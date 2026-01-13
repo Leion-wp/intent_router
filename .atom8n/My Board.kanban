@@ -1,0 +1,124 @@
+{
+  "readme": "To open this file inside VSCode, you need to install VSCode extension \"Kanban atom8n\"",
+  "columns": [
+    {
+      "id": "col_ra365q_mkbzk17s",
+      "title": "BIG PICTURE",
+      "order": 0,
+      "boardId": "",
+      "tasks": [
+        {
+          "id": "task_zhxnqw_mkbzk512",
+          "title": "Router intent",
+          "description": "## Voilà la big picture de ce que ce schéma repésente\n\nJe voudrai créer une extension de routing pour relier toutes les extensions VS Code/ Cursor/ Antigravity \n\n# Le rôle exact de MON extension Router\n\nTon extension :\n\n- expose **UNE commande centrale**\n\n- reçoit une **intention normalisée**\n\n- résout les capacités\n\n- appelle les bonnes extensions\n\nSchéma mental :\n\n```\nUser / Agent / LLM\n        ↓\nRouter Extension\n        ↓\nVS Code Commands / APIs\n        ↓\nOther Extensions\n```\n\n---\n\n# 3️⃣ Structure minimale de l’extension Router\n\n```\nvscode-intent-router/\n├─ package.json\n├─ src/\n│  ├─ extension.ts\n│  ├─ router.ts\n│  ├─ registry.ts\n│  └─ types.ts\n└─ README.md\n```\n\n---\n\n# 4️⃣ package.json (le point clé)\n\n### 1. Une commande unique\n\n```\n{\n  \"name\": \"intent-router\",\n  \"activationEvents\": [\n    \"onCommand:intentRouter.route\"\n  ],\n  \"contributes\": {\n    \"commands\": [\n      {\n        \"command\": \"intentRouter.route\",\n        \"title\": \"Intent Router: Route Intent\"\n      }\n    ]\n  }\n}\n```\n\n👉 **Une seule porte d’entrée**.\n\n---\n\n# 5️⃣ L’intention (format minimal)\n\nTu pars sur un JSON **ultra simple** :\n\n```\ntype Intent = {\n  intent: string\n  capabilities?: string[]\n  payload?: any\n}\n```\n\nExemple :\n\n```\n{\n  \"intent\": \"run api test\",\n  \"capabilities\": [\"http.exec\"]\n}\n```\n\n---\n\n# 6️⃣ Registry des capacités (le cœur du router)\n\n## Handshake dynamique (plus évolué)\n\nLe router envoie :\n\n```\nvscode.commands.executeCommand(\n  \"someExtension.registerCapabilities\"\n)\n```\n\nMais **Option A suffit pour V1**.\n\n---\n\n# 7️⃣ Router.ts (pseudo-code clair)\n\n```\nexport async function routeIntent(intent: Intent) {\n  const providers = resolveCapabilities(intent.capabilities)\n\n  for (const provider of providers) {\n    await vscode.commands.executeCommand(\n      provider.command,\n      intent.payload\n    )\n  }\n}\n```\n\n👉 Le router **ne sait rien** de ce qui se passe après.\n\n---\n\n# 8️⃣ Comment un LLM / Agent l’utilise\n\nTrès simple.\n\n- soit via **Command Palette**\n\n- soit via une autre extension (Agent)\n\n- soit via MCP / IPC\n\nExemple :\n\n```\nvscode.commands.executeCommand(\n  \"intentRouter.route\",\n  {\n    intent: \"deploy app\",\n    capabilities: [\"docker.build\", \"git.push\"]\n  }\n)\n```\n\n![](.atom8n/assets/mkbzkuoo-rfhfrf2k.png)",
+          "priority": "MEDIUM",
+          "order": 0,
+          "columnId": "col_ra365q_mkbzk17s",
+          "assigneeId": null
+        }
+      ]
+    },
+    {
+      "id": "col_np5lfv_mkbzsd42",
+      "title": "Roadmap",
+      "order": 1,
+      "boardId": "",
+      "tasks": [
+        {
+          "id": "task_3e95ew_mkc02zk4",
+          "title": "Roadmap V1",
+          "description": "**Phase 1: Project Skeleton**\n\n- Initialize `vscode-intent-router` directory structure.\n- Create `package.json` with basic metadata.\n- Set up TypeScript configuration (`tsconfig.json`).\n\n**Phase 2: Core Definitions**\n\n- Create `src/types.ts`: Define `Intent` interface, `Capability` types.\n- Create `src/registry.ts`: Implement `resolveCapabilities` (v1: simple mapping).\n- Create `src/router.ts`: Implement `routeIntent` logic.\n\n**Phase 3: Extension Wiring**\n\n- Update `package.json`: Register `intentRouter.route` command and activation events.\n- Implement `src/extension.ts`: Register commands and connect Router.\n\n**Phase 4: Verification**\n\n- Test via VS Code Command Palette.\n- Verify payload delivery to target extensions.",
+          "priority": "HIGH",
+          "order": 0,
+          "columnId": "col_np5lfv_mkbzsd42",
+          "assigneeId": null
+        }
+      ]
+    },
+    {
+      "id": "col_7brif6_mkbzjhsr",
+      "title": "To Do",
+      "order": 2,
+      "boardId": "",
+      "tasks": []
+    },
+    {
+      "id": "col_n8gofe_mkbzjhsr",
+      "title": "In Progress",
+      "order": 3,
+      "boardId": "",
+      "tasks": []
+    },
+    {
+      "id": "col_1uu00i_mkbzjhsr",
+      "title": "Done",
+      "order": 4,
+      "boardId": "",
+      "tasks": [
+        {
+          "id": "task_ts8d7j_mkbzjn67",
+          "title": "init project",
+          "description": "1. **Init Project Structure**: Create folders and basic config files (`package.json`, `tsconfig.json`).",
+          "priority": "HIGH",
+          "order": 0,
+          "columnId": "col_1uu00i_mkbzjhsr",
+          "assigneeId": null
+        },
+        {
+          "id": "task_ib5gsj_mkc04r7y",
+          "title": "Defines Types",
+          "description": "2. Implement `Intent` interface in `src/types.ts`.",
+          "priority": "HIGH",
+          "order": 1,
+          "columnId": "col_1uu00i_mkbzjhsr",
+          "assigneeId": null
+        },
+        {
+          "id": "task_6qz6we_mkc05vm2",
+          "title": "Implement Registry",
+          "description": "3.Create `src/registry.ts` stub with basic resolution logic.",
+          "priority": "HIGH",
+          "order": 2,
+          "columnId": "col_1uu00i_mkbzjhsr",
+          "assigneeId": null
+        },
+        {
+          "id": "task_9zy9bu_mkc06nls",
+          "title": "Implement Router",
+          "description": "Write `routeIntent` function in `src/router.ts`.",
+          "priority": "MEDIUM",
+          "order": 3,
+          "columnId": "col_1uu00i_mkbzjhsr",
+          "assigneeId": null
+        },
+        {
+          "id": "task_bvpkp6_mkc07fr9",
+          "title": "Configure Command",
+          "description": "Add `intentRouter.route` to `package.json` contributes",
+          "priority": "MEDIUM",
+          "order": 4,
+          "columnId": "col_1uu00i_mkbzjhsr",
+          "assigneeId": null
+        },
+        {
+          "id": "task_tmzord_mkc07sie",
+          "title": "Main Entry Point",
+          "description": "6. Implement `activate` function in `src/extension.ts`.",
+          "priority": "MEDIUM",
+          "order": 5,
+          "columnId": "col_1uu00i_mkbzjhsr",
+          "assigneeId": null
+        },
+        {
+          "id": "task_gw2vw5_mkc095tl",
+          "title": "Manual Testing ",
+          "description": "Make sure the extension works :\n\n- Units tests\n- Tests e2e \n- Tests with real extension",
+          "priority": "LOW",
+          "order": 6,
+          "columnId": "col_1uu00i_mkbzjhsr",
+          "assigneeId": null
+        }
+      ]
+    }
+  ]
+}

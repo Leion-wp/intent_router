@@ -1,0 +1,80 @@
+{
+    "name": "intent-router",
+    "displayName": "Intent Router",
+    "description": "Centralized intent routing for VS Code / Cursor / Agentic extensions",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "main": "./out/extension.js",
+    "activationEvents": [
+        "onCommand:intentRouter.route",
+        "onCommand:intentRouter.registerCapabilities"
+    ],
+    "contributes": {
+        "commands": [
+            {
+                "command": "intentRouter.route",
+                "title": "Intent Router: Route Intent"
+            }
+        ],
+        "configuration": {
+            "title": "Intent Router",
+            "properties": {
+                "intentRouter.mappings": {
+                    "type": "array",
+                    "default": [],
+                    "description": "User-defined capability mappings that override registered providers.",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "capability",
+                            "command"
+                        ],
+                        "properties": {
+                            "capability": {
+                                "type": "string",
+                                "description": "Normalized capability identifier (ex: git.push)."
+                            },
+                            "command": {
+                                "type": "string",
+                                "description": "VS Code command to execute for this capability."
+                            },
+                            "provider": {
+                                "type": "string",
+                                "description": "Optional provider name to scope this mapping."
+                            },
+                            "target": {
+                                "type": "string",
+                                "description": "Optional target name to scope this mapping."
+                            },
+                            "type": {
+                                "type": "string",
+                                "enum": [
+                                    "vscode",
+                                    "external"
+                                ],
+                                "description": "Provider type. External is reserved for future use."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "test": "npm run compile && node ./out/test/runTest.js"
+    },
+    "devDependencies": {
+        "@types/mocha": "^10.0.10",
+        "@types/node": "16.x",
+        "@types/vscode": "^1.75.0",
+        "@vscode/test-electron": "^2.5.2",
+        "glob": "^13.0.0",
+        "mocha": "^11.7.5",
+        "typescript": "^4.9.0"
+    }
+}
