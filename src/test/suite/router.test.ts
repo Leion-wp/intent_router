@@ -1,9 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-
-// Note: Testing the actual 'routeIntent' requires mocking vscode.commands.executeCommand,
-// which is complex in integration tests. Here we focus on unit testing the logic parts
-// and integration testing the command presence.
+import { resetRegistry } from '../../registry';
 
 // Integration tests for the extension
 suite('Extension Test Suite', () => {
@@ -20,19 +17,55 @@ suite('Extension Test Suite', () => {
         }
     });
 
-    test('Extension - Run Sample Intent (Smoke Test)', async () => {
-        // This just verifies the command doesn't crash. 
+    test('Extension - Register Capabilities Handshake', async () => {
+        resetRegistry();
+        const count = await vscode.commands.executeCommand('intentRouter.registerCapabilities', {
+            provider: 'test',
+            capabilities: ['test.cap'],
+            command: 'intentRouter.test.fake'
+        });
+        assert.strictEqual(count, 1);
+    });
+
+    test('Extension - End-to-End Intent Routing', async () => {
+        resetRegistry();
+        const received: any[] = [];
+        const fakeCommand = 'intentRouter.test.fake';
+        const disposable = vscode.commands.registerCommand(fakeCommand, (payload) => {
+            received.push(payload);
+        });
+
         try {
-            const sampleIntent = {
+            await vscode.commands.executeCommand('intentRouter.registerCapabilities', {
+                provider: 'test',
+                capabilities: [
+                    {
+                        capability: 'test.route',
+                        command: fakeCommand,
+                        mapPayload: (intent: any) => ({
+                            intent: intent.intent,
+                            project: intent.payload?.project,
+                            tagged: true
+                        })
+                    }
+                ]
+            });
+
+            await vscode.commands.executeCommand('intentRouter.route', {
                 intent: 'deploy app',
-                capabilities: ['docker.build', 'git.push'],
-                payload: { project: 'demo-app' }
-            };
-            await vscode.commands.executeCommand('intentRouter.route', sampleIntent);
-            assert.ok(true);
-        } catch (err) {
-            console.warn(`Command intentRouter.route failed (potentially expected if no handler): ${err}`);
-            // Don't fail the build for this smoke test
+                capabilities: ['test.route'],
+                payload: { project: 'demo-app' },
+                provider: 'test'
+            });
+
+            assert.strictEqual(received.length, 1);
+            assert.deepStrictEqual(received[0], {
+                intent: 'deploy app',
+                project: 'demo-app',
+                tagged: true
+            });
+        } finally {
+            disposable.dispose();
         }
     });
 });

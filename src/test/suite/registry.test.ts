@@ -1,7 +1,12 @@
 import * as assert from 'assert';
-import { resolveCapabilities } from '../../registry';
+import { registerCapabilities, resetRegistry, resolveCapabilities } from '../../registry';
+import { Intent, UserMapping } from '../../types';
 
 suite('Registry Unit Test Suite', () => {
+    setup(() => {
+        resetRegistry();
+    });
+
     test('Registry - Resolve Capabilities Empty', () => {
         const result = resolveCapabilities({ intent: 'noop', capabilities: [] });
         assert.strictEqual(result.length, 0);
@@ -11,5 +16,72 @@ suite('Registry Unit Test Suite', () => {
         const result = resolveCapabilities({ intent: 'http.get', capabilities: ['http.get'] });
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].command, 'http.get');
+    });
+
+    test('Registry - Register Capabilities (Simple List)', () => {
+        const count = registerCapabilities({
+            provider: 'git',
+            capabilities: ['git.push'],
+            command: 'git.push'
+        });
+        assert.strictEqual(count, 1);
+        const result = resolveCapabilities({ intent: 'deploy', capabilities: ['git.push'] });
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].command, 'git.push');
+        assert.strictEqual(result[0].provider, 'git');
+    });
+
+    test('Registry - Register Capabilities (Object Entries)', () => {
+        const count = registerCapabilities({
+            provider: 'docker',
+            capabilities: [
+                { capability: 'docker.build', command: 'docker.build' }
+            ]
+        });
+        assert.strictEqual(count, 1);
+        const result = resolveCapabilities({ intent: 'build', capabilities: ['docker.build'] });
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].command, 'docker.build');
+        assert.strictEqual(result[0].provider, 'docker');
+    });
+
+    test('Registry - User Mapping Overrides Provider', () => {
+        registerCapabilities({
+            provider: 'git',
+            capabilities: ['git.push'],
+            command: 'git.push'
+        });
+        const mappings: UserMapping[] = [
+            { capability: 'git.push', command: 'git.pushForce', provider: 'git' }
+        ];
+        const result = resolveCapabilities({ intent: 'deploy', capabilities: ['git.push'], provider: 'git' }, mappings);
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].command, 'git.pushForce');
+    });
+
+    test('Registry - Provider/Target Preference', () => {
+        registerCapabilities({
+            provider: 'git',
+            target: 'origin',
+            capabilities: ['git.push'],
+            command: 'git.push'
+        });
+        registerCapabilities({
+            provider: 'git',
+            target: 'backup',
+            capabilities: ['git.push'],
+            command: 'git.pushBackup'
+        });
+
+        const intent: Intent = {
+            intent: 'deploy',
+            capabilities: ['git.push'],
+            provider: 'git',
+            target: 'backup'
+        };
+
+        const result = resolveCapabilities(intent);
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].command, 'git.pushBackup');
     });
 });

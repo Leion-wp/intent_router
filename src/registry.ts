@@ -2,6 +2,10 @@ import { Capability, Intent, RegisterCapabilitiesArgs, UserMapping } from './typ
 
 const registeredCapabilities: Capability[] = [];
 
+export function resetRegistry(): void {
+    registeredCapabilities.length = 0;
+}
+
 export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
     if (!args || !args.capabilities || args.capabilities.length === 0) {
         return 0;
