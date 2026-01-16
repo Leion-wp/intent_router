@@ -16,6 +16,7 @@ export class PipelinesTreeDataProvider implements vscode.TreeDataProvider<Pipeli
         const item = new vscode.TreeItem(this.getLabel(element.uri));
         item.resourceUri = element.uri;
         item.contextValue = 'pipelineItem';
+        item.iconPath = new vscode.ThemeIcon('list-tree');
         item.command = {
             command: 'intentRouter.pipelines.openBuilder',
             title: 'Open Pipeline Builder',

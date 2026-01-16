@@ -51,23 +51,28 @@
             },
             {
                 "command": "intentRouter.pipelines.new",
-                "title": "Intent Router: New Pipeline"
+                "title": "Intent Router: New Pipeline",
+                "icon": "$(add)"
             },
             {
                 "command": "intentRouter.pipelines.run",
-                "title": "Intent Router: Run Selected Pipeline"
+                "title": "Intent Router: Run Selected Pipeline",
+                "icon": "$(play)"
             },
             {
                 "command": "intentRouter.pipelines.dryRun",
-                "title": "Intent Router: Dry Run Selected Pipeline"
+                "title": "Intent Router: Dry Run Selected Pipeline",
+                "icon": "$(beaker)"
             },
             {
                 "command": "intentRouter.pipelines.openJson",
-                "title": "Intent Router: Open Pipeline JSON"
+                "title": "Intent Router: Open Pipeline JSON",
+                "icon": "$(file-code)"
             },
             {
                 "command": "intentRouter.pipelines.refresh",
-                "title": "Intent Router: Refresh Pipelines"
+                "title": "Intent Router: Refresh Pipelines",
+                "icon": "$(refresh)"
             }
         ],
         "viewsContainers": {
