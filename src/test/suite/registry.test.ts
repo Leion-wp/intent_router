@@ -16,6 +16,7 @@ suite('Registry Unit Test Suite', () => {
         const result = resolveCapabilities({ intent: 'http.get', capabilities: ['http.get'] });
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].command, 'http.get');
+        assert.strictEqual(result[0].source, 'fallback');
     });
 
     test('Registry - Register Capabilities (Simple List)', () => {
@@ -29,6 +30,7 @@ suite('Registry Unit Test Suite', () => {
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].command, 'git.push');
         assert.strictEqual(result[0].provider, 'git');
+        assert.strictEqual(result[0].source, 'registry');
     });
 
     test('Registry - Register Capabilities (Object Entries)', () => {
@@ -43,6 +45,7 @@ suite('Registry Unit Test Suite', () => {
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].command, 'docker.build');
         assert.strictEqual(result[0].provider, 'docker');
+        assert.strictEqual(result[0].source, 'registry');
     });
 
     test('Registry - User Mapping Overrides Provider', () => {
@@ -57,9 +60,10 @@ suite('Registry Unit Test Suite', () => {
         const result = resolveCapabilities({ intent: 'deploy', capabilities: ['git.push'], provider: 'git' }, mappings);
         assert.strictEqual(result.length, 1);
         assert.strictEqual(result[0].command, 'git.pushForce');
+        assert.strictEqual(result[0].source, 'user');
     });
 
-    test('Registry - Provider/Target Preference', () => {
+    test('Registry - Provider/Target Returned For Filtering', () => {
         registerCapabilities({
             provider: 'git',
             target: 'origin',
@@ -81,7 +85,8 @@ suite('Registry Unit Test Suite', () => {
         };
 
         const result = resolveCapabilities(intent);
-        assert.strictEqual(result.length, 1);
-        assert.strictEqual(result[0].command, 'git.pushBackup');
+        assert.strictEqual(result.length, 2);
+        const commands = result.map(entry => entry.command).sort();
+        assert.deepStrictEqual(commands, ['git.push', 'git.pushBackup']);
     });
 });

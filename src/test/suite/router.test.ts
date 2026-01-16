@@ -68,4 +68,36 @@ suite('Extension Test Suite', () => {
             disposable.dispose();
         }
     });
+
+    test('Extension - Dry Run Skips Execution', async () => {
+        resetRegistry();
+        const received: any[] = [];
+        const fakeCommand = 'intentRouter.test.fakeDryRun';
+        const disposable = vscode.commands.registerCommand(fakeCommand, (payload) => {
+            received.push(payload);
+        });
+
+        try {
+            await vscode.commands.executeCommand('intentRouter.registerCapabilities', {
+                provider: 'test',
+                capabilities: [
+                    {
+                        capability: 'test.dryrun',
+                        command: fakeCommand
+                    }
+                ]
+            });
+
+            await vscode.commands.executeCommand('intentRouter.route', {
+                intent: 'dry run',
+                capabilities: ['test.dryrun'],
+                provider: 'test',
+                meta: { dryRun: true }
+            });
+
+            assert.strictEqual(received.length, 0);
+        } finally {
+            disposable.dispose();
+        }
+    });
 });

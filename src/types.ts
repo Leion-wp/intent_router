@@ -4,7 +4,11 @@ export type Intent = {
     payload?: any;
     provider?: string;
     target?: string;
-    meta?: Record<string, any>;
+    meta?: {
+        dryRun?: boolean;
+        traceId?: string;
+        debug?: boolean;
+    };
 };
 
 export type ProviderType = 'vscode' | 'external';
@@ -17,6 +21,16 @@ export type Capability = {
     target?: string;
     type?: ProviderType;
     mapPayload?: (intent: Intent) => any;
+};
+
+export type Resolution = {
+    capability: string;
+    command: string;
+    provider?: string;
+    target?: string;
+    type: ProviderType;
+    mapPayload?: (intent: Intent) => any;
+    source: 'user' | 'registry' | 'fallback';
 };
 
 export type UserMapping = {

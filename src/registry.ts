@@ -1,4 +1,4 @@
-import { Capability, Intent, RegisterCapabilitiesArgs, UserMapping } from './types';
+import { Capability, Intent, RegisterCapabilitiesArgs, Resolution, UserMapping } from './types';
 
 const registeredCapabilities: Capability[] = [];
 
@@ -53,73 +53,50 @@ export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
     return count;
 }
 
-function matchesIntent(intent: Intent, entry: { provider?: string; target?: string }): boolean {
-    if (intent.provider && entry.provider && entry.provider !== intent.provider) {
-        return false;
-    }
-    if (intent.target && entry.target && entry.target !== intent.target) {
-        return false;
-    }
-    return true;
-}
-
-function resolveWithPreference<T extends { provider?: string; target?: string }>(
-    intent: Intent,
-    entries: T[]
-): T[] {
-    if (intent.provider || intent.target) {
-        const exact = entries.filter(e => {
-            if (intent.provider && e.provider !== intent.provider) {
-                return false;
-            }
-            if (intent.target && e.target !== intent.target) {
-                return false;
-            }
-            return true;
-        });
-        if (exact.length > 0) {
-            return exact;
-        }
-    }
-    return entries;
-}
-
-export function resolveCapabilities(intent: Intent, userMappings: UserMapping[] = []): Capability[] {
+export function resolveCapabilities(intent: Intent, userMappings: UserMapping[] = []): Resolution[] {
     if (!intent.capabilities || intent.capabilities.length === 0) {
         return [];
     }
 
-    const resolved: Capability[] = [];
+    const resolved: Resolution[] = [];
 
     for (const cap of intent.capabilities) {
-        const userMatches = userMappings.filter(m => m.capability === cap && matchesIntent(intent, m));
-        const preferredUser = resolveWithPreference(intent, userMatches);
-        if (preferredUser.length > 0) {
-            for (const entry of preferredUser) {
+        const userMatches = userMappings.filter(m => m.capability === cap);
+        if (userMatches.length > 0) {
+            for (const entry of userMatches) {
                 resolved.push({
                     capability: entry.capability,
                     command: entry.command,
-                    description: `Resolved capability: ${entry.capability}`,
                     provider: entry.provider,
                     target: entry.target,
-                    type: entry.type ?? 'vscode'
+                    type: entry.type ?? 'vscode',
+                    source: 'user'
                 });
             }
             continue;
         }
 
-        const registryMatches = registeredCapabilities.filter(r => r.capability === cap && matchesIntent(intent, r));
-        const preferredRegistry = resolveWithPreference(intent, registryMatches);
-        if (preferredRegistry.length > 0) {
-            resolved.push(...preferredRegistry);
+        const registryMatches = registeredCapabilities.filter(r => r.capability === cap);
+        if (registryMatches.length > 0) {
+            for (const entry of registryMatches) {
+                resolved.push({
+                    capability: entry.capability,
+                    command: entry.command,
+                    provider: entry.provider,
+                    target: entry.target,
+                    type: entry.type ?? 'vscode',
+                    mapPayload: entry.mapPayload,
+                    source: 'registry'
+                });
+            }
             continue;
         }
 
         resolved.push({
             capability: cap,
             command: cap,
-            description: `Resolved capability: ${cap}`,
-            type: 'vscode'
+            type: 'vscode',
+            source: 'fallback'
         });
     }
 
