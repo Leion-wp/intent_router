@@ -15,7 +15,17 @@
     "activationEvents": [
         "onCommand:intentRouter.route",
         "onCommand:intentRouter.registerCapabilities",
-        "onCommand:intentRouter.routeFromJson"
+        "onCommand:intentRouter.routeFromJson",
+        "onCommand:intentRouter.createPipeline",
+        "onCommand:intentRouter.runPipeline",
+        "onCommand:intentRouter.dryRunPipeline",
+        "onCommand:intentRouter.pipelines.new",
+        "onCommand:intentRouter.pipelines.run",
+        "onCommand:intentRouter.pipelines.dryRun",
+        "onCommand:intentRouter.pipelines.openJson",
+        "onCommand:intentRouter.pipelines.refresh",
+        "onCommand:intentRouter.pipelines.openBuilder",
+        "onView:intentRouterPipelines"
     ],
     "contributes": {
         "commands": [
@@ -26,8 +36,103 @@
             {
                 "command": "intentRouter.routeFromJson",
                 "title": "Intent Router: Route Intent (JSON)"
+            },
+            {
+                "command": "intentRouter.createPipeline",
+                "title": "Intent Router: Create Pipeline"
+            },
+            {
+                "command": "intentRouter.runPipeline",
+                "title": "Intent Router: Run Pipeline"
+            },
+            {
+                "command": "intentRouter.dryRunPipeline",
+                "title": "Intent Router: Dry Run Pipeline"
+            },
+            {
+                "command": "intentRouter.pipelines.new",
+                "title": "Intent Router: New Pipeline"
+            },
+            {
+                "command": "intentRouter.pipelines.run",
+                "title": "Intent Router: Run Selected Pipeline"
+            },
+            {
+                "command": "intentRouter.pipelines.dryRun",
+                "title": "Intent Router: Dry Run Selected Pipeline"
+            },
+            {
+                "command": "intentRouter.pipelines.openJson",
+                "title": "Intent Router: Open Pipeline JSON"
+            },
+            {
+                "command": "intentRouter.pipelines.refresh",
+                "title": "Intent Router: Refresh Pipelines"
             }
         ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "intentRouter",
+                    "title": "Intent Router",
+                    "icon": "media/intent-router.svg"
+                }
+            ]
+        },
+        "views": {
+            "intentRouter": [
+                {
+                    "id": "intentRouterPipelines",
+                    "name": "Intent Pipelines"
+                }
+            ]
+        },
+        "menus": {
+            "view/title": [
+                {
+                    "command": "intentRouter.pipelines.new",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.run",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.dryRun",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.openJson",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.refresh",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "intentRouter.pipelines.run",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "inline"
+                },
+                {
+                    "command": "intentRouter.pipelines.dryRun",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "inline"
+                },
+                {
+                    "command": "intentRouter.pipelines.openJson",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "inline"
+                }
+            ]
+        },
         "configuration": {
             "title": "Intent Router",
             "properties": {
@@ -160,6 +265,15 @@
                             }
                         }
                     }
+                },
+                "intentRouter.demoProvider": {
+                    "type": "string",
+                    "enum": [
+                        "",
+                        "git"
+                    ],
+                    "default": "",
+                    "description": "Enable a built-in demo provider (git) for quick testing."
                 }
             }
         }
