@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Intent, ProfileConfig, ProviderAdapter, Resolution, UserMapping } from './types';
 import { resolveCapabilities } from './registry';
 
-export async function routeIntent(intent: Intent) {
+export async function routeIntent(intent: Intent): Promise<boolean> {
     const normalized = normalizeIntent(intent);
     const output = getOutputChannel();
     const profile = getActiveProfile();
@@ -16,7 +16,7 @@ export async function routeIntent(intent: Intent) {
     if (resolved.length === 0) {
         log(output, normalized, 'warn', 'IR003', 'step=resolve empty=true');
         vscode.window.showWarningMessage(`No capabilities resolved for intent: ${normalized.intent}`);
-        return;
+        return false;
     }
 
     const providerFiltered = filterByProfileProviders(profile, resolved);
@@ -25,7 +25,7 @@ export async function routeIntent(intent: Intent) {
     if (providerFiltered.length === 0) {
         log(output, normalized, 'warn', 'IR010', 'step=profileProviders empty=true');
         vscode.window.showWarningMessage(`No capabilities matched enabled providers for intent: ${normalized.intent}`);
-        return;
+        return false;
     }
 
     const filtered = filterByProviderTarget(normalized, providerFiltered);
@@ -34,12 +34,18 @@ export async function routeIntent(intent: Intent) {
     if (filtered.length === 0) {
         log(output, normalized, 'warn', 'IR005', 'step=filter empty=true');
         vscode.window.showWarningMessage(`No capabilities matched provider/target for intent: ${normalized.intent}`);
-        return;
+        return false;
     }
 
+    let success = true;
     for (const entry of filtered) {
-        await executeResolution(normalized, entry, output);
+        const stepOk = await executeResolution(normalized, entry, output);
+        if (!stepOk) {
+            success = false;
+        }
     }
+
+    return success;
 }
 
 function getUserMappings(profile?: ProfileConfig): { primaryMappings: UserMapping[]; fallbackMappings: UserMapping[] } {
@@ -133,12 +139,12 @@ function filterByProviderTarget(intent: Intent, entries: Resolution[]): Resoluti
     });
 }
 
-async function executeResolution(intent: Intent, entry: Resolution, output: vscode.OutputChannel): Promise<void> {
+async function executeResolution(intent: Intent, entry: Resolution, output: vscode.OutputChannel): Promise<boolean> {
     const meta = intent.meta ?? {};
     const adapter = getProviderAdapter(entry.type);
     if (!adapter) {
         log(output, intent, 'warn', 'IR006', `step=transport skip type=${entry.type} capability=${entry.capability}`);
-        return;
+        return false;
     }
 
     const payload = entry.mapPayload ? entry.mapPayload(intent) : intent.payload;
@@ -151,15 +157,17 @@ async function executeResolution(intent: Intent, entry: Resolution, output: vsco
     );
 
     if (meta.dryRun) {
-        return;
+        return true;
     }
 
     try {
         await adapter.invoke(entry, payload, intent);
+        return true;
     } catch (error) {
         log(output, intent, 'error', 'IR008', `step=execute error command=${entry.command}`);
         console.error(`Failed to execute capability ${entry.command}:`, error);
         vscode.window.showErrorMessage(`Failed to execute ${entry.command}: ${error}`);
+        return false;
     }
 }
 

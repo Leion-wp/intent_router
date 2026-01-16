@@ -31,6 +31,39 @@ Optional: enable the built-in demo Git provider in settings:
 "intentRouter.demoProvider": "git"
 ```
 
+## Pipelines (.intent.json)
+Create a pipeline file from the command palette:
+- **Intent Router: Create Pipeline**
+
+Run the current pipeline (active editor):
+- **Intent Router: Run Pipeline**
+- **Intent Router: Dry Run Pipeline**
+
+Pipeline format (V1, linear):
+```json
+{
+  "name": "deploy-app",
+  "profile": "work",
+  "steps": [
+    {
+      "intent": "build image",
+      "capabilities": ["docker.build"],
+      "payload": { "project": "demo" }
+    },
+    {
+      "intent": "push code",
+      "capabilities": ["git.push"],
+      "payload": { "message": "deploy" }
+    }
+  ]
+}
+```
+
+Rules:
+- Steps execute in order.
+- If a step fails, the pipeline stops.
+- `Dry Run` injects `meta.dryRun=true` for all steps.
+
 ## Intent Format
 ```ts
 type Intent = {

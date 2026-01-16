@@ -15,7 +15,10 @@
     "activationEvents": [
         "onCommand:intentRouter.route",
         "onCommand:intentRouter.registerCapabilities",
-        "onCommand:intentRouter.routeFromJson"
+        "onCommand:intentRouter.routeFromJson",
+        "onCommand:intentRouter.createPipeline",
+        "onCommand:intentRouter.runPipeline",
+        "onCommand:intentRouter.dryRunPipeline"
     ],
     "contributes": {
         "commands": [
@@ -26,6 +29,18 @@
             {
                 "command": "intentRouter.routeFromJson",
                 "title": "Intent Router: Route Intent (JSON)"
+            },
+            {
+                "command": "intentRouter.createPipeline",
+                "title": "Intent Router: Create Pipeline"
+            },
+            {
+                "command": "intentRouter.runPipeline",
+                "title": "Intent Router: Run Pipeline"
+            },
+            {
+                "command": "intentRouter.dryRunPipeline",
+                "title": "Intent Router: Dry Run Pipeline"
             }
         ],
         "configuration": {
