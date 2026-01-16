@@ -30,8 +30,27 @@ export function activate(context: vscode.ExtensionContext) {
         return count;
     });
 
+    let promptDisposable = vscode.commands.registerCommand('intentRouter.routeFromJson', async () => {
+        const input = await vscode.window.showInputBox({
+            prompt: 'Paste intent JSON to route',
+            placeHolder: '{"intent":"deploy app","capabilities":["git.push"],"payload":{"project":"demo-app"}}'
+        });
+
+        if (!input) {
+            return;
+        }
+
+        try {
+            const args = JSON.parse(input);
+            await vscode.commands.executeCommand('intentRouter.route', args);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Invalid JSON: ${error}`);
+        }
+    });
+
     context.subscriptions.push(disposable);
     context.subscriptions.push(registerDisposable);
+    context.subscriptions.push(promptDisposable);
 }
 
 export function deactivate() { }

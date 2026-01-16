@@ -16,6 +16,10 @@
             {
                 "command": "intentRouter.route",
                 "title": "Intent Router: Route Intent"
+            },
+            {
+                "command": "intentRouter.routeFromJson",
+                "title": "Intent Router: Route Intent (JSON)"
             }
         ],
         "configuration": {
