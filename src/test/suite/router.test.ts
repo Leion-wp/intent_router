@@ -100,4 +100,139 @@ suite('Extension Test Suite', () => {
             disposable.dispose();
         }
     });
+
+    test('Extension - External Provider Stub Errors', async () => {
+        resetRegistry();
+        let errorThrown = false;
+        const output: string[] = [];
+        const originalShowError = vscode.window.showErrorMessage;
+
+        (vscode.window as any).showErrorMessage = (message: string) => {
+            output.push(message);
+            return Promise.resolve(undefined);
+        };
+
+        try {
+            await vscode.commands.executeCommand('intentRouter.registerCapabilities', {
+                provider: 'externalProvider',
+                type: 'external',
+                capabilities: [
+                    {
+                        capability: 'external.run',
+                        command: 'external.run'
+                    }
+                ]
+            });
+
+            await vscode.commands.executeCommand('intentRouter.route', {
+                intent: 'external call',
+                capabilities: ['external.run']
+            });
+        } catch {
+            errorThrown = true;
+        } finally {
+            (vscode.window as any).showErrorMessage = originalShowError;
+        }
+
+        assert.strictEqual(errorThrown, false);
+        assert.ok(output.some(message => message.includes('External provider not implemented')));
+    });
+
+    test('Extension - Profile Mappings Override Global', async () => {
+        resetRegistry();
+        const received: string[] = [];
+        const globalCommand = 'intentRouter.test.profileGlobal';
+        const profileCommand = 'intentRouter.test.profileLocal';
+        const globalDisposable = vscode.commands.registerCommand(globalCommand, () => {
+            received.push('global');
+        });
+        const profileDisposable = vscode.commands.registerCommand(profileCommand, () => {
+            received.push('profile');
+        });
+
+        const config = vscode.workspace.getConfiguration('intentRouter');
+        const originalMappings = config.get('mappings');
+        const originalProfiles = config.get('profiles');
+        const originalActive = config.get('activeProfile');
+
+        try {
+            await config.update('mappings', [
+                { capability: 'profile.cap', command: globalCommand }
+            ], true);
+            await config.update('profiles', [
+                {
+                    name: 'demo',
+                    mappings: [
+                        { capability: 'profile.cap', command: profileCommand }
+                    ]
+                }
+            ], true);
+            await config.update('activeProfile', 'demo', true);
+
+            await vscode.commands.executeCommand('intentRouter.route', {
+                intent: 'profile test',
+                capabilities: ['profile.cap']
+            });
+
+            assert.deepStrictEqual(received, ['profile']);
+        } finally {
+            await config.update('mappings', originalMappings, true);
+            await config.update('profiles', originalProfiles, true);
+            await config.update('activeProfile', originalActive, true);
+            globalDisposable.dispose();
+            profileDisposable.dispose();
+        }
+    });
+
+    test('Extension - Profile Enabled Providers Filter', async () => {
+        resetRegistry();
+        const received: string[] = [];
+        const allowedCommand = 'intentRouter.test.providerAllowed';
+        const blockedCommand = 'intentRouter.test.providerBlocked';
+        const allowedDisposable = vscode.commands.registerCommand(allowedCommand, () => {
+            received.push('allowed');
+        });
+        const blockedDisposable = vscode.commands.registerCommand(blockedCommand, () => {
+            received.push('blocked');
+        });
+
+        const config = vscode.workspace.getConfiguration('intentRouter');
+        const originalProfiles = config.get('profiles');
+        const originalActive = config.get('activeProfile');
+
+        try {
+            await config.update('profiles', [
+                {
+                    name: 'demo',
+                    enabledProviders: ['allowed']
+                }
+            ], true);
+            await config.update('activeProfile', 'demo', true);
+
+            await vscode.commands.executeCommand('intentRouter.registerCapabilities', {
+                provider: 'allowed',
+                capabilities: [
+                    { capability: 'provider.allowed', command: allowedCommand }
+                ]
+            });
+            await vscode.commands.executeCommand('intentRouter.registerCapabilities', {
+                provider: 'blocked',
+                capabilities: [
+                    { capability: 'provider.blocked', command: blockedCommand }
+                ]
+            });
+
+            await vscode.commands.executeCommand('intentRouter.route', {
+                intent: 'provider test',
+                capabilities: ['provider.allowed', 'provider.blocked']
+            });
+
+            assert.deepStrictEqual(received, ['allowed']);
+        } finally {
+            await config.update('profiles', originalProfiles, true);
+            await config.update('activeProfile', originalActive, true);
+            allowedDisposable.dispose();
+            blockedDisposable.dispose();
+        }
+    });
 });

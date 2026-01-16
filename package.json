@@ -67,6 +67,93 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Enable verbose Intent Router logs in the console."
+                },
+                "intentRouter.logLevel": {
+                    "type": "string",
+                    "enum": [
+                        "error",
+                        "warn",
+                        "info",
+                        "debug"
+                    ],
+                    "default": "info",
+                    "description": "Minimum log level for the Intent Router output channel."
+                },
+                "intentRouter.activeProfile": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Active profile name used for profile-specific mappings and provider settings."
+                },
+                "intentRouter.profiles": {
+                    "type": "array",
+                    "default": [],
+                    "description": "Named profiles that can override mappings and provider enablement.",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "name"
+                        ],
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Profile name."
+                            },
+                            "mappings": {
+                                "type": "array",
+                                "default": [],
+                                "description": "Profile-specific mappings that override global mappings.",
+                                "items": {
+                                    "type": "object",
+                                    "required": [
+                                        "capability",
+                                        "command"
+                                    ],
+                                    "properties": {
+                                        "capability": {
+                                            "type": "string",
+                                            "description": "Normalized capability identifier (ex: git.push)."
+                                        },
+                                        "command": {
+                                            "type": "string",
+                                            "description": "VS Code command to execute for this capability."
+                                        },
+                                        "provider": {
+                                            "type": "string",
+                                            "description": "Optional provider name to scope this mapping."
+                                        },
+                                        "target": {
+                                            "type": "string",
+                                            "description": "Optional target name to scope this mapping."
+                                        },
+                                        "type": {
+                                            "type": "string",
+                                            "enum": [
+                                                "vscode",
+                                                "external"
+                                            ],
+                                            "description": "Provider type. External is reserved for future use."
+                                        }
+                                    }
+                                }
+                            },
+                            "enabledProviders": {
+                                "type": "array",
+                                "default": [],
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "If set, only these providers are allowed."
+                            },
+                            "disabledProviders": {
+                                "type": "array",
+                                "default": [],
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "Providers to block."
+                            }
+                        }
+                    }
                 }
             }
         }

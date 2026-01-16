@@ -33,6 +33,18 @@ export type Resolution = {
     source: 'user' | 'registry' | 'fallback';
 };
 
+export type ProviderAdapter = {
+    type: ProviderType;
+    invoke: (entry: Resolution, payload: any, intent: Intent) => Promise<void>;
+};
+
+export type ProfileConfig = {
+    name: string;
+    mappings?: UserMapping[];
+    enabledProviders?: string[];
+    disabledProviders?: string[];
+};
+
 export type UserMapping = {
     capability: string;
     command: string;

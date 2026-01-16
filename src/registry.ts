@@ -53,7 +53,11 @@ export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
     return count;
 }
 
-export function resolveCapabilities(intent: Intent, userMappings: UserMapping[] = []): Resolution[] {
+export function resolveCapabilities(
+    intent: Intent,
+    userMappings: UserMapping[] = [],
+    fallbackMappings: UserMapping[] = []
+): Resolution[] {
     if (!intent.capabilities || intent.capabilities.length === 0) {
         return [];
     }
@@ -64,6 +68,21 @@ export function resolveCapabilities(intent: Intent, userMappings: UserMapping[] 
         const userMatches = userMappings.filter(m => m.capability === cap);
         if (userMatches.length > 0) {
             for (const entry of userMatches) {
+                resolved.push({
+                    capability: entry.capability,
+                    command: entry.command,
+                    provider: entry.provider,
+                    target: entry.target,
+                    type: entry.type ?? 'vscode',
+                    source: 'user'
+                });
+            }
+            continue;
+        }
+
+        const fallbackMatches = fallbackMappings.filter(m => m.capability === cap);
+        if (fallbackMatches.length > 0) {
+            for (const entry of fallbackMatches) {
                 resolved.push({
                     capability: entry.capability,
                     command: entry.command,
