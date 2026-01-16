@@ -20,7 +20,7 @@ export async function runPipelineFromActiveEditor(dryRun: boolean): Promise<void
         return;
     }
 
-    await runPipeline(pipeline, dryRun);
+    await runPipelineFromData(pipeline, dryRun);
 }
 
 export async function runPipelineFromUri(uri: vscode.Uri, dryRun: boolean): Promise<void> {
@@ -29,7 +29,7 @@ export async function runPipelineFromUri(uri: vscode.Uri, dryRun: boolean): Prom
         return;
     }
 
-    await runPipeline(pipeline, dryRun);
+    await runPipelineFromData(pipeline, dryRun);
 }
 
 export async function readPipelineFromUri(uri: vscode.Uri): Promise<PipelineFile | undefined> {
@@ -56,6 +56,10 @@ export async function ensurePipelineFolder(): Promise<vscode.Uri | undefined> {
     const folderUri = vscode.Uri.joinPath(workspaceFolder.uri, 'pipeline');
     await vscode.workspace.fs.createDirectory(folderUri);
     return folderUri;
+}
+
+export async function runPipelineFromData(pipeline: PipelineFile, dryRun: boolean): Promise<void> {
+    await runPipeline(pipeline, dryRun);
 }
 
 function parsePipeline(text: string): PipelineFile | undefined {

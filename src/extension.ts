@@ -4,7 +4,7 @@ import { Intent, RegisterCapabilitiesArgs } from './types';
 import { registerCapabilities } from './registry';
 import { PipelineBuilder } from './pipelineBuilder';
 import { PipelinesTreeDataProvider } from './pipelinesView';
-import { readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromUri } from './pipelineRunner';
+import { readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri } from './pipelineRunner';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
@@ -118,6 +118,10 @@ export function activate(context: vscode.ExtensionContext) {
         await runPipelineFromActiveEditor(true);
     });
 
+    let runPipelineFromDataDisposable = vscode.commands.registerCommand('intentRouter.runPipelineFromData', async (pipeline, dryRun: boolean) => {
+        await runPipelineFromData(pipeline, !!dryRun);
+    });
+
     let newPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.new', async () => {
         await pipelineBuilder.open();
     });
@@ -171,6 +175,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(createPipelineDisposable);
     context.subscriptions.push(runPipelineDisposable);
     context.subscriptions.push(dryRunPipelineDisposable);
+    context.subscriptions.push(runPipelineFromDataDisposable);
     context.subscriptions.push(newPipelineDisposable);
     context.subscriptions.push(openPipelineDisposable);
     context.subscriptions.push(runSelectedPipelineDisposable);

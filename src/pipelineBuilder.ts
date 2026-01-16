@@ -45,11 +45,11 @@ export class PipelineBuilder {
                 return;
             }
             if (message?.type === 'run') {
-                await vscode.commands.executeCommand('intentRouter.runPipeline');
+                await vscode.commands.executeCommand('intentRouter.runPipelineFromData', message.data, false);
                 return;
             }
             if (message?.type === 'dryRun') {
-                await vscode.commands.executeCommand('intentRouter.dryRunPipeline');
+                await vscode.commands.executeCommand('intentRouter.runPipelineFromData', message.data, true);
                 return;
             }
             if (message?.type === 'openJson') {

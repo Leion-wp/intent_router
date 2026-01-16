@@ -1,0 +1,17 @@
+{
+  "name": "test",
+  "steps": [
+    {
+      "intent": "chatgpt.openSidebar",
+      "capabilities": [
+        "chatgpt.openSidebar"
+      ]
+    },
+    {
+      "intent": "git.commit",
+      "capabilities": [
+        "git.commit"
+      ]
+    }
+  ]
+}
