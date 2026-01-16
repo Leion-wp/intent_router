@@ -70,8 +70,17 @@
                 "title": "Intent Router: Refresh Pipelines"
             }
         ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "intentRouter",
+                    "title": "Intent Router",
+                    "icon": "media/intent-router.svg"
+                }
+            ]
+        },
         "views": {
-            "explorer": [
+            "intentRouter": [
                 {
                     "id": "intentRouterPipelines",
                     "name": "Intent Pipelines"
