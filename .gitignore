@@ -3,6 +3,9 @@ node_modules/
 out/
 .vscode-test/
 *.tsbuildinfo
+coverage/
+*.vsix
+*.tgz
 
 *.log
 npm-debug.log*
@@ -12,6 +15,7 @@ pnpm-debug.log*
 
 .DS_Store
 Thumbs.db
+.idea/
 
 .env
 .env.*
