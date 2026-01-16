@@ -1,0 +1,30 @@
+{
+  "name": "publish_change",
+  "steps": [
+    {
+      "intent": "commit changes",
+      "capabilities": ["git.commit"],
+      "payload": {
+        "message": "test pipeline"
+      }
+    },
+    {
+      "intent": "push current branch",
+      "capabilities": ["git.push"]
+    },
+    {
+      "intent": "merge current branch into dev",
+      "capabilities": ["git.merge"],
+      "payload": {
+        "target": "test"
+      }
+    },
+    {
+      "intent": "push dev branch",
+      "capabilities": ["git.push"],
+      "payload": {
+        "branch": "test"
+      }
+    }
+  ]
+}
