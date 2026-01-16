@@ -2,11 +2,19 @@ import * as vscode from 'vscode';
 import { routeIntent } from './router';
 import { Intent, RegisterCapabilitiesArgs } from './types';
 import { registerCapabilities } from './registry';
+import { PipelineBuilder } from './pipelineBuilder';
+import { PipelinesTreeDataProvider } from './pipelinesView';
+import { readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromUri } from './pipelineRunner';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
 
     registerDemoProvider();
+    const pipelineBuilder = new PipelineBuilder();
+    const pipelinesProvider = new PipelinesTreeDataProvider();
+    const pipelinesView = vscode.window.createTreeView('intentRouterPipelines', {
+        treeDataProvider: pipelinesProvider
+    });
 
     let disposable = vscode.commands.registerCommand('intentRouter.route', async (args: any) => {
         // Basic validation
@@ -103,11 +111,58 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let runPipelineDisposable = vscode.commands.registerCommand('intentRouter.runPipeline', async () => {
-        await runPipeline(false);
+        await runPipelineFromActiveEditor(false);
     });
 
     let dryRunPipelineDisposable = vscode.commands.registerCommand('intentRouter.dryRunPipeline', async () => {
-        await runPipeline(true);
+        await runPipelineFromActiveEditor(true);
+    });
+
+    let newPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.new', async () => {
+        await pipelineBuilder.open();
+    });
+
+    let openPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.openBuilder', async (uri?: vscode.Uri) => {
+        if (!uri) {
+            return;
+        }
+        const pipeline = await readPipelineFromUri(uri);
+        if (!pipeline) {
+            return;
+        }
+        await pipelineBuilder.open(pipeline, uri);
+    });
+
+    let runSelectedPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.run', async () => {
+        const item = pipelinesView.selection[0];
+        if (!item) {
+            vscode.window.showErrorMessage('Select a pipeline in the Intent Pipelines view.');
+            return;
+        }
+        await runPipelineFromUri(item.uri, false);
+    });
+
+    let dryRunSelectedPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.dryRun', async () => {
+        const item = pipelinesView.selection[0];
+        if (!item) {
+            vscode.window.showErrorMessage('Select a pipeline in the Intent Pipelines view.');
+            return;
+        }
+        await runPipelineFromUri(item.uri, true);
+    });
+
+    let openPipelineJsonDisposable = vscode.commands.registerCommand('intentRouter.pipelines.openJson', async () => {
+        const item = pipelinesView.selection[0];
+        if (!item) {
+            vscode.window.showErrorMessage('Select a pipeline in the Intent Pipelines view.');
+            return;
+        }
+        const doc = await vscode.workspace.openTextDocument(item.uri);
+        await vscode.window.showTextDocument(doc, { preview: false });
+    });
+
+    let refreshPipelinesDisposable = vscode.commands.registerCommand('intentRouter.pipelines.refresh', async () => {
+        pipelinesProvider.refresh();
     });
 
     context.subscriptions.push(disposable);
@@ -116,6 +171,13 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(createPipelineDisposable);
     context.subscriptions.push(runPipelineDisposable);
     context.subscriptions.push(dryRunPipelineDisposable);
+    context.subscriptions.push(newPipelineDisposable);
+    context.subscriptions.push(openPipelineDisposable);
+    context.subscriptions.push(runSelectedPipelineDisposable);
+    context.subscriptions.push(dryRunSelectedPipelineDisposable);
+    context.subscriptions.push(openPipelineJsonDisposable);
+    context.subscriptions.push(refreshPipelinesDisposable);
+    context.subscriptions.push(pipelinesView);
 }
 
 export function deactivate() { }
@@ -136,62 +198,4 @@ function registerDemoProvider(): void {
             { capability: 'git.push', command: 'git.push' }
         ]
     });
-}
-
-type PipelineFile = {
-    name: string;
-    profile?: string;
-    steps: Array<Intent>;
-};
-
-async function runPipeline(dryRun: boolean): Promise<void> {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        vscode.window.showErrorMessage('Open a .intent.json file to run a pipeline.');
-        return;
-    }
-
-    const doc = editor.document;
-    const text = doc.getText();
-    let pipeline: PipelineFile;
-    try {
-        pipeline = JSON.parse(text);
-    } catch (error) {
-        vscode.window.showErrorMessage(`Invalid pipeline JSON: ${error}`);
-        return;
-    }
-
-    if (!pipeline || !Array.isArray(pipeline.steps)) {
-        vscode.window.showErrorMessage('Invalid pipeline: expected a "steps" array.');
-        return;
-    }
-
-    const config = vscode.workspace.getConfiguration('intentRouter');
-    const originalProfile = config.get<string>('activeProfile', '');
-    const targetProfile = pipeline.profile ?? '';
-    if (targetProfile && targetProfile !== originalProfile) {
-        await config.update('activeProfile', targetProfile, true);
-    }
-
-    try {
-        for (const step of pipeline.steps) {
-            const stepIntent: Intent = {
-                ...step,
-                meta: {
-                    ...(step.meta ?? {}),
-                    dryRun: dryRun ? true : step.meta?.dryRun
-                }
-            };
-
-            const ok = await routeIntent(stepIntent);
-            if (!ok) {
-                vscode.window.showWarningMessage('Pipeline stopped on failed step.');
-                break;
-            }
-        }
-    } finally {
-        if (targetProfile && targetProfile !== originalProfile) {
-            await config.update('activeProfile', originalProfile, true);
-        }
-    }
 }
