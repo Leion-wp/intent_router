@@ -3,13 +3,19 @@
     "displayName": "Intent Router",
     "description": "Centralized intent routing for VS Code / Cursor / Agentic extensions",
     "version": "0.0.1",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Leion-wp/intent_router.git"
+    },
     "engines": {
         "vscode": "^1.75.0"
     },
     "main": "./out/extension.js",
     "activationEvents": [
         "onCommand:intentRouter.route",
-        "onCommand:intentRouter.registerCapabilities"
+        "onCommand:intentRouter.registerCapabilities",
+        "onCommand:intentRouter.routeFromJson"
     ],
     "contributes": {
         "commands": [
