@@ -6,6 +6,8 @@ import { registerCapabilities } from './registry';
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
 
+    registerDemoProvider();
+
     let disposable = vscode.commands.registerCommand('intentRouter.route', async (args: any) => {
         // Basic validation
         if (!args || typeof args.intent !== 'string') {
@@ -54,3 +56,21 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() { }
+
+function registerDemoProvider(): void {
+    const config = vscode.workspace.getConfiguration('intentRouter');
+    const demoProvider = config.get<string>('demoProvider', '');
+    if (demoProvider !== 'git') {
+        return;
+    }
+
+    registerCapabilities({
+        provider: 'git',
+        capabilities: [
+            { capability: 'git.showOutput', command: 'git.showOutput' },
+            { capability: 'git.fetch', command: 'git.fetch' },
+            { capability: 'git.pull', command: 'git.pull' },
+            { capability: 'git.push', command: 'git.push' }
+        ]
+    });
+}

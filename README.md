@@ -26,6 +26,11 @@ To make the demo capability resolve, add this to your settings (host window):
 ]
 ```
 
+Optional: enable the built-in demo Git provider in settings:
+```json
+"intentRouter.demoProvider": "git"
+```
+
 ## Intent Format
 ```ts
 type Intent = {
