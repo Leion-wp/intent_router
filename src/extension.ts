@@ -138,30 +138,27 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let runSelectedPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.run', async () => {
-        const item = pipelinesView.selection[0];
-        if (!item) {
-            vscode.window.showErrorMessage('Select a pipeline in the Intent Pipelines view.');
+        const uri = await getPipelineUriFromSelectionOrPrompt(pipelinesView);
+        if (!uri) {
             return;
         }
-        await runPipelineFromUri(item.uri, false);
+        await runPipelineFromUri(uri, false);
     });
 
     let dryRunSelectedPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.dryRun', async () => {
-        const item = pipelinesView.selection[0];
-        if (!item) {
-            vscode.window.showErrorMessage('Select a pipeline in the Intent Pipelines view.');
+        const uri = await getPipelineUriFromSelectionOrPrompt(pipelinesView);
+        if (!uri) {
             return;
         }
-        await runPipelineFromUri(item.uri, true);
+        await runPipelineFromUri(uri, true);
     });
 
     let openPipelineJsonDisposable = vscode.commands.registerCommand('intentRouter.pipelines.openJson', async () => {
-        const item = pipelinesView.selection[0];
-        if (!item) {
-            vscode.window.showErrorMessage('Select a pipeline in the Intent Pipelines view.');
+        const uri = await getPipelineUriFromSelectionOrPrompt(pipelinesView);
+        if (!uri) {
             return;
         }
-        const doc = await vscode.workspace.openTextDocument(item.uri);
+        const doc = await vscode.workspace.openTextDocument(uri);
         await vscode.window.showTextDocument(doc, { preview: false });
     });
 
@@ -203,4 +200,29 @@ function registerDemoProvider(): void {
             { capability: 'git.push', command: 'git.push' }
         ]
     });
+}
+
+async function getPipelineUriFromSelectionOrPrompt(
+    pipelinesView: vscode.TreeView<any>
+): Promise<vscode.Uri | undefined> {
+    const selected = pipelinesView.selection[0];
+    if (selected?.uri instanceof vscode.Uri) {
+        return selected.uri;
+    }
+
+    const files = await vscode.workspace.findFiles('pipeline/*.intent.json');
+    if (files.length === 0) {
+        vscode.window.showErrorMessage('No pipelines found in /pipeline.');
+        return undefined;
+    }
+
+    const picks = files.map(uri => ({
+        label: uri.path.split('/').pop() || 'pipeline',
+        uri
+    }));
+
+    const picked = await vscode.window.showQuickPick(picks, {
+        placeHolder: 'Select a pipeline'
+    });
+    return picked?.uri;
 }

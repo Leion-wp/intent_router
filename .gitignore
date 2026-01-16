@@ -25,3 +25,4 @@ Thumbs.db
 !.vscode/tasks.json
 !.vscode/settings.json
 !.vscode/extensions.json
+pipeline/*
