@@ -14,6 +14,8 @@ export class PipelineBuilder {
     private panel: vscode.WebviewPanel | undefined;
     private currentUri: vscode.Uri | undefined;
 
+    constructor(private readonly extensionUri: vscode.Uri) {}
+
     async open(pipeline?: PipelineFile, uri?: vscode.Uri): Promise<void> {
         this.currentUri = uri;
         const panel = vscode.window.createWebviewPanel(
@@ -22,7 +24,8 @@ export class PipelineBuilder {
             vscode.ViewColumn.Active,
             {
                 enableScripts: true,
-                retainContextWhenHidden: true
+                retainContextWhenHidden: true,
+                localResourceRoots: [this.extensionUri]
             }
         );
 
@@ -175,7 +178,7 @@ export class PipelineBuilder {
     private getHtml(webview: vscode.Webview, data: { pipeline: PipelineFile; commandGroups: CommandGroup[]; profiles: string[]; templates: Record<string, any> }): string {
         const nonce = this.getNonce();
         const payload = JSON.stringify(data);
-        const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(vscode.extensions.getExtension('intent-router.intent-router')!.extensionUri, 'media', 'codicons', 'codicon.css'));
+        const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'codicons', 'codicon.css'));
 
         return `<!DOCTYPE html>
 <html lang="en">
