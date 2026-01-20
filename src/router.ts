@@ -37,8 +37,16 @@ export async function routeIntent(intent: Intent): Promise<boolean> {
         return false;
     }
 
+    const expanded = expandCompositeResolutions(normalized, filtered);
+    log(output, normalized, 'info', 'IR011', `step=expand count=${expanded.length}`);
+    if (expanded.length === 0) {
+        log(output, normalized, 'warn', 'IR012', 'step=expand empty=true');
+        vscode.window.showWarningMessage(`No executable steps after expansion for intent: ${normalized.intent}`);
+        return false;
+    }
+
     let success = true;
-    for (const entry of filtered) {
+    for (const entry of expanded) {
         const stepOk = await executeResolution(normalized, entry, output);
         if (!stepOk) {
             success = false;
@@ -139,8 +147,43 @@ function filterByProviderTarget(intent: Intent, entries: Resolution[]): Resoluti
     });
 }
 
+function expandCompositeResolutions(intent: Intent, entries: Resolution[]): Resolution[] {
+    const expanded: Resolution[] = [];
+    for (const entry of entries) {
+        if (entry.capabilityType !== 'composite') {
+            expanded.push(entry);
+            continue;
+        }
+
+        const steps = entry.compositeSteps ?? [];
+        for (const step of steps) {
+            const stepProvider = step.provider ?? entry.provider;
+            const stepTarget = step.target ?? entry.target;
+            const stepType = step.type ?? entry.type;
+            const stepPayload = step.payload;
+            const mapPayload = step.mapPayload ?? (stepPayload !== undefined ? () => stepPayload : undefined);
+
+            expanded.push({
+                capability: step.capability,
+                command: step.command,
+                provider: stepProvider,
+                target: stepTarget,
+                type: stepType ?? 'vscode',
+                capabilityType: 'atomic',
+                mapPayload,
+                source: 'composite'
+            });
+        }
+    }
+    return expanded;
+}
+
 async function executeResolution(intent: Intent, entry: Resolution, output: vscode.OutputChannel): Promise<boolean> {
     const meta = intent.meta ?? {};
+    if (entry.capabilityType !== 'atomic') {
+        log(output, intent, 'warn', 'IR013', `step=execute skip capabilityType=${entry.capabilityType} capability=${entry.capability}`);
+        return false;
+    }
     const adapter = getProviderAdapter(entry.type);
     if (!adapter) {
         log(output, intent, 'warn', 'IR006', `step=transport skip type=${entry.type} capability=${entry.capability}`);
