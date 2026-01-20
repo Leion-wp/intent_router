@@ -15,6 +15,8 @@ export class PipelineBuilder {
     private panel: vscode.WebviewPanel | undefined;
     private currentUri: vscode.Uri | undefined;
 
+    constructor(private readonly extensionUri: vscode.Uri) {}
+
     async open(pipeline?: PipelineFile, uri?: vscode.Uri): Promise<void> {
         this.currentUri = uri;
         const panel = vscode.window.createWebviewPanel(
@@ -23,7 +25,8 @@ export class PipelineBuilder {
             vscode.ViewColumn.Active,
             {
                 enableScripts: true,
-                retainContextWhenHidden: true
+                retainContextWhenHidden: true,
+                localResourceRoots: [this.extensionUri]
             }
         );
 
@@ -40,6 +43,7 @@ export class PipelineBuilder {
 
         // Aggregate templates
         const templates = { ...gitTemplates, ...dockerTemplates, ...terminalTemplates, ...systemTemplates };
+        const templates = { ...gitTemplates, ...dockerTemplates, ...terminalTemplates };
 
         panel.webview.html = this.getHtml(panel.webview, {
             pipeline: initialPipeline,
@@ -177,6 +181,7 @@ export class PipelineBuilder {
         const nonce = this.getNonce();
         const payload = JSON.stringify(data);
         const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(vscode.extensions.getExtension('intent-router.intent-router')!.extensionUri, 'media', 'codicons', 'codicon.css'));
+        const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'codicons', 'codicon.css'));
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -340,6 +345,7 @@ export class PipelineBuilder {
         textarea:hover + .payload-status + .variable-hint {
             display: block;
         }
+
     </style>
 </head>
 <body>
@@ -476,6 +482,9 @@ export class PipelineBuilder {
                             <span class="provider-icon">\${icon}</span>
                             Step \${index + 1}
                         </div>
+
+
+                        <div class="step-title">Step \${index + 1}</div>
                         <button class="step-remove" data-role="remove" title="Remove Step">×</button>
                     </div>
                     <div class="row">

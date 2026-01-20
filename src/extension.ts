@@ -20,6 +20,8 @@ export function activate(context: vscode.ExtensionContext) {
     registerSystemProvider(context);
 
     const pipelineBuilder = new PipelineBuilder();
+
+    const pipelineBuilder = new PipelineBuilder(context.extensionUri);
     const pipelinesProvider = new PipelinesTreeDataProvider();
     const pipelinesView = vscode.window.createTreeView('intentRouterPipelines', {
         treeDataProvider: pipelinesProvider

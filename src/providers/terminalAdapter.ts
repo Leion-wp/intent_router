@@ -38,6 +38,7 @@ export async function executeTerminalCommand(args: any): Promise<void> {
         term = vscode.window.createTerminal(TERMINAL_NAME);
     }
 
+    const term = vscode.window.createTerminal(`Intent: ${commandText.substring(0, 20)}...`);
     term.show();
     term.sendText(commandText);
 }
