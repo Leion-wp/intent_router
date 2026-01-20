@@ -128,6 +128,8 @@ suite('Registry Unit Test Suite', () => {
         assert.ok(npmInstall, 'npm.install should be resolved');
         assert.strictEqual(npmInstall!.command, 'npm.install', 'npm.install should come from fallback');
         assert.strictEqual(npmInstall!.source, 'fallback', 'npm.install source should be fallback');
+    });
+
     test('Registry - Composite Capability Is Public Only', () => {
         registerCapabilities({
             provider: 'git',
