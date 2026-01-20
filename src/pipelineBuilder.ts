@@ -332,6 +332,7 @@ export class PipelineBuilder {
             font-family: 'codicon';
             font-size: 16px;
         }
+
     </style>
 </head>
 <body>
@@ -467,6 +468,8 @@ export class PipelineBuilder {
                             <span class="provider-icon">\${icon}</span>
                             Step \${index + 1}
                         </div>
+
+                        <div class="step-title">Step \${index + 1}</div>
                         <button class="step-remove" data-role="remove" title="Remove Step">×</button>
                     </div>
                     <div class="row">
