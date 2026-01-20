@@ -7,6 +7,7 @@ import { PipelinesTreeDataProvider } from './pipelinesView';
 import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri } from './pipelineRunner';
 import { registerGitProvider } from './providers/gitAdapter';
 import { registerDockerProvider } from './providers/dockerAdapter';
+import { executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
@@ -14,6 +15,7 @@ export function activate(context: vscode.ExtensionContext) {
     // V1 Providers: Strict discovery
     registerGitProvider(context);
     registerDockerProvider(context);
+    registerTerminalProvider(context);
 
     const pipelineBuilder = new PipelineBuilder();
     const pipelinesProvider = new PipelinesTreeDataProvider();
@@ -43,6 +45,10 @@ export function activate(context: vscode.ExtensionContext) {
     let registerDisposable = vscode.commands.registerCommand('intentRouter.registerCapabilities', async (args: RegisterCapabilitiesArgs) => {
         const count = registerCapabilities(args);
         return count;
+    });
+
+    let internalTerminalDisposable = vscode.commands.registerCommand('intentRouter.internal.terminalRun', async (args: any) => {
+        await executeTerminalCommand(args);
     });
 
     let promptDisposable = vscode.commands.registerCommand('intentRouter.routeFromJson', async () => {
@@ -216,6 +222,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(disposable);
     context.subscriptions.push(registerDisposable);
+    context.subscriptions.push(internalTerminalDisposable);
     context.subscriptions.push(promptDisposable);
     context.subscriptions.push(createPipelineDisposable);
     context.subscriptions.push(runPipelineDisposable);

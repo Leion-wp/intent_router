@@ -3,6 +3,7 @@ import { listPublicCapabilities } from './registry';
 import { PipelineFile, ensurePipelineFolder, writePipelineToUri } from './pipelineRunner';
 import { gitTemplates } from './providers/gitAdapter';
 import { dockerTemplates } from './providers/dockerAdapter';
+import { terminalTemplates } from './providers/terminalAdapter';
 
 type CommandGroup = {
     provider: string;
@@ -37,7 +38,7 @@ export class PipelineBuilder {
         const initialPipeline = pipeline ?? { name: '', steps: [] };
 
         // Aggregate templates
-        const templates = { ...gitTemplates, ...dockerTemplates };
+        const templates = { ...gitTemplates, ...dockerTemplates, ...terminalTemplates };
 
         panel.webview.html = this.getHtml(panel.webview, {
             pipeline: initialPipeline,
@@ -174,6 +175,7 @@ export class PipelineBuilder {
     private getHtml(webview: vscode.Webview, data: { pipeline: PipelineFile; commandGroups: CommandGroup[]; profiles: string[]; templates: Record<string, any> }): string {
         const nonce = this.getNonce();
         const payload = JSON.stringify(data);
+        const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(vscode.extensions.getExtension('intent-router.intent-router')!.extensionUri, 'media', 'codicons', 'codicon.css'));
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -181,7 +183,7 @@ export class PipelineBuilder {
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="${webview.asWebviewUri(vscode.Uri.joinPath(vscode.extensions.getExtension('vscode.codicons')!.extensionUri, 'dist', 'codicon.css'))}" rel="stylesheet" />
+    <link href="${codiconUri}" rel="stylesheet" />
     <title>Pipeline Builder</title>
     <style>
         :root {
@@ -442,6 +444,7 @@ export class PipelineBuilder {
              // Simple hardcoded map for V1
             if (provider === 'git') return '&#xea5d;'; // git-merge
             if (provider === 'docker') return '&#xeb11;'; // server? closest standard codicon
+            if (provider === 'terminal') return '&#xeb8e;'; // terminal
             return '&#xea79;'; // code
         }
 
