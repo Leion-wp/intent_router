@@ -47,19 +47,16 @@ export async function routeIntent(intent: Intent): Promise<boolean> {
     }
 
     const expanded = expandCompositeResolutions(normalized, filtered);
-    log(output, normalized, 'info', 'IR011', `step=expand count=${expanded.length}`);
+    log(output, normalized, minLevel, 'info', 'IR011', `step=expand count=${expanded.length}`);
     if (expanded.length === 0) {
-        log(output, normalized, 'warn', 'IR012', 'step=expand empty=true');
+        log(output, normalized, minLevel, 'warn', 'IR012', 'step=expand empty=true');
         vscode.window.showWarningMessage(`No executable steps after expansion for intent: ${normalized.intent}`);
         return false;
     }
 
     let success = true;
-    for (const entry of filtered) {
-        const stepOk = await executeResolution(normalized, entry, output, minLevel);
-
     for (const entry of expanded) {
-        const stepOk = await executeResolution(normalized, entry, output);
+        const stepOk = await executeResolution(normalized, entry, output, minLevel);
         if (!stepOk) {
             success = false;
         }
@@ -156,7 +153,6 @@ function filterByProviderTarget(intent: Intent, entries: Resolution[]): Resoluti
     });
 }
 
-async function executeResolution(intent: Intent, entry: Resolution, output: vscode.OutputChannel, minLevel: 'error' | 'warn' | 'info' | 'debug'): Promise<boolean> {
 function expandCompositeResolutions(intent: Intent, entries: Resolution[]): Resolution[] {
     const expanded: Resolution[] = [];
     for (const entry of entries) {
@@ -188,10 +184,10 @@ function expandCompositeResolutions(intent: Intent, entries: Resolution[]): Reso
     return expanded;
 }
 
-async function executeResolution(intent: Intent, entry: Resolution, output: vscode.OutputChannel): Promise<boolean> {
+async function executeResolution(intent: Intent, entry: Resolution, output: vscode.OutputChannel, minLevel: 'error' | 'warn' | 'info' | 'debug'): Promise<boolean> {
     const meta = intent.meta ?? {};
     if (entry.capabilityType !== 'atomic') {
-        log(output, intent, 'warn', 'IR013', `step=execute skip capabilityType=${entry.capabilityType} capability=${entry.capability}`);
+        log(output, intent, minLevel, 'warn', 'IR013', `step=execute skip capabilityType=${entry.capabilityType} capability=${entry.capability}`);
         return false;
     }
     const adapter = getProviderAdapter(entry.type);
@@ -258,11 +254,6 @@ function generateTraceId(): string {
     return `${Date.now().toString(16)}-${rand}`;
 }
 
-function getLogLevel(): 'error' | 'warn' | 'info' | 'debug' {
-    if (cachedLogLevel) {
-        return cachedLogLevel;
-    }
-    const config = vscode.workspace.getConfiguration('intentRouter');
 function getLogLevel(config: vscode.WorkspaceConfiguration): 'error' | 'warn' | 'info' | 'debug' {
     const level = config.get<string>('logLevel', 'info');
     if (level === 'error' || level === 'warn' || level === 'info' || level === 'debug') {

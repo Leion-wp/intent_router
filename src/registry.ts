@@ -130,8 +130,6 @@ export function resolveCapabilities(
             continue;
         }
 
-        const registryMatches = registryMap.get(cap);
-        if (registryMatches) {
         const compositeMatch = compositeCapabilities.find(c => c.capability === cap);
         if (compositeMatch) {
             resolved.push({
@@ -147,8 +145,8 @@ export function resolveCapabilities(
             continue;
         }
 
-        const registryMatches = registeredCapabilities.filter(r => r.capability === cap);
-        if (registryMatches.length > 0) {
+        const registryMatches = registryMap.get(cap);
+        if (registryMatches) {
             for (const entry of registryMatches) {
                 resolved.push({
                     capability: entry.capability,

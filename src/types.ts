@@ -32,7 +32,7 @@ export type Resolution = {
     type: ProviderType;
     capabilityType: CapabilityType;
     mapPayload?: (intent: Intent) => any;
-    source: 'user' | 'registry' | 'fallback';
+    source: 'user' | 'registry' | 'fallback' | 'composite';
     compositeSteps?: CompositeStep[];
 };
 
