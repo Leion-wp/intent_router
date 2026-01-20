@@ -89,4 +89,40 @@ suite('Registry Unit Test Suite', () => {
         const commands = result.map(entry => entry.command).sort();
         assert.deepStrictEqual(commands, ['git.push', 'git.pushBackup']);
     });
+
+    test('Registry - Resolve Multiple Capabilities with Mixed Sources', () => {
+        registerCapabilities({
+            provider: 'docker',
+            capabilities: [
+                { capability: 'docker.build', command: 'docker.build.registry' }
+            ]
+        });
+
+        const userMappings: UserMapping[] = [
+            { capability: 'git.push', command: 'git.push.user' }
+        ];
+
+        const intent: Intent = {
+            intent: 'deploy',
+            capabilities: ['git.push', 'docker.build', 'npm.install'],
+        };
+
+        const result = resolveCapabilities(intent, userMappings);
+        assert.strictEqual(result.length, 3, 'Should resolve three capabilities');
+
+        const gitPush = result.find(r => r.capability === 'git.push');
+        assert.ok(gitPush, 'git.push should be resolved');
+        assert.strictEqual(gitPush!.command, 'git.push.user', 'git.push should come from user mapping');
+        assert.strictEqual(gitPush!.source, 'user', 'git.push source should be user');
+
+        const dockerBuild = result.find(r => r.capability === 'docker.build');
+        assert.ok(dockerBuild, 'docker.build should be resolved');
+        assert.strictEqual(dockerBuild!.command, 'docker.build.registry', 'docker.build should come from registry');
+        assert.strictEqual(dockerBuild!.source, 'registry', 'docker.build source should be registry');
+
+        const npmInstall = result.find(r => r.capability === 'npm.install');
+        assert.ok(npmInstall, 'npm.install should be resolved');
+        assert.strictEqual(npmInstall!.command, 'npm.install', 'npm.install should come from fallback');
+        assert.strictEqual(npmInstall!.source, 'fallback', 'npm.install source should be fallback');
+    });
 });
