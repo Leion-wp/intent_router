@@ -235,4 +235,44 @@ suite('Extension Test Suite', () => {
             blockedDisposable.dispose();
         }
     });
+
+    test('Extension - Composite Capability Expands Internally', async () => {
+        resetRegistry();
+        const received: string[] = [];
+        const stepOneCommand = 'intentRouter.test.stepOne';
+        const stepTwoCommand = 'intentRouter.test.stepTwo';
+        const stepOneDisposable = vscode.commands.registerCommand(stepOneCommand, () => {
+            received.push('one');
+        });
+        const stepTwoDisposable = vscode.commands.registerCommand(stepTwoCommand, () => {
+            received.push('two');
+        });
+
+        try {
+            await vscode.commands.executeCommand('intentRouter.registerCapabilities', {
+                provider: 'git',
+                capabilities: [
+                    {
+                        capability: 'git.publishPR',
+                        command: 'git.publishPR',
+                        capabilityType: 'composite',
+                        steps: [
+                            { capability: 'git.commit', command: stepOneCommand },
+                            { capability: 'git.push', command: stepTwoCommand }
+                        ]
+                    }
+                ]
+            });
+
+            await vscode.commands.executeCommand('intentRouter.route', {
+                intent: 'publish',
+                capabilities: ['git.publishPR']
+            });
+
+            assert.deepStrictEqual(received, ['one', 'two']);
+        } finally {
+            stepOneDisposable.dispose();
+            stepTwoDisposable.dispose();
+        }
+    });
 });

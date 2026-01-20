@@ -1,9 +1,11 @@
-import { Capability, Intent, RegisterCapabilitiesArgs, Resolution, UserMapping } from './types';
+import { Capability, CompositeCapability, Intent, RegisterCapabilitiesArgs, Resolution, UserMapping } from './types';
 
 const registeredCapabilities: Capability[] = [];
+const compositeCapabilities: CompositeCapability[] = [];
 
 export function resetRegistry(): void {
     registeredCapabilities.length = 0;
+    compositeCapabilities.length = 0;
 }
 
 export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
@@ -36,18 +38,33 @@ export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
         return count;
     }
 
-    for (const entry of args.capabilities as Array<{ capability: string; command: string; mapPayload?: (intent: Intent) => any; }>) {
+    for (const entry of args.capabilities as Array<{ capability: string; command: string; capabilityType?: string; steps?: any[]; mapPayload?: (intent: Intent) => any; }>) {
         if (!entry.capability || !entry.command) {
             continue;
         }
-        registeredCapabilities.push({
-            capability: entry.capability,
-            command: entry.command,
-            description: `Resolved capability: ${entry.capability}`,
-            mapPayload: entry.mapPayload ?? args.mapPayload,
-            ...base
-        });
-        count += 1;
+        if (entry.capabilityType === 'composite') {
+            if (!Array.isArray(entry.steps) || entry.steps.length === 0) {
+                continue;
+            }
+            compositeCapabilities.push({
+                capability: entry.capability,
+                capabilityType: 'composite',
+                provider: args.provider,
+                target: args.target,
+                type: args.type ?? 'vscode',
+                steps: entry.steps
+            });
+            count += 1;
+        } else {
+            registeredCapabilities.push({
+                capability: entry.capability,
+                command: entry.command,
+                description: `Resolved capability: ${entry.capability}`,
+                mapPayload: entry.mapPayload ?? args.mapPayload,
+                ...base
+            });
+            count += 1;
+        }
     }
 
     return count;
@@ -74,6 +91,7 @@ export function resolveCapabilities(
                     provider: entry.provider,
                     target: entry.target,
                     type: entry.type ?? 'vscode',
+                    capabilityType: 'atomic',
                     source: 'user'
                 });
             }
@@ -89,9 +107,25 @@ export function resolveCapabilities(
                     provider: entry.provider,
                     target: entry.target,
                     type: entry.type ?? 'vscode',
+                    capabilityType: 'atomic',
                     source: 'user'
                 });
             }
+            continue;
+        }
+
+        const compositeMatch = compositeCapabilities.find(c => c.capability === cap);
+        if (compositeMatch) {
+            resolved.push({
+                capability: compositeMatch.capability,
+                command: compositeMatch.capability,
+                provider: compositeMatch.provider,
+                target: compositeMatch.target,
+                type: compositeMatch.type ?? 'vscode',
+                capabilityType: 'composite',
+                source: 'registry',
+                compositeSteps: compositeMatch.steps
+            });
             continue;
         }
 
@@ -104,6 +138,7 @@ export function resolveCapabilities(
                     provider: entry.provider,
                     target: entry.target,
                     type: entry.type ?? 'vscode',
+                    capabilityType: 'atomic',
                     mapPayload: entry.mapPayload,
                     source: 'registry'
                 });
@@ -115,9 +150,29 @@ export function resolveCapabilities(
             capability: cap,
             command: cap,
             type: 'vscode',
+            capabilityType: 'atomic',
             source: 'fallback'
         });
     }
 
     return resolved;
+}
+
+export function listPublicCapabilities(): Array<{ provider: string; capability: string; capabilityType: 'atomic' | 'composite' }> {
+    const items: Array<{ provider: string; capability: string; capabilityType: 'atomic' | 'composite' }> = [];
+    for (const entry of registeredCapabilities) {
+        items.push({
+            provider: entry.provider ?? 'custom',
+            capability: entry.capability,
+            capabilityType: 'atomic'
+        });
+    }
+    for (const entry of compositeCapabilities) {
+        items.push({
+            provider: entry.provider ?? 'custom',
+            capability: entry.capability,
+            capabilityType: 'composite'
+        });
+    }
+    return items;
 }
