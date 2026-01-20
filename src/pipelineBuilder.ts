@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import { listPublicCapabilities } from './registry';
 import { PipelineFile, ensurePipelineFolder, writePipelineToUri } from './pipelineRunner';
+import { gitTemplates } from './providers/gitAdapter';
+import { dockerTemplates } from './providers/dockerAdapter';
+import { terminalTemplates } from './providers/terminalAdapter';
 
 type CommandGroup = {
     provider: string;
@@ -11,6 +14,8 @@ export class PipelineBuilder {
     private panel: vscode.WebviewPanel | undefined;
     private currentUri: vscode.Uri | undefined;
 
+    constructor(private readonly extensionUri: vscode.Uri) {}
+
     async open(pipeline?: PipelineFile, uri?: vscode.Uri): Promise<void> {
         this.currentUri = uri;
         const panel = vscode.window.createWebviewPanel(
@@ -19,7 +24,8 @@ export class PipelineBuilder {
             vscode.ViewColumn.Active,
             {
                 enableScripts: true,
-                retainContextWhenHidden: true
+                retainContextWhenHidden: true,
+                localResourceRoots: [this.extensionUri]
             }
         );
 
@@ -34,10 +40,14 @@ export class PipelineBuilder {
         const profileNames = this.getProfileNames();
         const initialPipeline = pipeline ?? { name: '', steps: [] };
 
+        // Aggregate templates
+        const templates = { ...gitTemplates, ...dockerTemplates, ...terminalTemplates };
+
         panel.webview.html = this.getHtml(panel.webview, {
             pipeline: initialPipeline,
             commandGroups,
-            profiles: profileNames
+            profiles: profileNames,
+            templates
         });
 
         panel.webview.onDidReceiveMessage(async (message) => {
@@ -165,16 +175,18 @@ export class PipelineBuilder {
         return profiles.map(profile => profile?.name).filter((value: any) => typeof value === 'string');
     }
 
-    private getHtml(webview: vscode.Webview, data: { pipeline: PipelineFile; commandGroups: CommandGroup[]; profiles: string[] }): string {
+    private getHtml(webview: vscode.Webview, data: { pipeline: PipelineFile; commandGroups: CommandGroup[]; profiles: string[]; templates: Record<string, any> }): string {
         const nonce = this.getNonce();
         const payload = JSON.stringify(data);
+        const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'codicons', 'codicon.css'));
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="${codiconUri}" rel="stylesheet" />
     <title>Pipeline Builder</title>
     <style>
         :root {
@@ -313,6 +325,14 @@ export class PipelineBuilder {
             height: 14px;
             margin-top: 4px;
         }
+        .provider-icon {
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 6px;
+            font-family: 'codicon';
+            font-size: 16px;
+        }
+
     </style>
 </head>
 <body>
@@ -353,6 +373,7 @@ export class PipelineBuilder {
         const data = ${payload};
         const commandGroups = data.commandGroups || [];
         const profiles = data.profiles || [];
+        const templates = data.templates || {};
         let steps = Array.isArray(data.pipeline.steps) ? data.pipeline.steps.map(stepToModel) : [];
 
         const nameInput = document.getElementById('pipeline-name');
@@ -387,11 +408,12 @@ export class PipelineBuilder {
         function createEmptyStep() {
             const firstProvider = commandGroups[0]?.provider || '';
             const firstCommand = commandGroups[0]?.commands?.[0] || '';
+            const payload = getPayloadTemplate(firstCommand);
             return {
                 provider: firstProvider,
                 command: firstCommand,
                 intent: '',
-                payload: '',
+                payload: payload,
                 filter: ''
             };
         }
@@ -415,6 +437,21 @@ export class PipelineBuilder {
             return command.slice(0, idx);
         }
 
+        function getPayloadTemplate(command) {
+            if (templates[command]) {
+                return JSON.stringify(templates[command], null, 2);
+            }
+            return '{}';
+        }
+
+        function getProviderIcon(provider) {
+             // Simple hardcoded map for V1
+            if (provider === 'git') return '&#xea5d;'; // git-merge
+            if (provider === 'docker') return '&#xeb11;'; // server? closest standard codicon
+            if (provider === 'terminal') return '&#xeb8e;'; // terminal
+            return '&#xea79;'; // code
+        }
+
         function render() {
             const container = document.getElementById('steps');
             container.innerHTML = '';
@@ -422,8 +459,16 @@ export class PipelineBuilder {
             steps.forEach((step, index) => {
                 const stepEl = document.createElement('div');
                 stepEl.className = 'step';
+
+                const icon = getProviderIcon(step.provider);
+
                 stepEl.innerHTML = \`
                     <div class="step-header">
+                        <div class="step-title">
+                            <span class="provider-icon">\${icon}</span>
+                            Step \${index + 1}
+                        </div>
+
                         <div class="step-title">Step \${index + 1}</div>
                         <button class="step-remove" data-role="remove" title="Remove Step">×</button>
                     </div>
@@ -486,14 +531,27 @@ export class PipelineBuilder {
                     commandFilter.value = '';
                     fillCommands(commandSelect, step.provider, '');
                     step.command = commandSelect.value;
+
+                    // Pre-fill payload if empty or default
+                    step.payload = getPayloadTemplate(step.command);
+                    payloadInput.value = step.payload;
+                    updatePayloadValidation(payloadInput, payloadStatus, step.payload);
+                    render(); // Re-render to update icon
                 });
+
                 commandFilter.addEventListener('input', (e) => {
                     step.filter = e.target.value;
                     fillCommands(commandSelect, step.provider, step.command, step.filter);
                 });
+
                 commandSelect.addEventListener('change', (e) => {
                     step.command = e.target.value;
+                    // Pre-fill payload
+                    step.payload = getPayloadTemplate(step.command);
+                    payloadInput.value = step.payload;
+                    updatePayloadValidation(payloadInput, payloadStatus, step.payload);
                 });
+
                 intentInput.addEventListener('input', (e) => {
                     step.intent = e.target.value;
                 });
