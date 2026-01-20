@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { routeIntent } from './router';
+import { routeIntent, invalidateLogLevelCache } from './router';
 import { Intent, RegisterCapabilitiesArgs } from './types';
 import { registerCapabilities } from './registry';
 import { PipelineBuilder } from './pipelineBuilder';
@@ -202,6 +202,12 @@ export function activate(context: vscode.ExtensionContext) {
     let refreshPipelinesDisposable = vscode.commands.registerCommand('intentRouter.pipelines.refresh', async () => {
         pipelinesProvider.refresh();
     });
+
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('intentRouter.logLevel')) {
+            invalidateLogLevelCache();
+        }
+    }));
 
     context.subscriptions.push(disposable);
     context.subscriptions.push(registerDisposable);

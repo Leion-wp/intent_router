@@ -2,6 +2,12 @@ import * as vscode from 'vscode';
 import { Intent, ProfileConfig, ProviderAdapter, Resolution, UserMapping } from './types';
 import { resolveCapabilities } from './registry';
 
+let cachedLogLevel: 'error' | 'warn' | 'info' | 'debug' | undefined;
+
+export function invalidateLogLevelCache(): void {
+    cachedLogLevel = undefined;
+}
+
 export async function routeIntent(intent: Intent): Promise<boolean> {
     const config = vscode.workspace.getConfiguration('intentRouter');
     const normalized = normalizeIntent(intent, config);
@@ -252,11 +258,18 @@ function generateTraceId(): string {
     return `${Date.now().toString(16)}-${rand}`;
 }
 
+function getLogLevel(): 'error' | 'warn' | 'info' | 'debug' {
+    if (cachedLogLevel) {
+        return cachedLogLevel;
+    }
+    const config = vscode.workspace.getConfiguration('intentRouter');
 function getLogLevel(config: vscode.WorkspaceConfiguration): 'error' | 'warn' | 'info' | 'debug' {
     const level = config.get<string>('logLevel', 'info');
     if (level === 'error' || level === 'warn' || level === 'info' || level === 'debug') {
+        cachedLogLevel = level;
         return level;
     }
+    cachedLogLevel = 'info';
     return 'info';
 }
 
