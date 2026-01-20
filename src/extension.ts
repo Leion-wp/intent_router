@@ -5,11 +5,20 @@ import { registerCapabilities } from './registry';
 import { PipelineBuilder } from './pipelineBuilder';
 import { PipelinesTreeDataProvider } from './pipelinesView';
 import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri } from './pipelineRunner';
+import { registerGitProvider } from './providers/gitAdapter';
+import { registerDockerProvider } from './providers/dockerAdapter';
+import { executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
+import { executeSystemPause, registerSystemProvider } from './providers/systemAdapter';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
 
-    registerDemoProvider();
+    // V1 Providers: Strict discovery
+    registerGitProvider(context);
+    registerDockerProvider(context);
+    registerTerminalProvider(context);
+    registerSystemProvider(context);
+
     const pipelineBuilder = new PipelineBuilder();
     const pipelinesProvider = new PipelinesTreeDataProvider();
     const pipelinesView = vscode.window.createTreeView('intentRouterPipelines', {
@@ -38,6 +47,14 @@ export function activate(context: vscode.ExtensionContext) {
     let registerDisposable = vscode.commands.registerCommand('intentRouter.registerCapabilities', async (args: RegisterCapabilitiesArgs) => {
         const count = registerCapabilities(args);
         return count;
+    });
+
+    let internalTerminalDisposable = vscode.commands.registerCommand('intentRouter.internal.terminalRun', async (args: any) => {
+        await executeTerminalCommand(args);
+    });
+
+    let internalSystemPauseDisposable = vscode.commands.registerCommand('intentRouter.internal.systemPause', async (args: any) => {
+        await executeSystemPause(args);
     });
 
     let promptDisposable = vscode.commands.registerCommand('intentRouter.routeFromJson', async () => {
@@ -211,6 +228,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(disposable);
     context.subscriptions.push(registerDisposable);
+    context.subscriptions.push(internalTerminalDisposable);
+    context.subscriptions.push(internalSystemPauseDisposable);
     context.subscriptions.push(promptDisposable);
     context.subscriptions.push(createPipelineDisposable);
     context.subscriptions.push(runPipelineDisposable);
@@ -233,35 +252,6 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() { }
-
-function registerDemoProvider(): void {
-    const config = vscode.workspace.getConfiguration('intentRouter');
-    const demoProvider = config.get<string>('demoProvider', '');
-    if (demoProvider !== 'git') {
-        return;
-    }
-
-    registerCapabilities({
-        provider: 'git',
-        capabilities: [
-            { capability: 'git.showOutput', command: 'git.showOutput' },
-            { capability: 'git.fetch', command: 'git.fetch' },
-            { capability: 'git.pull', command: 'git.pull' },
-            { capability: 'git.push', command: 'git.push' },
-            {
-                capability: 'git.publishPR',
-                command: 'git.publishPR',
-                capabilityType: 'composite',
-                steps: [
-                    { capability: 'git.generateCommitMessage', command: 'intentRouter.internal.generateCommitMessage' },
-                    { capability: 'git.commit', command: 'git.commit', payload: { message: 'chore: publish' } },
-                    { capability: 'git.push', command: 'git.push' },
-                    { capability: 'git.createPR', command: 'intentRouter.internal.createPR' }
-                ]
-            }
-        ]
-    });
-}
 
 async function getPipelineUriFromSelectionOrPrompt(
     pipelinesView: vscode.TreeView<any>
