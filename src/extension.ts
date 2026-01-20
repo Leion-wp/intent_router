@@ -4,7 +4,7 @@ import { Intent, RegisterCapabilitiesArgs } from './types';
 import { registerCapabilities } from './registry';
 import { PipelineBuilder } from './pipelineBuilder';
 import { PipelinesTreeDataProvider } from './pipelinesView';
-import { readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri } from './pipelineRunner';
+import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri } from './pipelineRunner';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
@@ -122,6 +122,43 @@ export function activate(context: vscode.ExtensionContext) {
         await runPipelineFromData(pipeline, !!dryRun);
     });
 
+    let generatePromptDisposable = vscode.commands.registerCommand('intentRouter.generatePipelinePrompt', async () => {
+        await generatePipelinePrompt();
+    });
+
+    let importFromClipboardDisposable = vscode.commands.registerCommand('intentRouter.importPipelineFromClipboard', async () => {
+        await importPipelineFromClipboard();
+        pipelinesProvider.refresh();
+    });
+
+    let openCodexDisposable = vscode.commands.registerCommand('intentRouter.openCodex', async () => {
+        await openCodex();
+    });
+
+    let generatePromptAndOpenCodexDisposable = vscode.commands.registerCommand('intentRouter.generatePromptAndOpenCodex', async () => {
+        const prompt = await generatePipelinePrompt();
+        if (prompt) {
+            await openCodex();
+        }
+    });
+
+    let importPipelineFromClipboardAndRunDisposable = vscode.commands.registerCommand('intentRouter.importPipelineFromClipboardAndRun', async () => {
+        const uri = await importPipelineFromClipboard();
+        if (!uri) {
+            return;
+        }
+        pipelinesProvider.refresh();
+        await runPipelineFromUri(uri, false);
+    });
+
+    let internalCommitMessageDisposable = vscode.commands.registerCommand('intentRouter.internal.generateCommitMessage', async () => {
+        return 'chore: publish';
+    });
+
+    let internalCreatePRDisposable = vscode.commands.registerCommand('intentRouter.internal.createPR', async () => {
+        vscode.window.showInformationMessage('PR creation not implemented (demo composite).');
+    });
+
     let newPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.new', async () => {
         await pipelineBuilder.open();
     });
@@ -179,6 +216,13 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(runPipelineDisposable);
     context.subscriptions.push(dryRunPipelineDisposable);
     context.subscriptions.push(runPipelineFromDataDisposable);
+    context.subscriptions.push(generatePromptDisposable);
+    context.subscriptions.push(importFromClipboardDisposable);
+    context.subscriptions.push(openCodexDisposable);
+    context.subscriptions.push(generatePromptAndOpenCodexDisposable);
+    context.subscriptions.push(importPipelineFromClipboardAndRunDisposable);
+    context.subscriptions.push(internalCommitMessageDisposable);
+    context.subscriptions.push(internalCreatePRDisposable);
     context.subscriptions.push(newPipelineDisposable);
     context.subscriptions.push(openPipelineDisposable);
     context.subscriptions.push(runSelectedPipelineDisposable);
@@ -203,7 +247,18 @@ function registerDemoProvider(): void {
             { capability: 'git.showOutput', command: 'git.showOutput' },
             { capability: 'git.fetch', command: 'git.fetch' },
             { capability: 'git.pull', command: 'git.pull' },
-            { capability: 'git.push', command: 'git.push' }
+            { capability: 'git.push', command: 'git.push' },
+            {
+                capability: 'git.publishPR',
+                command: 'git.publishPR',
+                capabilityType: 'composite',
+                steps: [
+                    { capability: 'git.generateCommitMessage', command: 'intentRouter.internal.generateCommitMessage' },
+                    { capability: 'git.commit', command: 'git.commit', payload: { message: 'chore: publish' } },
+                    { capability: 'git.push', command: 'git.push' },
+                    { capability: 'git.createPR', command: 'intentRouter.internal.createPR' }
+                ]
+            }
         ]
     });
 }
@@ -231,4 +286,171 @@ async function getPipelineUriFromSelectionOrPrompt(
         placeHolder: 'Select a pipeline'
     });
     return picked?.uri;
+}
+
+async function generatePipelinePrompt(): Promise<string | undefined> {
+    const intent = await vscode.window.showInputBox({
+        prompt: 'Décris le pipeline à générer',
+        placeHolder: 'commit push sync build image deploy'
+    });
+    if (!intent) {
+        return undefined;
+    }
+
+    const prompt = [
+        'You are an intent pipeline compiler.',
+        'Return ONLY valid JSON that matches this schema:',
+        '{ "name": string, "profile"?: string, "steps": [{ "intent": string, "capabilities": string[], "payload"?: object }] }',
+        'Rules:',
+        '- JSON only, no markdown, no comments.',
+        '- steps must be linear, ordered.',
+        '- capabilities must be VS Code commands (ex: git.commit).',
+        `Request: "${intent}"`
+    ].join('\n');
+
+    await vscode.env.clipboard.writeText(prompt);
+    await openPromptPanel(prompt);
+    vscode.window.showInformationMessage('Prompt copié dans le presse-papiers.');
+    return prompt;
+}
+
+async function importPipelineFromClipboard(): Promise<vscode.Uri | undefined> {
+    const text = await vscode.env.clipboard.readText();
+    if (!text) {
+        vscode.window.showErrorMessage('Presse-papiers vide.');
+        return undefined;
+    }
+
+    let pipeline: { name?: string; steps?: any[]; profile?: string };
+    try {
+        pipeline = JSON.parse(text);
+    } catch (error) {
+        vscode.window.showErrorMessage(`JSON invalide dans le presse-papiers: ${error}`);
+        return undefined;
+    }
+
+    if (!pipeline || !Array.isArray(pipeline.steps)) {
+        vscode.window.showErrorMessage('Pipeline invalide: "steps" manquant.');
+        return undefined;
+    }
+
+    let name = pipeline.name;
+    if (!name) {
+        name = await vscode.window.showInputBox({
+            prompt: 'Nom du pipeline',
+            placeHolder: 'deploy-app'
+        });
+    }
+    if (!name) {
+        return undefined;
+    }
+
+    const folder = await ensurePipelineFolder();
+    if (!folder) {
+        vscode.window.showErrorMessage('Ouvre un workspace pour créer /pipeline.');
+        return undefined;
+    }
+
+    const fileName = name.endsWith('.intent.json') ? name : `${name}.intent.json`;
+    const uri = vscode.Uri.joinPath(folder, fileName);
+    const exists = await fileExists(uri);
+    if (exists) {
+        const confirm = await vscode.window.showWarningMessage(
+            `Le fichier ${fileName} existe déjà. Écraser ?`,
+            { modal: true },
+            'Écraser'
+        );
+        if (confirm !== 'Écraser') {
+            return undefined;
+        }
+    }
+
+    await writePipelineToUri(uri, {
+        name,
+        profile: pipeline.profile,
+        steps: pipeline.steps
+    });
+
+    const doc = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    return uri;
+}
+
+async function openCodex(): Promise<void> {
+    const candidates = [
+        'chatgpt.newCodexPanel',
+        'chatgpt.newChat',
+        'chatgpt.openCommandMenu'
+    ];
+    for (const cmd of candidates) {
+        try {
+            await vscode.commands.executeCommand(cmd);
+            return;
+        } catch {
+            // ignore
+        }
+    }
+    vscode.window.showErrorMessage('Impossible d’ouvrir Codex (chatgpt).');
+}
+
+async function openPromptPanel(prompt: string): Promise<void> {
+    const panel = vscode.window.createWebviewPanel(
+        'intentRouter.promptPanel',
+        'Pipeline Prompt',
+        vscode.ViewColumn.Active,
+        { enableScripts: true }
+    );
+
+    const nonce = generateNonce();
+    panel.webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Prompt</title>
+    <style>
+        body { font-family: Segoe UI, sans-serif; margin: 0; padding: 16px; }
+        textarea { width: 100%; height: 240px; font-family: Consolas, monospace; font-size: 12px; padding: 8px; }
+        .actions { margin-top: 12px; display: flex; gap: 8px; }
+    </style>
+</head>
+<body>
+    <textarea readonly>${prompt.replace(/</g, '&lt;')}</textarea>
+    <div class="actions">
+        <button id="copy">Copy prompt</button>
+    </div>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        document.getElementById('copy').addEventListener('click', () => {
+            vscode.postMessage({ type: 'copyPrompt' });
+        });
+    </script>
+</body>
+</html>`;
+
+    panel.webview.onDidReceiveMessage(async (message) => {
+        if (message?.type === 'copyPrompt') {
+            await vscode.env.clipboard.writeText(prompt);
+            vscode.window.showInformationMessage('Prompt copié.');
+        }
+    });
+}
+
+async function fileExists(uri: vscode.Uri): Promise<boolean> {
+    try {
+        await vscode.workspace.fs.stat(uri);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function generateNonce(): string {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
 }

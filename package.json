@@ -25,6 +25,11 @@
         "onCommand:intentRouter.pipelines.openJson",
         "onCommand:intentRouter.pipelines.refresh",
         "onCommand:intentRouter.pipelines.openBuilder",
+        "onCommand:intentRouter.generatePipelinePrompt",
+        "onCommand:intentRouter.importPipelineFromClipboard",
+        "onCommand:intentRouter.openCodex",
+        "onCommand:intentRouter.generatePromptAndOpenCodex",
+        "onCommand:intentRouter.importPipelineFromClipboardAndRun",
         "onView:intentRouterPipelines"
     ],
     "contributes": {
@@ -70,6 +75,36 @@
                 "icon": "$(file-code)"
             },
             {
+                "command": "intentRouter.pipelines.openBuilder",
+                "title": "Intent Router: Open Pipeline Builder",
+                "icon": "$(edit)"
+            },
+            {
+                "command": "intentRouter.generatePipelinePrompt",
+                "title": "Intent Router: Generate Pipeline Prompt",
+                "icon": "$(sparkle)"
+            },
+            {
+                "command": "intentRouter.importPipelineFromClipboard",
+                "title": "Intent Router: Import Pipeline From Clipboard",
+                "icon": "$(clippy)"
+            },
+            {
+                "command": "intentRouter.openCodex",
+                "title": "Intent Router: Open Codex",
+                "icon": "$(comment-discussion)"
+            },
+            {
+                "command": "intentRouter.generatePromptAndOpenCodex",
+                "title": "Intent Router: Generate Prompt & Open Codex",
+                "icon": "$(sparkle)"
+            },
+            {
+                "command": "intentRouter.importPipelineFromClipboardAndRun",
+                "title": "Intent Router: Import Pipeline From Clipboard & Run",
+                "icon": "$(play-circle)"
+            },
+            {
                 "command": "intentRouter.pipelines.refresh",
                 "title": "Intent Router: Refresh Pipelines",
                 "icon": "$(refresh)"
@@ -100,6 +135,21 @@
                     "group": "navigation"
                 },
                 {
+                    "command": "intentRouter.generatePromptAndOpenCodex",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.importPipelineFromClipboardAndRun",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.openCodex",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
                     "command": "intentRouter.pipelines.run",
                     "when": "view == intentRouterPipelines",
                     "group": "navigation"
@@ -124,17 +174,22 @@
                 {
                     "command": "intentRouter.pipelines.run",
                     "when": "view == intentRouterPipelines && viewItem == pipelineItem",
-                    "group": "inline"
+                    "group": "inline@1"
                 },
                 {
                     "command": "intentRouter.pipelines.dryRun",
                     "when": "view == intentRouterPipelines && viewItem == pipelineItem",
-                    "group": "inline"
+                    "group": "inline@2"
                 },
                 {
                     "command": "intentRouter.pipelines.openJson",
                     "when": "view == intentRouterPipelines && viewItem == pipelineItem",
-                    "group": "inline"
+                    "group": "inline@3"
+                },
+                {
+                    "command": "intentRouter.pipelines.openBuilder",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "inline@4"
                 }
             ]
         },

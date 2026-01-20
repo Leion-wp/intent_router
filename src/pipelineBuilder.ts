@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { listPublicCapabilities } from './registry';
 import { PipelineFile, ensurePipelineFolder, writePipelineToUri } from './pipelineRunner';
 
 type CommandGroup = {
@@ -56,6 +57,18 @@ export class PipelineBuilder {
                 if (saved) {
                     await vscode.commands.executeCommand('intentRouter.runPipelineFromData', message.data, true);
                 }
+                return;
+            }
+            if (message?.type === 'generatePrompt') {
+                await vscode.commands.executeCommand('intentRouter.generatePromptAndOpenCodex');
+                return;
+            }
+            if (message?.type === 'importClipboard') {
+                await vscode.commands.executeCommand('intentRouter.importPipelineFromClipboardAndRun');
+                return;
+            }
+            if (message?.type === 'openCodex') {
+                await vscode.commands.executeCommand('intentRouter.openCodex');
                 return;
             }
             if (message?.type === 'run') {
@@ -126,24 +139,14 @@ export class PipelineBuilder {
     }
 
     private async getCommandGroups(): Promise<CommandGroup[]> {
-        const commands = await vscode.commands.getCommands(true);
+        const capabilities = listPublicCapabilities();
         const groups = new Map<string, Set<string>>();
-        const custom = new Set<string>();
-
-        for (const cmd of commands) {
-            const provider = this.getProviderFromCommand(cmd);
-            if (!provider) {
-                custom.add(cmd);
-                continue;
-            }
+        for (const entry of capabilities) {
+            const provider = entry.provider || 'custom';
             if (!groups.has(provider)) {
                 groups.set(provider, new Set());
             }
-            groups.get(provider)?.add(cmd);
-        }
-
-        if (custom.size > 0) {
-            groups.set('custom', custom);
+            groups.get(provider)?.add(entry.capability);
         }
 
         return Array.from(groups.entries())
@@ -152,14 +155,6 @@ export class PipelineBuilder {
                 commands: Array.from(cmds).sort()
             }))
             .sort((a, b) => a.provider.localeCompare(b.provider));
-    }
-
-    private getProviderFromCommand(command: string): string | undefined {
-        const parts = command.split('.');
-        if (parts.length < 2) {
-            return undefined;
-        }
-        return parts[0];
     }
 
     private getProfileNames(): string[] {
@@ -212,6 +207,8 @@ export class PipelineBuilder {
         </label>
         <div class="top-actions">
             <button id="open-json">Open JSON</button>
+            <button id="generate-prompt">Generate & Open Codex</button>
+            <button id="import-clipboard">Import & Run</button>
         </div>
     </header>
 
@@ -260,6 +257,8 @@ export class PipelineBuilder {
         document.getElementById('run').addEventListener('click', () => send('run'));
         document.getElementById('dry-run').addEventListener('click', () => send('dryRun'));
         document.getElementById('open-json').addEventListener('click', () => send('openJson'));
+        document.getElementById('generate-prompt').addEventListener('click', () => send('generatePrompt'));
+        document.getElementById('import-clipboard').addEventListener('click', () => send('importClipboard'));
 
         function createEmptyStep() {
             const firstProvider = commandGroups[0]?.provider || '';

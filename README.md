@@ -64,6 +64,16 @@ Rules:
 - If a step fails, the pipeline stops.
 - `Dry Run` injects `meta.dryRun=true` for all steps.
 
+## AI-assisted Pipeline (Prompt + Clipboard)
+Workflow:
+1) **Generate Pipeline Prompt** (Intent Router) → prompt copied to clipboard.
+2) **Open Codex** → paste the prompt, generate JSON.
+3) **Import Pipeline From Clipboard** → validate and write to `/pipeline`.
+
+Notes:
+- The JSON file remains the source of truth.
+- The AI never executes anything directly.
+
 ## Intent Format
 ```ts
 type Intent = {

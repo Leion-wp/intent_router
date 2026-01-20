@@ -12,6 +12,7 @@ export type Intent = {
 };
 
 export type ProviderType = 'vscode' | 'external';
+export type CapabilityType = 'atomic' | 'composite';
 
 export type Capability = {
     capability: string;
@@ -29,8 +30,10 @@ export type Resolution = {
     provider?: string;
     target?: string;
     type: ProviderType;
+    capabilityType: CapabilityType;
     mapPayload?: (intent: Intent) => any;
     source: 'user' | 'registry' | 'fallback';
+    compositeSteps?: CompositeStep[];
 };
 
 export type ProviderAdapter = {
@@ -43,6 +46,25 @@ export type ProfileConfig = {
     mappings?: UserMapping[];
     enabledProviders?: string[];
     disabledProviders?: string[];
+};
+
+export type CompositeStep = {
+    capability: string;
+    command: string;
+    provider?: string;
+    target?: string;
+    type?: ProviderType;
+    payload?: any;
+    mapPayload?: (intent: Intent) => any;
+};
+
+export type CompositeCapability = {
+    capability: string;
+    capabilityType: 'composite';
+    provider?: string;
+    target?: string;
+    type?: ProviderType;
+    steps: CompositeStep[];
 };
 
 export type UserMapping = {
@@ -60,6 +82,8 @@ export type RegisterCapabilitiesArgs = {
     capabilities: string[] | Array<{
         capability: string;
         command: string;
+        capabilityType?: CapabilityType;
+        steps?: CompositeStep[];
         mapPayload?: (intent: Intent) => any;
     }>;
     command?: string;
