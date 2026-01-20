@@ -5,11 +5,16 @@ import { registerCapabilities } from './registry';
 import { PipelineBuilder } from './pipelineBuilder';
 import { PipelinesTreeDataProvider } from './pipelinesView';
 import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri } from './pipelineRunner';
+import { registerGitProvider } from './providers/gitAdapter';
+import { registerDockerProvider } from './providers/dockerAdapter';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
 
-    registerDemoProvider();
+    // V1 Providers: Strict discovery
+    registerGitProvider(context);
+    registerDockerProvider(context);
+
     const pipelineBuilder = new PipelineBuilder();
     const pipelinesProvider = new PipelinesTreeDataProvider();
     const pipelinesView = vscode.window.createTreeView('intentRouterPipelines', {
@@ -233,35 +238,6 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() { }
-
-function registerDemoProvider(): void {
-    const config = vscode.workspace.getConfiguration('intentRouter');
-    const demoProvider = config.get<string>('demoProvider', '');
-    if (demoProvider !== 'git') {
-        return;
-    }
-
-    registerCapabilities({
-        provider: 'git',
-        capabilities: [
-            { capability: 'git.showOutput', command: 'git.showOutput' },
-            { capability: 'git.fetch', command: 'git.fetch' },
-            { capability: 'git.pull', command: 'git.pull' },
-            { capability: 'git.push', command: 'git.push' },
-            {
-                capability: 'git.publishPR',
-                command: 'git.publishPR',
-                capabilityType: 'composite',
-                steps: [
-                    { capability: 'git.generateCommitMessage', command: 'intentRouter.internal.generateCommitMessage' },
-                    { capability: 'git.commit', command: 'git.commit', payload: { message: 'chore: publish' } },
-                    { capability: 'git.push', command: 'git.push' },
-                    { capability: 'git.createPR', command: 'intentRouter.internal.createPR' }
-                ]
-            }
-        ]
-    });
-}
 
 async function getPipelineUriFromSelectionOrPrompt(
     pipelinesView: vscode.TreeView<any>

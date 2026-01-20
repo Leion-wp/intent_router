@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { listPublicCapabilities } from './registry';
 import { PipelineFile, ensurePipelineFolder, writePipelineToUri } from './pipelineRunner';
+import { gitTemplates } from './providers/gitAdapter';
+import { dockerTemplates } from './providers/dockerAdapter';
 
 type CommandGroup = {
     provider: string;
@@ -34,10 +36,14 @@ export class PipelineBuilder {
         const profileNames = this.getProfileNames();
         const initialPipeline = pipeline ?? { name: '', steps: [] };
 
+        // Aggregate templates
+        const templates = { ...gitTemplates, ...dockerTemplates };
+
         panel.webview.html = this.getHtml(panel.webview, {
             pipeline: initialPipeline,
             commandGroups,
-            profiles: profileNames
+            profiles: profileNames,
+            templates
         });
 
         panel.webview.onDidReceiveMessage(async (message) => {
@@ -165,7 +171,7 @@ export class PipelineBuilder {
         return profiles.map(profile => profile?.name).filter((value: any) => typeof value === 'string');
     }
 
-    private getHtml(webview: vscode.Webview, data: { pipeline: PipelineFile; commandGroups: CommandGroup[]; profiles: string[] }): string {
+    private getHtml(webview: vscode.Webview, data: { pipeline: PipelineFile; commandGroups: CommandGroup[]; profiles: string[]; templates: Record<string, any> }): string {
         const nonce = this.getNonce();
         const payload = JSON.stringify(data);
 
@@ -173,54 +179,187 @@ export class PipelineBuilder {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}';">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="${webview.asWebviewUri(vscode.Uri.joinPath(vscode.extensions.getExtension('vscode.codicons')!.extensionUri, 'dist', 'codicon.css'))}" rel="stylesheet" />
     <title>Pipeline Builder</title>
     <style>
-        body { font-family: Segoe UI, sans-serif; margin: 0; padding: 16px; }
-        header { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
-        input, select, textarea, button { font-family: inherit; font-size: 13px; }
-        input[type="text"] { padding: 6px 8px; }
-        select { padding: 6px 8px; }
-        textarea { width: 100%; min-height: 80px; padding: 6px 8px; font-family: Consolas, monospace; }
-        textarea.valid { border: 1px solid #2e7d32; }
-        textarea.invalid { border: 1px solid #c62828; }
-        .steps { display: flex; flex-direction: column; gap: 16px; }
-        .step { border: 1px solid #2d2d2d; padding: 12px; border-radius: 6px; }
-        .row { display: flex; gap: 12px; margin-bottom: 8px; }
-        .row label { display: flex; flex-direction: column; gap: 6px; flex: 1; }
-        .actions { display: flex; gap: 8px; margin-top: 16px; }
-        .step-title { font-weight: 600; margin-bottom: 8px; }
-        .muted { color: #888; font-size: 12px; }
-        .top-actions { display: flex; gap: 8px; margin-left: auto; }
+        :root {
+            --background: #1e1e1e;
+            --foreground: #cccccc;
+            --card-bg: #252526;
+            --border: #3c3c3c;
+            --highlight: #007acc;
+            --button-bg: #0e639c;
+            --button-fg: #ffffff;
+            --input-bg: #3c3c3c;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 24px;
+            background-color: var(--background);
+            color: var(--foreground);
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        header {
+            display: flex;
+            gap: 16px;
+            align-items: flex-end;
+            margin-bottom: 32px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        input, select, textarea {
+            font-family: inherit;
+            font-size: 13px;
+            background-color: var(--input-bg);
+            color: inherit;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            padding: 6px 8px;
+            outline: none;
+        }
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--highlight);
+        }
+        button {
+            background-color: var(--button-bg);
+            color: var(--button-fg);
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        button.secondary {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+        }
+        textarea {
+            width: 100%;
+            min-height: 80px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            resize: vertical;
+        }
+        textarea.valid { border-color: #4ec9b0; }
+        textarea.invalid { border-color: #f14c4c; }
+
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .step {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            padding: 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        .step:hover {
+            border-color: #555;
+        }
+        .step-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .step-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--highlight);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .step-remove {
+            color: #f14c4c;
+            background: none;
+            border: none;
+            padding: 4px;
+            font-size: 18px;
+            line-height: 1;
+        }
+        .row {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 12px;
+        }
+        .row label {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 1;
+        }
+        .muted {
+            color: #888;
+            font-size: 11px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        .actions-bar {
+            display: flex;
+            gap: 12px;
+            margin-top: 32px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+        .top-actions {
+            display: flex;
+            gap: 8px;
+            margin-left: auto;
+        }
+        .payload-status {
+            font-size: 11px;
+            height: 14px;
+            margin-top: 4px;
+        }
+        .provider-icon {
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 6px;
+            font-family: 'codicon';
+            font-size: 16px;
+        }
     </style>
 </head>
 <body>
     <header>
         <label>
             <div class="muted">Pipeline name</div>
-            <input id="pipeline-name" type="text" />
+            <input id="pipeline-name" type="text" placeholder="e.g., deploy-production" style="min-width: 200px;" />
         </label>
         <label>
             <div class="muted">Profile</div>
             <select id="pipeline-profile"></select>
         </label>
         <div class="top-actions">
-            <button id="open-json">Open JSON</button>
-            <button id="generate-prompt">Generate & Open Codex</button>
-            <button id="import-clipboard">Import & Run</button>
+            <button id="open-json" class="secondary" title="Edit raw JSON">JSON</button>
+            <button id="generate-prompt" class="secondary" title="Generate via AI">AI Assist</button>
+            <button id="import-clipboard" class="secondary" title="Import from Clipboard">Import</button>
         </div>
     </header>
 
-    <div class="steps" id="steps"></div>
+    <div class="steps" id="steps">
+        <!-- Steps will be rendered here -->
+    </div>
 
-    <div class="actions">
-        <button id="add-step">+ Add step</button>
+    <div style="margin-top: 20px; text-align: center;">
+        <button id="add-step" style="width: 100%; padding: 12px; background: transparent; border: 2px dashed var(--border); color: #888;">+ Add New Step</button>
+    </div>
+
+    <div class="actions-bar">
         <button id="save">Save</button>
         <button id="save-run">Save & Run</button>
-        <button id="save-dry-run">Save & Dry Run</button>
-        <button id="run">Run</button>
-        <button id="dry-run">Dry Run</button>
+        <button id="save-dry-run" class="secondary">Dry Run</button>
+        <div style="flex:1"></div>
+        <button id="run" class="secondary">Run (Unsaved)</button>
     </div>
 
     <script nonce="${nonce}">
@@ -228,6 +367,7 @@ export class PipelineBuilder {
         const data = ${payload};
         const commandGroups = data.commandGroups || [];
         const profiles = data.profiles || [];
+        const templates = data.templates || {};
         let steps = Array.isArray(data.pipeline.steps) ? data.pipeline.steps.map(stepToModel) : [];
 
         const nameInput = document.getElementById('pipeline-name');
@@ -255,7 +395,6 @@ export class PipelineBuilder {
         document.getElementById('save-run').addEventListener('click', () => send('saveRun'));
         document.getElementById('save-dry-run').addEventListener('click', () => send('saveDryRun'));
         document.getElementById('run').addEventListener('click', () => send('run'));
-        document.getElementById('dry-run').addEventListener('click', () => send('dryRun'));
         document.getElementById('open-json').addEventListener('click', () => send('openJson'));
         document.getElementById('generate-prompt').addEventListener('click', () => send('generatePrompt'));
         document.getElementById('import-clipboard').addEventListener('click', () => send('importClipboard'));
@@ -263,11 +402,12 @@ export class PipelineBuilder {
         function createEmptyStep() {
             const firstProvider = commandGroups[0]?.provider || '';
             const firstCommand = commandGroups[0]?.commands?.[0] || '';
+            const payload = getPayloadTemplate(firstCommand);
             return {
                 provider: firstProvider,
                 command: firstCommand,
                 intent: '',
-                payload: '',
+                payload: payload,
                 filter: ''
             };
         }
@@ -291,6 +431,20 @@ export class PipelineBuilder {
             return command.slice(0, idx);
         }
 
+        function getPayloadTemplate(command) {
+            if (templates[command]) {
+                return JSON.stringify(templates[command], null, 2);
+            }
+            return '{}';
+        }
+
+        function getProviderIcon(provider) {
+             // Simple hardcoded map for V1
+            if (provider === 'git') return '&#xea5d;'; // git-merge
+            if (provider === 'docker') return '&#xeb11;'; // server? closest standard codicon
+            return '&#xea79;'; // code
+        }
+
         function render() {
             const container = document.getElementById('steps');
             container.innerHTML = '';
@@ -298,33 +452,43 @@ export class PipelineBuilder {
             steps.forEach((step, index) => {
                 const stepEl = document.createElement('div');
                 stepEl.className = 'step';
+
+                const icon = getProviderIcon(step.provider);
+
                 stepEl.innerHTML = \`
-                    <div class="step-title">Step \${index + 1}</div>
+                    <div class="step-header">
+                        <div class="step-title">
+                            <span class="provider-icon">\${icon}</span>
+                            Step \${index + 1}
+                        </div>
+                        <button class="step-remove" data-role="remove" title="Remove Step">×</button>
+                    </div>
                     <div class="row">
-                        <label>
+                        <label style="flex: 0 0 120px;">
                             <div class="muted">Provider</div>
                             <select data-role="provider"></select>
                         </label>
                         <label>
-                            <div class="muted">Action</div>
-                            <input data-role="command-filter" type="text" placeholder="Filter commands" />
-                            <select data-role="command"></select>
+                            <div class="muted">Action (Capability)</div>
+                            <div style="display: flex; gap: 8px;">
+                                <input data-role="command-filter" type="text" placeholder="Filter..." style="width: 80px;" />
+                                <select data-role="command" style="flex:1;"></select>
+                            </div>
                         </label>
                     </div>
                     <div class="row">
                         <label>
-                            <div class="muted">Intent</div>
-                            <input data-role="intent" type="text" />
+                            <div class="muted">Intent Description</div>
+                            <input data-role="intent" type="text" placeholder="Human-readable description" />
                         </label>
                     </div>
                     <div class="row">
-                        <label style="flex:1;">
+                        <label>
                             <div class="muted">Payload (JSON)</div>
-                            <textarea data-role="payload"></textarea>
-                            <div class="muted" data-role="payload-status"></div>
+                            <textarea data-role="payload" placeholder="{}"></textarea>
+                            <div class="payload-status" data-role="payload-status"></div>
                         </label>
                     </div>
-                    <button data-role="remove">Remove step</button>
                 \`;
 
                 const providerSelect = stepEl.querySelector('[data-role="provider"]');
@@ -358,14 +522,27 @@ export class PipelineBuilder {
                     commandFilter.value = '';
                     fillCommands(commandSelect, step.provider, '');
                     step.command = commandSelect.value;
+
+                    // Pre-fill payload if empty or default
+                    step.payload = getPayloadTemplate(step.command);
+                    payloadInput.value = step.payload;
+                    updatePayloadValidation(payloadInput, payloadStatus, step.payload);
+                    render(); // Re-render to update icon
                 });
+
                 commandFilter.addEventListener('input', (e) => {
                     step.filter = e.target.value;
                     fillCommands(commandSelect, step.provider, step.command, step.filter);
                 });
+
                 commandSelect.addEventListener('change', (e) => {
                     step.command = e.target.value;
+                    // Pre-fill payload
+                    step.payload = getPayloadTemplate(step.command);
+                    payloadInput.value = step.payload;
+                    updatePayloadValidation(payloadInput, payloadStatus, step.payload);
                 });
+
                 intentInput.addEventListener('input', (e) => {
                     step.intent = e.target.value;
                 });
@@ -411,6 +588,7 @@ export class PipelineBuilder {
             const trimmed = value ? value.trim() : '';
             textarea.classList.remove('valid', 'invalid');
             status.textContent = '';
+            status.style.color = '#888';
             if (!trimmed) {
                 return;
             }
@@ -418,9 +596,11 @@ export class PipelineBuilder {
                 JSON.parse(trimmed);
                 textarea.classList.add('valid');
                 status.textContent = 'JSON valide';
+                status.style.color = '#4ec9b0';
             } catch (e) {
                 textarea.classList.add('invalid');
                 status.textContent = 'JSON invalide';
+                status.style.color = '#f14c4c';
             }
         }
 
@@ -437,7 +617,8 @@ export class PipelineBuilder {
 
             for (const step of steps) {
                 if (!step.command) {
-                    alert('Each step must have a command.');
+                    vscode.postMessage({ type: 'error', message: 'Step missing command' });
+                    // In a real app we'd show a toast in the webview
                     return null;
                 }
                 let payload = undefined;
