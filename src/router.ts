@@ -8,7 +8,7 @@ export function invalidateLogLevelCache(): void {
     cachedLogLevel = undefined;
 }
 
-export async function routeIntent(intent: Intent): Promise<boolean> {
+export async function routeIntent(intent: Intent, variableCache?: Map<string, string>): Promise<boolean> {
     const config = vscode.workspace.getConfiguration('intentRouter');
     const normalized = normalizeIntent(intent, config);
     const output = getOutputChannel();
@@ -56,7 +56,7 @@ export async function routeIntent(intent: Intent): Promise<boolean> {
 
     let success = true;
     for (const entry of expanded) {
-        const stepOk = await executeResolution(normalized, entry, output, minLevel);
+        const stepOk = await executeResolution(normalized, entry, output, minLevel, variableCache);
         if (!stepOk) {
             success = false;
         }
@@ -184,7 +184,55 @@ function expandCompositeResolutions(intent: Intent, entries: Resolution[]): Reso
     return expanded;
 }
 
-async function executeResolution(intent: Intent, entry: Resolution, output: vscode.OutputChannel, minLevel: 'error' | 'warn' | 'info' | 'debug'): Promise<boolean> {
+async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
+    if (typeof input === 'string') {
+        const regex = /\$\{input:([^}]+)\}/g;
+        let match;
+        let result = input;
+
+        while ((match = regex.exec(input)) !== null) {
+            const fullMatch = match[0];
+            const promptText = match[1];
+
+            let value = cache?.get(promptText);
+
+            if (value === undefined) {
+                value = await vscode.window.showInputBox({
+                    prompt: promptText,
+                    placeHolder: `Value for ${promptText}`
+                });
+
+                if (value === undefined) {
+                    throw new Error(`Input cancelled for variable: ${promptText}`);
+                }
+
+                if (cache) {
+                    cache.set(promptText, value);
+                }
+            }
+
+            result = result.replace(fullMatch, value);
+        }
+        return result;
+    } else if (Array.isArray(input)) {
+        return Promise.all(input.map(item => resolveVariables(item, cache)));
+    } else if (typeof input === 'object' && input !== null) {
+        const resolved: any = {};
+        for (const key of Object.keys(input)) {
+            resolved[key] = await resolveVariables(input[key], cache);
+        }
+        return resolved;
+    }
+    return input;
+}
+
+async function executeResolution(
+    intent: Intent,
+    entry: Resolution,
+    output: vscode.OutputChannel,
+    minLevel: 'error' | 'warn' | 'info' | 'debug',
+    variableCache?: Map<string, string>
+): Promise<boolean> {
     const meta = intent.meta ?? {};
     if (entry.capabilityType !== 'atomic') {
         log(output, intent, minLevel, 'warn', 'IR013', `step=execute skip capabilityType=${entry.capabilityType} capability=${entry.capability}`);
@@ -196,7 +244,20 @@ async function executeResolution(intent: Intent, entry: Resolution, output: vsco
         return false;
     }
 
-    const payload = entry.mapPayload ? entry.mapPayload(intent) : intent.payload;
+    if (intent.description) {
+        log(output, intent, minLevel, 'info', 'IR014', `[STEP] ${intent.description}`);
+    }
+
+    let payload = entry.mapPayload ? entry.mapPayload(intent) : intent.payload;
+
+    try {
+        payload = await resolveVariables(payload, variableCache);
+    } catch (error) {
+         log(output, intent, minLevel, 'warn', 'IR015', `step=resolveVariables cancelled=${error}`);
+         vscode.window.showWarningMessage('Pipeline cancelled by user.');
+         return false;
+    }
+
     log(
         output,
         intent,

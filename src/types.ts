@@ -1,5 +1,6 @@
 export type Intent = {
     intent: string;
+    description?: string;
     capabilities?: string[];
     payload?: any;
     provider?: string;

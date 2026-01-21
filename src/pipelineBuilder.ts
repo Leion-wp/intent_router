@@ -425,6 +425,7 @@ export class PipelineBuilder {
                 provider: provider || 'custom',
                 command: command || '',
                 intent: step.intent || '',
+                description: step.description || '',
                 payload: step.payload ? JSON.stringify(step.payload, null, 2) : '',
                 filter: ''
             };
@@ -487,8 +488,14 @@ export class PipelineBuilder {
                     </div>
                     <div class="row">
                         <label>
-                            <div class="muted">Intent Description</div>
-                            <input data-role="intent" type="text" placeholder="Human-readable description" />
+                            <div class="muted">Intent</div>
+                            <input data-role="intent" type="text" placeholder="Intent name" />
+                        </label>
+                    </div>
+                    <div class="row">
+                        <label>
+                            <div class="muted">Description (Metadata)</div>
+                            <input data-role="description" type="text" placeholder="Description with $(icon)..." />
                         </label>
                     </div>
                     <div class="row">
@@ -504,6 +511,7 @@ export class PipelineBuilder {
                 const commandSelect = stepEl.querySelector('[data-role="command"]');
                 const commandFilter = stepEl.querySelector('[data-role="command-filter"]');
                 const intentInput = stepEl.querySelector('[data-role="intent"]');
+                const descriptionInput = stepEl.querySelector('[data-role="description"]');
                 const payloadInput = stepEl.querySelector('[data-role="payload"]');
                 const payloadStatus = stepEl.querySelector('[data-role="payload-status"]');
                 const removeButton = stepEl.querySelector('[data-role="remove"]');
@@ -522,6 +530,7 @@ export class PipelineBuilder {
                 commandFilter.value = step.filter || '';
                 fillCommands(commandSelect, step.provider, step.command, step.filter);
                 intentInput.value = step.intent || '';
+                descriptionInput.value = step.description || '';
                 payloadInput.value = step.payload || '';
                 updatePayloadValidation(payloadInput, payloadStatus, step.payload);
 
@@ -554,6 +563,9 @@ export class PipelineBuilder {
 
                 intentInput.addEventListener('input', (e) => {
                     step.intent = e.target.value;
+                });
+                descriptionInput.addEventListener('input', (e) => {
+                    step.description = e.target.value;
                 });
                 payloadInput.addEventListener('input', (e) => {
                     step.payload = e.target.value;
@@ -641,6 +653,7 @@ export class PipelineBuilder {
                 }
                 stepsPayload.push({
                     intent: step.intent || step.command,
+                    description: step.description,
                     capabilities: [step.command],
                     payload
                 });
