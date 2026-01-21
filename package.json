@@ -348,9 +348,10 @@
         "@types/mocha": "^10.0.10",
         "@types/node": "16.x",
         "@types/vscode": "^1.75.0",
+        "@vscode/codicons": "^0.0.44",
         "@vscode/test-electron": "^2.5.2",
         "glob": "^13.0.0",
         "mocha": "^11.7.5",
-        "typescript": "^4.9.0"
+        "typescript": "^4.9.5"
     }
 }

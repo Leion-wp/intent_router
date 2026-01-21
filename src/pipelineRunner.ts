@@ -87,17 +87,20 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
         await config.update('activeProfile', targetProfile, true);
     }
 
+    const variableCache = new Map<string, string>();
+
     try {
         for (const step of pipeline.steps) {
             const stepIntent: Intent = {
                 ...step,
+                description: step.description,
                 meta: {
                     ...(step.meta ?? {}),
                     dryRun: dryRun ? true : step.meta?.dryRun
                 }
             };
 
-            const ok = await routeIntent(stepIntent);
+            const ok = await routeIntent(stepIntent, variableCache);
             if (!ok) {
                 vscode.window.showWarningMessage('Pipeline stopped on failed step.');
                 break;
