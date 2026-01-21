@@ -93,6 +93,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
     pipelineEventBus.emit({ type: 'pipelineStart', runId, timestamp: Date.now() });
 
+
     try {
         for (const step of pipeline.steps) {
             const stepIntent: Intent = {
@@ -112,6 +113,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
             pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: ok });
 
+            const ok = await routeIntent(stepIntent, variableCache);
             if (!ok) {
                 vscode.window.showWarningMessage('Pipeline stopped on failed step.');
                 pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: false });

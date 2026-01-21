@@ -211,6 +211,8 @@ function expandCompositeResolutions(intent: Intent, entries: Resolution[]): Reso
 }
 
 export async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
+
+async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
     if (typeof input === 'string') {
         const regex = /\$\{input:([^}]+)\}/g;
         let match;

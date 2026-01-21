@@ -138,6 +138,307 @@ export class PipelineBuilder {
     <script nonce="${nonce}">
         window.vscode = acquireVsCodeApi();
         window.initialData = ${payload};
+        const vscode = acquireVsCodeApi();
+        const data = ${payload};
+        const commandGroups = data.commandGroups || [];
+        const profiles = data.profiles || [];
+        const templates = data.templates || {};
+        let steps = Array.isArray(data.pipeline.steps) ? data.pipeline.steps.map(stepToModel) : [];
+
+        const nameInput = document.getElementById('pipeline-name');
+        const profileSelect = document.getElementById('pipeline-profile');
+        nameInput.value = data.pipeline.name || '';
+
+        profileSelect.innerHTML = '';
+        const noneOption = document.createElement('option');
+        noneOption.value = '';
+        noneOption.textContent = '(none)';
+        profileSelect.appendChild(noneOption);
+        profiles.forEach(profile => {
+            const option = document.createElement('option');
+            option.value = profile;
+            option.textContent = profile;
+            profileSelect.appendChild(option);
+        });
+        profileSelect.value = data.pipeline.profile || '';
+
+        document.getElementById('add-step').addEventListener('click', () => {
+            steps.push(createEmptyStep());
+            render();
+        });
+        document.getElementById('save').addEventListener('click', () => send('save'));
+        document.getElementById('save-run').addEventListener('click', () => send('saveRun'));
+        document.getElementById('save-dry-run').addEventListener('click', () => send('saveDryRun'));
+        document.getElementById('run').addEventListener('click', () => send('run'));
+        document.getElementById('open-json').addEventListener('click', () => send('openJson'));
+        document.getElementById('generate-prompt').addEventListener('click', () => send('generatePrompt'));
+        document.getElementById('import-clipboard').addEventListener('click', () => send('importClipboard'));
+
+        function createEmptyStep() {
+            const firstProvider = commandGroups[0]?.provider || '';
+            const firstCommand = commandGroups[0]?.commands?.[0] || '';
+            const payload = getPayloadTemplate(firstCommand);
+            return {
+                provider: firstProvider,
+                command: firstCommand,
+                intent: '',
+                payload: payload,
+                filter: ''
+            };
+        }
+
+        function stepToModel(step) {
+            const command = Array.isArray(step.capabilities) ? step.capabilities[0] : '';
+            const provider = getProviderFromCommand(command);
+            return {
+                provider: provider || 'custom',
+                command: command || '',
+                intent: step.intent || '',
+                description: step.description || '',
+                payload: step.payload ? JSON.stringify(step.payload, null, 2) : '',
+                filter: ''
+            };
+        }
+
+        function getProviderFromCommand(command) {
+            if (!command) return '';
+            const idx = command.indexOf('.');
+            if (idx === -1) return '';
+            return command.slice(0, idx);
+        }
+
+        function getPayloadTemplate(command) {
+            if (templates[command]) {
+                return JSON.stringify(templates[command], null, 2);
+            }
+            return '{}';
+        }
+
+        function getProviderIcon(provider) {
+             // Simple hardcoded map for V1
+            if (provider === 'git') return '&#xea5d;'; // git-merge
+            if (provider === 'docker') return '&#xeb11;'; // server? closest standard codicon
+            if (provider === 'terminal') return '&#xeb8e;'; // terminal
+            return '&#xea79;'; // code
+        }
+
+        function render() {
+            const container = document.getElementById('steps');
+            container.innerHTML = '';
+
+            steps.forEach((step, index) => {
+                const stepEl = document.createElement('div');
+                stepEl.className = 'step';
+
+                const icon = getProviderIcon(step.provider);
+
+                stepEl.innerHTML = \`
+                    <div class="step-header">
+                        <div class="step-title">
+                            <span class="provider-icon">\${icon}</span>
+                            Step \${index + 1}
+                        </div>
+
+                        <div class="step-title">Step \${index + 1}</div>
+                        <button class="step-remove" data-role="remove" title="Remove Step">×</button>
+                    </div>
+                    <div class="row">
+                        <label style="flex: 0 0 120px;">
+                            <div class="muted">Provider</div>
+                            <select data-role="provider"></select>
+                        </label>
+                        <label>
+                            <div class="muted">Action (Capability)</div>
+                            <div style="display: flex; gap: 8px;">
+                                <input data-role="command-filter" type="text" placeholder="Filter..." style="width: 80px;" />
+                                <select data-role="command" style="flex:1;"></select>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="row">
+                        <label>
+                            <div class="muted">Intent</div>
+                            <input data-role="intent" type="text" placeholder="Intent name" />
+                        </label>
+                    </div>
+                    <div class="row">
+                        <label>
+                            <div class="muted">Description (Metadata)</div>
+                            <input data-role="description" type="text" placeholder="Description with $(icon)..." />
+                        </label>
+                    </div>
+                    <div class="row">
+                        <label>
+                            <div class="muted">Payload (JSON)</div>
+                            <textarea data-role="payload" placeholder="{}"></textarea>
+                            <div class="payload-status" data-role="payload-status"></div>
+                        </label>
+                    </div>
+                \`;
+
+                const providerSelect = stepEl.querySelector('[data-role="provider"]');
+                const commandSelect = stepEl.querySelector('[data-role="command"]');
+                const commandFilter = stepEl.querySelector('[data-role="command-filter"]');
+                const intentInput = stepEl.querySelector('[data-role="intent"]');
+                const descriptionInput = stepEl.querySelector('[data-role="description"]');
+                const payloadInput = stepEl.querySelector('[data-role="payload"]');
+                const payloadStatus = stepEl.querySelector('[data-role="payload-status"]');
+                const removeButton = stepEl.querySelector('[data-role="remove"]');
+
+                commandGroups.forEach(group => {
+                    const option = document.createElement('option');
+                    option.value = group.provider;
+                    option.textContent = group.provider;
+                    providerSelect.appendChild(option);
+                });
+                if (!providerSelect.value && commandGroups.length === 0) {
+                    providerSelect.innerHTML = '<option value="">(none)</option>';
+                }
+
+                providerSelect.value = step.provider;
+                commandFilter.value = step.filter || '';
+                fillCommands(commandSelect, step.provider, step.command, step.filter);
+                intentInput.value = step.intent || '';
+                descriptionInput.value = step.description || '';
+                payloadInput.value = step.payload || '';
+                updatePayloadValidation(payloadInput, payloadStatus, step.payload);
+
+                providerSelect.addEventListener('change', (e) => {
+                    step.provider = e.target.value;
+                    step.filter = '';
+                    commandFilter.value = '';
+                    fillCommands(commandSelect, step.provider, '');
+                    step.command = commandSelect.value;
+
+                    // Pre-fill payload if empty or default
+                    step.payload = getPayloadTemplate(step.command);
+                    payloadInput.value = step.payload;
+                    updatePayloadValidation(payloadInput, payloadStatus, step.payload);
+                    render(); // Re-render to update icon
+                });
+
+                commandFilter.addEventListener('input', (e) => {
+                    step.filter = e.target.value;
+                    fillCommands(commandSelect, step.provider, step.command, step.filter);
+                });
+
+                commandSelect.addEventListener('change', (e) => {
+                    step.command = e.target.value;
+                    // Pre-fill payload
+                    step.payload = getPayloadTemplate(step.command);
+                    payloadInput.value = step.payload;
+                    updatePayloadValidation(payloadInput, payloadStatus, step.payload);
+                });
+
+                intentInput.addEventListener('input', (e) => {
+                    step.intent = e.target.value;
+                });
+                descriptionInput.addEventListener('input', (e) => {
+                    step.description = e.target.value;
+                });
+                payloadInput.addEventListener('input', (e) => {
+                    step.payload = e.target.value;
+                    updatePayloadValidation(payloadInput, payloadStatus, step.payload);
+                });
+                removeButton.addEventListener('click', () => {
+                    steps.splice(index, 1);
+                    render();
+                });
+
+                container.appendChild(stepEl);
+            });
+        }
+
+        function fillCommands(select, provider, current, filter) {
+            select.innerHTML = '';
+            const group = commandGroups.find(g => g.provider === provider);
+            let commands = group ? group.commands : [];
+            if (filter && filter.trim().length > 0) {
+                const lower = filter.toLowerCase();
+                commands = commands.filter(cmd => cmd.toLowerCase().includes(lower));
+            }
+            commands.forEach(cmd => {
+                const option = document.createElement('option');
+                option.value = cmd;
+                option.textContent = cmd;
+                select.appendChild(option);
+            });
+            if (commands.length === 0) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = '(none)';
+                select.appendChild(option);
+            }
+            if (current && commands.includes(current)) {
+                select.value = current;
+            }
+        }
+
+        function updatePayloadValidation(textarea, status, value) {
+            const trimmed = value ? value.trim() : '';
+            textarea.classList.remove('valid', 'invalid');
+            status.textContent = '';
+            status.style.color = '#888';
+            if (!trimmed) {
+                return;
+            }
+            try {
+                JSON.parse(trimmed);
+                textarea.classList.add('valid');
+                status.textContent = 'JSON valide';
+                status.style.color = '#4ec9b0';
+            } catch (e) {
+                textarea.classList.add('invalid');
+                status.textContent = 'JSON invalide';
+                status.style.color = '#f14c4c';
+            }
+        }
+
+        function send(type) {
+            const payload = buildPipelinePayload();
+            if (!payload) return;
+            vscode.postMessage({ type, data: payload });
+        }
+
+        function buildPipelinePayload() {
+            const name = nameInput.value.trim();
+            const profile = profileSelect.value || undefined;
+            const stepsPayload = [];
+
+            for (const step of steps) {
+                if (!step.command) {
+                    vscode.postMessage({ type: 'error', message: 'Step missing command' });
+                    // In a real app we'd show a toast in the webview
+                    return null;
+                }
+                let payload = undefined;
+                if (step.payload && step.payload.trim().length > 0) {
+                    try {
+                        payload = JSON.parse(step.payload);
+                    } catch (e) {
+                        alert('Invalid JSON payload in a step.');
+                        return null;
+                    }
+                }
+                stepsPayload.push({
+                    intent: step.intent || step.command,
+                    description: step.description,
+                    capabilities: [step.command],
+                    payload
+                });
+            }
+
+            const pipeline = {
+                name,
+                steps: stepsPayload
+            };
+            if (profile) {
+                pipeline.profile = profile;
+            }
+            return pipeline;
+        }
+
+        render();
     </script>
     <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
