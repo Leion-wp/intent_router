@@ -8,6 +8,7 @@ import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor,
 import { registerGitProvider } from './providers/gitAdapter';
 import { registerDockerProvider } from './providers/dockerAdapter';
 import { executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
+import { registerSystemProvider } from './providers/systemAdapter';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
@@ -16,6 +17,7 @@ export function activate(context: vscode.ExtensionContext) {
     registerGitProvider(context);
     registerDockerProvider(context);
     registerTerminalProvider(context);
+    registerSystemProvider(context);
 
     const pipelineBuilder = new PipelineBuilder(context.extensionUri);
     const pipelinesProvider = new PipelinesTreeDataProvider();
