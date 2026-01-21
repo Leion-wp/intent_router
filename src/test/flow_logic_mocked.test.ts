@@ -1,23 +1,6 @@
 import * as assert from 'assert';
 
-// Mock the vscode module BEFORE importing other modules
 const mockVscode = require('./vscode-mock');
-const Module = require('module');
-const originalRequire = Module.prototype.require;
-
-Module.prototype.require = function (request: string) {
-  if (request === 'vscode') {
-    return mockVscode;
-  }
-  return originalRequire.apply(this, arguments);
-};
-
-// Now import the code to test.
-// Note: We need to import the compiled JS files from 'out/' to avoid ts-node complexity,
-// but since we are running this specific test file which is TS, we might need ts-node or run against 'out'.
-// The previous attempt ran against 'out/test/flow_logic.test.js'.
-
-// To verify logic, we can just test the logic concepts or we need to ensure 'router' uses our mock.
 
 suite('Flow Logic Tests (Mocked)', () => {
 
