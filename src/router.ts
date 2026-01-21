@@ -10,12 +10,38 @@ export function invalidateLogLevelCache(): void {
 
 export async function routeIntent(intent: Intent, variableCache?: Map<string, string>): Promise<boolean> {
     const config = vscode.workspace.getConfiguration('intentRouter');
-    const normalized = normalizeIntent(intent, config);
     const output = getOutputChannel();
+    const minLevel = getLogLevel(config);
+    const normalized = normalizeIntent(intent, config);
+
+    // Recursive Execution Logic (Composite Pattern)
+    if (intent.steps && intent.steps.length > 0) {
+        log(output, normalized, minLevel, 'info', 'IR016', `step=composite-start count=${intent.steps.length}`);
+
+        for (const childStep of intent.steps) {
+            // Propagate variables cache and debug/dryRun context
+            const childIntent: Intent = {
+                ...childStep,
+                meta: {
+                    ...(normalized.meta ?? {}),
+                    ...(childStep.meta ?? {})
+                }
+            };
+
+            const success = await routeIntent(childIntent, variableCache);
+            if (!success) {
+                log(output, normalized, minLevel, 'warn', 'IR017', 'step=composite-fail');
+                return false;
+            }
+        }
+
+        log(output, normalized, minLevel, 'info', 'IR018', 'step=composite-end');
+        return true;
+    }
+
+    // Atomic Execution Logic (Existing)
     const profile = getActiveProfile(config);
     const { primaryMappings, fallbackMappings } = getUserMappings(config, profile);
-
-    const minLevel = getLogLevel(config);
 
     log(output, normalized, minLevel, 'info', 'IR001', `step=normalize intent=${normalized.intent}`);
 
@@ -183,6 +209,8 @@ function expandCompositeResolutions(intent: Intent, entries: Resolution[]): Reso
     }
     return expanded;
 }
+
+export async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
 
 async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
     if (typeof input === 'string') {
