@@ -3,8 +3,8 @@ import * as vscode from 'vscode';
 export type PipelineEvent =
     | { type: 'pipelineStart'; runId: string; timestamp: number }
     | { type: 'pipelineEnd'; runId: string; timestamp: number; success: boolean }
-    | { type: 'stepStart'; runId: string; intentId: string; timestamp: number; description?: string }
-    | { type: 'stepEnd'; runId: string; intentId: string; timestamp: number; success: boolean };
+    | { type: 'stepStart'; runId: string; intentId: string; timestamp: number; description?: string; index?: number }
+    | { type: 'stepEnd'; runId: string; intentId: string; timestamp: number; success: boolean; index?: number };
 
 type Listener = (event: PipelineEvent) => void;
 
