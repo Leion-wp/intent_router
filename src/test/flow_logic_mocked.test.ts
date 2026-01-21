@@ -77,6 +77,8 @@ suite('Flow Logic Tests (Mocked)', () => {
         cache.set('Branch Name', 'cached-value');
         const res2 = await resolve('git checkout ${input:Branch Name}');
         assert.strictEqual(res2, 'git checkout cached-value');
+    });
+
     test('Terminal reuse logic (Integration)', async () => {
         const termName = 'Intent Router';
 
@@ -116,4 +118,3 @@ suite('Flow Logic Tests (Mocked)', () => {
         assert.strictEqual(result2, 'Checkout cached-value');
     });
 });
-

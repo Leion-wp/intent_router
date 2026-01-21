@@ -4,6 +4,7 @@ import { PipelineFile, ensurePipelineFolder, writePipelineToUri } from './pipeli
 import { gitTemplates } from './providers/gitAdapter';
 import { dockerTemplates } from './providers/dockerAdapter';
 import { terminalTemplates } from './providers/terminalAdapter';
+import { pipelineEventBus } from './eventBus';
 
 type CommandGroup = {
     provider: string;
@@ -13,10 +14,19 @@ type CommandGroup = {
 export class PipelineBuilder {
     private panel: vscode.WebviewPanel | undefined;
     private currentUri: vscode.Uri | undefined;
+    private disposables: vscode.Disposable[] = [];
 
     constructor(private readonly extensionUri: vscode.Uri) {}
 
     async open(pipeline?: PipelineFile, uri?: vscode.Uri): Promise<void> {
+        // If we already have a panel, reveal it. But if opening a different URI, we might want to replace content.
+        // For V1, simplest is to allow multiple panels or just one singleton. Let's do singleton for now.
+        if (this.panel) {
+            this.panel.reveal(vscode.ViewColumn.Active);
+            // TODO: Update content if needed? For now we assume new open call replaces old one or creates new if disposed.
+            // Actually, let's just dispose old one if different URI for simplicity.
+        }
+
         this.currentUri = uri;
         const panel = vscode.window.createWebviewPanel(
             'intentRouter.pipelineBuilder',
@@ -32,9 +42,25 @@ export class PipelineBuilder {
         );
 
         this.panel = panel;
+
+        // Listen to pipeline events to forward to webview
+        const eventSub = pipelineEventBus.on(e => {
+            if (this.panel && this.panel.visible) {
+               if (e.type === 'stepStart' || e.type === 'stepEnd') {
+                   this.panel.webview.postMessage({
+                       type: 'executionStatus',
+                       index: e.index,
+                       status: e.type === 'stepStart' ? 'running' : (e.success ? 'success' : 'failure')
+                   });
+               }
+            }
+        });
+        this.disposables.push(eventSub);
+
         panel.onDidDispose(() => {
             if (this.panel === panel) {
                 this.panel = undefined;
+                this.dispose();
             }
         });
 
@@ -58,13 +84,17 @@ export class PipelineBuilder {
         });
 
         panel.webview.onDidReceiveMessage(async (message) => {
-            if (message?.type === 'save') {
-                await this.savePipeline(message.data as PipelineFile);
+            if (message?.type === 'savePipeline') {
+                await this.savePipeline(message.pipeline as PipelineFile);
+                vscode.window.showInformationMessage('Pipeline saved successfully.');
                 return;
             }
-            // ... (rest of message handling logic)
-            // For now, minimal implementation to verify loading
         });
+    }
+
+    private dispose() {
+        this.disposables.forEach(d => d.dispose());
+        this.disposables = [];
     }
 
     private getTitle(pipeline?: PipelineFile, uri?: vscode.Uri): string {
@@ -136,13 +166,10 @@ export class PipelineBuilder {
 <body>
     <div id="root"></div>
     <script nonce="${nonce}">
-<<<<<<< HEAD
-=======
         window.vscode = acquireVsCodeApi();
         window.initialData = ${payload};
->>>>>>> 2a4f8d3abf64ce4b5e1178e3fbbe883f6c56973f
-        const vscode = acquireVsCodeApi();
-        const data = ${payload};
+        const vscode = window.vscode;
+        const data = window.initialData;
         const commandGroups = data.commandGroups || [];
         const profiles = data.profiles || [];
         const templates = data.templates || {};
@@ -442,11 +469,6 @@ export class PipelineBuilder {
         }
 
         render();
-<<<<<<< HEAD
-        window.vscode = acquireVsCodeApi();
-        window.initialData = ${payload};
-=======
->>>>>>> 2a4f8d3abf64ce4b5e1178e3fbbe883f6c56973f
     </script>
     <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
