@@ -31,7 +31,13 @@ export async function executeTerminalCommand(args: any): Promise<void> {
         return;
     }
 
-    const term = vscode.window.createTerminal(`Intent: ${commandText.substring(0, 20)}...`);
+    const TERMINAL_NAME = 'Intent Router';
+    let term = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
+
+    if (!term) {
+        term = vscode.window.createTerminal(TERMINAL_NAME);
+    }
+
     term.show();
     term.sendText(commandText);
 }
