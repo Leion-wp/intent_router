@@ -8,6 +8,7 @@ import {
   addEdge,
   MiniMap,
   ReactFlowProvider,
+  useReactFlow,
   Edge,
   Node,
   Connection,
@@ -75,7 +76,7 @@ function Flow() {
       let y = 150;
 
       if (Array.isArray(pipeline.steps)) {
-          pipeline.steps.forEach((step: any) => {
+          pipeline.steps.forEach((step: any, index: number) => {
              const nodeId = getId();
              const parts = (step.intent || '').split('.');
              const provider = parts[0] || 'terminal';
@@ -122,16 +123,16 @@ function Flow() {
              // If we have index:
              if (message.index !== undefined) {
                // Filter out the start node (index -1 effectively)
-                const actionNodes = nds.filter(n => n.id !== 'start');
-                if (actionNodes[message.index] && actionNodes[message.index].id === node.id) {
-                  return {
-                    ...node,
-                    data: { ...node.data, status: message.status }
-                  };
-                }
-              }
-              return node;
-            }));
+               const actionNodes = nds.filter(n => n.id !== 'start');
+               if (actionNodes[message.index] && actionNodes[message.index].id === node.id) {
+                 return {
+                   ...node,
+                   data: { ...node.data, status: message.status }
+                 };
+               }
+             }
+             return node;
+           }));
            break;
        }
     };
