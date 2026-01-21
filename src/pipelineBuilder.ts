@@ -136,6 +136,11 @@ export class PipelineBuilder {
 <body>
     <div id="root"></div>
     <script nonce="${nonce}">
+<<<<<<< HEAD
+=======
+        window.vscode = acquireVsCodeApi();
+        window.initialData = ${payload};
+>>>>>>> 2a4f8d3abf64ce4b5e1178e3fbbe883f6c56973f
         const vscode = acquireVsCodeApi();
         const data = ${payload};
         const commandGroups = data.commandGroups || [];
@@ -437,8 +442,11 @@ export class PipelineBuilder {
         }
 
         render();
+<<<<<<< HEAD
         window.vscode = acquireVsCodeApi();
         window.initialData = ${payload};
+=======
+>>>>>>> 2a4f8d3abf64ce4b5e1178e3fbbe883f6c56973f
     </script>
     <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
