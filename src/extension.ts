@@ -1,12 +1,29 @@
 import * as vscode from 'vscode';
-import { routeIntent } from './router';
+import { routeIntent, invalidateLogLevelCache } from './router';
 import { Intent, RegisterCapabilitiesArgs } from './types';
 import { registerCapabilities } from './registry';
+import { PipelineBuilder } from './pipelineBuilder';
+import { PipelinesTreeDataProvider } from './pipelinesView';
+import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri } from './pipelineRunner';
+import { registerGitProvider } from './providers/gitAdapter';
+import { registerDockerProvider } from './providers/dockerAdapter';
+import { executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
+import { registerSystemProvider } from './providers/systemAdapter';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
 
-    registerDemoProvider();
+    // V1 Providers: Strict discovery
+    registerGitProvider(context);
+    registerDockerProvider(context);
+    registerTerminalProvider(context);
+    registerSystemProvider(context);
+
+    const pipelineBuilder = new PipelineBuilder(context.extensionUri);
+    const pipelinesProvider = new PipelinesTreeDataProvider();
+    const pipelinesView = vscode.window.createTreeView('intentRouterPipelines', {
+        treeDataProvider: pipelinesProvider
+    });
 
     let disposable = vscode.commands.registerCommand('intentRouter.route', async (args: any) => {
         // Basic validation
@@ -30,6 +47,10 @@ export function activate(context: vscode.ExtensionContext) {
     let registerDisposable = vscode.commands.registerCommand('intentRouter.registerCapabilities', async (args: RegisterCapabilitiesArgs) => {
         const count = registerCapabilities(args);
         return count;
+    });
+
+    let internalTerminalDisposable = vscode.commands.registerCommand('intentRouter.internal.terminalRun', async (args: any) => {
+        await executeTerminalCommand(args);
     });
 
     let promptDisposable = vscode.commands.registerCommand('intentRouter.routeFromJson', async () => {
@@ -103,95 +124,318 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let runPipelineDisposable = vscode.commands.registerCommand('intentRouter.runPipeline', async () => {
-        await runPipeline(false);
+        await runPipelineFromActiveEditor(false);
     });
 
     let dryRunPipelineDisposable = vscode.commands.registerCommand('intentRouter.dryRunPipeline', async () => {
-        await runPipeline(true);
+        await runPipelineFromActiveEditor(true);
     });
+
+    let runPipelineFromDataDisposable = vscode.commands.registerCommand('intentRouter.runPipelineFromData', async (pipeline, dryRun: boolean) => {
+        await runPipelineFromData(pipeline, !!dryRun);
+    });
+
+    let generatePromptDisposable = vscode.commands.registerCommand('intentRouter.generatePipelinePrompt', async () => {
+        await generatePipelinePrompt();
+    });
+
+    let importFromClipboardDisposable = vscode.commands.registerCommand('intentRouter.importPipelineFromClipboard', async () => {
+        await importPipelineFromClipboard();
+        pipelinesProvider.refresh();
+    });
+
+    let openCodexDisposable = vscode.commands.registerCommand('intentRouter.openCodex', async () => {
+        await openCodex();
+    });
+
+    let generatePromptAndOpenCodexDisposable = vscode.commands.registerCommand('intentRouter.generatePromptAndOpenCodex', async () => {
+        const prompt = await generatePipelinePrompt();
+        if (prompt) {
+            await openCodex();
+        }
+    });
+
+    let importPipelineFromClipboardAndRunDisposable = vscode.commands.registerCommand('intentRouter.importPipelineFromClipboardAndRun', async () => {
+        const uri = await importPipelineFromClipboard();
+        if (!uri) {
+            return;
+        }
+        pipelinesProvider.refresh();
+        await runPipelineFromUri(uri, false);
+    });
+
+    let internalCommitMessageDisposable = vscode.commands.registerCommand('intentRouter.internal.generateCommitMessage', async () => {
+        return 'chore: publish';
+    });
+
+    let internalCreatePRDisposable = vscode.commands.registerCommand('intentRouter.internal.createPR', async () => {
+        vscode.window.showInformationMessage('PR creation not implemented (demo composite).');
+    });
+
+    let newPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.new', async () => {
+        await pipelineBuilder.open();
+    });
+
+    let openPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.openBuilder', async (uri?: vscode.Uri) => {
+        if (!uri) {
+            return;
+        }
+        const pipeline = await readPipelineFromUri(uri);
+        if (!pipeline) {
+            return;
+        }
+        await pipelineBuilder.open(pipeline, uri);
+    });
+
+    let runSelectedPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.run', async () => {
+        const uri = await getPipelineUriFromSelectionOrPrompt(pipelinesView);
+        if (!uri) {
+            return;
+        }
+        await runPipelineFromUri(uri, false);
+    });
+
+    let dryRunSelectedPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.dryRun', async () => {
+        const uri = await getPipelineUriFromSelectionOrPrompt(pipelinesView);
+        if (!uri) {
+            return;
+        }
+        await runPipelineFromUri(uri, true);
+    });
+
+    let openPipelineJsonDisposable = vscode.commands.registerCommand('intentRouter.pipelines.openJson', async () => {
+        const uri = await getPipelineUriFromSelectionOrPrompt(pipelinesView);
+        if (!uri) {
+            return;
+        }
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc, { preview: false });
+    });
+
+    let refreshPipelinesDisposable = vscode.commands.registerCommand('intentRouter.pipelines.refresh', async () => {
+        pipelinesProvider.refresh();
+    });
+
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('intentRouter.logLevel')) {
+            invalidateLogLevelCache();
+        }
+    }));
 
     context.subscriptions.push(disposable);
     context.subscriptions.push(registerDisposable);
+    context.subscriptions.push(internalTerminalDisposable);
     context.subscriptions.push(promptDisposable);
     context.subscriptions.push(createPipelineDisposable);
     context.subscriptions.push(runPipelineDisposable);
     context.subscriptions.push(dryRunPipelineDisposable);
+    context.subscriptions.push(runPipelineFromDataDisposable);
+    context.subscriptions.push(generatePromptDisposable);
+    context.subscriptions.push(importFromClipboardDisposable);
+    context.subscriptions.push(openCodexDisposable);
+    context.subscriptions.push(generatePromptAndOpenCodexDisposable);
+    context.subscriptions.push(importPipelineFromClipboardAndRunDisposable);
+    context.subscriptions.push(internalCommitMessageDisposable);
+    context.subscriptions.push(internalCreatePRDisposable);
+    context.subscriptions.push(newPipelineDisposable);
+    context.subscriptions.push(openPipelineDisposable);
+    context.subscriptions.push(runSelectedPipelineDisposable);
+    context.subscriptions.push(dryRunSelectedPipelineDisposable);
+    context.subscriptions.push(openPipelineJsonDisposable);
+    context.subscriptions.push(refreshPipelinesDisposable);
+    context.subscriptions.push(pipelinesView);
 }
 
 export function deactivate() { }
 
-function registerDemoProvider(): void {
-    const config = vscode.workspace.getConfiguration('intentRouter');
-    const demoProvider = config.get<string>('demoProvider', '');
-    if (demoProvider !== 'git') {
-        return;
+async function getPipelineUriFromSelectionOrPrompt(
+    pipelinesView: vscode.TreeView<any>
+): Promise<vscode.Uri | undefined> {
+    const selected = pipelinesView.selection[0];
+    if (selected?.uri instanceof vscode.Uri) {
+        return selected.uri;
     }
 
-    registerCapabilities({
-        provider: 'git',
-        capabilities: [
-            { capability: 'git.showOutput', command: 'git.showOutput' },
-            { capability: 'git.fetch', command: 'git.fetch' },
-            { capability: 'git.pull', command: 'git.pull' },
-            { capability: 'git.push', command: 'git.push' }
-        ]
+    const files = await vscode.workspace.findFiles('pipeline/*.intent.json');
+    if (files.length === 0) {
+        vscode.window.showErrorMessage('No pipelines found in /pipeline.');
+        return undefined;
+    }
+
+    const picks = files.map(uri => ({
+        label: uri.path.split('/').pop() || 'pipeline',
+        uri
+    }));
+
+    const picked = await vscode.window.showQuickPick(picks, {
+        placeHolder: 'Select a pipeline'
     });
+    return picked?.uri;
 }
 
-type PipelineFile = {
-    name: string;
-    profile?: string;
-    steps: Array<Intent>;
-};
-
-async function runPipeline(dryRun: boolean): Promise<void> {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        vscode.window.showErrorMessage('Open a .intent.json file to run a pipeline.');
-        return;
+async function generatePipelinePrompt(): Promise<string | undefined> {
+    const intent = await vscode.window.showInputBox({
+        prompt: 'Décris le pipeline à générer',
+        placeHolder: 'commit push sync build image deploy'
+    });
+    if (!intent) {
+        return undefined;
     }
 
-    const doc = editor.document;
-    const text = doc.getText();
-    let pipeline: PipelineFile;
+    const prompt = [
+        'You are an intent pipeline compiler.',
+        'Return ONLY valid JSON that matches this schema:',
+        '{ "name": string, "profile"?: string, "steps": [{ "intent": string, "capabilities": string[], "payload"?: object }] }',
+        'Rules:',
+        '- JSON only, no markdown, no comments.',
+        '- steps must be linear, ordered.',
+        '- capabilities must be VS Code commands (ex: git.commit).',
+        `Request: "${intent}"`
+    ].join('\n');
+
+    await vscode.env.clipboard.writeText(prompt);
+    await openPromptPanel(prompt);
+    vscode.window.showInformationMessage('Prompt copié dans le presse-papiers.');
+    return prompt;
+}
+
+async function importPipelineFromClipboard(): Promise<vscode.Uri | undefined> {
+    const text = await vscode.env.clipboard.readText();
+    if (!text) {
+        vscode.window.showErrorMessage('Presse-papiers vide.');
+        return undefined;
+    }
+
+    let pipeline: { name?: string; steps?: any[]; profile?: string };
     try {
         pipeline = JSON.parse(text);
     } catch (error) {
-        vscode.window.showErrorMessage(`Invalid pipeline JSON: ${error}`);
-        return;
+        vscode.window.showErrorMessage(`JSON invalide dans le presse-papiers: ${error}`);
+        return undefined;
     }
 
     if (!pipeline || !Array.isArray(pipeline.steps)) {
-        vscode.window.showErrorMessage('Invalid pipeline: expected a "steps" array.');
-        return;
+        vscode.window.showErrorMessage('Pipeline invalide: "steps" manquant.');
+        return undefined;
     }
 
-    const config = vscode.workspace.getConfiguration('intentRouter');
-    const originalProfile = config.get<string>('activeProfile', '');
-    const targetProfile = pipeline.profile ?? '';
-    if (targetProfile && targetProfile !== originalProfile) {
-        await config.update('activeProfile', targetProfile, true);
+    let name = pipeline.name;
+    if (!name) {
+        name = await vscode.window.showInputBox({
+            prompt: 'Nom du pipeline',
+            placeHolder: 'deploy-app'
+        });
+    }
+    if (!name) {
+        return undefined;
     }
 
+    const folder = await ensurePipelineFolder();
+    if (!folder) {
+        vscode.window.showErrorMessage('Ouvre un workspace pour créer /pipeline.');
+        return undefined;
+    }
+
+    const fileName = name.endsWith('.intent.json') ? name : `${name}.intent.json`;
+    const uri = vscode.Uri.joinPath(folder, fileName);
+    const exists = await fileExists(uri);
+    if (exists) {
+        const confirm = await vscode.window.showWarningMessage(
+            `Le fichier ${fileName} existe déjà. Écraser ?`,
+            { modal: true },
+            'Écraser'
+        );
+        if (confirm !== 'Écraser') {
+            return undefined;
+        }
+    }
+
+    await writePipelineToUri(uri, {
+        name,
+        profile: pipeline.profile,
+        steps: pipeline.steps
+    });
+
+    const doc = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    return uri;
+}
+
+async function openCodex(): Promise<void> {
+    const candidates = [
+        'chatgpt.newCodexPanel',
+        'chatgpt.newChat',
+        'chatgpt.openCommandMenu'
+    ];
+    for (const cmd of candidates) {
+        try {
+            await vscode.commands.executeCommand(cmd);
+            return;
+        } catch {
+            // ignore
+        }
+    }
+    vscode.window.showErrorMessage('Impossible d’ouvrir Codex (chatgpt).');
+}
+
+async function openPromptPanel(prompt: string): Promise<void> {
+    const panel = vscode.window.createWebviewPanel(
+        'intentRouter.promptPanel',
+        'Pipeline Prompt',
+        vscode.ViewColumn.Active,
+        { enableScripts: true }
+    );
+
+    const nonce = generateNonce();
+    panel.webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Prompt</title>
+    <style>
+        body { font-family: Segoe UI, sans-serif; margin: 0; padding: 16px; }
+        textarea { width: 100%; height: 240px; font-family: Consolas, monospace; font-size: 12px; padding: 8px; }
+        .actions { margin-top: 12px; display: flex; gap: 8px; }
+    </style>
+</head>
+<body>
+    <textarea readonly>${prompt.replace(/</g, '&lt;')}</textarea>
+    <div class="actions">
+        <button id="copy">Copy prompt</button>
+    </div>
+    <script nonce="${nonce}">
+        const vscode = acquireVsCodeApi();
+        document.getElementById('copy').addEventListener('click', () => {
+            vscode.postMessage({ type: 'copyPrompt' });
+        });
+    </script>
+</body>
+</html>`;
+
+    panel.webview.onDidReceiveMessage(async (message) => {
+        if (message?.type === 'copyPrompt') {
+            await vscode.env.clipboard.writeText(prompt);
+            vscode.window.showInformationMessage('Prompt copié.');
+        }
+    });
+}
+
+async function fileExists(uri: vscode.Uri): Promise<boolean> {
     try {
-        for (const step of pipeline.steps) {
-            const stepIntent: Intent = {
-                ...step,
-                meta: {
-                    ...(step.meta ?? {}),
-                    dryRun: dryRun ? true : step.meta?.dryRun
-                }
-            };
-
-            const ok = await routeIntent(stepIntent);
-            if (!ok) {
-                vscode.window.showWarningMessage('Pipeline stopped on failed step.');
-                break;
-            }
-        }
-    } finally {
-        if (targetProfile && targetProfile !== originalProfile) {
-            await config.update('activeProfile', originalProfile, true);
-        }
+        await vscode.workspace.fs.stat(uri);
+        return true;
+    } catch {
+        return false;
     }
+}
+
+function generateNonce(): string {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
 }

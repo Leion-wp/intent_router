@@ -18,7 +18,19 @@
         "onCommand:intentRouter.routeFromJson",
         "onCommand:intentRouter.createPipeline",
         "onCommand:intentRouter.runPipeline",
-        "onCommand:intentRouter.dryRunPipeline"
+        "onCommand:intentRouter.dryRunPipeline",
+        "onCommand:intentRouter.pipelines.new",
+        "onCommand:intentRouter.pipelines.run",
+        "onCommand:intentRouter.pipelines.dryRun",
+        "onCommand:intentRouter.pipelines.openJson",
+        "onCommand:intentRouter.pipelines.refresh",
+        "onCommand:intentRouter.pipelines.openBuilder",
+        "onCommand:intentRouter.generatePipelinePrompt",
+        "onCommand:intentRouter.importPipelineFromClipboard",
+        "onCommand:intentRouter.openCodex",
+        "onCommand:intentRouter.generatePromptAndOpenCodex",
+        "onCommand:intentRouter.importPipelineFromClipboardAndRun",
+        "onView:intentRouterPipelines"
     ],
     "contributes": {
         "commands": [
@@ -41,8 +53,146 @@
             {
                 "command": "intentRouter.dryRunPipeline",
                 "title": "Intent Router: Dry Run Pipeline"
+            },
+            {
+                "command": "intentRouter.pipelines.new",
+                "title": "Intent Router: New Pipeline",
+                "icon": "$(add)"
+            },
+            {
+                "command": "intentRouter.pipelines.run",
+                "title": "Intent Router: Run Selected Pipeline",
+                "icon": "$(play)"
+            },
+            {
+                "command": "intentRouter.pipelines.dryRun",
+                "title": "Intent Router: Dry Run Selected Pipeline",
+                "icon": "$(beaker)"
+            },
+            {
+                "command": "intentRouter.pipelines.openJson",
+                "title": "Intent Router: Open Pipeline JSON",
+                "icon": "$(file-code)"
+            },
+            {
+                "command": "intentRouter.pipelines.openBuilder",
+                "title": "Intent Router: Open Pipeline Builder",
+                "icon": "$(edit)"
+            },
+            {
+                "command": "intentRouter.generatePipelinePrompt",
+                "title": "Intent Router: Generate Pipeline Prompt",
+                "icon": "$(sparkle)"
+            },
+            {
+                "command": "intentRouter.importPipelineFromClipboard",
+                "title": "Intent Router: Import Pipeline From Clipboard",
+                "icon": "$(clippy)"
+            },
+            {
+                "command": "intentRouter.openCodex",
+                "title": "Intent Router: Open Codex",
+                "icon": "$(comment-discussion)"
+            },
+            {
+                "command": "intentRouter.generatePromptAndOpenCodex",
+                "title": "Intent Router: Generate Prompt & Open Codex",
+                "icon": "$(sparkle)"
+            },
+            {
+                "command": "intentRouter.importPipelineFromClipboardAndRun",
+                "title": "Intent Router: Import Pipeline From Clipboard & Run",
+                "icon": "$(play-circle)"
+            },
+            {
+                "command": "intentRouter.pipelines.refresh",
+                "title": "Intent Router: Refresh Pipelines",
+                "icon": "$(refresh)"
             }
         ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "intentRouter",
+                    "title": "Intent Router",
+                    "icon": "media/intent-router.svg"
+                }
+            ]
+        },
+        "views": {
+            "intentRouter": [
+                {
+                    "id": "intentRouterPipelines",
+                    "name": "Intent Pipelines"
+                }
+            ]
+        },
+        "menus": {
+            "view/title": [
+                {
+                    "command": "intentRouter.pipelines.new",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.generatePromptAndOpenCodex",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.importPipelineFromClipboardAndRun",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.openCodex",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.run",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.dryRun",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.openJson",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.refresh",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "intentRouter.pipelines.run",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "intentRouter.pipelines.dryRun",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "inline@2"
+                },
+                {
+                    "command": "intentRouter.pipelines.openJson",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "inline@3"
+                },
+                {
+                    "command": "intentRouter.pipelines.openBuilder",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "inline@4"
+                }
+            ]
+        },
         "configuration": {
             "title": "Intent Router",
             "properties": {
@@ -198,9 +348,10 @@
         "@types/mocha": "^10.0.10",
         "@types/node": "16.x",
         "@types/vscode": "^1.75.0",
+        "@vscode/codicons": "^0.0.44",
         "@vscode/test-electron": "^2.5.2",
         "glob": "^13.0.0",
         "mocha": "^11.7.5",
-        "typescript": "^4.9.0"
+        "typescript": "^4.9.5"
     }
 }

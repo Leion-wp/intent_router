@@ -2,44 +2,61 @@ import * as vscode from 'vscode';
 import { Intent, ProfileConfig, ProviderAdapter, Resolution, UserMapping } from './types';
 import { resolveCapabilities } from './registry';
 
-export async function routeIntent(intent: Intent): Promise<boolean> {
-    const normalized = normalizeIntent(intent);
-    const output = getOutputChannel();
-    const profile = getActiveProfile();
-    const { primaryMappings, fallbackMappings } = getUserMappings(profile);
+let cachedLogLevel: 'error' | 'warn' | 'info' | 'debug' | undefined;
 
-    log(output, normalized, 'info', 'IR001', `step=normalize intent=${normalized.intent}`);
+export function invalidateLogLevelCache(): void {
+    cachedLogLevel = undefined;
+}
+
+export async function routeIntent(intent: Intent, variableCache?: Map<string, string>): Promise<boolean> {
+    const config = vscode.workspace.getConfiguration('intentRouter');
+    const normalized = normalizeIntent(intent, config);
+    const output = getOutputChannel();
+    const profile = getActiveProfile(config);
+    const { primaryMappings, fallbackMappings } = getUserMappings(config, profile);
+
+    const minLevel = getLogLevel(config);
+
+    log(output, normalized, minLevel, 'info', 'IR001', `step=normalize intent=${normalized.intent}`);
 
     const resolved = resolveCapabilities(normalized, primaryMappings, fallbackMappings);
-    log(output, normalized, 'info', 'IR002', `step=resolve count=${resolved.length}`);
+    log(output, normalized, minLevel, 'info', 'IR002', `step=resolve count=${resolved.length}`);
 
     if (resolved.length === 0) {
-        log(output, normalized, 'warn', 'IR003', 'step=resolve empty=true');
+        log(output, normalized, minLevel, 'warn', 'IR003', 'step=resolve empty=true');
         vscode.window.showWarningMessage(`No capabilities resolved for intent: ${normalized.intent}`);
         return false;
     }
 
     const providerFiltered = filterByProfileProviders(profile, resolved);
-    log(output, normalized, 'info', 'IR009', `step=profileProviders count=${providerFiltered.length}`);
+    log(output, normalized, minLevel, 'info', 'IR009', `step=profileProviders count=${providerFiltered.length}`);
 
     if (providerFiltered.length === 0) {
-        log(output, normalized, 'warn', 'IR010', 'step=profileProviders empty=true');
+        log(output, normalized, minLevel, 'warn', 'IR010', 'step=profileProviders empty=true');
         vscode.window.showWarningMessage(`No capabilities matched enabled providers for intent: ${normalized.intent}`);
         return false;
     }
 
     const filtered = filterByProviderTarget(normalized, providerFiltered);
-    log(output, normalized, 'info', 'IR004', `step=filter count=${filtered.length}`);
+    log(output, normalized, minLevel, 'info', 'IR004', `step=filter count=${filtered.length}`);
 
     if (filtered.length === 0) {
-        log(output, normalized, 'warn', 'IR005', 'step=filter empty=true');
+        log(output, normalized, minLevel, 'warn', 'IR005', 'step=filter empty=true');
         vscode.window.showWarningMessage(`No capabilities matched provider/target for intent: ${normalized.intent}`);
         return false;
     }
 
+    const expanded = expandCompositeResolutions(normalized, filtered);
+    log(output, normalized, minLevel, 'info', 'IR011', `step=expand count=${expanded.length}`);
+    if (expanded.length === 0) {
+        log(output, normalized, minLevel, 'warn', 'IR012', 'step=expand empty=true');
+        vscode.window.showWarningMessage(`No executable steps after expansion for intent: ${normalized.intent}`);
+        return false;
+    }
+
     let success = true;
-    for (const entry of filtered) {
-        const stepOk = await executeResolution(normalized, entry, output);
+    for (const entry of expanded) {
+        const stepOk = await executeResolution(normalized, entry, output, minLevel, variableCache);
         if (!stepOk) {
             success = false;
         }
@@ -48,8 +65,7 @@ export async function routeIntent(intent: Intent): Promise<boolean> {
     return success;
 }
 
-function getUserMappings(profile?: ProfileConfig): { primaryMappings: UserMapping[]; fallbackMappings: UserMapping[] } {
-    const config = vscode.workspace.getConfiguration('intentRouter');
+function getUserMappings(config: vscode.WorkspaceConfiguration, profile?: ProfileConfig): { primaryMappings: UserMapping[]; fallbackMappings: UserMapping[] } {
     const rawMappings = config.get<UserMapping[]>('mappings', []);
     const profileMappings = profile?.mappings ?? [];
 
@@ -66,8 +82,7 @@ function getUserMappings(profile?: ProfileConfig): { primaryMappings: UserMappin
     };
 }
 
-function normalizeIntent(intent: Intent): Intent {
-    const config = vscode.workspace.getConfiguration('intentRouter');
+function normalizeIntent(intent: Intent, config: vscode.WorkspaceConfiguration): Intent {
     const debugDefault = config.get<boolean>('debug', false);
 
     const meta = {
@@ -82,8 +97,7 @@ function normalizeIntent(intent: Intent): Intent {
     };
 }
 
-function getActiveProfile(): ProfileConfig | undefined {
-    const config = vscode.workspace.getConfiguration('intentRouter');
+function getActiveProfile(config: vscode.WorkspaceConfiguration): ProfileConfig | undefined {
     const name = config.get<string>('activeProfile', '');
     if (!name) {
         return undefined;
@@ -139,18 +153,115 @@ function filterByProviderTarget(intent: Intent, entries: Resolution[]): Resoluti
     });
 }
 
-async function executeResolution(intent: Intent, entry: Resolution, output: vscode.OutputChannel): Promise<boolean> {
+function expandCompositeResolutions(intent: Intent, entries: Resolution[]): Resolution[] {
+    const expanded: Resolution[] = [];
+    for (const entry of entries) {
+        if (entry.capabilityType !== 'composite') {
+            expanded.push(entry);
+            continue;
+        }
+
+        const steps = entry.compositeSteps ?? [];
+        for (const step of steps) {
+            const stepProvider = step.provider ?? entry.provider;
+            const stepTarget = step.target ?? entry.target;
+            const stepType = step.type ?? entry.type;
+            const stepPayload = step.payload;
+            const mapPayload = step.mapPayload ?? (stepPayload !== undefined ? () => stepPayload : undefined);
+
+            expanded.push({
+                capability: step.capability,
+                command: step.command,
+                provider: stepProvider,
+                target: stepTarget,
+                type: stepType ?? 'vscode',
+                capabilityType: 'atomic',
+                mapPayload,
+                source: 'composite'
+            });
+        }
+    }
+    return expanded;
+}
+
+async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
+    if (typeof input === 'string') {
+        const regex = /\$\{input:([^}]+)\}/g;
+        let match;
+        let result = input;
+
+        while ((match = regex.exec(input)) !== null) {
+            const fullMatch = match[0];
+            const promptText = match[1];
+
+            let value = cache?.get(promptText);
+
+            if (value === undefined) {
+                value = await vscode.window.showInputBox({
+                    prompt: promptText,
+                    placeHolder: `Value for ${promptText}`
+                });
+
+                if (value === undefined) {
+                    throw new Error(`Input cancelled for variable: ${promptText}`);
+                }
+
+                if (cache) {
+                    cache.set(promptText, value);
+                }
+            }
+
+            result = result.replace(fullMatch, value);
+        }
+        return result;
+    } else if (Array.isArray(input)) {
+        return Promise.all(input.map(item => resolveVariables(item, cache)));
+    } else if (typeof input === 'object' && input !== null) {
+        const resolved: any = {};
+        for (const key of Object.keys(input)) {
+            resolved[key] = await resolveVariables(input[key], cache);
+        }
+        return resolved;
+    }
+    return input;
+}
+
+async function executeResolution(
+    intent: Intent,
+    entry: Resolution,
+    output: vscode.OutputChannel,
+    minLevel: 'error' | 'warn' | 'info' | 'debug',
+    variableCache?: Map<string, string>
+): Promise<boolean> {
     const meta = intent.meta ?? {};
+    if (entry.capabilityType !== 'atomic') {
+        log(output, intent, minLevel, 'warn', 'IR013', `step=execute skip capabilityType=${entry.capabilityType} capability=${entry.capability}`);
+        return false;
+    }
     const adapter = getProviderAdapter(entry.type);
     if (!adapter) {
-        log(output, intent, 'warn', 'IR006', `step=transport skip type=${entry.type} capability=${entry.capability}`);
+        log(output, intent, minLevel, 'warn', 'IR006', `step=transport skip type=${entry.type} capability=${entry.capability}`);
         return false;
     }
 
-    const payload = entry.mapPayload ? entry.mapPayload(intent) : intent.payload;
+    if (intent.description) {
+        log(output, intent, minLevel, 'info', 'IR014', `[STEP] ${intent.description}`);
+    }
+
+    let payload = entry.mapPayload ? entry.mapPayload(intent) : intent.payload;
+
+    try {
+        payload = await resolveVariables(payload, variableCache);
+    } catch (error) {
+         log(output, intent, minLevel, 'warn', 'IR015', `step=resolveVariables cancelled=${error}`);
+         vscode.window.showWarningMessage('Pipeline cancelled by user.');
+         return false;
+    }
+
     log(
         output,
         intent,
+        minLevel,
         'info',
         'IR007',
         `step=execute command=${entry.command} source=${entry.source} dryRun=${meta.dryRun ? 'true' : 'false'} type=${entry.type}`
@@ -164,7 +275,7 @@ async function executeResolution(intent: Intent, entry: Resolution, output: vsco
         await adapter.invoke(entry, payload, intent);
         return true;
     } catch (error) {
-        log(output, intent, 'error', 'IR008', `step=execute error command=${entry.command}`);
+        log(output, intent, minLevel, 'error', 'IR008', `step=execute error command=${entry.command}`);
         console.error(`Failed to execute capability ${entry.command}:`, error);
         vscode.window.showErrorMessage(`Failed to execute ${entry.command}: ${error}`);
         return false;
@@ -183,11 +294,11 @@ function getOutputChannel(): vscode.OutputChannel {
 function log(
     output: vscode.OutputChannel,
     intent: Intent,
+    minLevel: 'error' | 'warn' | 'info' | 'debug',
     level: 'error' | 'warn' | 'info' | 'debug',
     code: string,
     message: string
 ): void {
-    const minLevel = getLogLevel();
     if (!shouldLog(level, minLevel)) {
         return;
     }
@@ -204,12 +315,13 @@ function generateTraceId(): string {
     return `${Date.now().toString(16)}-${rand}`;
 }
 
-function getLogLevel(): 'error' | 'warn' | 'info' | 'debug' {
-    const config = vscode.workspace.getConfiguration('intentRouter');
+function getLogLevel(config: vscode.WorkspaceConfiguration): 'error' | 'warn' | 'info' | 'debug' {
     const level = config.get<string>('logLevel', 'info');
     if (level === 'error' || level === 'warn' || level === 'info' || level === 'debug') {
+        cachedLogLevel = level;
         return level;
     }
+    cachedLogLevel = 'info';
     return 'info';
 }
 
