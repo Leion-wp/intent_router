@@ -70,6 +70,19 @@ export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
     return count;
 }
 
+function buildMapping<T extends { capability: string }>(entries: T[]): Map<string, T[]> {
+    const map = new Map<string, T[]>();
+    for (const entry of entries) {
+        const list = map.get(entry.capability);
+        if (list) {
+            list.push(entry);
+        } else {
+            map.set(entry.capability, [entry]);
+        }
+    }
+    return map;
+}
+
 export function resolveCapabilities(
     intent: Intent,
     userMappings: UserMapping[] = [],
@@ -80,10 +93,13 @@ export function resolveCapabilities(
     }
 
     const resolved: Resolution[] = [];
+    const userMap = buildMapping(userMappings);
+    const fallbackMap = buildMapping(fallbackMappings);
+    const registryMap = buildMapping(registeredCapabilities);
 
     for (const cap of intent.capabilities) {
-        const userMatches = userMappings.filter(m => m.capability === cap);
-        if (userMatches.length > 0) {
+        const userMatches = userMap.get(cap);
+        if (userMatches) {
             for (const entry of userMatches) {
                 resolved.push({
                     capability: entry.capability,
@@ -98,8 +114,8 @@ export function resolveCapabilities(
             continue;
         }
 
-        const fallbackMatches = fallbackMappings.filter(m => m.capability === cap);
-        if (fallbackMatches.length > 0) {
+        const fallbackMatches = fallbackMap.get(cap);
+        if (fallbackMatches) {
             for (const entry of fallbackMatches) {
                 resolved.push({
                     capability: entry.capability,
@@ -129,8 +145,8 @@ export function resolveCapabilities(
             continue;
         }
 
-        const registryMatches = registeredCapabilities.filter(r => r.capability === cap);
-        if (registryMatches.length > 0) {
+        const registryMatches = registryMap.get(cap);
+        if (registryMatches) {
             for (const entry of registryMatches) {
                 resolved.push({
                     capability: entry.capability,
