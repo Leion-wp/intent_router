@@ -150,7 +150,8 @@ export class PipelineBuilder {
 
     private getHtml(webview: vscode.Webview, scriptUri: vscode.Uri, styleUri: vscode.Uri, data: any): string {
         const nonce = this.getNonce();
-        const payload = JSON.stringify(data);
+        // Prevent XSS by escaping < and > in JSON payload
+        const payload = JSON.stringify(data).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 
         return `<!DOCTYPE html>
 <html lang="en">
