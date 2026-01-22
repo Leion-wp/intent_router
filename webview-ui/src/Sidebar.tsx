@@ -16,7 +16,8 @@ export default function Sidebar() {
 
   return (
     <aside style={{
-      width: '250px',
+      width: '100%',
+      minWidth: '200px',
       borderRight: '1px solid var(--vscode-panel-border)',
       padding: '16px',
       background: 'var(--vscode-sideBar-background)',
