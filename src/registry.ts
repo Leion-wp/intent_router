@@ -38,7 +38,7 @@ export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
         return count;
     }
 
-    for (const entry of args.capabilities as Array<{ capability: string; command: string; capabilityType?: string; steps?: any[]; mapPayload?: (intent: Intent) => any; }>) {
+    for (const entry of args.capabilities as Array<{ capability: string; command: string; capabilityType?: string; steps?: any[]; args?: any[]; description?: string; mapPayload?: (intent: Intent) => any; }>) {
         if (!entry.capability || !entry.command) {
             continue;
         }
@@ -52,14 +52,17 @@ export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
                 provider: args.provider,
                 target: args.target,
                 type: args.type ?? 'vscode',
-                steps: entry.steps
+                steps: entry.steps,
+                args: entry.args,
+                description: entry.description
             });
             count += 1;
         } else {
             registeredCapabilities.push({
                 capability: entry.capability,
                 command: entry.command,
-                description: `Resolved capability: ${entry.capability}`,
+                description: entry.description || `Resolved capability: ${entry.capability}`,
+                args: entry.args,
                 mapPayload: entry.mapPayload ?? args.mapPayload,
                 ...base
             });
@@ -174,21 +177,13 @@ export function resolveCapabilities(
     return resolved;
 }
 
-export function listPublicCapabilities(): Array<{ provider: string; capability: string; capabilityType: 'atomic' | 'composite' }> {
-    const items: Array<{ provider: string; capability: string; capabilityType: 'atomic' | 'composite' }> = [];
+export function listPublicCapabilities(): Array<Capability | CompositeCapability> {
+    const items: Array<Capability | CompositeCapability> = [];
     for (const entry of registeredCapabilities) {
-        items.push({
-            provider: entry.provider ?? 'custom',
-            capability: entry.capability,
-            capabilityType: 'atomic'
-        });
+        items.push(entry);
     }
     for (const entry of compositeCapabilities) {
-        items.push({
-            provider: entry.provider ?? 'custom',
-            capability: entry.capability,
-            capabilityType: 'composite'
-        });
+        items.push(entry);
     }
     return items;
 }

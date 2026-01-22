@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -19,6 +19,9 @@ import './index.css';
 
 import Sidebar from './Sidebar';
 import ActionNode from './nodes/ActionNode';
+
+// Context for Registry
+export const RegistryContext = createContext<any>({});
 
 // Register custom node types
 const nodeTypes = {
@@ -80,7 +83,8 @@ function Flow() {
              const nodeId = getId();
              const parts = (step.intent || '').split('.');
              const provider = parts[0] || 'terminal';
-             const capability = parts[1] || 'run';
+             // Store full capability name (e.g. 'terminal.run') to match registry
+             const capability = step.intent || 'terminal.run';
 
              // Merge payload and description into args for the UI
              const args = { ...step.payload, description: step.description };
@@ -279,14 +283,24 @@ function Flow() {
 }
 
 export default function App() {
+  const [commandGroups, setCommandGroups] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (window.initialData && window.initialData.commandGroups) {
+      setCommandGroups(window.initialData.commandGroups);
+    }
+  }, []);
+
   return (
-    <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
-       <Sidebar />
-       <div style={{ flex: 1, position: 'relative' }}>
-         <ReactFlowProvider>
-           <Flow />
-         </ReactFlowProvider>
-       </div>
-    </div>
+    <RegistryContext.Provider value={{ commandGroups }}>
+      <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
+         <Sidebar />
+         <div style={{ flex: 1, position: 'relative' }}>
+           <ReactFlowProvider>
+             <Flow />
+           </ReactFlowProvider>
+         </div>
+      </div>
+    </RegistryContext.Provider>
   );
 }
