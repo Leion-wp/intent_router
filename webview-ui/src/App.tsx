@@ -83,7 +83,8 @@ function Flow() {
              const nodeId = getId();
              const parts = (step.intent || '').split('.');
              const provider = parts[0] || 'terminal';
-             const capability = parts[1] || 'run';
+             // Store full capability name (e.g. 'terminal.run') to match registry
+             const capability = step.intent || 'terminal.run';
 
              // Merge payload and description into args for the UI
              const args = { ...step.payload, description: step.description };

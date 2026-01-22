@@ -18,6 +18,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const [capability, setCapability] = useState<string>((data.capability as string) || '');
   const [args, setArgs] = useState<Record<string, any>>((data.args as Record<string, any>) || {});
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
+  const [expandedHelp, setExpandedHelp] = useState<Record<string, boolean>>({});
 
   // Sync from props if data changes externally
   useEffect(() => {
@@ -33,6 +34,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
   // Default capability selection
   useEffect(() => {
+    // If capability is empty, select a default
     if (!capability && currentCaps.length > 0) {
        // Try to find 'run' or just take first
        const defaultCap = currentCaps.find((c: any) => c.capability.endsWith('.run'))?.capability || currentCaps[0].capability;
@@ -59,7 +61,18 @@ const ActionNode = ({ data, id }: NodeProps) => {
     handleArgChange(key, current + '${input:Prompt}');
   };
 
-  const selectedCapConfig = currentCaps.find((c: any) => c.capability === capability);
+  const toggleHelp = (key: string) => {
+      setExpandedHelp(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Find the selected capability configuration
+  // We need to handle cases where capability might be just suffix (legacy) or full string
+  let selectedCapConfig = currentCaps.find((c: any) => c.capability === capability);
+  if (!selectedCapConfig && capability) {
+      // Fallback: try to match by suffix if user manually edited JSON or old format
+      selectedCapConfig = currentCaps.find((c: any) => c.capability.endsWith(`.${capability}`));
+  }
+
   // Default args include 'description' which is standard for all steps
   const schemaArgs = selectedCapConfig?.args || [];
   const displayArgs = [
@@ -92,7 +105,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
         <select
           aria-label="Select capability"
           className="nodrag"
-          value={capability}
+          value={selectedCapConfig?.capability || capability}
           onChange={(e) => {
             setCapability(e.target.value);
             // Clear args that might not apply, or keep them? Keeping is safer for now.
@@ -123,16 +136,47 @@ const ActionNode = ({ data, id }: NodeProps) => {
         {displayArgs.map((arg: any) => {
           const inputId = `input-${id}-${arg.name}`;
           const isRequired = arg.required;
+          const showHelp = expandedHelp[arg.name];
 
           return (
             <div key={arg.name} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <label htmlFor={inputId} style={{ fontSize: '0.75em', opacity: 0.9, display: 'flex', alignItems: 'center' }}>
-                  {arg.name}
-                  {isRequired && <span style={{ color: '#f44336', marginLeft: '2px' }}>*</span>}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label htmlFor={inputId} style={{ fontSize: '0.75em', opacity: 0.9, display: 'flex', alignItems: 'center' }}>
+                      {arg.name}
+                      {isRequired && <span style={{ color: '#f44336', marginLeft: '2px' }}>*</span>}
+                  </label>
                   {arg.description && (
-                      <span title={arg.description} style={{ marginLeft: '4px', cursor: 'help', opacity: 0.5 }}>ⓘ</span>
+                      <button
+                          onClick={() => toggleHelp(arg.name)}
+                          title="Toggle description"
+                          className="nodrag"
+                          style={{
+                              background: 'none',
+                              border: 'none',
+                              color: showHelp ? 'var(--vscode-textLink-foreground)' : 'var(--vscode-descriptionForeground)',
+                              cursor: 'pointer',
+                              fontSize: '0.9em',
+                              padding: '0 4px'
+                          }}
+                      >
+                          ⓘ
+                      </button>
                   )}
-              </label>
+              </div>
+
+              {showHelp && arg.description && (
+                  <div style={{
+                      fontSize: '0.7em',
+                      color: 'var(--vscode-descriptionForeground)',
+                      marginBottom: '2px',
+                      fontStyle: 'italic',
+                      padding: '2px 4px',
+                      background: 'rgba(255,255,255,0.05)',
+                      borderRadius: '2px'
+                  }}>
+                      {arg.description}
+                  </div>
+              )}
 
               {arg.type === 'boolean' ? (
                    <input
