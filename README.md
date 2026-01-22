@@ -1,162 +1,119 @@
 # Intent Router (VS Code Extension)
 
-Centralized intent routing for VS Code and agentic workflows. The extension exposes a single entry point, resolves capabilities, and dispatches to VS Code commands registered by other extensions.
+**The Human-Centric Orchestration Cockpit for VS Code.**
 
-## Features
-- One command to route intents: `intentRouter.route`
-- Dynamic capability registration via `intentRouter.registerCapabilities`
-- User mappings and profile overrides
-- Dry-run mode
-- Output channel logs with trace IDs
-- External provider stub (logs error, no transport yet)
+Intent Router is a low-level orchestration layer designed to manage workflows between humans and AI agents with absolute transparency. It prioritizes **Human Sovereignty** over AI autonomy.
 
-## Quick Start (Dev Host)
-1) Open this repo in VS Code.
-2) Press `F5` to launch the Extension Development Host.
-3) In the host window, run: **Intent Router: Route Intent (JSON)**.
-4) Paste:
-```json
-{"intent":"open commands","capabilities":["demo.showCommands"],"payload":{}}
-```
+## 🧠 Philosophy
 
-To make the demo capability resolve, add this to your settings (host window):
-```json
-"intentRouter.mappings": [
-  { "capability": "demo.showCommands", "command": "workbench.action.showCommands" }
-]
-```
+> **"No Magic. No Opaque Autonomy. Strict Human Validation."**
 
-Optional: enable the built-in demo Git provider in settings:
-```json
-"intentRouter.demoProvider": "git"
-```
+Intent Router is designed to support a clear "Review & Merge" workflow where AI agents (like Codex or Jules) are producers/reviewers, but **never decision-makers**.
 
-## Pipelines (.intent.json)
-Create a pipeline file from the command palette:
-- **Intent Router: Create Pipeline**
+*   **Orchestration + Traceability:** Every action is visible, logged, and reproducible.
+*   **Terminal as Bedrock:** The primary interface is the `Terminal` provider. It is brutal, deterministic, and visible.
+*   **Agents are Tools:** Intent Router proposes actions (e.g., checkout a PR), but destructive actions (e.g., merge) require explicit human confirmation.
 
-Run the current pipeline (active editor):
-- **Intent Router: Run Pipeline**
-- **Intent Router: Dry Run Pipeline**
+If Intent Router becomes magical, opaque, or autonomous, the project has failed.
 
-Pipeline format (V1, linear):
+---
+
+## 🚀 Key Features
+
+### 1. Visual Pipeline Builder (The Cockpit)
+Construct workflows visually using a Drag-and-Drop interface.
+*   **Drag & Drop:** Pull providers (Terminal, Git, System) from the sidebar.
+*   **Inline Configuration:** Edit commands and arguments directly in the graph.
+*   **Live Status:** Watch steps execute in real-time with Blue (Running), Green (Success), and Red (Failure) indicators.
+*   **Launch:** Open via the "Intent Pipelines" view in the Activity Bar.
+
+### 2. Core Providers
+Intent Router comes with strict, low-level providers:
+*   **Terminal:** The neutral base. Reuses a single "Intent Router" terminal instance to keep history visible.
+    *   Capability: `terminal.run`
+*   **System:** Control flow and safety.
+    *   Capability: `system.pause` (Triggers a modal dialog for mandatory human review).
+*   **Git:** Wrapper around VS Code's built-in Git extension.
+    *   Capabilities: `git.checkout`, `git.commit`, `git.push`, `git.pull`.
+*   **Docker:** Wrapper around VS Code's Docker extension.
+    *   Capabilities: `docker.build`, `docker.run`.
+
+### 3. Workflow Logic
+*   **Variables (`${input:Prompt}`):** Ask the human for input at runtime (e.g., "Which branch?"). Values are cached per session.
+*   **Pause (`system.pause`):** Stop execution and wait for user confirmation. Essential for the "Review" phase.
+*   **Linear Execution:** Steps run sequentially. If one fails, the pipeline stops.
+
+---
+
+## 🎯 Target Workflow (V1)
+
+The ideal flow supported by Intent Router:
+
+1.  **Detection:** Intent Router selects the latest PR branch.
+2.  **Checkout:** `terminal.run` checks out the branch.
+3.  **AI Review:** An AI Agent (e.g., Codex) reads code, tests, and fixes locally.
+4.  **Human Validation:** `system.pause` halts the pipeline. **You** review the changes.
+5.  **Merge:** You manually merge if satisfied.
+6.  **Loop:** The pipeline continues to the next PR.
+
+**⚠️ Rules:**
+*   No Agent merges code automatically.
+*   All Git actions are visible in the Terminal.
+
+---
+
+## 🛠 Usage
+
+### Creating a Pipeline
+1.  Open the **Intent Router** view in the Activity Bar.
+2.  Click **"+" (New Pipeline)**.
+3.  Drag nodes (e.g., Terminal) onto the canvas.
+4.  Configure steps:
+    *   *Terminal:* `echo "Checking out..." && git checkout -b feature/demo`
+    *   *System:* Pause with message "Check the code now!"
+5.  Click **Save Pipeline**. It is saved as `.intent/pipelines/<name>.json`.
+
+### Running a Pipeline
+*   **From the Builder:** Click "Run" (planned feature) or use the command palette.
+*   **From the Tree View:** Right-click a pipeline in the "Intent Pipelines" view and select **Run**.
+*   **Dry Run:** Simulates execution without side effects (where supported).
+
+### JSON Format
+Pipelines are stored as simple JSON files:
 ```json
 {
-  "name": "deploy-app",
-  "profile": "work",
+  "name": "review-flow",
   "steps": [
     {
-      "intent": "build image",
-      "capabilities": ["docker.build"],
-      "payload": { "project": "demo" }
+      "intent": "terminal.run",
+      "description": "Checkout Branch",
+      "payload": {
+        "command": "git checkout ${input:BranchName}"
+      }
     },
     {
-      "intent": "push code",
-      "capabilities": ["git.push"],
-      "payload": { "message": "deploy" }
+      "intent": "system.pause",
+      "description": "Human Review",
+      "payload": {
+        "message": "Review the code. Continue if safe."
+      }
     }
   ]
 }
 ```
 
-Rules:
-- Steps execute in order.
-- If a step fails, the pipeline stops.
-- `Dry Run` injects `meta.dryRun=true` for all steps.
+---
 
-## AI-assisted Pipeline (Prompt + Clipboard)
-Workflow:
-1) **Generate Pipeline Prompt** (Intent Router) → prompt copied to clipboard.
-2) **Open Codex** → paste the prompt, generate JSON.
-3) **Import Pipeline From Clipboard** → validate and write to `/pipeline`.
+## 🧩 Architecture
 
-Notes:
-- The JSON file remains the source of truth.
-- The AI never executes anything directly.
+*   **Intent:** An abstract definition of "what needs to be done".
+*   **Router:** Resolves intents to specific capabilities based on installed extensions.
+*   **Providers:** Adapters that map Intent Router commands to VS Code APIs or external tools.
+*   **Pipeline Runner:** Executes a linear sequence of intents, handling state and events.
 
-## Intent Format
-```ts
-type Intent = {
-  intent: string
-  capabilities?: string[]
-  payload?: any
-  provider?: string
-  target?: string
-  meta?: {
-    dryRun?: boolean
-    traceId?: string
-    debug?: boolean
-  }
-}
-```
+## Contributing
 
-## Register Capabilities (Handshake)
-Other extensions register capabilities by calling:
-```ts
-await vscode.commands.executeCommand(
-  "intentRouter.registerCapabilities",
-  {
-    provider: "git",
-    capabilities: [
-      { capability: "git.push", command: "git.push" },
-      { capability: "git.commit", command: "git.commit", mapPayload: (intent) => ({ message: intent.payload?.message }) }
-    ]
-  }
-);
-```
-
-## User Mappings
-Settings key: `intentRouter.mappings`
-```json
-"intentRouter.mappings": [
-  { "capability": "git.push", "command": "git.pushWithForce", "provider": "git" }
-]
-```
-
-## Profiles (V2.3)
-Settings keys: `intentRouter.activeProfile`, `intentRouter.profiles`
-```json
-"intentRouter.activeProfile": "work",
-"intentRouter.profiles": [
-  {
-    "name": "work",
-    "mappings": [
-      { "capability": "git.push", "command": "git.push" }
-    ],
-    "enabledProviders": ["git", "docker"],
-    "disabledProviders": ["legacy"]
-  }
-]
-```
-
-Resolution order:
-1) Profile mappings
-2) Global mappings
-3) Registered capabilities
-4) Fallback to `capability -> command`
-
-## Observability
-Output channel: **Intent Router**
-Settings: `intentRouter.logLevel` (`error|warn|info|debug`)
-
-Dry run:
-```json
-{
-  "intent": "deploy app",
-  "capabilities": ["git.push"],
-  "meta": { "dryRun": true }
-}
-```
-
-## Commands
-- `Intent Router: Route Intent`
-- `Intent Router: Route Intent (JSON)`
-
-## Testing
-```bash
-npm test
-```
-
-## Notes
-- External providers are stubbed and will log "not implemented".
-- The route entry point is the only public action; everything else is internal plumbing.
+1.  **Clone** the repository.
+2.  `npm install`
+3.  `npm run compile`
+4.  `F5` to launch the Extension Development Host.

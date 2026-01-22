@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Intent } from './types';
 import { routeIntent } from './router';
+import { pipelineEventBus } from './eventBus';
 
 export type PipelineFile = {
     name: string;
@@ -88,9 +89,13 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
     }
 
     const variableCache = new Map<string, string>();
+    const runId = Date.now().toString(36); // Simple run ID
+
+    pipelineEventBus.emit({ type: 'pipelineStart', runId, timestamp: Date.now() });
 
     try {
-        for (const step of pipeline.steps) {
+        for (let i = 0; i < pipeline.steps.length; i++) {
+            const step = pipeline.steps[i];
             const stepIntent: Intent = {
                 ...step,
                 description: step.description,
@@ -100,12 +105,39 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 }
             };
 
+            const intentId = stepIntent.meta?.traceId ?? Math.random().toString(36).substring(7);
+
+            // Emit index so frontend can map to node
+            pipelineEventBus.emit({
+                type: 'stepStart',
+                runId,
+                intentId,
+                timestamp: Date.now(),
+                description: step.description,
+                index: i // Added index
+            });
+
             const ok = await routeIntent(stepIntent, variableCache);
+
+            pipelineEventBus.emit({
+                type: 'stepEnd',
+                runId,
+                intentId,
+                timestamp: Date.now(),
+                success: ok,
+                index: i // Added index
+            });
+
             if (!ok) {
                 vscode.window.showWarningMessage('Pipeline stopped on failed step.');
+                pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: false });
                 break;
             }
         }
+        pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: true });
+    } catch (e) {
+        pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: false });
+        throw e;
     } finally {
         if (targetProfile && targetProfile !== originalProfile) {
             await config.update('activeProfile', originalProfile, true);
