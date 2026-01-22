@@ -97,6 +97,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
       <div style={{ marginBottom: '8px' }}>
         <select
+          aria-label="Select capability"
           className="nodrag"
           value={capability}
           onChange={(e) => {
@@ -118,45 +119,50 @@ const ActionNode = ({ data, id }: NodeProps) => {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        {currentArgs.map(arg => (
-          <div key={arg} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <label style={{ fontSize: '0.7em', opacity: 0.8 }}>{arg}</label>
-            <div style={{ display: 'flex', gap: '4px' }}>
-              <input
-                className="nodrag"
-                type="text"
-                value={args[arg] || ''}
-                onChange={(e) => handleArgChange(arg, e.target.value)}
-                placeholder={arg}
-                style={{
-                  flex: 1,
-                  background: 'var(--vscode-input-background)',
-                  color: 'var(--vscode-input-foreground)',
-                  border: '1px solid var(--vscode-input-border)',
-                  padding: '4px',
-                  fontSize: '0.9em'
-                }}
-              />
-              <button
-                className="nodrag"
-                onClick={() => insertVariable(arg)}
-                title="Insert Input Variable"
-                style={{
-                  background: 'var(--vscode-button-background)',
-                  color: 'var(--vscode-button-foreground)',
-                  border: 'none',
-                  cursor: 'pointer',
-                  width: '24px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              >
-                {'{ }'}
-              </button>
+        {currentArgs.map(arg => {
+          const inputId = `input-${id}-${arg}`;
+          return (
+            <div key={arg} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <label htmlFor={inputId} style={{ fontSize: '0.7em', opacity: 0.8 }}>{arg}</label>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <input
+                  id={inputId}
+                  className="nodrag"
+                  type="text"
+                  value={args[arg] || ''}
+                  onChange={(e) => handleArgChange(arg, e.target.value)}
+                  placeholder={arg}
+                  style={{
+                    flex: 1,
+                    background: 'var(--vscode-input-background)',
+                    color: 'var(--vscode-input-foreground)',
+                    border: '1px solid var(--vscode-input-border)',
+                    padding: '4px',
+                    fontSize: '0.9em'
+                  }}
+                />
+                <button
+                  className="nodrag"
+                  onClick={() => insertVariable(arg)}
+                  title="Insert Input Variable"
+                  aria-label={`Insert variable for ${arg}`}
+                  style={{
+                    background: 'var(--vscode-button-background)',
+                    color: 'var(--vscode-button-foreground)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    width: '24px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  {'{ }'}
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <Handle type="source" position={Position.Bottom} />
