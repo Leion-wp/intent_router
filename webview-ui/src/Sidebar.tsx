@@ -16,18 +16,21 @@ export default function Sidebar() {
 
   return (
     <aside style={{
-      width: '100%',
-      minWidth: '200px',
-      borderRight: '1px solid var(--vscode-panel-border)',
-      padding: '16px',
-      background: 'var(--vscode-sideBar-background)',
-      color: 'var(--vscode-sideBar-foreground)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '16px',
-      fontFamily: 'var(--vscode-font-family)',
-      fontSize: 'var(--vscode-font-size)'
-    }}>
+        width: '280px',
+        minWidth: '240px',
+        maxWidth: '360px',
+        flexShrink: 0,
+        borderRight: '1px solid var(--vscode-panel-border)',
+        padding: '16px',
+        background: 'var(--vscode-sideBar-background)',
+        color: 'var(--vscode-sideBar-foreground)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '16px',
+        fontFamily: 'var(--vscode-font-family)',
+        fontSize: 'var(--vscode-font-size)'
+      }}>
+
       <div style={{
         fontSize: '11px',
         fontWeight: 'bold',
