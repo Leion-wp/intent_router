@@ -151,6 +151,9 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             const stepIntent: Intent = {
                 ...step,
                 description: step.description,
+                capabilities: Array.isArray(step.capabilities) && step.capabilities.length > 0
+                    ? step.capabilities
+                    : [step.intent],
                 meta: {
                     ...(step.meta ?? {}),
                     dryRun: dryRun ? true : step.meta?.dryRun
