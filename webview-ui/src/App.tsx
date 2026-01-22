@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -19,6 +19,9 @@ import './index.css';
 
 import Sidebar from './Sidebar';
 import ActionNode from './nodes/ActionNode';
+
+// Context for Registry
+export const RegistryContext = createContext<any>({});
 
 // Register custom node types
 const nodeTypes = {
@@ -279,14 +282,24 @@ function Flow() {
 }
 
 export default function App() {
+  const [commandGroups, setCommandGroups] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (window.initialData && window.initialData.commandGroups) {
+      setCommandGroups(window.initialData.commandGroups);
+    }
+  }, []);
+
   return (
-    <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
-       <Sidebar />
-       <div style={{ flex: 1, position: 'relative' }}>
-         <ReactFlowProvider>
-           <Flow />
-         </ReactFlowProvider>
-       </div>
-    </div>
+    <RegistryContext.Provider value={{ commandGroups }}>
+      <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
+         <Sidebar />
+         <div style={{ flex: 1, position: 'relative' }}>
+           <ReactFlowProvider>
+             <Flow />
+           </ReactFlowProvider>
+         </div>
+      </div>
+    </RegistryContext.Provider>
   );
 }
