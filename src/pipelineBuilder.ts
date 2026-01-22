@@ -36,7 +36,8 @@ export class PipelineBuilder {
                 enableScripts: true,
                 retainContextWhenHidden: true,
                 localResourceRoots: [
-                    vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle')
+                    vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle'),
+                    vscode.Uri.joinPath(this.extensionUri, 'media')
                 ]
             }
         );
@@ -75,8 +76,11 @@ export class PipelineBuilder {
         const styleUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.css')
         );
+        const codiconUri = panel.webview.asWebviewUri(
+            vscode.Uri.joinPath(this.extensionUri, 'media', 'codicons', 'codicon.css')
+        );
 
-        panel.webview.html = this.getHtml(panel.webview, webviewUri, styleUri, {
+        panel.webview.html = this.getHtml(panel.webview, webviewUri, styleUri, codiconUri, {
             pipeline: initialPipeline,
             commandGroups,
             profiles: profileNames,
@@ -148,7 +152,7 @@ export class PipelineBuilder {
         return Array.isArray(profiles) ? profiles.map(p => p?.name).filter(v => typeof v === 'string') : [];
     }
 
-    private getHtml(webview: vscode.Webview, scriptUri: vscode.Uri, styleUri: vscode.Uri, data: any): string {
+    private getHtml(webview: vscode.Webview, scriptUri: vscode.Uri, styleUri: vscode.Uri, codiconUri: vscode.Uri, data: any): string {
         const nonce = this.getNonce();
         const payload = JSON.stringify(data);
 
@@ -156,9 +160,10 @@ export class PipelineBuilder {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="${styleUri}" rel="stylesheet" />
+    <link href="${codiconUri}" rel="stylesheet" />
     <title>Pipeline Builder</title>
 </head>
 <body>
