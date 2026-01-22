@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 
 export type PipelineEvent =
-    | { type: 'pipelineStart'; runId: string; timestamp: number }
+    | { type: 'pipelineStart'; runId: string; timestamp: number; totalSteps?: number; name?: string }
     | { type: 'pipelineEnd'; runId: string; timestamp: number; success: boolean }
     | { type: 'stepStart'; runId: string; intentId: string; timestamp: number; description?: string; index?: number }
-    | { type: 'stepEnd'; runId: string; intentId: string; timestamp: number; success: boolean; index?: number };
+    | { type: 'stepEnd'; runId: string; intentId: string; timestamp: number; success: boolean; index?: number }
+    | { type: 'pipelinePause'; runId: string; timestamp: number }
+    | { type: 'pipelineResume'; runId: string; timestamp: number };
 
 type Listener = (event: PipelineEvent) => void;
 
