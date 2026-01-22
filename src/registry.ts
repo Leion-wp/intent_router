@@ -1,11 +1,11 @@
 import { Capability, CompositeCapability, Intent, RegisterCapabilitiesArgs, Resolution, UserMapping } from './types';
 
 const registeredCapabilities: Capability[] = [];
-const compositeCapabilities: CompositeCapability[] = [];
+const compositeCapabilities: Map<string, CompositeCapability> = new Map();
 
 export function resetRegistry(): void {
     registeredCapabilities.length = 0;
-    compositeCapabilities.length = 0;
+    compositeCapabilities.clear();
 }
 
 export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
@@ -46,7 +46,7 @@ export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
             if (!Array.isArray(entry.steps) || entry.steps.length === 0) {
                 continue;
             }
-            compositeCapabilities.push({
+            compositeCapabilities.set(entry.capability, {
                 capability: entry.capability,
                 capabilityType: 'composite',
                 provider: args.provider,
@@ -130,7 +130,7 @@ export function resolveCapabilities(
             continue;
         }
 
-        const compositeMatch = compositeCapabilities.find(c => c.capability === cap);
+        const compositeMatch = compositeCapabilities.get(cap);
         if (compositeMatch) {
             resolved.push({
                 capability: compositeMatch.capability,
@@ -183,7 +183,7 @@ export function listPublicCapabilities(): Array<{ provider: string; capability: 
             capabilityType: 'atomic'
         });
     }
-    for (const entry of compositeCapabilities) {
+    for (const entry of compositeCapabilities.values()) {
         items.push({
             provider: entry.provider ?? 'custom',
             capability: entry.capability,
