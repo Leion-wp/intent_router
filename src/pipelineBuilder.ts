@@ -5,10 +5,11 @@ import { gitTemplates } from './providers/gitAdapter';
 import { dockerTemplates } from './providers/dockerAdapter';
 import { terminalTemplates } from './providers/terminalAdapter';
 import { pipelineEventBus } from './eventBus';
+import { Capability, CompositeCapability } from './types';
 
 type CommandGroup = {
     provider: string;
-    commands: string[];
+    commands: (Capability | CompositeCapability)[];
 };
 
 export class PipelineBuilder {
@@ -136,14 +137,17 @@ export class PipelineBuilder {
 
     private async getCommandGroups(): Promise<CommandGroup[]> {
         const capabilities = listPublicCapabilities();
-        const groups = new Map<string, Set<string>>();
+        const groups = new Map<string, (Capability | CompositeCapability)[]>();
+
         for (const entry of capabilities) {
             const provider = entry.provider || 'custom';
-            if (!groups.has(provider)) groups.set(provider, new Set());
-            groups.get(provider)?.add(entry.capability);
+            if (!groups.has(provider)) groups.set(provider, []);
+            groups.get(provider)?.push(entry);
         }
+
         return Array.from(groups.entries()).map(([provider, cmds]) => ({
-            provider, commands: Array.from(cmds).sort()
+            provider,
+            commands: cmds.sort((a, b) => a.capability.localeCompare(b.capability))
         })).sort((a, b) => a.provider.localeCompare(b.provider));
     }
 
