@@ -2,6 +2,7 @@ export type Intent = {
     intent: string;
     description?: string;
     capabilities?: string[];
+    steps?: Intent[];
     payload?: any;
     provider?: string;
     target?: string;
@@ -9,6 +10,7 @@ export type Intent = {
         dryRun?: boolean;
         traceId?: string;
         debug?: boolean;
+        ui?: any;
     };
 };
 
