@@ -117,8 +117,15 @@ function normalizeIntent(intent: Intent, config: vscode.WorkspaceConfiguration):
         debug: intent.meta?.debug ?? debugDefault
     };
 
+    // V1 Compatibility: If 'capabilities' is missing, assume the intent string itself
+    // is the requested capability (Atomic Intent).
+    const capabilities = (intent.capabilities && intent.capabilities.length > 0)
+        ? intent.capabilities
+        : [intent.intent];
+
     return {
         ...intent,
+        capabilities,
         meta
     };
 }
