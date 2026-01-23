@@ -11,9 +11,11 @@ import { registerDockerProvider } from './providers/dockerAdapter';
 import { executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
 import { registerSystemProvider } from './providers/systemAdapter';
 import { StatusBarManager } from './statusBar';
+import { historyManager } from './historyManager';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
+    console.log('HistoryManager initialized', !!historyManager);
 
     // V1 Providers: Strict discovery
     registerGitProvider(context);
