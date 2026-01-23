@@ -5,6 +5,7 @@ import { gitTemplates } from './providers/gitAdapter';
 import { dockerTemplates } from './providers/dockerAdapter';
 import { terminalTemplates } from './providers/terminalAdapter';
 import { pipelineEventBus } from './eventBus';
+import { generateSecureNonce } from './security';
 import { Capability, CompositeCapability } from './types';
 
 type CommandGroup = {
@@ -157,7 +158,7 @@ export class PipelineBuilder {
     }
 
     private getHtml(webview: vscode.Webview, scriptUri: vscode.Uri, styleUri: vscode.Uri, codiconUri: vscode.Uri, data: any): string {
-        const nonce = this.getNonce();
+        const nonce = generateSecureNonce();
         // Prevent XSS by escaping < and > in JSON payload
         const payload = JSON.stringify(data).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 
@@ -180,14 +181,5 @@ export class PipelineBuilder {
     <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
-    }
-
-    private getNonce(): string {
-        let text = '';
-        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        for (let i = 0; i < 32; i++) {
-            text += possible.charAt(Math.floor(Math.random() * possible.length));
-        }
-        return text;
     }
 }
