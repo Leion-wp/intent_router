@@ -17,7 +17,7 @@ function doRegister() {
                 description: 'Run a shell command in the integrated terminal',
                 args: [
                     { name: 'command', type: 'string', description: 'The shell command to execute', required: true },
-                    { name: 'cwd', type: 'string', description: 'Working directory', default: '.' }
+                    { name: 'cwd', type: 'path', description: 'Working directory', default: '.' }
                 ]
             }
         ]

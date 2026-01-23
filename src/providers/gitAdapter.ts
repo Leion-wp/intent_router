@@ -9,13 +9,32 @@ export function registerGitProvider(context: vscode.ExtensionContext) {
 
     if (!gitExtension.isActive) {
         // Try to activate if present but not active, though usually Git activates early.
-        gitExtension.activate().then(() => doRegister(), () => {});
+        gitExtension.activate().then(() => doRegister(context), () => {});
     } else {
-        doRegister();
+        doRegister(context);
     }
 }
 
-function doRegister() {
+function doRegister(context: vscode.ExtensionContext) {
+    // Register internal command to list branches
+    const internalListBranches = vscode.commands.registerCommand('intentRouter.internal.git.listBranches', async () => {
+         try {
+             const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+             const api = gitExtension.getAPI(1);
+             if (api.repositories.length > 0) {
+                 const repo = api.repositories[0]; // Simplification: V1 targets first repo
+                 const refs = await repo.getRefs();
+                 return refs.filter((r: any) => r.type === 1 || r.type === 2).map((r: any) => r.name?.replace('refs/heads/', '')).filter(Boolean);
+             }
+             return ['main', 'dev']; // Fallback
+         } catch (e) {
+             console.error('Error fetching git branches:', e);
+             return ['main'];
+         }
+    });
+    context.subscriptions.push(internalListBranches);
+
+
     registerCapabilities({
         provider: 'git',
         type: 'vscode',
@@ -49,7 +68,13 @@ function doRegister() {
                 command: 'git.checkout',
                 description: 'Checkout a branch or tag',
                 args: [
-                     { name: 'branch', type: 'string', description: 'Branch name to checkout', required: true },
+                     {
+                         name: 'branch',
+                         type: 'enum',
+                         description: 'Branch name to checkout',
+                         required: true,
+                         options: 'intentRouter.internal.git.listBranches' // Dynamic options
+                     },
                      { name: 'create', type: 'boolean', description: 'Create new branch', default: false }
                 ]
             }

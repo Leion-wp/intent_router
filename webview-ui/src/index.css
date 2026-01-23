@@ -28,6 +28,7 @@ html, body, #root {
 
 .dndnode:hover {
   background: var(--vscode-list-hoverBackground);
+
   color: var(--vscode-list-hoverForeground);
 }
 
