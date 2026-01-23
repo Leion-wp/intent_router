@@ -1,4 +1,4 @@
-import React, { memo, useState, useEffect, useContext } from 'react';
+import { memo, useState, useEffect, useContext } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { RegistryContext } from '../App';
 

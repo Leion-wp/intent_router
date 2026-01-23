@@ -143,7 +143,8 @@ export function resolveCapabilities(
                 type: compositeMatch.type ?? 'vscode',
                 capabilityType: 'composite',
                 source: 'registry',
-                compositeSteps: compositeMatch.steps
+                compositeSteps: compositeMatch.steps,
+                args: compositeMatch.args
             });
             continue;
         }
@@ -159,7 +160,8 @@ export function resolveCapabilities(
                     type: entry.type ?? 'vscode',
                     capabilityType: 'atomic',
                     mapPayload: entry.mapPayload,
-                    source: 'registry'
+                    source: 'registry',
+                    args: entry.args
                 });
             }
             continue;

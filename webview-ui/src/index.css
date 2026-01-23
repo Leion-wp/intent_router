@@ -22,11 +22,14 @@ html, body, #root {
   background: var(--vscode-dropdown-background);
   color: var(--vscode-dropdown-foreground);
   transition: background 0.1s ease;
+  transition: background 0.1s ease, border-color 0.1s ease;
   user-select: none;
 }
 
 .dndnode:hover {
   background: var(--vscode-list-hoverBackground);
+
+  color: var(--vscode-list-hoverForeground);
 }
 
 .dndnode:focus-visible {
@@ -71,4 +74,5 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 6px;
+  border-color: var(--vscode-focusBorder);
 }
