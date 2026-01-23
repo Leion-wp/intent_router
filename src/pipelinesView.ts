@@ -82,13 +82,13 @@ export class PipelinesTreeDataProvider implements vscode.TreeDataProvider<Pipeli
         return `Profile: ${profile}\nSteps: ${steps}\nProviders: ${providers}`;
     }
 
-    private extractProviders(steps: Array<{ capabilities?: string[] }>): string[] {
+    private extractProviders(steps: Array<{ intent?: string; capabilities?: string[] }>): string[] {
         const counts = new Map<string, number>();
         for (const step of steps) {
-            const cap = step.capabilities?.[0];
-            if (!cap) {
-                continue;
-            }
+            const fromIntent = typeof step.intent === 'string' ? step.intent : '';
+            const cap = fromIntent || step.capabilities?.[0] || '';
+            if (!cap) continue;
+
             const provider = cap.split('.')[0] || 'custom';
             counts.set(provider, (counts.get(provider) ?? 0) + 1);
         }

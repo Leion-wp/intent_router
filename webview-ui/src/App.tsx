@@ -190,17 +190,6 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
           console.warn('No pipeline snapshot found in history run.');
       }
 
-      // 2. Playback logic (delayed to allow render)
-      setTimeout(() => {
-         const actionNodes = nodes.filter(n => n.id !== 'start'); // These might be old nodes if loadPipeline was async? No it's synchronous state update but React batches.
-         // Actually, loadPipeline calls setNodes. We need to wait for that to settle.
-         // But we can't await setNodes.
-         // Ideally, we should trigger playback AFTER nodes update.
-         // For now, let's just use the logic below but it might miss the new nodes if they are re-created.
-         // Wait, if we reload pipeline, nodes are new objects with new IDs (getId()).
-         // So playback logic matching by index is crucial.
-      }, 50);
-
       onRunHandled();
     }
   }, [selectedRun]);

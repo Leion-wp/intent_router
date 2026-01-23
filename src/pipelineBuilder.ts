@@ -25,9 +25,11 @@ export class PipelineBuilder {
         // If we already have a panel, reveal it. But if opening a different URI, we might want to replace content.
         // For V1, simplest is to allow multiple panels or just one singleton. Let's do singleton for now.
         if (this.panel) {
-            this.panel.reveal(vscode.ViewColumn.Active);
-            // TODO: Update content if needed? For now we assume new open call replaces old one or creates new if disposed.
-            // Actually, let's just dispose old one if different URI for simplicity.
+            // Dispose the previous panel to avoid stacking event listeners and message handlers.
+            const oldPanel = this.panel;
+            this.panel = undefined;
+            this.dispose();
+            oldPanel.dispose();
         }
 
         this.currentUri = uri;
@@ -103,6 +105,14 @@ export class PipelineBuilder {
             if (message?.type === 'savePipeline') {
                 await this.savePipeline(message.pipeline as PipelineFile);
                 vscode.window.showInformationMessage('Pipeline saved successfully.');
+                return;
+            }
+            if (message?.type === 'clearHistory') {
+                await historyManager.clearHistory();
+                this.panel?.webview.postMessage({
+                    type: 'historyUpdate',
+                    history: historyManager.getHistory()
+                });
                 return;
             }
             if (message?.type === 'selectPath') {
