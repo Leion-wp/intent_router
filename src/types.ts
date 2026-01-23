@@ -19,9 +19,9 @@ export type CapabilityType = 'atomic' | 'composite';
 
 export type CapabilityArgument = {
     name: string;
-    type: 'string' | 'boolean' | 'enum';
+    type: 'string' | 'boolean' | 'enum' | 'path';
     description?: string;
-    options?: string[]; // For enum
+    options?: string[] | string; // Array for static, String for dynamic command
     required?: boolean;
     default?: any;
 };
@@ -47,6 +47,7 @@ export type Resolution = {
     mapPayload?: (intent: Intent) => any;
     source: 'user' | 'registry' | 'fallback' | 'composite';
     compositeSteps?: CompositeStep[];
+    args?: CapabilityArgument[];
 };
 
 export type ProviderAdapter = {

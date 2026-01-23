@@ -3,12 +3,12 @@ import {
   ReactFlow,
   Controls,
   Background,
+  BackgroundVariant,
   useNodesState,
   useEdgesState,
   addEdge,
   MiniMap,
   ReactFlowProvider,
-  useReactFlow,
   Edge,
   Node,
   Connection,
@@ -51,18 +51,42 @@ const initialNodes: Node[] = [
 let idCounter = 0;
 const getId = () => `node_${idCounter++}`;
 
-function Flow() {
+function canonicalizeIntent(provider: string, capability: string): { provider: string; intent: string; capability: string } {
+  const fallbackProvider = (provider || '').trim() || 'terminal';
+  let cap = (capability || '').trim();
+
+  if (!cap) {
+    const intent = `${fallbackProvider}.run`;
+    return { provider: fallbackProvider, intent, capability: intent };
+  }
+
+  // If the capability already looks like a full id (e.g. "system.pause"), infer provider from it.
+  const inferredProvider = cap.includes('.') ? cap.split('.')[0] : fallbackProvider;
+  const finalProvider = (inferredProvider || '').trim() || fallbackProvider;
+
+  // If capability is a suffix (legacy), prefix it with provider.
+  if (!cap.includes('.')) {
+    cap = `${finalProvider}.${cap}`;
+  }
+
+  // Defensive: collapse repeated provider prefixes produced by older UI versions (e.g. "system.system.pause").
+  const dupPrefix = `${finalProvider}.${finalProvider}.`;
+  while (cap.startsWith(dupPrefix)) {
+    cap = `${finalProvider}.` + cap.slice(dupPrefix.length);
+  }
+
+  return { provider: finalProvider, intent: cap, capability: cap };
+}
+
+function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: () => void }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
 
-  // Load initial data if any
-  useEffect(() => {
-    if (window.initialData && window.initialData.pipeline) {
-      const { pipeline } = window.initialData;
+  // Helper to load pipeline data into graph
+  const loadPipeline = (pipeline: any) => {
       console.log('Loading pipeline:', pipeline);
-
       const newNodes: Node[] = [];
       const newEdges: Edge[] = [];
 
@@ -79,12 +103,12 @@ function Flow() {
       let y = 150;
 
       if (Array.isArray(pipeline.steps)) {
-          pipeline.steps.forEach((step: any, index: number) => {
+          pipeline.steps.forEach((step: any) => {
              const nodeId = getId();
-             const parts = (step.intent || '').split('.');
-             const provider = parts[0] || 'terminal';
+             const normalized = canonicalizeIntent('', step.intent || '');
+             const provider = normalized.provider;
              // Store full capability name (e.g. 'terminal.run') to match registry
-             const capability = step.intent || 'terminal.run';
+             const capability = normalized.capability;
 
              // Merge payload and description into args for the UI
              const args = { ...step.payload, description: step.description };
@@ -96,7 +120,8 @@ function Flow() {
                  data: {
                    provider,
                    capability,
-                   args
+                   args,
+                   status: 'idle'
                  }
              });
 
@@ -114,6 +139,13 @@ function Flow() {
 
       setNodes(newNodes);
       setEdges(newEdges);
+      setTimeout(() => reactFlowInstance?.fitView(), 100);
+  };
+
+  // Load initial data if any
+  useEffect(() => {
+    if (window.initialData && window.initialData.pipeline) {
+      loadPipeline(window.initialData.pipeline);
     }
 
     // Listen for messages from extension
@@ -143,7 +175,75 @@ function Flow() {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [reactFlowInstance]); // Dependency on reactFlowInstance for fitView
+
+  // Handle History Selection (Restore Pipeline + Playback)
+  useEffect(() => {
+    if (selectedRun) {
+      // 1. Restore Pipeline Definition if available
+      if (selectedRun.pipelineSnapshot) {
+          loadPipeline(selectedRun.pipelineSnapshot);
+      } else {
+          // If no snapshot, we can't restore structure.
+          // We can only replay on CURRENT structure if it matches.
+          // For V1, let's warn or just try.
+          console.warn('No pipeline snapshot found in history run.');
+      }
+
+      // 2. Playback logic (delayed to allow render)
+      setTimeout(() => {
+         const actionNodes = nodes.filter(n => n.id !== 'start'); // These might be old nodes if loadPipeline was async? No it's synchronous state update but React batches.
+         // Actually, loadPipeline calls setNodes. We need to wait for that to settle.
+         // But we can't await setNodes.
+         // Ideally, we should trigger playback AFTER nodes update.
+         // For now, let's just use the logic below but it might miss the new nodes if they are re-created.
+         // Wait, if we reload pipeline, nodes are new objects with new IDs (getId()).
+         // So playback logic matching by index is crucial.
+      }, 50);
+
+      onRunHandled();
+    }
+  }, [selectedRun]);
+
+  // Separate Effect for Playback (triggered when nodes are ready/stable?)
+  // Actually, let's keep the original Playback Logic but adapt it.
+  // We need to know if we are in "Playback Mode".
+  // Let's use `selectedRun` to trigger a sequence of status updates.
+  useEffect(() => {
+      const timeouts: any[] = [];
+      if (selectedRun) {
+          // Wait a bit for nodes to potentially reload
+          const t0 = setTimeout(() => {
+              // 1. Reset all nodes to idle (in case we re-used existing)
+              setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
+
+              // 2. Playback steps
+              selectedRun.steps.forEach((step: any, i: number) => {
+                 const t = setTimeout(() => {
+                   setNodes((nds) => {
+                      const actionNodes = nds.filter(n => n.id !== 'start');
+                      const targetNode = actionNodes[step.index];
+                      if (!targetNode) return nds;
+
+                      return nds.map(n => {
+                        if (n.id === targetNode.id) {
+                          return {
+                            ...n,
+                            data: { ...n.data, status: step.status }
+                          };
+                        }
+                        return n;
+                      });
+                   });
+                 }, (i + 1) * 600);
+                 timeouts.push(t);
+              });
+          }, 100);
+          timeouts.push(t0);
+      }
+      return () => timeouts.forEach(clearTimeout);
+  }, [selectedRun]);
+
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -209,7 +309,8 @@ function Flow() {
        if (!nextNode) break;
 
        const data: any = nextNode.data;
-       const intent = `${data.provider}.${data.capability}`;
+       const normalized = canonicalizeIntent(String(data.provider || ''), String(data.capability || ''));
+       const intent = normalized.intent;
 
        // Separate description from payload
        const { description, ...payload } = data.args || {};
@@ -256,7 +357,7 @@ function Flow() {
           fitView
         >
           <Controls />
-          <Background variant="dots" gap={12} size={1} />
+          <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
           <MiniMap />
         </ReactFlow>
       </div>
@@ -284,20 +385,45 @@ function Flow() {
 
 export default function App() {
   const [commandGroups, setCommandGroups] = useState<any[]>([]);
+  const [history, setHistory] = useState<any[]>([]);
+  const [selectedRun, setSelectedRun] = useState<any>(null);
 
   useEffect(() => {
-    if (window.initialData && window.initialData.commandGroups) {
-      setCommandGroups(window.initialData.commandGroups);
+    if (window.initialData) {
+      if (window.initialData.commandGroups) {
+        setCommandGroups(window.initialData.commandGroups);
+      }
+      if (window.initialData.history) {
+        setHistory(window.initialData.history);
+      }
     }
+
+    const handleMessage = (event: MessageEvent) => {
+       if (event.data?.type === 'historyUpdate') {
+           console.log('History updated:', event.data.history);
+           setHistory(event.data.history);
+           // If history is cleared, clear selected run
+           if (event.data.history.length === 0) {
+               setSelectedRun(null);
+           }
+       }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
   }, []);
 
   return (
     <RegistryContext.Provider value={{ commandGroups }}>
       <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
-         <Sidebar />
+         <Sidebar history={history} onSelectHistory={setSelectedRun} />
          <div style={{ flex: 1, position: 'relative' }}>
            <ReactFlowProvider>
-             <Flow />
+             <Flow
+                selectedRun={selectedRun}
+                onRunHandled={() => {
+                    // Logic handled in effects
+                }}
+             />
            </ReactFlowProvider>
          </div>
       </div>

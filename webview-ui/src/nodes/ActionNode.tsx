@@ -1,4 +1,4 @@
-import React, { memo, useState, useEffect, useContext } from 'react';
+import { memo, useState, useEffect, useContext } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { RegistryContext } from '../App';
 
@@ -19,6 +19,8 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const [args, setArgs] = useState<Record<string, any>>((data.args as Record<string, any>) || {});
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
   const [expandedHelp, setExpandedHelp] = useState<Record<string, boolean>>({});
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({});
 
   // Sync from props if data changes externally
   useEffect(() => {
@@ -61,6 +63,32 @@ const ActionNode = ({ data, id }: NodeProps) => {
     handleArgChange(key, current + '${input:Prompt}');
   };
 
+  const handleBrowse = (key: string) => {
+      // Send message to extension
+      if (window.vscode) {
+          window.vscode.postMessage({
+              type: 'selectPath',
+              id: id,
+              argName: key
+          });
+
+          // Listen for the response
+          const handleMessage = (event: MessageEvent) => {
+              const message = event.data;
+              if (message.type === 'pathSelected' && message.id === id && message.argName === key) {
+                  handleArgChange(key, message.path);
+                  window.removeEventListener('message', handleMessage);
+              }
+          };
+          window.addEventListener('message', handleMessage);
+      } else {
+          console.log('Browse clicked (Mock):', key);
+          // Mock for browser dev
+          const mockPath = '/mock/path/to/folder';
+          handleArgChange(key, mockPath);
+      }
+  };
+
   const toggleHelp = (key: string) => {
       setExpandedHelp(prev => ({ ...prev, [key]: !prev[key] }));
   };
@@ -79,6 +107,60 @@ const ActionNode = ({ data, id }: NodeProps) => {
      ...schemaArgs,
      { name: 'description', type: 'string', description: 'Step description for logs' }
   ];
+
+  // Initialize Defaults & Validate & Fetch Dynamic Options
+  useEffect(() => {
+      const newArgs = { ...args };
+      let changed = false;
+      const newErrors: Record<string, boolean> = {};
+
+      displayArgs.forEach((arg: any) => {
+          // Initialize default if undefined
+          if (newArgs[arg.name] === undefined && arg.default !== undefined) {
+              newArgs[arg.name] = arg.default;
+              changed = true;
+          }
+
+          // Validate required
+          if (arg.required && (newArgs[arg.name] === undefined || newArgs[arg.name] === '')) {
+              newErrors[arg.name] = true;
+          }
+
+          // Fetch dynamic options
+          if (arg.type === 'enum' && typeof arg.options === 'string' && !dynamicOptions[arg.name]) {
+             if (window.vscode) {
+                 window.vscode.postMessage({
+                     type: 'fetchOptions',
+                     command: arg.options,
+                     argName: arg.name
+                 });
+             }
+          }
+      });
+
+      if (changed) {
+          setArgs(newArgs);
+          updateData(provider, capability, newArgs);
+      }
+      setErrors(newErrors);
+
+  }, [capability, args, selectedCapConfig]);
+
+  // Listen for option responses
+  useEffect(() => {
+      const handleMessage = (event: MessageEvent) => {
+          const message = event.data;
+          if (message.type === 'optionsFetched') {
+              setDynamicOptions(prev => ({
+                  ...prev,
+                  [message.argName]: message.options
+              }));
+          }
+      };
+      window.addEventListener('message', handleMessage);
+      return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
 
   const isPause = provider === 'system' && capability === 'system.pause';
   const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
@@ -108,7 +190,8 @@ const ActionNode = ({ data, id }: NodeProps) => {
           value={selectedCapConfig?.capability || capability}
           onChange={(e) => {
             setCapability(e.target.value);
-            // Clear args that might not apply, or keep them? Keeping is safer for now.
+            // We keep args that match names, but effectively "reset" behavior is complex.
+            // For now, keeping overlap is fine, defaults will fill in.
             updateData(provider, e.target.value, args);
           }}
           style={{
@@ -137,11 +220,13 @@ const ActionNode = ({ data, id }: NodeProps) => {
           const inputId = `input-${id}-${arg.name}`;
           const isRequired = arg.required;
           const showHelp = expandedHelp[arg.name];
+          const hasError = errors[arg.name];
+          const inputBorderColor = hasError ? 'var(--vscode-inputValidation-errorBorder)' : 'var(--vscode-input-border)';
 
           return (
             <div key={arg.name} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label htmlFor={inputId} style={{ fontSize: '0.75em', opacity: 0.9, display: 'flex', alignItems: 'center' }}>
+                  <label htmlFor={inputId} style={{ fontSize: '0.75em', opacity: 0.9, display: 'flex', alignItems: 'center', color: hasError ? 'var(--vscode-inputValidation-errorForeground)' : 'inherit' }}>
                       {arg.name}
                       {isRequired && <span style={{ color: '#f44336', marginLeft: '2px' }}>*</span>}
                   </label>
@@ -185,9 +270,12 @@ const ActionNode = ({ data, id }: NodeProps) => {
                        className="nodrag"
                        checked={!!args[arg.name]}
                        onChange={(e) => handleArgChange(arg.name, e.target.checked)}
-                       style={{ alignSelf: 'flex-start' }}
+                       style={{
+                         alignSelf: 'flex-start',
+                         outline: hasError ? `1px solid ${inputBorderColor}` : 'none'
+                       }}
                    />
-              ) : arg.type === 'enum' && arg.options ? (
+              ) : arg.type === 'enum' ? (
                    <select
                        id={inputId}
                        className="nodrag"
@@ -197,15 +285,67 @@ const ActionNode = ({ data, id }: NodeProps) => {
                            width: '100%',
                            background: 'var(--vscode-input-background)',
                            color: 'var(--vscode-input-foreground)',
-                           border: '1px solid var(--vscode-input-border)',
+                           border: `1px solid ${inputBorderColor}`,
                            padding: '4px'
                        }}
                    >
                        <option value="">(Select)</option>
-                       {arg.options.map((opt: string) => (
+                       {(Array.isArray(arg.options) ? arg.options : (dynamicOptions[arg.name] || [])).map((opt: string) => (
                            <option key={opt} value={opt}>{opt}</option>
                        ))}
                    </select>
+              ) : arg.type === 'path' ? (
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <input
+                      id={inputId}
+                      className="nodrag"
+                      type="text"
+                      value={args[arg.name] || ''}
+                      onChange={(e) => handleArgChange(arg.name, e.target.value)}
+                      placeholder={arg.default !== undefined ? `${arg.default} (default)` : ''}
+                      style={{
+                        flex: 1,
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: `1px solid ${inputBorderColor}`,
+                        padding: '4px',
+                        fontSize: '0.9em'
+                      }}
+                    />
+                    <button
+                        className="nodrag"
+                        onClick={() => handleBrowse(arg.name)}
+                        title="Browse..."
+                        style={{
+                            background: 'var(--vscode-button-secondaryBackground)',
+                            color: 'var(--vscode-button-secondaryForeground)',
+                            border: 'none',
+                            cursor: 'pointer',
+                            padding: '0 8px',
+                            display: 'flex',
+                            alignItems: 'center'
+                        }}
+                    >
+                        <span className="codicon codicon-folder-opened"></span>
+                    </button>
+                    <button
+                      className="nodrag"
+                      onClick={() => insertVariable(arg.name)}
+                      title="Insert Input Variable"
+                      style={{
+                        background: 'var(--vscode-button-background)',
+                        color: 'var(--vscode-button-foreground)',
+                        border: 'none',
+                        cursor: 'pointer',
+                        width: '24px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      {'{ }'}
+                    </button>
+                  </div>
               ) : (
                   <div style={{ display: 'flex', gap: '4px' }}>
                     <input
@@ -214,12 +354,12 @@ const ActionNode = ({ data, id }: NodeProps) => {
                       type="text"
                       value={args[arg.name] || ''}
                       onChange={(e) => handleArgChange(arg.name, e.target.value)}
-                      placeholder={arg.default ? `${arg.default} (default)` : ''}
+                      placeholder={arg.default !== undefined ? `${arg.default} (default)` : ''}
                       style={{
                         flex: 1,
                         background: 'var(--vscode-input-background)',
                         color: 'var(--vscode-input-foreground)',
-                        border: '1px solid var(--vscode-input-border)',
+                        border: `1px solid ${inputBorderColor}`,
                         padding: '4px',
                         fontSize: '0.9em'
                       }}
