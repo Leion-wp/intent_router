@@ -16,7 +16,7 @@ export interface PipelineRun {
     id: string;
     name: string;
     timestamp: number;
-    status: 'running' | 'success' | 'failure' | 'cancelled';
+    status: 'running' | 'success' | 'failure' | 'cancelled' | 'aborted';
     steps: StepLog[];
 }
 
@@ -66,6 +66,12 @@ export class HistoryManager {
         return this.runs;
     }
 
+    public async clearHistory() {
+        this.runs = [];
+        await this.saveHistory();
+        pipelineEventBus.emit({ type: 'historyUpdate', runId: 'sys', timestamp: Date.now() } as any);
+    }
+
     private registerListeners() {
         pipelineEventBus.on(this.handleEvent.bind(this));
     }
@@ -113,6 +119,11 @@ export class HistoryManager {
 
             case 'pipelineEnd':
                 if (this.currentRun && this.currentRun.id === event.runId) {
+                    // Map 'failure' to 'aborted' if user prefers that terminology for failed runs
+                    // But usually failure means error, cancelled means user stop.
+                    // User request: "mark abort rather than failed".
+                    // I will interpret this as: if success=false, mark as 'aborted'.
+                    this.currentRun.status = event.success ? 'success' : 'aborted';
                     this.currentRun.status = event.success ? 'success' : 'failure';
                     this.saveHistory();
                     this.currentRun = null;

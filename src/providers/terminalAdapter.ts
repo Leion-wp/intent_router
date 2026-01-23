@@ -31,6 +31,8 @@ export const terminalTemplates: Record<string, any> = {
 
 export async function executeTerminalCommand(args: any): Promise<void> {
     const commandText = args?.command;
+    const cwd = args?.cwd;
+
     if (!commandText || typeof commandText !== 'string') {
         vscode.window.showErrorMessage('Invalid terminal command payload. Expected "command" string.');
         return;
@@ -44,5 +46,11 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     }
 
     term.show();
+
+    if (cwd && typeof cwd === 'string' && cwd.trim().length > 0) {
+        // Send cd first
+        term.sendText(`cd "${cwd}"`);
+    }
+
     term.sendText(commandText);
 }

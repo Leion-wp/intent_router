@@ -186,6 +186,9 @@ function Flow({ selectedRun }: { selectedRun: any }) {
       const actionNodes = nodes.filter(n => n.id !== 'start');
 
       selectedRun.steps.forEach((step: any, i: number) => {
+         // Immediate reset at step 0 if needed, but we did it above.
+
+         // Visual playback
          const t = setTimeout(() => {
            setNodes((nds) => {
               // Map index to action node ID
@@ -375,14 +378,28 @@ export default function App() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  // When clicking an active run again or clicking clear, we might want to toggle?
+  // For now, let's allow re-selection to replay.
+  // Sidebar handles the click.
+
   return (
     <RegistryContext.Provider value={{ commandGroups }}>
       <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
-         <Sidebar history={history} onSelectHistory={setSelectedRun} />
+         <Sidebar
+            history={history}
+            onSelectHistory={(run) => setSelectedRun(run)}
+         />
          <div style={{ flex: 1, position: 'relative' }}>
-           <ReactFlowProvider>
-             <Flow selectedRun={selectedRun} />
-           </ReactFlowProvider>
+            {/* Click on background to reset selection? Optional UX */}
+            <div style={{width: '100%', height: '100%'}} onClick={(e) => {
+                // If click is directly on the container (not node), maybe reset?
+                // Hard to detect in React Flow wrapper easily without capturing everything.
+                // Let's rely on logic inside Flow component to handle 'selectedRun' prop changes.
+            }}>
+               <ReactFlowProvider>
+                 <Flow selectedRun={selectedRun} />
+               </ReactFlowProvider>
+            </div>
          </div>
       </div>
     </RegistryContext.Provider>
