@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 
 type SidebarProps = {
-    history?: any[];
-    onSelectHistory?: (run: any) => void;
+  history?: any[];
+  onSelectHistory?: (run: any) => void;
 };
 
 // Acquire VS Code API (safe singleton) - reuse from App or get from global
@@ -32,27 +32,12 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
     { id: 'terminal', label: 'Terminal', icon: 'codicon-terminal', desc: 'Run shell commands' },
     { id: 'system', label: 'System', icon: 'codicon-settings-gear', desc: 'Workflow controls' },
     { id: 'git', label: 'Git', icon: 'codicon-git-commit', desc: 'Version control operations' },
-    { id: 'docker', label: 'Docker', icon: 'codicon-container', desc: 'Container operations' },
+    { id: 'docker', label: 'Docker', icon: 'codicon-container', desc: 'Container operations' }
   ];
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-header">
-        Providers
-      </div>
-
-      <div className="sidebar-list">
-        {providers.map((p) => (
-          <div
-            key={p.id}
-            className="dndnode"
-            onDragStart={(event) => onDragStart(event, 'actionNode', p.id)}
-            draggable
-            title={`Drag to add ${p.label} - ${p.desc}`}
-            aria-label={`Add ${p.label} node`}
-            tabIndex={0}
-            role="listitem"
-    <aside style={{
+    <aside
+      style={{
         width: '280px',
         minWidth: '240px',
         maxWidth: '360px',
@@ -66,50 +51,50 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
         gap: '16px',
         fontFamily: 'var(--vscode-font-family)',
         fontSize: 'var(--vscode-font-size)'
-      }}>
-
+      }}
+    >
       <div style={{ display: 'flex', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px', gap: '16px' }}>
-          <div
-             onClick={() => setTab('providers')}
-             style={{
-                 cursor: 'pointer',
-                 fontWeight: tab === 'providers' ? 'bold' : 'normal',
-                 opacity: tab === 'providers' ? 1 : 0.6,
-                 borderBottom: tab === 'providers' ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none'
-             }}
-          >
-              PROVIDERS
-          </div>
-          <div
-             onClick={() => setTab('history')}
-             style={{
-                 cursor: 'pointer',
-                 fontWeight: tab === 'history' ? 'bold' : 'normal',
-                 opacity: tab === 'history' ? 1 : 0.6,
-                 borderBottom: tab === 'history' ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none'
-             }}
-          >
-              HISTORY
-          </div>
+        <div
+          onClick={() => setTab('providers')}
+          style={{
+            cursor: 'pointer',
+            fontWeight: tab === 'providers' ? 'bold' : 'normal',
+            opacity: tab === 'providers' ? 1 : 0.6,
+            borderBottom: tab === 'providers' ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none'
+          }}
+        >
+          PROVIDERS
+        </div>
+        <div
+          onClick={() => setTab('history')}
+          style={{
+            cursor: 'pointer',
+            fontWeight: tab === 'history' ? 'bold' : 'normal',
+            opacity: tab === 'history' ? 1 : 0.6,
+            borderBottom: tab === 'history' ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none'
+          }}
+        >
+          HISTORY
+        </div>
       </div>
 
       {tab === 'providers' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {providers.map((p) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} role="list" aria-label="Providers">
+          {providers.map((p) => (
             <div
-                key={p.id}
-                className="dndnode"
-                onDragStart={(event) => onDragStart(event, 'actionNode', p.id)}
-                draggable
-                title={p.desc}
-                role="listitem"
-                tabIndex={0}
-                aria-label={`Drag ${p.label} to graph`}
+              key={p.id}
+              className="dndnode"
+              onDragStart={(event) => onDragStart(event, 'actionNode', p.id)}
+              draggable
+              title={p.desc}
+              role="listitem"
+              tabIndex={0}
+              aria-label={`Drag ${p.label} to graph`}
             >
-                <span className={`codicon ${p.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
-                <span>{p.label}</span>
+              <span className={`codicon ${p.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
+              <span>{p.label}</span>
             </div>
-            ))}
+          ))}
         </div>
       ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', flex: 1 }}>
@@ -162,16 +147,18 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
       )}
 
       {tab === 'providers' && (
-        <div style={{
+        <div
+          style={{
             marginTop: 'auto',
             fontSize: '11px',
             opacity: 0.6,
             display: 'flex',
             alignItems: 'center',
             gap: '6px'
-        }}>
-            <span className="codicon codicon-info"></span>
-            <span>Drag items to the graph</span>
+          }}
+        >
+          <span className="codicon codicon-info"></span>
+          <span>Drag items to the graph</span>
         </div>
       )}
     </aside>
