@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Intent, ProfileConfig, ProviderAdapter, Resolution, UserMapping } from './types';
 import { resolveCapabilities } from './registry';
+import { generateSecureTraceId } from './security';
 
 let cachedLogLevel: 'error' | 'warn' | 'info' | 'debug' | undefined;
 
@@ -10,12 +11,38 @@ export function invalidateLogLevelCache(): void {
 
 export async function routeIntent(intent: Intent, variableCache?: Map<string, string>): Promise<boolean> {
     const config = vscode.workspace.getConfiguration('intentRouter');
-    const normalized = normalizeIntent(intent, config);
     const output = getOutputChannel();
+    const minLevel = getLogLevel(config);
+    const normalized = normalizeIntent(intent, config);
+
+    // Recursive Execution Logic (Composite Pattern)
+    if (intent.steps && intent.steps.length > 0) {
+        log(output, normalized, minLevel, 'info', 'IR016', `step=composite-start count=${intent.steps.length}`);
+
+        for (const childStep of intent.steps) {
+            // Propagate variables cache and debug/dryRun context
+            const childIntent: Intent = {
+                ...childStep,
+                meta: {
+                    ...(normalized.meta ?? {}),
+                    ...(childStep.meta ?? {})
+                }
+            };
+
+            const success = await routeIntent(childIntent, variableCache);
+            if (!success) {
+                log(output, normalized, minLevel, 'warn', 'IR017', 'step=composite-fail');
+                return false;
+            }
+        }
+
+        log(output, normalized, minLevel, 'info', 'IR018', 'step=composite-end');
+        return true;
+    }
+
+    // Atomic Execution Logic (Existing)
     const profile = getActiveProfile(config);
     const { primaryMappings, fallbackMappings } = getUserMappings(config, profile);
-
-    const minLevel = getLogLevel(config);
 
     log(output, normalized, minLevel, 'info', 'IR001', `step=normalize intent=${normalized.intent}`);
 
@@ -87,14 +114,46 @@ function normalizeIntent(intent: Intent, config: vscode.WorkspaceConfiguration):
 
     const meta = {
         dryRun: intent.meta?.dryRun ?? false,
-        traceId: intent.meta?.traceId ?? generateTraceId(),
+        traceId: intent.meta?.traceId ?? generateSecureTraceId(),
         debug: intent.meta?.debug ?? debugDefault
     };
 
+    // V1 Compatibility: If 'capabilities' is missing, assume the intent string itself
+    // is the requested capability (Atomic Intent).
+    const rawCapabilities = (intent.capabilities && intent.capabilities.length > 0)
+        ? intent.capabilities
+        : [intent.intent];
+
+    const capabilities = rawCapabilities.map(canonicalizeCapabilityId);
+
     return {
         ...intent,
+        capabilities,
         meta
     };
+}
+
+function canonicalizeCapabilityId(capability: string): string {
+    const raw = (capability ?? '').trim();
+    if (!raw) {
+        return raw;
+    }
+
+    const parts = raw.split('.').filter(Boolean);
+    if (parts.length < 3) {
+        return raw;
+    }
+
+    const first = parts[0];
+    let i = 1;
+    while (i < parts.length - 1 && parts[i] === first) {
+        i += 1;
+    }
+    if (i === 1) {
+        return raw;
+    }
+
+    return [first, ...parts.slice(i)].join('.');
 }
 
 function getActiveProfile(config: vscode.WorkspaceConfiguration): ProfileConfig | undefined {
@@ -184,7 +243,7 @@ function expandCompositeResolutions(intent: Intent, entries: Resolution[]): Reso
     return expanded;
 }
 
-async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
+export async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
     if (typeof input === 'string') {
         const regex = /\$\{input:([^}]+)\}/g;
         let match;
@@ -308,11 +367,6 @@ function log(
     if (intent.meta?.debug) {
         console.log(`[${traceId}] ${level.toUpperCase()} ${code} ${message}`);
     }
-}
-
-function generateTraceId(): string {
-    const rand = Math.floor(Math.random() * 1e8).toString(16);
-    return `${Date.now().toString(16)}-${rand}`;
 }
 
 function getLogLevel(config: vscode.WorkspaceConfiguration): 'error' | 'warn' | 'info' | 'debug' {

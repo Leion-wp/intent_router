@@ -2,13 +2,15 @@ import * as vscode from 'vscode';
 import { routeIntent, invalidateLogLevelCache } from './router';
 import { Intent, RegisterCapabilitiesArgs } from './types';
 import { registerCapabilities } from './registry';
+import { generateSecureNonce } from './security';
 import { PipelineBuilder } from './pipelineBuilder';
 import { PipelinesTreeDataProvider } from './pipelinesView';
-import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri } from './pipelineRunner';
+import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri, cancelCurrentPipeline, pauseCurrentPipeline, resumeCurrentPipeline } from './pipelineRunner';
 import { registerGitProvider } from './providers/gitAdapter';
 import { registerDockerProvider } from './providers/dockerAdapter';
 import { executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
 import { registerSystemProvider } from './providers/systemAdapter';
+import { StatusBarManager } from './statusBar';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
@@ -24,6 +26,9 @@ export function activate(context: vscode.ExtensionContext) {
     const pipelinesView = vscode.window.createTreeView('intentRouterPipelines', {
         treeDataProvider: pipelinesProvider
     });
+
+    const statusBarManager = new StatusBarManager();
+    context.subscriptions.push(statusBarManager);
 
     let disposable = vscode.commands.registerCommand('intentRouter.route', async (args: any) => {
         // Basic validation
@@ -216,6 +221,32 @@ export function activate(context: vscode.ExtensionContext) {
         pipelinesProvider.refresh();
     });
 
+    let showPipelineActionsDisposable = vscode.commands.registerCommand('intentRouter.showPipelineActions', async () => {
+        const selection = await vscode.window.showQuickPick(['Pause Pipeline', 'Resume Pipeline', 'Cancel Pipeline'], {
+            placeHolder: 'Select action for current pipeline'
+        });
+        if (selection === 'Pause Pipeline') {
+             pauseCurrentPipeline();
+        } else if (selection === 'Resume Pipeline') {
+             resumeCurrentPipeline();
+        } else if (selection === 'Cancel Pipeline') {
+             cancelCurrentPipeline();
+        }
+    });
+
+    let cancelPipelineDisposable = vscode.commands.registerCommand('intentRouter.cancelPipeline', async () => {
+         cancelCurrentPipeline();
+    });
+
+    let pausePipelineDisposable = vscode.commands.registerCommand('intentRouter.pausePipeline', async () => {
+         pauseCurrentPipeline();
+    });
+
+    let resumePipelineDisposable = vscode.commands.registerCommand('intentRouter.resumePipeline', async () => {
+         resumeCurrentPipeline();
+    });
+
+
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('intentRouter.logLevel')) {
             invalidateLogLevelCache();
@@ -243,6 +274,10 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(dryRunSelectedPipelineDisposable);
     context.subscriptions.push(openPipelineJsonDisposable);
     context.subscriptions.push(refreshPipelinesDisposable);
+    context.subscriptions.push(showPipelineActionsDisposable);
+    context.subscriptions.push(cancelPipelineDisposable);
+    context.subscriptions.push(pausePipelineDisposable);
+    context.subscriptions.push(resumePipelineDisposable);
     context.subscriptions.push(pipelinesView);
 }
 
@@ -386,7 +421,7 @@ async function openPromptPanel(prompt: string): Promise<void> {
         { enableScripts: true }
     );
 
-    const nonce = generateNonce();
+    const nonce = generateSecureNonce();
     panel.webview.html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -429,13 +464,4 @@ async function fileExists(uri: vscode.Uri): Promise<boolean> {
     } catch {
         return false;
     }
-}
-
-function generateNonce(): string {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
 }

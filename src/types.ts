@@ -2,6 +2,7 @@ export type Intent = {
     intent: string;
     description?: string;
     capabilities?: string[];
+    steps?: Intent[];
     payload?: any;
     provider?: string;
     target?: string;
@@ -9,11 +10,21 @@ export type Intent = {
         dryRun?: boolean;
         traceId?: string;
         debug?: boolean;
+        ui?: any;
     };
 };
 
 export type ProviderType = 'vscode' | 'external';
 export type CapabilityType = 'atomic' | 'composite';
+
+export type CapabilityArgument = {
+    name: string;
+    type: 'string' | 'boolean' | 'enum';
+    description?: string;
+    options?: string[]; // For enum
+    required?: boolean;
+    default?: any;
+};
 
 export type Capability = {
     capability: string;
@@ -22,6 +33,7 @@ export type Capability = {
     provider?: string;
     target?: string;
     type?: ProviderType;
+    args?: CapabilityArgument[];
     mapPayload?: (intent: Intent) => any;
 };
 
@@ -66,6 +78,8 @@ export type CompositeCapability = {
     target?: string;
     type?: ProviderType;
     steps: CompositeStep[];
+    args?: CapabilityArgument[];
+    description?: string;
 };
 
 export type UserMapping = {
@@ -85,6 +99,8 @@ export type RegisterCapabilitiesArgs = {
         command: string;
         capabilityType?: CapabilityType;
         steps?: CompositeStep[];
+        args?: CapabilityArgument[];
+        description?: string;
         mapPayload?: (intent: Intent) => any;
     }>;
     command?: string;

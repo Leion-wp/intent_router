@@ -1,0 +1,37 @@
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.dndflow {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.dndnode {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid var(--vscode-dropdown-border);
+  border-radius: 2px;
+  cursor: grab;
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  transition: background 0.1s ease, border-color 0.1s ease;
+  user-select: none;
+}
+
+.dndnode:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-list-hoverForeground);
+}
+
+.dndnode:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+  border-color: var(--vscode-focusBorder);
+}
