@@ -21,7 +21,7 @@ function doRegister() {
                 command: 'intentRouter.internal.systemPause',
                 description: 'Pause execution for human verification',
                 args: [
-                    { name: 'message', type: 'string', description: 'Message to display in the modal', required: true, default: 'Pipeline paused for review.' }
+                    { name: 'message', type: 'string', description: 'Message to display in the modal', default: 'Pipeline paused for review.' }
                 ]
             }
         ]
