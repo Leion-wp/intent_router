@@ -317,6 +317,26 @@ async function executeResolution(
          return false;
     }
 
+    // Argument Validation
+    if (entry.args && !meta.dryRun) {
+        payload = payload || {};
+        for (const arg of entry.args) {
+            const val = payload[arg.name];
+
+            // Check required
+            if (arg.required && (val === undefined || val === null || val === '')) {
+                log(output, intent, minLevel, 'error', 'IR019', `step=validate-args error=missing-required arg=${arg.name}`);
+                vscode.window.showErrorMessage(`Missing required argument: ${arg.name} for ${entry.capability}`);
+                return false;
+            }
+
+            // Apply default
+            if (val === undefined && arg.default !== undefined) {
+                payload[arg.name] = arg.default;
+            }
+        }
+    }
+
     log(
         output,
         intent,

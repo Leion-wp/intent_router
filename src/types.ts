@@ -47,6 +47,7 @@ export type Resolution = {
     mapPayload?: (intent: Intent) => any;
     source: 'user' | 'registry' | 'fallback' | 'composite';
     compositeSteps?: CompositeStep[];
+    args?: CapabilityArgument[];
 };
 
 export type ProviderAdapter = {

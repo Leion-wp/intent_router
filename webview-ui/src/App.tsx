@@ -78,7 +78,7 @@ function canonicalizeIntent(provider: string, capability: string): { provider: s
   return { provider: finalProvider, intent: cap, capability: cap };
 }
 
-function Flow() {
+function Flow({ selectedRun }: { selectedRun: any }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -171,6 +171,49 @@ function Flow() {
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, []);
+
+  // Playback Logic
+  useEffect(() => {
+    const timeouts: any[] = [];
+
+    if (selectedRun) {
+      console.log('Replaying run:', selectedRun);
+
+      // 1. Reset all nodes to idle
+      setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
+
+      // 2. Playback steps
+      const actionNodes = nodes.filter(n => n.id !== 'start');
+
+      selectedRun.steps.forEach((step: any, i: number) => {
+         // Immediate reset at step 0 if needed, but we did it above.
+
+         // Visual playback
+         const t = setTimeout(() => {
+           setNodes((nds) => {
+              // Map index to action node ID
+              const targetNode = actionNodes[step.index];
+              if (!targetNode) return nds;
+
+              return nds.map(n => {
+                if (n.id === targetNode.id) {
+                  return {
+                    ...n,
+                    data: { ...n.data, status: step.status }
+                  };
+                }
+                return n;
+              });
+           });
+         }, (i + 1) * 600); // 600ms delay per step
+         timeouts.push(t);
+      });
+    }
+
+    return () => {
+      timeouts.forEach(clearTimeout);
+    };
+  }, [selectedRun]); // Re-run when selectedRun changes
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -312,21 +355,51 @@ function Flow() {
 
 export default function App() {
   const [commandGroups, setCommandGroups] = useState<any[]>([]);
+  const [history, setHistory] = useState<any[]>([]);
+  const [selectedRun, setSelectedRun] = useState<any>(null);
 
   useEffect(() => {
-    if (window.initialData && window.initialData.commandGroups) {
-      setCommandGroups(window.initialData.commandGroups);
+    if (window.initialData) {
+      if (window.initialData.commandGroups) {
+        setCommandGroups(window.initialData.commandGroups);
+      }
+      if (window.initialData.history) {
+        setHistory(window.initialData.history);
+      }
     }
+
+    const handleMessage = (event: MessageEvent) => {
+       if (event.data?.type === 'historyUpdate') {
+           console.log('History updated:', event.data.history);
+           setHistory(event.data.history);
+       }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
   }, []);
+
+  // When clicking an active run again or clicking clear, we might want to toggle?
+  // For now, let's allow re-selection to replay.
+  // Sidebar handles the click.
 
   return (
     <RegistryContext.Provider value={{ commandGroups }}>
       <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
-         <Sidebar />
+         <Sidebar
+            history={history}
+            onSelectHistory={(run) => setSelectedRun(run)}
+         />
          <div style={{ flex: 1, position: 'relative' }}>
-           <ReactFlowProvider>
-             <Flow />
-           </ReactFlowProvider>
+            {/* Click on background to reset selection? Optional UX */}
+            <div style={{width: '100%', height: '100%'}} onClick={(e) => {
+                // If click is directly on the container (not node), maybe reset?
+                // Hard to detect in React Flow wrapper easily without capturing everything.
+                // Let's rely on logic inside Flow component to handle 'selectedRun' prop changes.
+            }}>
+               <ReactFlowProvider>
+                 <Flow selectedRun={selectedRun} />
+               </ReactFlowProvider>
+            </div>
          </div>
       </div>
     </RegistryContext.Provider>
