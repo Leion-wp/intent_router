@@ -50,7 +50,8 @@ export default function Sidebar() {
             draggable
             title={p.desc}
             role="listitem"
-            style={nodeStyle}
+            tabIndex={0}
+            aria-label={`Drag ${p.label} to graph`}
           >
             <span className={`codicon ${p.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
             <span>{p.label}</span>
@@ -73,16 +74,3 @@ export default function Sidebar() {
   );
 }
 
-const nodeStyle: React.CSSProperties = {
-  height: '36px',
-  display: 'flex',
-  alignItems: 'center',
-  padding: '0 12px',
-  border: '1px solid var(--vscode-dropdown-border)',
-  borderRadius: '2px',
-  cursor: 'grab',
-  background: 'var(--vscode-dropdown-background)',
-  color: 'var(--vscode-dropdown-foreground)',
-  transition: 'background 0.1s ease',
-  userSelect: 'none'
-};
