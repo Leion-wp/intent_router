@@ -24,7 +24,7 @@ function doRegister() {
                 command: 'vscode-docker.configure', // Best approximation for build workflow in V1
                 description: 'Build a Docker image',
                 args: [
-                    { name: 'tag', type: 'string', description: 'Image tag' },
+                    { name: 'tag', type: 'string', description: 'Image tag', required: true },
                     { name: 'path', type: 'string', description: 'Context path', default: '.' }
                 ]
             },
@@ -33,7 +33,8 @@ function doRegister() {
                 command: 'vscode-docker.containers.start',
                 description: 'Run a Docker container',
                 args: [
-                    { name: 'image', type: 'string', description: 'Image ID or name' }
+                    { name: 'image', type: 'string', description: 'Image ID or name', required: true },
+                    { name: 'detach', type: 'boolean', description: 'Run in background', default: true }
                 ]
             },
             {
@@ -49,6 +50,6 @@ function doRegister() {
 
 export const dockerTemplates: Record<string, any> = {
     'docker.build': { "tag": "myapp:latest", "path": "." },
-    'docker.run': { "image": "myapp:latest" },
+    'docker.run': { "image": "myapp:latest", "detach": true },
     'docker.logs': {}
 };
