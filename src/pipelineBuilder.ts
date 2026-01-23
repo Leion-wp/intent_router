@@ -5,10 +5,13 @@ import { gitTemplates } from './providers/gitAdapter';
 import { dockerTemplates } from './providers/dockerAdapter';
 import { terminalTemplates } from './providers/terminalAdapter';
 import { pipelineEventBus } from './eventBus';
+import { generateSecureNonce } from './security';
+import { Capability, CompositeCapability } from './types';
+import { historyManager } from './historyManager';
 
 type CommandGroup = {
     provider: string;
-    commands: string[];
+    commands: (Capability | CompositeCapability)[];
 };
 
 export class PipelineBuilder {
@@ -22,9 +25,11 @@ export class PipelineBuilder {
         // If we already have a panel, reveal it. But if opening a different URI, we might want to replace content.
         // For V1, simplest is to allow multiple panels or just one singleton. Let's do singleton for now.
         if (this.panel) {
-            this.panel.reveal(vscode.ViewColumn.Active);
-            // TODO: Update content if needed? For now we assume new open call replaces old one or creates new if disposed.
-            // Actually, let's just dispose old one if different URI for simplicity.
+            // Dispose the previous panel to avoid stacking event listeners and message handlers.
+            const oldPanel = this.panel;
+            this.panel = undefined;
+            this.dispose();
+            oldPanel.dispose();
         }
 
         this.currentUri = uri;
@@ -54,6 +59,13 @@ export class PipelineBuilder {
                        status: e.type === 'stepStart' ? 'running' : (e.success ? 'success' : 'failure')
                    });
                }
+
+               if (e.type === 'pipelineStart' || e.type === 'pipelineEnd') {
+                   this.panel.webview.postMessage({
+                       type: 'historyUpdate',
+                       history: historyManager.getHistory()
+                   });
+               }
             }
         });
         this.disposables.push(eventSub);
@@ -69,6 +81,7 @@ export class PipelineBuilder {
         const profileNames = this.getProfileNames();
         const initialPipeline = pipeline ?? { name: '', steps: [] };
         const templates = { ...gitTemplates, ...dockerTemplates, ...terminalTemplates };
+        const history = historyManager.getHistory();
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
@@ -84,13 +97,59 @@ export class PipelineBuilder {
             pipeline: initialPipeline,
             commandGroups,
             profiles: profileNames,
-            templates
+            templates,
+            history
         });
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'savePipeline') {
                 await this.savePipeline(message.pipeline as PipelineFile);
                 vscode.window.showInformationMessage('Pipeline saved successfully.');
+                return;
+            }
+            if (message?.type === 'clearHistory') {
+                await historyManager.clearHistory();
+                this.panel?.webview.postMessage({
+                    type: 'historyUpdate',
+                    history: historyManager.getHistory()
+                });
+                return;
+            }
+            if (message?.type === 'selectPath') {
+                const uris = await vscode.window.showOpenDialog({
+                    canSelectFiles: true,
+                    canSelectFolders: true,
+                    canSelectMany: false,
+                    openLabel: 'Select'
+                });
+                if (uris && uris.length > 0) {
+                    const path = uris[0].fsPath;
+                    this.panel?.webview.postMessage({
+                        type: 'pathSelected',
+                        id: message.id,
+                        argName: message.argName,
+                        path: path
+                    });
+                }
+                return;
+            }
+            if (message?.type === 'fetchOptions') {
+                const { command, argName } = message;
+                try {
+                    // Execute the internal command to fetch options
+                    const options = await vscode.commands.executeCommand(command);
+                    if (Array.isArray(options)) {
+                        this.panel?.webview.postMessage({
+                            type: 'optionsFetched',
+                            argName,
+                            options
+                        });
+                    } else {
+                         console.warn(`Dynamic options command ${command} did not return an array.`);
+                    }
+                } catch (error) {
+                    console.error(`Failed to fetch dynamic options for ${command}:`, error);
+                }
                 return;
             }
         });
@@ -136,14 +195,17 @@ export class PipelineBuilder {
 
     private async getCommandGroups(): Promise<CommandGroup[]> {
         const capabilities = listPublicCapabilities();
-        const groups = new Map<string, Set<string>>();
+        const groups = new Map<string, (Capability | CompositeCapability)[]>();
+
         for (const entry of capabilities) {
             const provider = entry.provider || 'custom';
-            if (!groups.has(provider)) groups.set(provider, new Set());
-            groups.get(provider)?.add(entry.capability);
+            if (!groups.has(provider)) groups.set(provider, []);
+            groups.get(provider)?.push(entry);
         }
+
         return Array.from(groups.entries()).map(([provider, cmds]) => ({
-            provider, commands: Array.from(cmds).sort()
+            provider,
+            commands: cmds.sort((a, b) => a.capability.localeCompare(b.capability))
         })).sort((a, b) => a.provider.localeCompare(b.provider));
     }
 
@@ -153,7 +215,7 @@ export class PipelineBuilder {
     }
 
     private getHtml(webview: vscode.Webview, scriptUri: vscode.Uri, styleUri: vscode.Uri, codiconUri: vscode.Uri, data: any): string {
-        const nonce = this.getNonce();
+        const nonce = generateSecureNonce();
         // Prevent XSS by escaping < and > in JSON payload
         const payload = JSON.stringify(data).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 
@@ -176,14 +238,5 @@ export class PipelineBuilder {
     <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
-    }
-
-    private getNonce(): string {
-        let text = '';
-        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        for (let i = 0; i < 32; i++) {
-            text += possible.charAt(Math.floor(Math.random() * possible.length));
-        }
-        return text;
     }
 }

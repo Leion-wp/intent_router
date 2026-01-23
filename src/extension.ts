@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { routeIntent, invalidateLogLevelCache } from './router';
 import { Intent, RegisterCapabilitiesArgs } from './types';
 import { registerCapabilities } from './registry';
+import { generateSecureNonce } from './security';
 import { PipelineBuilder } from './pipelineBuilder';
 import { PipelinesTreeDataProvider } from './pipelinesView';
 import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri, cancelCurrentPipeline, pauseCurrentPipeline, resumeCurrentPipeline } from './pipelineRunner';
@@ -10,9 +11,11 @@ import { registerDockerProvider } from './providers/dockerAdapter';
 import { executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
 import { registerSystemProvider } from './providers/systemAdapter';
 import { StatusBarManager } from './statusBar';
+import { historyManager } from './historyManager';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
+    console.log('HistoryManager initialized', !!historyManager);
 
     // V1 Providers: Strict discovery
     registerGitProvider(context);
@@ -97,14 +100,14 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) {
+        const fileName = name.endsWith('.intent.json') ? name : `${name}.intent.json`;
+        const folder = await ensurePipelineFolder();
+        if (!folder) {
             vscode.window.showErrorMessage('Open a workspace folder to create a pipeline file.');
             return;
         }
 
-        const fileName = name.endsWith('.intent.json') ? name : `${name}.intent.json`;
-        const defaultUri = vscode.Uri.joinPath(workspaceFolder.uri, fileName);
+        const defaultUri = vscode.Uri.joinPath(folder, fileName);
         const targetUri = await vscode.window.showSaveDialog({
             defaultUri,
             filters: { 'Intent Pipeline': ['intent.json'] }
@@ -245,6 +248,10 @@ export function activate(context: vscode.ExtensionContext) {
          resumeCurrentPipeline();
     });
 
+    let clearHistoryDisposable = vscode.commands.registerCommand('intentRouter.clearHistory', async () => {
+        await historyManager.clearHistory();
+    });
+
 
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('intentRouter.logLevel')) {
@@ -277,6 +284,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(cancelPipelineDisposable);
     context.subscriptions.push(pausePipelineDisposable);
     context.subscriptions.push(resumePipelineDisposable);
+    context.subscriptions.push(clearHistoryDisposable);
     context.subscriptions.push(pipelinesView);
 }
 
@@ -420,7 +428,7 @@ async function openPromptPanel(prompt: string): Promise<void> {
         { enableScripts: true }
     );
 
-    const nonce = generateNonce();
+    const nonce = generateSecureNonce();
     panel.webview.html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -463,13 +471,4 @@ async function fileExists(uri: vscode.Uri): Promise<boolean> {
     } catch {
         return false;
     }
-}
-
-function generateNonce(): string {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
 }

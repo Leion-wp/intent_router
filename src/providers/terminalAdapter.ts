@@ -13,7 +13,12 @@ function doRegister() {
         capabilities: [
             {
                 capability: 'terminal.run',
-                command: 'intentRouter.internal.terminalRun'
+                command: 'intentRouter.internal.terminalRun',
+                description: 'Run a shell command in the integrated terminal',
+                args: [
+                    { name: 'command', type: 'string', description: 'The shell command to execute', required: true },
+                    { name: 'cwd', type: 'path', description: 'Working directory', default: '.' }
+                ]
             }
         ]
     });
@@ -21,11 +26,13 @@ function doRegister() {
 }
 
 export const terminalTemplates: Record<string, any> = {
-    'terminal.run': { "command": "echo 'Hello Intent Router'" }
+    'terminal.run': { "command": "echo 'Hello Intent Router'", "cwd": "." }
 };
 
 export async function executeTerminalCommand(args: any): Promise<void> {
     const commandText = args?.command;
+    const cwd = args?.cwd;
+
     if (!commandText || typeof commandText !== 'string') {
         vscode.window.showErrorMessage('Invalid terminal command payload. Expected "command" string.');
         return;
@@ -39,5 +46,12 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     }
 
     term.show();
+
+    // Avoid shell-specific chaining tokens (PowerShell 5.1 doesn't support `&&`).
+    // `pushd` works across PowerShell/cmd/bash/zsh and also switches drives on Windows.
+    if (typeof cwd === 'string' && cwd.trim() && cwd.trim() !== '.') {
+        term.sendText(`pushd "${cwd.trim()}"`);
+    }
+
     term.sendText(commandText);
 }

@@ -18,7 +18,11 @@ function doRegister() {
         capabilities: [
             {
                 capability: 'system.pause',
-                command: 'intentRouter.internal.systemPause'
+                command: 'intentRouter.internal.systemPause',
+                description: 'Pause execution for human verification',
+                args: [
+                    { name: 'message', type: 'string', description: 'Message to display in the modal', required: true, default: 'Pipeline paused for review.' }
+                ]
             }
         ]
     });

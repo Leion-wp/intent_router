@@ -148,6 +148,6 @@ suite('Registry Unit Test Suite', () => {
         const publicCaps = listPublicCapabilities();
         assert.strictEqual(publicCaps.length, 1);
         assert.strictEqual(publicCaps[0].capability, 'git.publishPR');
-        assert.strictEqual(publicCaps[0].capabilityType, 'composite');
+        assert.strictEqual((publicCaps[0] as any).capabilityType, 'composite');
     });
 });

@@ -9,13 +9,32 @@ export function registerGitProvider(context: vscode.ExtensionContext) {
 
     if (!gitExtension.isActive) {
         // Try to activate if present but not active, though usually Git activates early.
-        gitExtension.activate().then(() => doRegister(), () => {});
+        gitExtension.activate().then(() => doRegister(context), () => {});
     } else {
-        doRegister();
+        doRegister(context);
     }
 }
 
-function doRegister() {
+function doRegister(context: vscode.ExtensionContext) {
+    // Register internal command to list branches
+    const internalListBranches = vscode.commands.registerCommand('intentRouter.internal.git.listBranches', async () => {
+         try {
+             const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+             const api = gitExtension.getAPI(1);
+             if (api.repositories.length > 0) {
+                 const repo = api.repositories[0]; // Simplification: V1 targets first repo
+                 const refs = await repo.getRefs();
+                 return refs.filter((r: any) => r.type === 1 || r.type === 2).map((r: any) => r.name?.replace('refs/heads/', '')).filter(Boolean);
+             }
+             return ['main', 'dev']; // Fallback
+         } catch (e) {
+             console.error('Error fetching git branches:', e);
+             return ['main'];
+         }
+    });
+    context.subscriptions.push(internalListBranches);
+
+
     registerCapabilities({
         provider: 'git',
         type: 'vscode',
@@ -23,15 +42,41 @@ function doRegister() {
             {
                 capability: 'git.commit',
                 command: 'git.commit',
+                description: 'Commit changes to the local repository',
+                args: [
+                    { name: 'message', type: 'string', description: 'Commit message', required: true },
+                    { name: 'amend', type: 'boolean', description: 'Amend previous commit', default: false }
+                ],
                 mapPayload: (intent) => intent.payload?.message ? { message: intent.payload.message } : undefined
             },
             {
                 capability: 'git.push',
-                command: 'git.push'
+                command: 'git.push',
+                description: 'Push changes to remote repository',
+                args: [
+                    // git.push in VS Code usually doesn't take arguments via command, but we can support remote/branch later
+                ]
             },
             {
                 capability: 'git.pull',
-                command: 'git.pull'
+                command: 'git.pull',
+                description: 'Pull changes from remote repository',
+                args: []
+            },
+            {
+                capability: 'git.checkout',
+                command: 'git.checkout',
+                description: 'Checkout a branch or tag',
+                args: [
+                     {
+                         name: 'branch',
+                         type: 'enum',
+                         description: 'Branch name to checkout',
+                         required: true,
+                         options: 'intentRouter.internal.git.listBranches' // Dynamic options
+                     },
+                     { name: 'create', type: 'boolean', description: 'Create new branch', default: false }
+                ]
             }
         ]
     });
@@ -39,7 +84,8 @@ function doRegister() {
 }
 
 export const gitTemplates: Record<string, any> = {
-    'git.commit': { "message": "chore: update" },
+    'git.commit': { "message": "chore: update", "amend": false },
     'git.push': {},
-    'git.pull': {}
+    'git.pull': {},
+    'git.checkout': { "branch": "main", "create": false }
 };

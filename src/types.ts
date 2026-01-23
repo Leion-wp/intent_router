@@ -17,6 +17,15 @@ export type Intent = {
 export type ProviderType = 'vscode' | 'external';
 export type CapabilityType = 'atomic' | 'composite';
 
+export type CapabilityArgument = {
+    name: string;
+    type: 'string' | 'boolean' | 'enum' | 'path';
+    description?: string;
+    options?: string[] | string; // Array for static, String for dynamic command
+    required?: boolean;
+    default?: any;
+};
+
 export type Capability = {
     capability: string;
     command: string;
@@ -24,6 +33,7 @@ export type Capability = {
     provider?: string;
     target?: string;
     type?: ProviderType;
+    args?: CapabilityArgument[];
     mapPayload?: (intent: Intent) => any;
 };
 
@@ -37,6 +47,7 @@ export type Resolution = {
     mapPayload?: (intent: Intent) => any;
     source: 'user' | 'registry' | 'fallback' | 'composite';
     compositeSteps?: CompositeStep[];
+    args?: CapabilityArgument[];
 };
 
 export type ProviderAdapter = {
@@ -68,6 +79,8 @@ export type CompositeCapability = {
     target?: string;
     type?: ProviderType;
     steps: CompositeStep[];
+    args?: CapabilityArgument[];
+    description?: string;
 };
 
 export type UserMapping = {
@@ -87,6 +100,8 @@ export type RegisterCapabilitiesArgs = {
         command: string;
         capabilityType?: CapabilityType;
         steps?: CompositeStep[];
+        args?: CapabilityArgument[];
+        description?: string;
         mapPayload?: (intent: Intent) => any;
     }>;
     command?: string;

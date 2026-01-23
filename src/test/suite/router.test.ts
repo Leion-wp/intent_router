@@ -155,23 +155,6 @@ suite('Extension Test Suite', () => {
         const originalProfiles = config.get('profiles');
         const originalActive = config.get('activeProfile');
 
-        async function waitForConfigApplied(): Promise<void> {
-            const start = Date.now();
-            while (Date.now() - start < 2000) {
-                const current = vscode.workspace.getConfiguration('intentRouter');
-                const active = current.get<string>('activeProfile');
-                const profiles = current.get<any[]>('profiles');
-                const hasDemo = Array.isArray(profiles) && profiles.some(p => p?.name === 'demo');
-                const mappings = current.get<any[]>('mappings');
-                const hasMapping = Array.isArray(mappings) && mappings.some(m => m?.capability === 'profile.cap');
-                if (active === 'demo' && hasDemo && hasMapping) {
-                    return;
-                }
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
-            throw new Error('Configuration changes were not applied in time.');
-        }
-
         try {
             await config.update('mappings', [
                 { capability: 'profile.cap', command: globalCommand }
@@ -185,8 +168,6 @@ suite('Extension Test Suite', () => {
                 }
             ], true);
             await config.update('activeProfile', 'demo', true);
-
-            await waitForConfigApplied();
 
             await vscode.commands.executeCommand('intentRouter.route', {
                 intent: 'profile test',

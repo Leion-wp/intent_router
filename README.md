@@ -71,7 +71,7 @@ The ideal flow supported by Intent Router:
 4.  Configure steps:
     *   *Terminal:* `echo "Checking out..." && git checkout -b feature/demo`
     *   *System:* Pause with message "Check the code now!"
-5.  Click **Save Pipeline**. It is saved as `.intent/pipelines/<name>.json`.
+5.  Click **Save Pipeline**. It is saved as `pipeline/<name>.intent.json`.
 
 ### Running a Pipeline
 *   **From the Builder:** Click "Run" (planned feature) or use the command palette.
