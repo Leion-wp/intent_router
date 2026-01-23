@@ -48,9 +48,10 @@ export default function Sidebar() {
             className="dndnode"
             onDragStart={(event) => onDragStart(event, 'actionNode', p.id)}
             draggable
-            title={p.desc}
+            title={`Drag to add ${p.label} - ${p.desc}`}
+            aria-label={`Add ${p.label} node`}
+            tabIndex={0}
             role="listitem"
-            style={nodeStyle}
           >
             <span className={`codicon ${p.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
             <span>{p.label}</span>
@@ -72,17 +73,3 @@ export default function Sidebar() {
     </aside>
   );
 }
-
-const nodeStyle: React.CSSProperties = {
-  height: '36px',
-  display: 'flex',
-  alignItems: 'center',
-  padding: '0 12px',
-  border: '1px solid var(--vscode-dropdown-border)',
-  borderRadius: '2px',
-  cursor: 'grab',
-  background: 'var(--vscode-dropdown-background)',
-  color: 'var(--vscode-dropdown-foreground)',
-  transition: 'background 0.1s ease',
-  userSelect: 'none'
-};
