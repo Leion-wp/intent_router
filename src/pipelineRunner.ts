@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { Intent } from './types';
 import { routeIntent } from './router';
 import { pipelineEventBus } from './eventBus';
+import { generateSecureToken } from './security';
 
 export type PipelineFile = {
     name: string;
@@ -151,16 +152,13 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             const stepIntent: Intent = {
                 ...step,
                 description: step.description,
-                capabilities: Array.isArray(step.capabilities) && step.capabilities.length > 0
-                    ? step.capabilities
-                    : [step.intent],
                 meta: {
                     ...(step.meta ?? {}),
                     dryRun: dryRun ? true : step.meta?.dryRun
                 }
             };
 
-            const intentId = stepIntent.meta?.traceId ?? Math.random().toString(36).substring(7);
+            const intentId = stepIntent.meta?.traceId ?? generateSecureToken(8);
 
             // Emit index so frontend can map to node
             pipelineEventBus.emit({

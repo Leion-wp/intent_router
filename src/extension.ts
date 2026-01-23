@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { routeIntent, invalidateLogLevelCache } from './router';
 import { Intent, RegisterCapabilitiesArgs } from './types';
 import { registerCapabilities } from './registry';
+import { generateSecureNonce } from './security';
 import { PipelineBuilder } from './pipelineBuilder';
 import { PipelinesTreeDataProvider } from './pipelinesView';
 import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri, cancelCurrentPipeline, pauseCurrentPipeline, resumeCurrentPipeline } from './pipelineRunner';
@@ -420,7 +421,7 @@ async function openPromptPanel(prompt: string): Promise<void> {
         { enableScripts: true }
     );
 
-    const nonce = generateNonce();
+    const nonce = generateSecureNonce();
     panel.webview.html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -463,13 +464,4 @@ async function fileExists(uri: vscode.Uri): Promise<boolean> {
     } catch {
         return false;
     }
-}
-
-function generateNonce(): string {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
 }
