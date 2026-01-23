@@ -7,6 +7,7 @@ import { terminalTemplates } from './providers/terminalAdapter';
 import { pipelineEventBus } from './eventBus';
 import { generateSecureNonce } from './security';
 import { Capability, CompositeCapability } from './types';
+import { historyManager } from './historyManager';
 
 type CommandGroup = {
     provider: string;
@@ -56,6 +57,20 @@ export class PipelineBuilder {
                        status: e.type === 'stepStart' ? 'running' : (e.success ? 'success' : 'failure')
                    });
                }
+
+               if (e.type === 'pipelineStart' || e.type === 'pipelineEnd') {
+                   this.panel.webview.postMessage({
+                       type: 'historyUpdate',
+                       history: historyManager.getHistory()
+                   });
+               }
+
+               if (e.type === ('historyUpdate' as any)) {
+                    this.panel.webview.postMessage({
+                        type: 'historyUpdate',
+                        history: historyManager.getHistory()
+                    });
+               }
             }
         });
         this.disposables.push(eventSub);
@@ -71,6 +86,7 @@ export class PipelineBuilder {
         const profileNames = this.getProfileNames();
         const initialPipeline = pipeline ?? { name: '', steps: [] };
         const templates = { ...gitTemplates, ...dockerTemplates, ...terminalTemplates };
+        const history = historyManager.getHistory();
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
@@ -86,13 +102,20 @@ export class PipelineBuilder {
             pipeline: initialPipeline,
             commandGroups,
             profiles: profileNames,
-            templates
+            templates,
+            history
         });
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'savePipeline') {
                 await this.savePipeline(message.pipeline as PipelineFile);
                 vscode.window.showInformationMessage('Pipeline saved successfully.');
+                return;
+            }
+
+            if (message?.type === 'clearHistory') {
+                await historyManager.clearHistory();
+                // historyUpdate event will handle sending new empty history to webview
                 return;
             }
         });
