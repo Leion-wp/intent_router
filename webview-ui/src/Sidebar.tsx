@@ -36,6 +36,22 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
   ];
 
   return (
+    <aside className="sidebar">
+      <div className="sidebar-header">
+        Providers
+      </div>
+
+      <div className="sidebar-list">
+        {providers.map((p) => (
+          <div
+            key={p.id}
+            className="dndnode"
+            onDragStart={(event) => onDragStart(event, 'actionNode', p.id)}
+            draggable
+            title={`Drag to add ${p.label} - ${p.desc}`}
+            aria-label={`Add ${p.label} node`}
+            tabIndex={0}
+            role="listitem"
     <aside style={{
         width: '280px',
         minWidth: '240px',

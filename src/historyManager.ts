@@ -124,6 +124,7 @@ export class HistoryManager {
                     // User request: "mark abort rather than failed".
                     // I will interpret this as: if success=false, mark as 'aborted'.
                     this.currentRun.status = event.success ? 'success' : 'aborted';
+                    this.currentRun.status = event.success ? 'success' : 'failure';
                     this.saveHistory();
                     this.currentRun = null;
                 }
