@@ -31,6 +31,8 @@ export default function Sidebar() {
             aria-label={`Add ${p.label} node`}
             tabIndex={0}
             role="listitem"
+            tabIndex={0}
+            aria-label={`Drag ${p.label} to graph`}
           >
             <span className={`codicon ${p.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
             <span>{p.label}</span>
@@ -45,3 +47,4 @@ export default function Sidebar() {
     </aside>
   );
 }
+

@@ -3,12 +3,12 @@ import {
   ReactFlow,
   Controls,
   Background,
+  BackgroundVariant,
   useNodesState,
   useEdgesState,
   addEdge,
   MiniMap,
   ReactFlowProvider,
-  useReactFlow,
   Edge,
   Node,
   Connection,
@@ -51,10 +51,37 @@ const initialNodes: Node[] = [
 let idCounter = 0;
 const getId = () => `node_${idCounter++}`;
 
+function canonicalizeIntent(provider: string, capability: string): { provider: string; intent: string; capability: string } {
+  const fallbackProvider = (provider || '').trim() || 'terminal';
+  let cap = (capability || '').trim();
+
+  if (!cap) {
+    const intent = `${fallbackProvider}.run`;
+    return { provider: fallbackProvider, intent, capability: intent };
+  }
+
+  // If the capability already looks like a full id (e.g. "system.pause"), infer provider from it.
+  const inferredProvider = cap.includes('.') ? cap.split('.')[0] : fallbackProvider;
+  const finalProvider = (inferredProvider || '').trim() || fallbackProvider;
+
+  // If capability is a suffix (legacy), prefix it with provider.
+  if (!cap.includes('.')) {
+    cap = `${finalProvider}.${cap}`;
+  }
+
+  // Defensive: collapse repeated provider prefixes produced by older UI versions (e.g. "system.system.pause").
+  const dupPrefix = `${finalProvider}.${finalProvider}.`;
+  while (cap.startsWith(dupPrefix)) {
+    cap = `${finalProvider}.` + cap.slice(dupPrefix.length);
+  }
+
+  return { provider: finalProvider, intent: cap, capability: cap };
+}
+
 function Flow() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
 
   // Load initial data if any
@@ -79,12 +106,12 @@ function Flow() {
       let y = 150;
 
       if (Array.isArray(pipeline.steps)) {
-          pipeline.steps.forEach((step: any, index: number) => {
+          pipeline.steps.forEach((step: any) => {
              const nodeId = getId();
-             const parts = (step.intent || '').split('.');
-             const provider = parts[0] || 'terminal';
+             const normalized = canonicalizeIntent('', step.intent || '');
+             const provider = normalized.provider;
              // Store full capability name (e.g. 'terminal.run') to match registry
-             const capability = step.intent || 'terminal.run';
+             const capability = normalized.capability;
 
              // Merge payload and description into args for the UI
              const args = { ...step.payload, description: step.description };
@@ -209,7 +236,8 @@ function Flow() {
        if (!nextNode) break;
 
        const data: any = nextNode.data;
-       const intent = `${data.provider}.${data.capability}`;
+       const normalized = canonicalizeIntent(String(data.provider || ''), String(data.capability || ''));
+       const intent = normalized.intent;
 
        // Separate description from payload
        const { description, ...payload } = data.args || {};
@@ -256,7 +284,7 @@ function Flow() {
           fitView
         >
           <Controls />
-          <Background variant="dots" gap={12} size={1} />
+          <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
           <MiniMap />
         </ReactFlow>
       </div>

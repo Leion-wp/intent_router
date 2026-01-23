@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Intent, ProfileConfig, ProviderAdapter, Resolution, UserMapping } from './types';
 import { resolveCapabilities } from './registry';
+import { generateSecureTraceId } from './security';
 
 let cachedLogLevel: 'error' | 'warn' | 'info' | 'debug' | undefined;
 
@@ -113,21 +114,46 @@ function normalizeIntent(intent: Intent, config: vscode.WorkspaceConfiguration):
 
     const meta = {
         dryRun: intent.meta?.dryRun ?? false,
-        traceId: intent.meta?.traceId ?? generateTraceId(),
+        traceId: intent.meta?.traceId ?? generateSecureTraceId(),
         debug: intent.meta?.debug ?? debugDefault
     };
 
     // V1 Compatibility: If 'capabilities' is missing, assume the intent string itself
     // is the requested capability (Atomic Intent).
-    const capabilities = (intent.capabilities && intent.capabilities.length > 0)
+    const rawCapabilities = (intent.capabilities && intent.capabilities.length > 0)
         ? intent.capabilities
         : [intent.intent];
+
+    const capabilities = rawCapabilities.map(canonicalizeCapabilityId);
 
     return {
         ...intent,
         capabilities,
         meta
     };
+}
+
+function canonicalizeCapabilityId(capability: string): string {
+    const raw = (capability ?? '').trim();
+    if (!raw) {
+        return raw;
+    }
+
+    const parts = raw.split('.').filter(Boolean);
+    if (parts.length < 3) {
+        return raw;
+    }
+
+    const first = parts[0];
+    let i = 1;
+    while (i < parts.length - 1 && parts[i] === first) {
+        i += 1;
+    }
+    if (i === 1) {
+        return raw;
+    }
+
+    return [first, ...parts.slice(i)].join('.');
 }
 
 function getActiveProfile(config: vscode.WorkspaceConfiguration): ProfileConfig | undefined {
@@ -341,11 +367,6 @@ function log(
     if (intent.meta?.debug) {
         console.log(`[${traceId}] ${level.toUpperCase()} ${code} ${message}`);
     }
-}
-
-function generateTraceId(): string {
-    const rand = Math.floor(Math.random() * 1e8).toString(16);
-    return `${Date.now().toString(16)}-${rand}`;
 }
 
 function getLogLevel(config: vscode.WorkspaceConfiguration): 'error' | 'warn' | 'info' | 'debug' {
