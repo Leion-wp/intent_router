@@ -11,7 +11,6 @@ declare global {
     vscode: any;
   }
 }
-const vscode = window.vscode || (window.vscode = (window as any).acquireVsCodeApi ? (window as any).acquireVsCodeApi() : null);
 
 export default function Sidebar({ history = [], onSelectHistory }: SidebarProps) {
   const [tab, setTab] = useState<'providers' | 'history'>('providers');

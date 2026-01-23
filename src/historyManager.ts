@@ -69,10 +69,9 @@ export class HistoryManager {
 
     private registerListeners() {
         pipelineEventBus.on(this.handleEvent.bind(this));
-        vscode.commands.registerCommand('intentRouter.clearHistory', () => this.clearHistory());
     }
 
-    private async clearHistory() {
+    public async clearHistory() {
         this.runs = [];
         await this.saveHistory();
         vscode.window.showInformationMessage('Pipeline history cleared.');
