@@ -5,6 +5,14 @@ type SidebarProps = {
     onSelectHistory?: (run: any) => void;
 };
 
+// Acquire VS Code API (safe singleton) - reuse from App or get from global
+declare global {
+  interface Window {
+    vscode: any;
+  }
+}
+const vscode = window.vscode || (window.vscode = (window as any).acquireVsCodeApi ? (window as any).acquireVsCodeApi() : null);
+
 export default function Sidebar({ history = [], onSelectHistory }: SidebarProps) {
   const [tab, setTab] = useState<'providers' | 'history'>('providers');
 
@@ -12,6 +20,12 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
     event.dataTransfer.setData('application/reactflow/type', nodeType);
     event.dataTransfer.setData('application/reactflow/provider', provider);
     event.dataTransfer.effectAllowed = 'move';
+  };
+
+  const onClearHistory = () => {
+    if (vscode) {
+        vscode.postMessage({ type: 'clearHistory' });
+    }
   };
 
   const providers = [
@@ -79,10 +93,6 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
           </div>
       </div>
 
-      <div className="sidebar-footer">
-        <span className="codicon codicon-info"></span>
-        <span>Drag items to the graph</span>
-      </div>
       {tab === 'providers' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {providers.map((p) => (
@@ -103,6 +113,23 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
         </div>
       ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', flex: 1 }}>
+              {history.length > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                         onClick={onClearHistory}
+                         style={{
+                             background: 'none',
+                             border: 'none',
+                             color: 'var(--vscode-descriptionForeground)',
+                             cursor: 'pointer',
+                             fontSize: '11px',
+                             textDecoration: 'underline'
+                         }}
+                      >
+                          Clear History
+                      </button>
+                  </div>
+              )}
               {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px'}}>No history available.</div>}
               {history.map((run) => (
                   <div
@@ -123,7 +150,7 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
                           <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
                           <span style={{
                               color: run.status === 'success' ? 'var(--vscode-testing-iconPassed)' :
-                                     run.status === 'failure' ? 'var(--vscode-testing-iconFailed)' :
+                                     (run.status === 'failure' || run.status === 'aborted') ? 'var(--vscode-testing-iconFailed)' :
                                      'var(--vscode-descriptionForeground)'
                           }}>
                               {run.status.toUpperCase()}

@@ -248,6 +248,10 @@ export function activate(context: vscode.ExtensionContext) {
          resumeCurrentPipeline();
     });
 
+    let clearHistoryDisposable = vscode.commands.registerCommand('intentRouter.clearHistory', async () => {
+        await historyManager.clearHistory();
+    });
+
 
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('intentRouter.logLevel')) {
@@ -280,6 +284,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(cancelPipelineDisposable);
     context.subscriptions.push(pausePipelineDisposable);
     context.subscriptions.push(resumePipelineDisposable);
+    context.subscriptions.push(clearHistoryDisposable);
     context.subscriptions.push(pipelinesView);
 }
 
