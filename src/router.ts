@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Intent, ProfileConfig, ProviderAdapter, Resolution, UserMapping } from './types';
 import { resolveCapabilities } from './registry';
+import { generateSecureTraceId } from './security';
 
 let cachedLogLevel: 'error' | 'warn' | 'info' | 'debug' | undefined;
 
@@ -113,7 +114,7 @@ function normalizeIntent(intent: Intent, config: vscode.WorkspaceConfiguration):
 
     const meta = {
         dryRun: intent.meta?.dryRun ?? false,
-        traceId: intent.meta?.traceId ?? generateTraceId(),
+        traceId: intent.meta?.traceId ?? generateSecureTraceId(),
         debug: intent.meta?.debug ?? debugDefault
     };
 
@@ -366,11 +367,6 @@ function log(
     if (intent.meta?.debug) {
         console.log(`[${traceId}] ${level.toUpperCase()} ${code} ${message}`);
     }
-}
-
-function generateTraceId(): string {
-    const rand = Math.floor(Math.random() * 1e8).toString(16);
-    return `${Date.now().toString(16)}-${rand}`;
 }
 
 function getLogLevel(config: vscode.WorkspaceConfiguration): 'error' | 'warn' | 'info' | 'debug' {
