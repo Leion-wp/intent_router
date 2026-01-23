@@ -78,4 +78,24 @@ suite('Pipeline Builder Tests (Mocked)', () => {
         assert.strictEqual(receivedMessages[0].status, 'running');
         assert.strictEqual(receivedMessages[0].index, 0);
     });
+
+    test('Clear History message clears history and notifies webview', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+
+        const { historyManager } = require('../../out/historyManager');
+        historyManager.getHistory().push({ id: '1', name: 'run', timestamp: 1, status: 'success', steps: [] });
+
+        const receivedMessages: any[] = [];
+        panel.onMessageReceived = (msg: any) => {
+            receivedMessages.push(msg);
+        };
+
+        if (panel.postMessageCallback) {
+            await panel.postMessageCallback({ type: 'clearHistory' });
+        }
+
+        assert.strictEqual(historyManager.getHistory().length, 0);
+        assert.ok(receivedMessages.some(m => m.type === 'historyUpdate' && Array.isArray(m.history) && m.history.length === 0));
+    });
 });
