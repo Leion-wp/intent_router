@@ -15,40 +15,21 @@ export default function Sidebar() {
   ];
 
   return (
-    <aside style={{
-        width: '280px',
-        minWidth: '240px',
-        maxWidth: '360px',
-        flexShrink: 0,
-        borderRight: '1px solid var(--vscode-panel-border)',
-        padding: '16px',
-        background: 'var(--vscode-sideBar-background)',
-        color: 'var(--vscode-sideBar-foreground)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '16px',
-        fontFamily: 'var(--vscode-font-family)',
-        fontSize: 'var(--vscode-font-size)'
-      }}>
-
-      <div style={{
-        fontSize: '11px',
-        fontWeight: 'bold',
-        textTransform: 'uppercase',
-        opacity: 0.8,
-        letterSpacing: '0.5px'
-      }}>
+    <aside className="sidebar">
+      <div className="sidebar-header">
         Providers
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div className="sidebar-list">
         {providers.map((p) => (
           <div
             key={p.id}
             className="dndnode"
             onDragStart={(event) => onDragStart(event, 'actionNode', p.id)}
             draggable
-            title={p.desc}
+            title={`Drag to add ${p.label} - ${p.desc}`}
+            aria-label={`Add ${p.label} node`}
+            tabIndex={0}
             role="listitem"
             tabIndex={0}
             aria-label={`Drag ${p.label} to graph`}
@@ -59,14 +40,7 @@ export default function Sidebar() {
         ))}
       </div>
 
-      <div style={{
-        marginTop: 'auto',
-        fontSize: '11px',
-        opacity: 0.6,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px'
-      }}>
+      <div className="sidebar-footer">
         <span className="codicon codicon-info"></span>
         <span>Drag items to the graph</span>
       </div>

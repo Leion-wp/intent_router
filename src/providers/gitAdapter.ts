@@ -25,7 +25,8 @@ function doRegister() {
                 command: 'git.commit',
                 description: 'Commit changes to the local repository',
                 args: [
-                    { name: 'message', type: 'string', description: 'Commit message', required: true }
+                    { name: 'message', type: 'string', description: 'Commit message', required: true },
+                    { name: 'amend', type: 'boolean', description: 'Amend previous commit', default: false }
                 ],
                 mapPayload: (intent) => intent.payload?.message ? { message: intent.payload.message } : undefined
             },
@@ -48,7 +49,8 @@ function doRegister() {
                 command: 'git.checkout',
                 description: 'Checkout a branch or tag',
                 args: [
-                     { name: 'branch', type: 'string', description: 'Branch name to checkout', required: true }
+                     { name: 'branch', type: 'string', description: 'Branch name to checkout', required: true },
+                     { name: 'create', type: 'boolean', description: 'Create new branch', default: false }
                 ]
             }
         ]
@@ -57,8 +59,8 @@ function doRegister() {
 }
 
 export const gitTemplates: Record<string, any> = {
-    'git.commit': { "message": "chore: update" },
+    'git.commit': { "message": "chore: update", "amend": false },
     'git.push': {},
     'git.pull': {},
-    'git.checkout': { "branch": "main" }
+    'git.checkout': { "branch": "main", "create": false }
 };
