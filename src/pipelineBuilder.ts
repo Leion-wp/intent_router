@@ -94,6 +94,43 @@ export class PipelineBuilder {
                 vscode.window.showInformationMessage('Pipeline saved successfully.');
                 return;
             }
+            if (message?.type === 'selectPath') {
+                const uris = await vscode.window.showOpenDialog({
+                    canSelectFiles: true,
+                    canSelectFolders: true,
+                    canSelectMany: false,
+                    openLabel: 'Select'
+                });
+                if (uris && uris.length > 0) {
+                    const path = uris[0].fsPath;
+                    this.panel?.webview.postMessage({
+                        type: 'pathSelected',
+                        id: message.id,
+                        argName: message.argName,
+                        path: path
+                    });
+                }
+                return;
+            }
+            if (message?.type === 'fetchOptions') {
+                const { command, argName } = message;
+                try {
+                    // Execute the internal command to fetch options
+                    const options = await vscode.commands.executeCommand(command);
+                    if (Array.isArray(options)) {
+                        this.panel?.webview.postMessage({
+                            type: 'optionsFetched',
+                            argName,
+                            options
+                        });
+                    } else {
+                         console.warn(`Dynamic options command ${command} did not return an array.`);
+                    }
+                } catch (error) {
+                    console.error(`Failed to fetch dynamic options for ${command}:`, error);
+                }
+                return;
+            }
         });
     }
 
