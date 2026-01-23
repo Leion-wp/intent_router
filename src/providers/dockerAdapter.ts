@@ -25,7 +25,7 @@ function doRegister() {
                 description: 'Build a Docker image',
                 args: [
                     { name: 'tag', type: 'string', description: 'Image tag', required: true },
-                    { name: 'path', type: 'string', description: 'Context path', default: '.' }
+                    { name: 'path', type: 'path', description: 'Context path', default: '.' }
                 ]
             },
             {

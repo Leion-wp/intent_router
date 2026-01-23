@@ -22,6 +22,22 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
   ];
 
   return (
+    <aside className="sidebar">
+      <div className="sidebar-header">
+        Providers
+      </div>
+
+      <div className="sidebar-list">
+        {providers.map((p) => (
+          <div
+            key={p.id}
+            className="dndnode"
+            onDragStart={(event) => onDragStart(event, 'actionNode', p.id)}
+            draggable
+            title={`Drag to add ${p.label} - ${p.desc}`}
+            aria-label={`Add ${p.label} node`}
+            tabIndex={0}
+            role="listitem"
     <aside style={{
         width: '280px',
         minWidth: '240px',
@@ -58,29 +74,15 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
                  opacity: tab === 'history' ? 1 : 0.6,
                  borderBottom: tab === 'history' ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none'
              }}
-    <aside className="sidebar">
-      <div className="sidebar-header">
-        Providers
-      </div>
-
-      <div className="sidebar-list">
-        {providers.map((p) => (
-          <div
-            key={p.id}
-            className="dndnode"
-            onDragStart={(event) => onDragStart(event, 'actionNode', p.id)}
-            draggable
-            title={`Drag to add ${p.label} - ${p.desc}`}
-            aria-label={`Add ${p.label} node`}
-            tabIndex={0}
-            role="listitem"
-            tabIndex={0}
-            aria-label={`Drag ${p.label} to graph`}
           >
               HISTORY
           </div>
       </div>
 
+      <div className="sidebar-footer">
+        <span className="codicon codicon-info"></span>
+        <span>Drag items to the graph</span>
+      </div>
       {tab === 'providers' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {providers.map((p) => (
@@ -145,10 +147,6 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
             <span>Drag items to the graph</span>
         </div>
       )}
-      <div className="sidebar-footer">
-        <span className="codicon codicon-info"></span>
-        <span>Drag items to the graph</span>
-      </div>
     </aside>
   );
 }

@@ -20,6 +20,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
   const [expandedHelp, setExpandedHelp] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({});
 
   // Sync from props if data changes externally
   useEffect(() => {
@@ -62,6 +63,32 @@ const ActionNode = ({ data, id }: NodeProps) => {
     handleArgChange(key, current + '${input:Prompt}');
   };
 
+  const handleBrowse = (key: string) => {
+      // Send message to extension
+      if (window.vscode) {
+          window.vscode.postMessage({
+              type: 'selectPath',
+              id: id,
+              argName: key
+          });
+
+          // Listen for the response
+          const handleMessage = (event: MessageEvent) => {
+              const message = event.data;
+              if (message.type === 'pathSelected' && message.id === id && message.argName === key) {
+                  handleArgChange(key, message.path);
+                  window.removeEventListener('message', handleMessage);
+              }
+          };
+          window.addEventListener('message', handleMessage);
+      } else {
+          console.log('Browse clicked (Mock):', key);
+          // Mock for browser dev
+          const mockPath = '/mock/path/to/folder';
+          handleArgChange(key, mockPath);
+      }
+  };
+
   const toggleHelp = (key: string) => {
       setExpandedHelp(prev => ({ ...prev, [key]: !prev[key] }));
   };
@@ -81,7 +108,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
      { name: 'description', type: 'string', description: 'Step description for logs' }
   ];
 
-  // Initialize Defaults & Validate
+  // Initialize Defaults & Validate & Fetch Dynamic Options
   useEffect(() => {
       const newArgs = { ...args };
       let changed = false;
@@ -98,6 +125,17 @@ const ActionNode = ({ data, id }: NodeProps) => {
           if (arg.required && (newArgs[arg.name] === undefined || newArgs[arg.name] === '')) {
               newErrors[arg.name] = true;
           }
+
+          // Fetch dynamic options
+          if (arg.type === 'enum' && typeof arg.options === 'string' && !dynamicOptions[arg.name]) {
+             if (window.vscode) {
+                 window.vscode.postMessage({
+                     type: 'fetchOptions',
+                     command: arg.options,
+                     argName: arg.name
+                 });
+             }
+          }
       });
 
       if (changed) {
@@ -107,6 +145,21 @@ const ActionNode = ({ data, id }: NodeProps) => {
       setErrors(newErrors);
 
   }, [capability, args, selectedCapConfig]);
+
+  // Listen for option responses
+  useEffect(() => {
+      const handleMessage = (event: MessageEvent) => {
+          const message = event.data;
+          if (message.type === 'optionsFetched') {
+              setDynamicOptions(prev => ({
+                  ...prev,
+                  [message.argName]: message.options
+              }));
+          }
+      };
+      window.addEventListener('message', handleMessage);
+      return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
 
   const isPause = provider === 'system' && capability === 'system.pause';
@@ -222,7 +275,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
                          outline: hasError ? `1px solid ${inputBorderColor}` : 'none'
                        }}
                    />
-              ) : arg.type === 'enum' && arg.options ? (
+              ) : arg.type === 'enum' ? (
                    <select
                        id={inputId}
                        className="nodrag"
@@ -237,10 +290,62 @@ const ActionNode = ({ data, id }: NodeProps) => {
                        }}
                    >
                        <option value="">(Select)</option>
-                       {arg.options.map((opt: string) => (
+                       {(Array.isArray(arg.options) ? arg.options : (dynamicOptions[arg.name] || [])).map((opt: string) => (
                            <option key={opt} value={opt}>{opt}</option>
                        ))}
                    </select>
+              ) : arg.type === 'path' ? (
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <input
+                      id={inputId}
+                      className="nodrag"
+                      type="text"
+                      value={args[arg.name] || ''}
+                      onChange={(e) => handleArgChange(arg.name, e.target.value)}
+                      placeholder={arg.default !== undefined ? `${arg.default} (default)` : ''}
+                      style={{
+                        flex: 1,
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: `1px solid ${inputBorderColor}`,
+                        padding: '4px',
+                        fontSize: '0.9em'
+                      }}
+                    />
+                    <button
+                        className="nodrag"
+                        onClick={() => handleBrowse(arg.name)}
+                        title="Browse..."
+                        style={{
+                            background: 'var(--vscode-button-secondaryBackground)',
+                            color: 'var(--vscode-button-secondaryForeground)',
+                            border: 'none',
+                            cursor: 'pointer',
+                            padding: '0 8px',
+                            display: 'flex',
+                            alignItems: 'center'
+                        }}
+                    >
+                        <span className="codicon codicon-folder-opened"></span>
+                    </button>
+                    <button
+                      className="nodrag"
+                      onClick={() => insertVariable(arg.name)}
+                      title="Insert Input Variable"
+                      style={{
+                        background: 'var(--vscode-button-background)',
+                        color: 'var(--vscode-button-foreground)',
+                        border: 'none',
+                        cursor: 'pointer',
+                        width: '24px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      {'{ }'}
+                    </button>
+                  </div>
               ) : (
                   <div style={{ display: 'flex', gap: '4px' }}>
                     <input
