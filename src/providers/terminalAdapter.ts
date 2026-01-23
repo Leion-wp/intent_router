@@ -47,10 +47,16 @@ export async function executeTerminalCommand(args: any): Promise<void> {
 
     term.show();
 
-    if (cwd && typeof cwd === 'string' && cwd.trim().length > 0) {
-        // Send cd first
-        term.sendText(`cd "${cwd}"`);
+    let finalCommand = commandText;
+    if (args.cwd && args.cwd !== '.') {
+        // Prepend cd command. Quote path to handle spaces.
+        // This assumes bash/zsh/powershell syntax compatibility for '&&' or ';'.
+        // VS Code terminals usually default to the platform shell.
+        // For broad compatibility, 'cd "path" && command' is standard on *nix.
+        // On Windows Powershell, 'cd "path"; command' or 'cd "path" && command' (PS 7+) works.
+        // Since the user asked for "command && cwd" fix (implying chaining), we use &&.
+        finalCommand = `cd "${args.cwd}" && ${commandText}`;
     }
 
-    term.sendText(commandText);
+    term.sendText(finalCommand);
 }
