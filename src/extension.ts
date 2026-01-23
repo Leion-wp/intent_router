@@ -100,14 +100,14 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-        if (!workspaceFolder) {
+        const fileName = name.endsWith('.intent.json') ? name : `${name}.intent.json`;
+        const folder = await ensurePipelineFolder();
+        if (!folder) {
             vscode.window.showErrorMessage('Open a workspace folder to create a pipeline file.');
             return;
         }
 
-        const fileName = name.endsWith('.intent.json') ? name : `${name}.intent.json`;
-        const defaultUri = vscode.Uri.joinPath(workspaceFolder.uri, fileName);
+        const defaultUri = vscode.Uri.joinPath(folder, fileName);
         const targetUri = await vscode.window.showSaveDialog({
             defaultUri,
             filters: { 'Intent Pipeline': ['intent.json'] }

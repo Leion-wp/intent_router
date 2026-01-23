@@ -47,9 +47,10 @@ export async function executeTerminalCommand(args: any): Promise<void> {
 
     term.show();
 
-    if (cwd && typeof cwd === 'string' && cwd.trim().length > 0) {
-        // Send cd first
-        term.sendText(`cd "${cwd}"`);
+    // Avoid shell-specific chaining tokens (PowerShell 5.1 doesn't support `&&`).
+    // `pushd` works across PowerShell/cmd/bash/zsh and also switches drives on Windows.
+    if (typeof cwd === 'string' && cwd.trim() && cwd.trim() !== '.') {
+        term.sendText(`pushd "${cwd.trim()}"`);
     }
 
     term.sendText(commandText);

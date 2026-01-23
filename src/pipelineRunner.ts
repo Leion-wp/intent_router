@@ -132,7 +132,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
         runId,
         timestamp: Date.now(),
         totalSteps: pipeline.steps.length,
-        name: pipeline.name
+        name: pipeline.name,
+        pipeline: pipeline // Pass the full pipeline definition
     });
 
     try {
@@ -144,7 +145,13 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
             if (isCancelled) {
                 vscode.window.showWarningMessage('Pipeline cancelled by user.');
-                pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: false });
+                pipelineEventBus.emit({
+                    type: 'pipelineEnd',
+                    runId,
+                    timestamp: Date.now(),
+                    success: false,
+                    status: 'cancelled'
+                });
                 return;
             }
 
@@ -183,13 +190,31 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
             if (!ok) {
                 vscode.window.showWarningMessage('Pipeline stopped on failed step.');
-                pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: false });
+                pipelineEventBus.emit({
+                    type: 'pipelineEnd',
+                    runId,
+                    timestamp: Date.now(),
+                    success: false,
+                    status: 'failure'
+                });
                 return;
             }
         }
-        pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: true });
+        pipelineEventBus.emit({
+            type: 'pipelineEnd',
+            runId,
+            timestamp: Date.now(),
+            success: true,
+            status: 'success'
+        });
     } catch (e) {
-        pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: false });
+        pipelineEventBus.emit({
+            type: 'pipelineEnd',
+            runId,
+            timestamp: Date.now(),
+            success: false,
+            status: 'failure'
+        });
         throw e;
     } finally {
         currentRunId = null;

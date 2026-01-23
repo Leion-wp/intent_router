@@ -25,9 +25,11 @@ export class PipelineBuilder {
         // If we already have a panel, reveal it. But if opening a different URI, we might want to replace content.
         // For V1, simplest is to allow multiple panels or just one singleton. Let's do singleton for now.
         if (this.panel) {
-            this.panel.reveal(vscode.ViewColumn.Active);
-            // TODO: Update content if needed? For now we assume new open call replaces old one or creates new if disposed.
-            // Actually, let's just dispose old one if different URI for simplicity.
+            // Dispose the previous panel to avoid stacking event listeners and message handlers.
+            const oldPanel = this.panel;
+            this.panel = undefined;
+            this.dispose();
+            oldPanel.dispose();
         }
 
         this.currentUri = uri;
@@ -63,13 +65,6 @@ export class PipelineBuilder {
                        type: 'historyUpdate',
                        history: historyManager.getHistory()
                    });
-               }
-
-               if (e.type === ('historyUpdate' as any)) {
-                    this.panel.webview.postMessage({
-                        type: 'historyUpdate',
-                        history: historyManager.getHistory()
-                    });
                }
             }
         });
@@ -112,10 +107,49 @@ export class PipelineBuilder {
                 vscode.window.showInformationMessage('Pipeline saved successfully.');
                 return;
             }
-
             if (message?.type === 'clearHistory') {
                 await historyManager.clearHistory();
-                // historyUpdate event will handle sending new empty history to webview
+                this.panel?.webview.postMessage({
+                    type: 'historyUpdate',
+                    history: historyManager.getHistory()
+                });
+                return;
+            }
+            if (message?.type === 'selectPath') {
+                const uris = await vscode.window.showOpenDialog({
+                    canSelectFiles: true,
+                    canSelectFolders: true,
+                    canSelectMany: false,
+                    openLabel: 'Select'
+                });
+                if (uris && uris.length > 0) {
+                    const path = uris[0].fsPath;
+                    this.panel?.webview.postMessage({
+                        type: 'pathSelected',
+                        id: message.id,
+                        argName: message.argName,
+                        path: path
+                    });
+                }
+                return;
+            }
+            if (message?.type === 'fetchOptions') {
+                const { command, argName } = message;
+                try {
+                    // Execute the internal command to fetch options
+                    const options = await vscode.commands.executeCommand(command);
+                    if (Array.isArray(options)) {
+                        this.panel?.webview.postMessage({
+                            type: 'optionsFetched',
+                            argName,
+                            options
+                        });
+                    } else {
+                         console.warn(`Dynamic options command ${command} did not return an array.`);
+                    }
+                } catch (error) {
+                    console.error(`Failed to fetch dynamic options for ${command}:`, error);
+                }
                 return;
             }
         });

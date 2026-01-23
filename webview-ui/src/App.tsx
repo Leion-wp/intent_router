@@ -78,18 +78,15 @@ function canonicalizeIntent(provider: string, capability: string): { provider: s
   return { provider: finalProvider, intent: cap, capability: cap };
 }
 
-function Flow({ selectedRun }: { selectedRun: any }) {
+function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: () => void }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
 
-  // Load initial data if any
-  useEffect(() => {
-    if (window.initialData && window.initialData.pipeline) {
-      const { pipeline } = window.initialData;
+  // Helper to load pipeline data into graph
+  const loadPipeline = (pipeline: any) => {
       console.log('Loading pipeline:', pipeline);
-
       const newNodes: Node[] = [];
       const newEdges: Edge[] = [];
 
@@ -123,7 +120,8 @@ function Flow({ selectedRun }: { selectedRun: any }) {
                  data: {
                    provider,
                    capability,
-                   args
+                   args,
+                   status: 'idle'
                  }
              });
 
@@ -141,6 +139,13 @@ function Flow({ selectedRun }: { selectedRun: any }) {
 
       setNodes(newNodes);
       setEdges(newEdges);
+      setTimeout(() => reactFlowInstance?.fitView(), 100);
+  };
+
+  // Load initial data if any
+  useEffect(() => {
+    if (window.initialData && window.initialData.pipeline) {
+      loadPipeline(window.initialData.pipeline);
     }
 
     // Listen for messages from extension
@@ -170,7 +175,64 @@ function Flow({ selectedRun }: { selectedRun: any }) {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [reactFlowInstance]); // Dependency on reactFlowInstance for fitView
+
+  // Handle History Selection (Restore Pipeline + Playback)
+  useEffect(() => {
+    if (selectedRun) {
+      // 1. Restore Pipeline Definition if available
+      if (selectedRun.pipelineSnapshot) {
+          loadPipeline(selectedRun.pipelineSnapshot);
+      } else {
+          // If no snapshot, we can't restore structure.
+          // We can only replay on CURRENT structure if it matches.
+          // For V1, let's warn or just try.
+          console.warn('No pipeline snapshot found in history run.');
+      }
+
+      onRunHandled();
+    }
+  }, [selectedRun]);
+
+  // Separate Effect for Playback (triggered when nodes are ready/stable?)
+  // Actually, let's keep the original Playback Logic but adapt it.
+  // We need to know if we are in "Playback Mode".
+  // Let's use `selectedRun` to trigger a sequence of status updates.
+  useEffect(() => {
+      const timeouts: any[] = [];
+      if (selectedRun) {
+          // Wait a bit for nodes to potentially reload
+          const t0 = setTimeout(() => {
+              // 1. Reset all nodes to idle (in case we re-used existing)
+              setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
+
+              // 2. Playback steps
+              selectedRun.steps.forEach((step: any, i: number) => {
+                 const t = setTimeout(() => {
+                   setNodes((nds) => {
+                      const actionNodes = nds.filter(n => n.id !== 'start');
+                      const targetNode = actionNodes[step.index];
+                      if (!targetNode) return nds;
+
+                      return nds.map(n => {
+                        if (n.id === targetNode.id) {
+                          return {
+                            ...n,
+                            data: { ...n.data, status: step.status }
+                          };
+                        }
+                        return n;
+                      });
+                   });
+                 }, (i + 1) * 600);
+                 timeouts.push(t);
+              });
+          }, 100);
+          timeouts.push(t0);
+      }
+      return () => timeouts.forEach(clearTimeout);
+  }, [selectedRun]);
+
 
   // Playback Logic
   useEffect(() => {
@@ -372,6 +434,10 @@ export default function App() {
        if (event.data?.type === 'historyUpdate') {
            console.log('History updated:', event.data.history);
            setHistory(event.data.history);
+           // If history is cleared, clear selected run
+           if (event.data.history.length === 0) {
+               setSelectedRun(null);
+           }
        }
     };
     window.addEventListener('message', handleMessage);
@@ -385,21 +451,16 @@ export default function App() {
   return (
     <RegistryContext.Provider value={{ commandGroups }}>
       <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
-         <Sidebar
-            history={history}
-            onSelectHistory={(run) => setSelectedRun(run)}
-         />
+         <Sidebar history={history} onSelectHistory={setSelectedRun} />
          <div style={{ flex: 1, position: 'relative' }}>
-            {/* Click on background to reset selection? Optional UX */}
-            <div style={{width: '100%', height: '100%'}} onClick={(e) => {
-                // If click is directly on the container (not node), maybe reset?
-                // Hard to detect in React Flow wrapper easily without capturing everything.
-                // Let's rely on logic inside Flow component to handle 'selectedRun' prop changes.
-            }}>
-               <ReactFlowProvider>
-                 <Flow selectedRun={selectedRun} />
-               </ReactFlowProvider>
-            </div>
+           <ReactFlowProvider>
+             <Flow
+                selectedRun={selectedRun}
+                onRunHandled={() => {
+                    // Logic handled in effects
+                }}
+             />
+           </ReactFlowProvider>
          </div>
       </div>
     </RegistryContext.Provider>

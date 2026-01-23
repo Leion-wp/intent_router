@@ -16,8 +16,9 @@ export interface PipelineRun {
     id: string;
     name: string;
     timestamp: number;
-    status: 'running' | 'success' | 'failure' | 'cancelled' | 'aborted';
+    status: 'running' | 'success' | 'failure' | 'cancelled';
     steps: StepLog[];
+    pipelineSnapshot?: any; // Store the full pipeline definition
 }
 
 export class HistoryManager {
@@ -66,14 +67,16 @@ export class HistoryManager {
         return this.runs;
     }
 
+    private registerListeners() {
+        pipelineEventBus.on(this.handleEvent.bind(this));
+    }
+
     public async clearHistory() {
         this.runs = [];
         await this.saveHistory();
-        pipelineEventBus.emit({ type: 'historyUpdate', runId: 'sys', timestamp: Date.now() } as any);
-    }
-
-    private registerListeners() {
-        pipelineEventBus.on(this.handleEvent.bind(this));
+        vscode.window.showInformationMessage('Pipeline history cleared.');
+        // We might need to notify the webview if it's open.
+        // For now, next refresh will show empty.
     }
 
     private handleEvent(event: PipelineEvent) {
@@ -84,7 +87,8 @@ export class HistoryManager {
                     name: event.name || 'Untitled Pipeline',
                     timestamp: event.timestamp,
                     status: 'running',
-                    steps: []
+                    steps: [],
+                    pipelineSnapshot: event.pipeline
                 };
                 // Add to start of list
                 this.runs.unshift(this.currentRun);
@@ -119,12 +123,12 @@ export class HistoryManager {
 
             case 'pipelineEnd':
                 if (this.currentRun && this.currentRun.id === event.runId) {
-                    // Map 'failure' to 'aborted' if user prefers that terminology for failed runs
-                    // But usually failure means error, cancelled means user stop.
-                    // User request: "mark abort rather than failed".
-                    // I will interpret this as: if success=false, mark as 'aborted'.
-                    this.currentRun.status = event.success ? 'success' : 'aborted';
-                    this.currentRun.status = event.success ? 'success' : 'failure';
+                    // Use explicit status if available, otherwise infer from success boolean
+                    if (event.status) {
+                        this.currentRun.status = event.status;
+                    } else {
+                        this.currentRun.status = event.success ? 'success' : 'failure';
+                    }
                     this.saveHistory();
                     this.currentRun = null;
                 }
