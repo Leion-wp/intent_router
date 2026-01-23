@@ -245,6 +245,49 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
   }, [selectedRun]);
 
 
+  // Playback Logic
+  useEffect(() => {
+    const timeouts: any[] = [];
+
+    if (selectedRun) {
+      console.log('Replaying run:', selectedRun);
+
+      // 1. Reset all nodes to idle
+      setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
+
+      // 2. Playback steps
+      const actionNodes = nodes.filter(n => n.id !== 'start');
+
+      selectedRun.steps.forEach((step: any, i: number) => {
+         // Immediate reset at step 0 if needed, but we did it above.
+
+         // Visual playback
+         const t = setTimeout(() => {
+           setNodes((nds) => {
+              // Map index to action node ID
+              const targetNode = actionNodes[step.index];
+              if (!targetNode) return nds;
+
+              return nds.map(n => {
+                if (n.id === targetNode.id) {
+                  return {
+                    ...n,
+                    data: { ...n.data, status: step.status }
+                  };
+                }
+                return n;
+              });
+           });
+         }, (i + 1) * 600); // 600ms delay per step
+         timeouts.push(t);
+      });
+    }
+
+    return () => {
+      timeouts.forEach(clearTimeout);
+    };
+  }, [selectedRun]); // Re-run when selectedRun changes
+
   const onConnect = useCallback(
     (params: Connection) => {
       // Prevent self-loops
@@ -411,6 +454,10 @@ export default function App() {
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, []);
+
+  // When clicking an active run again or clicking clear, we might want to toggle?
+  // For now, let's allow re-selection to replay.
+  // Sidebar handles the click.
 
   return (
     <RegistryContext.Provider value={{ commandGroups }}>

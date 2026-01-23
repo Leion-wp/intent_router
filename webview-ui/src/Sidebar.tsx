@@ -1,9 +1,17 @@
 import React, { useState } from 'react';
 
 type SidebarProps = {
-    history?: any[];
-    onSelectHistory?: (run: any) => void;
+  history?: any[];
+  onSelectHistory?: (run: any) => void;
 };
+
+// Acquire VS Code API (safe singleton) - reuse from App or get from global
+declare global {
+  interface Window {
+    vscode: any;
+  }
+}
+const vscode = window.vscode || (window.vscode = (window as any).acquireVsCodeApi ? (window as any).acquireVsCodeApi() : null);
 
 export default function Sidebar({ history = [], onSelectHistory }: SidebarProps) {
   const [tab, setTab] = useState<'providers' | 'history'>('providers');
@@ -24,7 +32,7 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
     { id: 'terminal', label: 'Terminal', icon: 'codicon-terminal', desc: 'Run shell commands' },
     { id: 'system', label: 'System', icon: 'codicon-settings-gear', desc: 'Workflow controls' },
     { id: 'git', label: 'Git', icon: 'codicon-git-commit', desc: 'Version control operations' },
-    { id: 'docker', label: 'Docker', icon: 'codicon-container', desc: 'Container operations' },
+    { id: 'docker', label: 'Docker', icon: 'codicon-container', desc: 'Container operations' }
   ];
 
   return (
