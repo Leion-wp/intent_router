@@ -15,9 +15,11 @@ declare global {
 export default function Sidebar({ history = [], onSelectHistory }: SidebarProps) {
   const [tab, setTab] = useState<'providers' | 'history'>('providers');
 
-  const onDragStart = (event: React.DragEvent, nodeType: string, provider: string) => {
+  const onDragStart = (event: React.DragEvent, nodeType: string, provider?: string) => {
     event.dataTransfer.setData('application/reactflow/type', nodeType);
-    event.dataTransfer.setData('application/reactflow/provider', provider);
+    if (provider) {
+        event.dataTransfer.setData('application/reactflow/provider', provider);
+    }
     event.dataTransfer.effectAllowed = 'move';
   };
 
@@ -27,11 +29,15 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
     }
   };
 
-  const providers = [
-    { id: 'terminal', label: 'Terminal', icon: 'codicon-terminal', desc: 'Run shell commands' },
-    { id: 'system', label: 'System', icon: 'codicon-settings-gear', desc: 'Workflow controls' },
-    { id: 'git', label: 'Git', icon: 'codicon-git-commit', desc: 'Version control operations' },
-    { id: 'docker', label: 'Docker', icon: 'codicon-container', desc: 'Container operations' }
+  const items = [
+    // Context / Setup Nodes
+    { type: 'promptNode', label: 'Prompt', icon: 'codicon-symbol-string', desc: 'Set variable' },
+    { type: 'repoNode', label: 'Repo', icon: 'codicon-repo', desc: 'Set workspace path' },
+    // Providers
+    { type: 'actionNode', provider: 'terminal', label: 'Terminal', icon: 'codicon-terminal', desc: 'Run shell commands' },
+    { type: 'actionNode', provider: 'system', label: 'System', icon: 'codicon-settings-gear', desc: 'Workflow controls' },
+    { type: 'actionNode', provider: 'git', label: 'Git', icon: 'codicon-git-commit', desc: 'Version control operations' },
+    { type: 'actionNode', provider: 'docker', label: 'Docker', icon: 'codicon-container', desc: 'Container operations' }
   ];
 
   return (
@@ -46,7 +52,7 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
                  borderBottom: tab === 'providers' ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none'
              }}
           >
-              PROVIDERS
+              NODES
           </div>
           <div
              onClick={() => setTab('history')}
@@ -63,19 +69,19 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
 
       {tab === 'providers' ? (
         <div className="sidebar-list">
-          {providers.map((p) => (
+          {items.map((item, idx) => (
             <div
-              key={p.id}
+              key={idx}
               className="dndnode"
-              onDragStart={(event) => onDragStart(event, 'actionNode', p.id)}
+              onDragStart={(event) => onDragStart(event, item.type, item.provider)}
               draggable
-              title={`Drag to add ${p.label} - ${p.desc}`}
-              aria-label={`Add ${p.label} node`}
+              title={`Drag to add ${item.label} - ${item.desc}`}
+              aria-label={`Add ${item.label} node`}
               tabIndex={0}
               role="listitem"
             >
-              <span className={`codicon ${p.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
-              <span>{p.label}</span>
+              <span className={`codicon ${item.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
+              <span>{item.label}</span>
             </div>
           ))}
         </div>
