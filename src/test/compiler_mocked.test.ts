@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { compileStep } from '../pipelineRunner';
+import { compileStep } from '../pipeline/compiler';
 import { Intent } from '../types';
 
 suite('Compiler Mocked Test', () => {
