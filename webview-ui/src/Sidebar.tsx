@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 type SidebarProps = {
   history?: any[];
   onSelectHistory?: (run: any) => void;
+  onRestoreHistory?: (run: any) => void;
 };
 
 // Acquire VS Code API (safe singleton) - reuse from App or get from global
@@ -12,7 +13,7 @@ declare global {
   }
 }
 
-export default function Sidebar({ history = [], onSelectHistory }: SidebarProps) {
+export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory }: SidebarProps) {
   const [tab, setTab] = useState<'providers' | 'history'>('providers');
 
   const onDragStart = (event: React.DragEvent, nodeType: string, provider?: string) => {
@@ -104,16 +105,36 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
                     onMouseOut={(e) => e.currentTarget.style.border = '1px solid transparent'}
                   >
                       <div style={{fontWeight: 'bold', fontSize: '12px', marginBottom: '4px'}}>{run.name}</div>
-                      <div style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between'}}>
+                      <div style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
                           <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
-                          <span style={{
-                              color: run.status === 'success' ? '#4caf50' : // Green
-                                     run.status === 'failure' ? '#f44336' : // Red
-                                     run.status === 'cancelled' ? '#e6c300' : // Gold
-                                     'var(--vscode-descriptionForeground)'
-                          }}>
-                              {run.status.toUpperCase()}
-                          </span>
+                          <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
+                            <span style={{
+                                color: run.status === 'success' ? '#4caf50' : // Green
+                                       run.status === 'failure' ? '#f44336' : // Red
+                                       run.status === 'cancelled' ? '#e6c300' : // Gold
+                                       'var(--vscode-descriptionForeground)'
+                            }}>
+                                {run.status.toUpperCase()}
+                            </span>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onRestoreHistory?.(run);
+                                }}
+                                title="Restore Snapshot"
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--vscode-icon-foreground)',
+                                    cursor: 'pointer',
+                                    padding: '2px',
+                                    opacity: run.pipelineSnapshot?.meta?.ui ? 1 : 0.3
+                                }}
+                                disabled={!run.pipelineSnapshot?.meta?.ui}
+                             >
+                                <span className="codicon codicon-desktop-download"></span>
+                             </button>
+                          </div>
                       </div>
                   </div>
               ))}
