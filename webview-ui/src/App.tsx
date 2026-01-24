@@ -103,13 +103,21 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
          deletable: false
       });
 
-      let lastId = 'start';
       let y = 150;
+      const stepIdToNodeId = new Map<string, string>();
+      const nodeIds: string[] = ['start'];
 
       if (Array.isArray(pipeline.steps)) {
+          // 1. Create Nodes
           pipeline.steps.forEach((step: any) => {
-             const nodeId = getId();
+             const nodeId = step.id || getId();
              const intent = step.intent || '';
+
+             // Store ID mapping
+             if (step.id) {
+                 stepIdToNodeId.set(step.id, nodeId);
+             }
+             // Implicit mapping by order for non-ID usage
 
              let type = 'actionNode';
              let data: any = { status: 'idle' };
@@ -139,16 +147,55 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
                  position: { x: 250, y: y },
                  data
              });
+             nodeIds.push(nodeId);
 
-             newEdges.push({
-                 id: `e-${lastId}-${nodeId}`,
-                 source: lastId,
-                 target: nodeId,
-                 markerEnd: { type: MarkerType.ArrowClosed }
-             });
-
-             lastId = nodeId;
              y += 150;
+          });
+
+          // 2. Create Edges
+          // Connect Start -> First Step
+          if (pipeline.steps.length > 0) {
+              const firstStepNodeId = nodeIds[1];
+              newEdges.push({
+                  id: `e-start-${firstStepNodeId}`,
+                  source: 'start',
+                  target: firstStepNodeId,
+                  markerEnd: { type: MarkerType.ArrowClosed }
+              });
+          }
+
+          // Connect sequential steps (Success Path) and Failures
+          pipeline.steps.forEach((step: any, index: number) => {
+             const currentNodeId = nodeIds[index + 1]; // +1 because index 0 is Start
+
+             // Success Edge (to next step)
+             // We assume linear succession unless specified otherwise?
+             // "Si Success: next step séquentiel". So we MUST connect to next step in array.
+             if (index < pipeline.steps.length - 1) {
+                 const nextNodeId = nodeIds[index + 2];
+                 newEdges.push({
+                     id: `e-${currentNodeId}-${nextNodeId}`,
+                     source: currentNodeId,
+                     target: nextNodeId,
+                     markerEnd: { type: MarkerType.ArrowClosed }
+                 });
+             }
+
+             // Failure Edge
+             if (step.onFailure) {
+                 const targetNodeId = stepIdToNodeId.get(step.onFailure);
+                 if (targetNodeId) {
+                     newEdges.push({
+                         id: `e-${currentNodeId}-${targetNodeId}-fail`,
+                         source: currentNodeId,
+                         target: targetNodeId,
+                         sourceHandle: 'failure',
+                         markerEnd: { type: MarkerType.ArrowClosed },
+                         style: { stroke: '#f44336' }, // Optional: visual cue
+                         animated: true
+                     });
+                 }
+             }
           });
       }
 
@@ -337,6 +384,8 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
     const adj = new Map<string, string[]>();
     const inDegree = new Map<string, number>();
+    const failureMap = new Map<string, string>(); // Source -> Target
+    const successEdges = new Map<string, string>(); // Source -> Target
 
     nodes.forEach(n => {
         adj.set(n.id, []);
@@ -348,11 +397,15 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
             adj.get(e.source)?.push(e.target);
             inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
         }
+
+        if (e.sourceHandle === 'failure') {
+            failureMap.set(e.source, e.target);
+        } else {
+            successEdges.set(e.source, e.target);
+        }
     });
 
     // 2. Check for Disconnected Nodes (Hard Error)
-    // A node is disconnected if it has no incoming AND no outgoing edges.
-    // Exception: If the graph has only 1 node, it is valid (e.g. just Start or just Action).
     if (nodes.length > 1) {
         const isolated = nodes.find(n => (inDegree.get(n.id) === 0) && (adj.get(n.id)?.length === 0));
         if (isolated) {
@@ -363,16 +416,31 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
         }
     }
 
-    // 3. Topological Sort (Kahn's Algorithm)
+    // 3. Topological Sort (Kahn's Algorithm with Success Priority)
     const queue: string[] = [];
     inDegree.forEach((degree, id) => {
         if (degree === 0) queue.push(id);
     });
 
     const sortedIds: string[] = [];
+    let lastProcessedId: string | null = null;
+
     while (queue.length > 0) {
-        const u = queue.shift()!;
+        let u: string;
+        let index = 0;
+
+        // Try to pick the "success" successor of the last processed node
+        if (lastProcessedId && successEdges.has(lastProcessedId)) {
+            const preferredNext = successEdges.get(lastProcessedId)!;
+            const preferredIndex = queue.indexOf(preferredNext);
+            if (preferredIndex !== -1) {
+                index = preferredIndex;
+            }
+        }
+
+        u = queue.splice(index, 1)[0];
         sortedIds.push(u);
+        lastProcessedId = u;
 
         const neighbors = adj.get(u) || [];
         neighbors.forEach(v => {
@@ -420,12 +488,18 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
         }
 
         if (intent) {
-            steps.push({
+            const stepObj: any = {
                 id: node.id,
                 intent,
                 description,
                 payload
-            });
+            };
+
+            if (failureMap.has(node.id)) {
+                stepObj.onFailure = failureMap.get(node.id);
+            }
+
+            steps.push(stepObj);
         }
     });
 
