@@ -76,3 +76,51 @@ html, body, #root {
   gap: 6px;
   border-color: var(--vscode-focusBorder);
 }
+
+/* Accessibility Improvements */
+.sidebar-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+  padding-bottom: 4px;
+  font: inherit;
+  text-transform: inherit;
+  transition: opacity 0.1s, border-color 0.1s;
+}
+
+.sidebar-tab:hover,
+.sidebar-tab:focus-visible,
+.sidebar-tab.active {
+  opacity: 1;
+}
+
+.sidebar-tab.active {
+  font-weight: bold;
+  border-bottom-color: var(--vscode-panelTitle-activeBorder);
+}
+
+.sidebar-tab:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+.history-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.history-item:hover,
+.history-item:focus-visible {
+  background: var(--vscode-list-hoverBackground);
+  border-color: var(--vscode-focusBorder);
+}

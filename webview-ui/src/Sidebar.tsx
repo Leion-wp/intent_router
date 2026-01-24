@@ -36,33 +36,36 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-header" style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}>
-          <div
+      <div
+        className="sidebar-header"
+        role="tablist"
+        aria-label="Sidebar Navigation"
+        style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}
+      >
+          <button
+             role="tab"
+             aria-selected={tab === 'providers'}
+             aria-controls="panel-providers"
+             id="tab-providers"
              onClick={() => setTab('providers')}
-             style={{
-                 cursor: 'pointer',
-                 fontWeight: tab === 'providers' ? 'bold' : 'normal',
-                 opacity: tab === 'providers' ? 1 : 0.6,
-                 borderBottom: tab === 'providers' ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none'
-             }}
+             className={`sidebar-tab ${tab === 'providers' ? 'active' : ''}`}
           >
               PROVIDERS
-          </div>
-          <div
+          </button>
+          <button
+             role="tab"
+             aria-selected={tab === 'history'}
+             aria-controls="panel-history"
+             id="tab-history"
              onClick={() => setTab('history')}
-             style={{
-                 cursor: 'pointer',
-                 fontWeight: tab === 'history' ? 'bold' : 'normal',
-                 opacity: tab === 'history' ? 1 : 0.6,
-                 borderBottom: tab === 'history' ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none'
-             }}
+             className={`sidebar-tab ${tab === 'history' ? 'active' : ''}`}
           >
               HISTORY
-          </div>
+          </button>
       </div>
 
       {tab === 'providers' ? (
-        <div className="sidebar-list">
+        <div id="panel-providers" role="tabpanel" aria-labelledby="tab-providers" className="sidebar-list">
           {providers.map((p) => (
             <div
               key={p.id}
@@ -80,25 +83,16 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
           ))}
         </div>
       ) : (
-          <div className="sidebar-list" style={{ flex: 1, overflowY: 'auto' }}>
+          <div id="panel-history" role="tabpanel" aria-labelledby="tab-history" className="sidebar-list" style={{ flex: 1, overflowY: 'auto' }}>
               {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
               {history.map((run) => (
-                  <div
+                  <button
                     key={run.id}
                     onClick={() => onSelectHistory?.(run)}
-                    style={{
-                      padding: '8px',
-                      background: 'var(--vscode-list-hoverBackground)',
-                      cursor: 'pointer',
-                      borderRadius: '4px',
-                      border: '1px solid transparent',
-                      marginBottom: '8px'
-                    }}
-                    onMouseOver={(e) => e.currentTarget.style.border = '1px solid var(--vscode-focusBorder)'}
-                    onMouseOut={(e) => e.currentTarget.style.border = '1px solid transparent'}
+                    className="history-item"
                   >
-                      <div style={{fontWeight: 'bold', fontSize: '12px', marginBottom: '4px'}}>{run.name}</div>
-                      <div style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between'}}>
+                      <span style={{fontWeight: 'bold', fontSize: '12px', marginBottom: '4px', display: 'block'}}>{run.name}</span>
+                      <span style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between'}}>
                           <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
                           <span style={{
                               color: run.status === 'success' ? '#4caf50' : // Green
@@ -108,8 +102,8 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
                           }}>
                               {run.status.toUpperCase()}
                           </span>
-                      </div>
-                  </div>
+                      </span>
+                  </button>
               ))}
           </div>
       )}
