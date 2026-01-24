@@ -16,6 +16,18 @@ export function generateSecureNonce(): string {
 }
 
 /**
+ * Validates that a string does not contain malicious characters for a file path.
+ * throws Error if invalid.
+ */
+export function validateCwdString(cwd: string): void {
+    const forbidden = ['"', '\n', '\r', '`', '$'];
+    const found = forbidden.filter(char => cwd.includes(char));
+    if (found.length > 0) {
+        throw new Error(`Security Error: cwd contains forbidden characters: ${found.map(c => JSON.stringify(c)).join(', ')}`);
+    }
+}
+
+/**
  * Generates a trace ID consisting of a timestamp and a secure random hex suffix.
  */
 export function generateSecureTraceId(): string {

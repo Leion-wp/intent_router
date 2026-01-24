@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { registerCapabilities } from '../registry';
+import { validateCwdString } from '../security';
 
 export function registerTerminalProvider(context: vscode.ExtensionContext) {
     // Terminal is a built-in feature, so we always register it.
@@ -29,6 +31,29 @@ export const terminalTemplates: Record<string, any> = {
     'terminal.run': { "command": "echo 'Hello Intent Router'", "cwd": "." }
 };
 
+async function validateCwdPath(cwd: string): Promise<void> {
+    validateCwdString(cwd);
+
+    let uri: vscode.Uri;
+    if (path.isAbsolute(cwd)) {
+        uri = vscode.Uri.file(cwd);
+    } else {
+        if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+            uri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, cwd);
+        } else {
+            // Cannot reliably validate relative path existence without workspace context.
+            // Rely on string validation only.
+            return;
+        }
+    }
+
+    try {
+        await vscode.workspace.fs.stat(uri);
+    } catch {
+        throw new Error(`Security Error: cwd path does not exist or is inaccessible: ${cwd}`);
+    }
+}
+
 export async function executeTerminalCommand(args: any): Promise<void> {
     const commandText = args?.command;
     const cwd = args?.cwd;
@@ -50,7 +75,13 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     // Avoid shell-specific chaining tokens (PowerShell 5.1 doesn't support `&&`).
     // `pushd` works across PowerShell/cmd/bash/zsh and also switches drives on Windows.
     if (typeof cwd === 'string' && cwd.trim() && cwd.trim() !== '.') {
-        term.sendText(`pushd "${cwd.trim()}"`);
+        try {
+            await validateCwdPath(cwd.trim());
+            term.sendText(`pushd "${cwd.trim()}"`);
+        } catch (error: any) {
+             vscode.window.showErrorMessage(error.message);
+             return;
+        }
     }
 
     term.sendText(commandText);
