@@ -180,6 +180,14 @@ const ActionNode = ({ data, id }: NodeProps) => {
     }}>
       <Handle type="target" position={Position.Left} />
 
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="failure"
+        title="On Failure"
+        style={{ top: '30%', background: '#f44336' }}
+      />
+
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', textTransform: 'capitalize' }}>
         <span>{provider}</span>
         {status !== 'idle' && <span style={{ fontSize: '0.8em', color: borderColor }}>●</span>}
