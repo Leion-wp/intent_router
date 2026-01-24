@@ -22,6 +22,7 @@ import Sidebar from './Sidebar';
 import ActionNode from './nodes/ActionNode';
 import PromptNode from './nodes/PromptNode';
 import RepoNode from './nodes/RepoNode';
+import VSCodeCommandNode from './nodes/VSCodeCommandNode';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
@@ -31,6 +32,7 @@ const nodeTypes = {
   actionNode: ActionNode,
   promptNode: PromptNode,
   repoNode: RepoNode,
+  vscodeCommandNode: VSCodeCommandNode
 };
 
 declare global {
@@ -106,15 +108,17 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
          deletable: false
       });
 
-      let x = 600;
+      const baseX = 450;
+      const baseY = 50;
+      const xSpacing = 320;
       const stepIdToNodeId = new Map<string, string>();
       const nodeIds: string[] = ['start'];
 
       if (Array.isArray(pipeline.steps)) {
           // 1. Create Nodes
-          pipeline.steps.forEach((step: any) => {
-             const nodeId = step.id || getId();
-             const intent = step.intent || '';
+          pipeline.steps.forEach((step: any, index: number) => {
+              const nodeId = step.id || getId();
+              const intent = step.intent || '';
 
              // Store ID mapping
              if (step.id) {
@@ -126,33 +130,36 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
              let data: any = { status: 'idle' };
 
              // Infer type from intent
-             if (intent === 'system.setVar') {
-                 type = 'promptNode';
-                 data.name = step.payload?.name;
-                 data.value = step.payload?.value;
-                 data.kind = 'prompt';
-             } else if (intent === 'system.setCwd') {
-                 type = 'repoNode';
-                 data.path = step.payload?.path;
-                 data.kind = 'repo';
-             } else {
-                 type = 'actionNode';
-                 const normalized = canonicalizeIntent('', intent);
-                 data.provider = normalized.provider;
-                 data.capability = normalized.capability;
+              if (intent === 'system.setVar') {
+                  type = 'promptNode';
+                  data.name = step.payload?.name;
+                  data.value = step.payload?.value;
+                  data.kind = 'prompt';
+              } else if (intent === 'system.setCwd') {
+                  type = 'repoNode';
+                  data.path = step.payload?.path;
+                  data.kind = 'repo';
+              } else if (intent === 'vscode.runCommand') {
+                  type = 'vscodeCommandNode';
+                  data.commandId = step.payload?.commandId;
+                  data.argsJson = typeof step.payload?.argsJson === 'string' ? step.payload.argsJson : '';
+                  data.kind = 'vscodeCommand';
+              } else {
+                  type = 'actionNode';
+                  const normalized = canonicalizeIntent('', intent);
+                  data.provider = normalized.provider;
+                  data.capability = normalized.capability;
                  data.args = { ...step.payload, description: step.description };
                  data.kind = 'action';
              }
 
-             newNodes.push({
-                 id: nodeId,
-                 type,
-                 position: { x, y: 50 },
-                 data
-             });
-             nodeIds.push(nodeId);
-
-             x += 350;
+              newNodes.push({
+                  id: nodeId,
+                  type,
+                  position: { x: baseX + index * xSpacing, y: baseY },
+                  data
+              });
+              nodeIds.push(nodeId);
           });
 
           // 2. Create Edges
@@ -415,13 +422,16 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
         id: getId(),
         type,
         position,
-        data: {
-          provider: provider,
-          capability: '', // Default will be set by Node
-          args: {},
-          status: 'idle',
-          kind: type === 'promptNode' ? 'prompt' : type === 'repoNode' ? 'repo' : 'action'
-        },
+        data:
+          type === 'actionNode'
+            ? { provider: provider, capability: '', args: {}, status: 'idle', kind: 'action' }
+            : type === 'promptNode'
+              ? { name: '', value: '', kind: 'prompt' }
+              : type === 'repoNode'
+                ? { path: '${workspaceRoot}', kind: 'repo' }
+                : type === 'vscodeCommandNode'
+                  ? { commandId: '', argsJson: '', kind: 'vscodeCommand' }
+                  : { status: 'idle' },
       };
 
       setNodes((nds) => nds.concat(newNode));
@@ -529,6 +539,9 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
         } else if (node.type === 'repoNode') {
             intent = 'system.setCwd';
             payload = { path: data.path };
+        } else if (node.type === 'vscodeCommandNode') {
+            intent = 'vscode.runCommand';
+            payload = { commandId: data.commandId, argsJson: data.argsJson };
         } else if (node.type === 'actionNode') {
             const normalized = canonicalizeIntent(String(data.provider || ''), String(data.capability || ''));
             intent = normalized.intent;
