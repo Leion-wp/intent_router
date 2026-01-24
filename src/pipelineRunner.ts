@@ -229,8 +229,6 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
     const runId = Date.now().toString(36); // Simple run ID
     currentRunId = runId;
 
-    let currentCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '.';
-
     pipelineEventBus.emit({
         type: 'pipelineStart',
         runId,
@@ -334,7 +332,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             // We use compileStep to handle both var resolution AND terminal transformation
             let compiledStep: Intent;
             try {
-                compiledStep = await compileStep(stepIntent, variableStore, currentCwd);
+                compiledStep = await compileStep(stepIntent, variableCache, currentCwd);
             } catch (error) {
                  vscode.window.showErrorMessage(`Compilation failed at step ${i}: ${error}`);
                  throw error;
@@ -347,7 +345,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                  const name = compiledStep.payload?.name;
                  const value = compiledStep.payload?.value;
                  if (name && value !== undefined) {
-                     variableStore.set(name, value);
+                     variableCache.set(name, value);
                      // Emit success for this "virtual" step
                      const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
                      pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: `Set var ${name}`, index: i });

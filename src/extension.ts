@@ -10,6 +10,7 @@ import { registerGitProvider } from './providers/gitAdapter';
 import { registerDockerProvider } from './providers/dockerAdapter';
 import { executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
 import { registerSystemProvider } from './providers/systemAdapter';
+import { registerVSCodeProvider } from './providers/vscodeAdapter';
 import { StatusBarManager } from './statusBar';
 import { historyManager } from './historyManager';
 
@@ -22,6 +23,7 @@ export function activate(context: vscode.ExtensionContext) {
     registerDockerProvider(context);
     registerTerminalProvider(context);
     registerSystemProvider(context);
+    registerVSCodeProvider(context);
 
     const pipelineBuilder = new PipelineBuilder(context.extensionUri);
     const pipelinesProvider = new PipelinesTreeDataProvider();
