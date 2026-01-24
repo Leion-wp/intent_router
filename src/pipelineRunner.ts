@@ -115,7 +115,8 @@ function parsePipeline(text: string): PipelineFile | undefined {
 function resolveTemplateVariables(input: any, store: Map<string, any>): any {
     if (typeof input === 'string') {
         return input.replace(/\$\{var:([^}]+)\}/g, (match, varName) => {
-            return store.has(varName) ? String(store.get(varName)) : match;
+            const key = typeof varName === 'string' ? varName.trim() : '';
+            return key && store.has(key) ? String(store.get(key)) : match;
         });
     } else if (Array.isArray(input)) {
         return input.map(item => resolveTemplateVariables(item, store));
@@ -163,10 +164,11 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
             break;
         case 'git.clone': {
              const url = payload?.url;
+             const dir = payload?.dir;
              if (!url) throw new Error('git.clone requires "url"');
-             command = `git clone ${url}`;
+             command = `git clone ${url}${dir ? ` ${dir}` : ''}`;
              break;
-        }
+         }
         case 'docker.build': {
             const tag = payload?.tag;
             const path = payload?.path || '.';
@@ -223,7 +225,9 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
         await config.update('activeProfile', targetProfile, true);
     }
 
-    const variableCache = new Map<string, string>();
+    const variableCache = new Map<string, string>(); // cache for ${input:...}
+    const variableStore = new Map<string, any>(); // store for ${var:...}
+
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
     let currentCwd = workspaceRoot ?? '.';
     const runId = Date.now().toString(36); // Simple run ID

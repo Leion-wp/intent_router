@@ -2,16 +2,9 @@ import * as vscode from 'vscode';
 import { registerCapabilities } from '../registry';
 
 export function registerDockerProvider(context: vscode.ExtensionContext) {
-    const dockerExtension = vscode.extensions.getExtension('ms-azuretools.vscode-docker');
-    if (!dockerExtension) {
-        return; // Strict discovery: if not present, do not register.
-    }
-
-    if (!dockerExtension.isActive) {
-        dockerExtension.activate().then(() => doRegister(), () => {});
-    } else {
-        doRegister();
-    }
+    // V2 direction: Docker steps compile to terminal commands in the runner.
+    // We still register schemas/templates for the builder and keep VS Code commands as a fallback for direct routing.
+    doRegister();
 }
 
 function doRegister() {
@@ -36,12 +29,6 @@ function doRegister() {
                     { name: 'image', type: 'string', description: 'Image ID or name', required: true },
                     { name: 'detach', type: 'boolean', description: 'Run in background', default: true }
                 ]
-            },
-            {
-                capability: 'docker.logs',
-                command: 'vscode-docker.containers.viewLogs',
-                description: 'View logs for a container',
-                args: []
             }
         ]
     });
@@ -50,6 +37,5 @@ function doRegister() {
 
 export const dockerTemplates: Record<string, any> = {
     'docker.build': { "tag": "myapp:latest", "path": "." },
-    'docker.run': { "image": "myapp:latest", "detach": true },
-    'docker.logs': {}
+    'docker.run': { "image": "myapp:latest", "detach": true }
 };
