@@ -60,7 +60,9 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
   const insertVariable = (key: string) => {
     const current = args[key] || '';
-    handleArgChange(key, current + '${input:Prompt}');
+    // Use design-time variables (PromptNode / system.setVar) rather than runtime prompts.
+    // Convention: variable name matches the argument key (e.g. `${var:branch}`).
+    handleArgChange(key, current + `\${var:${key}}`);
   };
 
   const handleBrowse = (key: string) => {

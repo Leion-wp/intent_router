@@ -111,6 +111,108 @@ function parsePipeline(text: string): PipelineFile | undefined {
     return pipeline;
 }
 
+// Helper to resolve ${var:name} from store
+function resolveTemplateVariables(input: any, store: Map<string, any>): any {
+    if (typeof input === 'string') {
+        return input.replace(/\$\{var:([^}]+)\}/g, (match, varName) => {
+            const key = typeof varName === 'string' ? varName.trim() : '';
+            return key && store.has(key) ? String(store.get(key)) : match;
+        });
+    } else if (Array.isArray(input)) {
+        return input.map(item => resolveTemplateVariables(item, store));
+    } else if (typeof input === 'object' && input !== null) {
+        const resolved: any = {};
+        for (const key of Object.keys(input)) {
+            resolved[key] = resolveTemplateVariables(input[key], store);
+        }
+        return resolved;
+    }
+    return input;
+}
+
+// Helper to compile high-level intents to terminal.run
+function transformToTerminal(intent: Intent, cwd: string): Intent {
+    const { intent: name, payload } = intent;
+
+    // Pass through if not a compile target
+    if (!name.startsWith('git.') && !name.startsWith('docker.')) {
+        return intent;
+    }
+
+    let command = '';
+
+    switch (name) {
+        case 'git.checkout': {
+            const branch = payload?.branch;
+            const create = payload?.create;
+            if (!branch) throw new Error('git.checkout requires "branch"');
+            command = `git checkout ${create ? '-b ' : ''}${branch}`;
+            break;
+        }
+        case 'git.commit': {
+            const message = payload?.message;
+            const amend = payload?.amend;
+            if (!message) throw new Error('git.commit requires "message"');
+            command = `git commit ${amend ? '--amend ' : ''}-m "${message}"`;
+            break;
+        }
+        case 'git.pull':
+            command = 'git pull';
+            break;
+        case 'git.push':
+            command = 'git push';
+            break;
+        case 'git.clone': {
+             const url = payload?.url;
+             const dir = payload?.dir;
+             if (!url) throw new Error('git.clone requires "url"');
+             command = `git clone ${url}${dir ? ` ${dir}` : ''}`;
+             break;
+         }
+        case 'docker.build': {
+            const tag = payload?.tag;
+            const path = payload?.path || '.';
+            if (!tag) throw new Error('docker.build requires "tag"');
+            command = `docker build -t ${tag} ${path}`;
+            break;
+        }
+        case 'docker.run': {
+            const image = payload?.image;
+            const detach = payload?.detach;
+            if (!image) throw new Error('docker.run requires "image"');
+            command = `docker run ${detach ? '-d ' : ''}${image}`;
+            break;
+        }
+        default:
+            return intent; // Not a target for compilation
+    }
+
+    return {
+        ...intent,
+        intent: 'terminal.run', // Transform intent ID
+        capabilities: ['terminal.run'],
+        payload: {
+            command,
+            cwd
+        },
+        description: intent.description || `Compiled: ${command}`
+    };
+}
+
+// Compiler entry point
+export async function compileStep(step: Intent, variableStore: Map<string, any>, cwd: string): Promise<Intent> {
+    // 1. Resolve variables
+    const resolvedPayload = resolveTemplateVariables(step.payload, variableStore);
+
+    const resolvedStep = {
+        ...step,
+        payload: resolvedPayload
+    };
+
+    // 2. Transform to terminal if needed
+    return transformToTerminal(resolvedStep, cwd);
+}
+
 async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<void> {
     // Reset state
     isCancelled = false;
@@ -123,7 +225,11 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
         await config.update('activeProfile', targetProfile, true);
     }
 
-    const variableCache = new Map<string, string>();
+    const variableCache = new Map<string, string>(); // cache for ${input:...}
+    const variableStore = new Map<string, any>(); // store for ${var:...}
+
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+    let currentCwd = workspaceRoot ?? '.';
     const runId = Date.now().toString(36); // Simple run ID
     currentRunId = runId;
 
@@ -156,16 +262,60 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             }
 
             const step = pipeline.steps[i];
+
             const stepIntent: Intent = {
                 ...step,
                 description: step.description,
+                payload: step.intent === 'terminal.run' ? applyDefaultCwd(step.payload, currentCwd) : step.payload,
                 meta: {
                     ...(step.meta ?? {}),
                     dryRun: dryRun ? true : step.meta?.dryRun
                 }
             };
 
-            const intentId = stepIntent.meta?.traceId ?? generateSecureToken(8);
+            // Resolve variables for compilation
+            // We use compileStep to handle both var resolution AND terminal transformation
+            let compiledStep: Intent;
+            try {
+                compiledStep = await compileStep(stepIntent, variableStore, currentCwd);
+            } catch (error) {
+                 vscode.window.showErrorMessage(`Compilation failed at step ${i}: ${error}`);
+                 throw error;
+            }
+
+            // Check for internal system intents *after* variable resolution (in case values were vars)
+            // But compileStep transforms git/docker. system.* should be preserved by default.
+
+            if (compiledStep.intent === 'system.setVar') {
+                const rawName = compiledStep.payload?.name;
+                const value = compiledStep.payload?.value;
+                const name = typeof rawName === 'string' ? rawName.trim() : '';
+                if (name && value !== undefined) {
+                    variableStore.set(name, value);
+                }
+
+                const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: compiledStep.description, index: i });
+                pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: true, index: i });
+                continue; // Skip routing
+            }
+
+            if (compiledStep.intent === 'system.setCwd') {
+                const rawPath = compiledStep.payload?.path;
+                if (typeof rawPath === 'string' && rawPath.trim()) {
+                    const normalized = rawPath.trim() === '${workspaceRoot}' && workspaceRoot ? workspaceRoot : rawPath.trim();
+                    currentCwd = normalized;
+                } else if (workspaceRoot) {
+                    currentCwd = workspaceRoot;
+                }
+
+                const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: compiledStep.description, index: i });
+                pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: true, index: i });
+                continue; // Skip routing
+            }
+
+            const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
 
             // Emit index so frontend can map to node
             pipelineEventBus.emit({
@@ -173,11 +323,12 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 runId,
                 intentId,
                 timestamp: Date.now(),
-                description: step.description,
+                description: compiledStep.description,
                 index: i
             });
 
-            const ok = await routeIntent(stepIntent, variableCache);
+            // Route the compiled intent
+            const ok = await routeIntent(compiledStep, variableCache);
 
             pipelineEventBus.emit({
                 type: 'stepEnd',
@@ -222,4 +373,14 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             await config.update('activeProfile', originalProfile, true);
         }
     }
+}
+
+function applyDefaultCwd(payload: any, cwd: string): any {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return payload;
+    }
+    if (payload.cwd === undefined || payload.cwd === null || payload.cwd === '' || payload.cwd === '.' || payload.cwd === '${workspaceRoot}') {
+        return { ...payload, cwd };
+    }
+    return payload;
 }
