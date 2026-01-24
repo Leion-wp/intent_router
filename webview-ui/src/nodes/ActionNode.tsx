@@ -60,7 +60,9 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
   const insertVariable = (key: string) => {
     const current = args[key] || '';
-    handleArgChange(key, current + '${input:Prompt}');
+    // Use design-time variables (PromptNode / system.setVar) rather than runtime prompts.
+    // Convention: variable name matches the argument key (e.g. `${var:branch}`).
+    handleArgChange(key, current + `\${var:${key}}`);
   };
 
   const handleBrowse = (key: string) => {
@@ -176,7 +178,15 @@ const ActionNode = ({ data, id }: NodeProps) => {
       color: 'var(--vscode-editor-foreground)',
       fontFamily: 'var(--vscode-font-family)'
     }}>
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
+
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="failure"
+        title="On Failure"
+        style={{ top: '30%', background: '#f44336' }}
+      />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', textTransform: 'capitalize' }}>
         <span>{provider}</span>
@@ -389,7 +399,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
         })}
       </div>
 
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   );
 };

@@ -1,0 +1,82 @@
+{
+  "name": "install .vsix",
+  "intent": "pipeline.run",
+  "steps": [
+    {
+      "id": "node_1",
+      "intent": "terminal.run",
+      "payload": {
+        "cwd": ".",
+        "command": "npm install"
+      },
+      "onFailure": "node_2"
+    },
+    {
+      "id": "node_2",
+      "intent": "system.pause",
+      "payload": {
+        "message": "wait install"
+      },
+      "onFailure": "node_3"
+    },
+    {
+      "id": "node_3",
+      "intent": "terminal.run",
+      "payload": {
+        "cwd": ".",
+        "command": "npm run compile"
+      }
+    },
+    {
+      "id": "node_4",
+      "intent": "system.pause",
+      "payload": {
+        "message": "wait for compile"
+      },
+      "onFailure": "node_5"
+    },
+    {
+      "id": "node_5",
+      "intent": "terminal.run",
+      "payload": {
+        "cwd": ".",
+        "command": "vsce package"
+      },
+      "onFailure": "node_6"
+    },
+    {
+      "id": "node_6",
+      "intent": "system.pause",
+      "payload": {
+        "message": "prepare the .vsix"
+      },
+      "onFailure": "node_7"
+    },
+    {
+      "id": "node_7",
+      "intent": "vscode.runCommand",
+      "description": "",
+      "payload": {
+        "commandId": "workbench.extensions.action.installVSIX",
+        "argsJson": ""
+      }
+    },
+    {
+      "id": "node_8",
+      "intent": "system.pause",
+      "payload": {
+        "message": "selection du .vsix"
+      },
+      "onFailure": "node_9"
+    },
+    {
+      "id": "node_9",
+      "intent": "vscode.runCommand",
+      "description": "",
+      "payload": {
+        "commandId": "workbench.action.reloadWindow",
+        "argsJson": ""
+      }
+    }
+  ]
+}

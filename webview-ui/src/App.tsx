@@ -12,13 +12,17 @@ import {
   Edge,
   Node,
   Connection,
-  MarkerType
+  MarkerType,
+  Position
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import './index.css';
 
 import Sidebar from './Sidebar';
 import ActionNode from './nodes/ActionNode';
+import PromptNode from './nodes/PromptNode';
+import RepoNode from './nodes/RepoNode';
+import VSCodeCommandNode from './nodes/VSCodeCommandNode';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
@@ -26,6 +30,9 @@ export const RegistryContext = createContext<any>({});
 // Register custom node types
 const nodeTypes = {
   actionNode: ActionNode,
+  promptNode: PromptNode,
+  repoNode: RepoNode,
+  vscodeCommandNode: VSCodeCommandNode
 };
 
 declare global {
@@ -44,6 +51,7 @@ const initialNodes: Node[] = [
     type: 'input',
     data: { label: 'Start' },
     position: { x: 250, y: 50 },
+    sourcePosition: Position.Right,
     deletable: false
   },
 ];
@@ -96,44 +104,108 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
          type: 'input',
          data: { label: pipeline.name || 'Start' },
          position: { x: 250, y: 50 },
+         sourcePosition: Position.Right,
          deletable: false
       });
 
-      let lastId = 'start';
-      let y = 150;
+      const baseX = 450;
+      const baseY = 50;
+      const xSpacing = 320;
+      const stepIdToNodeId = new Map<string, string>();
+      const nodeIds: string[] = ['start'];
 
       if (Array.isArray(pipeline.steps)) {
-          pipeline.steps.forEach((step: any) => {
-             const nodeId = getId();
-             const normalized = canonicalizeIntent('', step.intent || '');
-             const provider = normalized.provider;
-             // Store full capability name (e.g. 'terminal.run') to match registry
-             const capability = normalized.capability;
+          // 1. Create Nodes
+          pipeline.steps.forEach((step: any, index: number) => {
+              const nodeId = step.id || getId();
+              const intent = step.intent || '';
 
-             // Merge payload and description into args for the UI
-             const args = { ...step.payload, description: step.description };
+             // Store ID mapping
+             if (step.id) {
+                 stepIdToNodeId.set(step.id, nodeId);
+             }
+             // Implicit mapping by order for non-ID usage
 
-             newNodes.push({
-                 id: nodeId,
-                 type: 'actionNode',
-                 position: { x: 250, y: y },
-                 data: {
-                   provider,
-                   capability,
-                   args,
-                   status: 'idle'
+             let type = 'actionNode';
+             let data: any = { status: 'idle' };
+
+             // Infer type from intent
+              if (intent === 'system.setVar') {
+                  type = 'promptNode';
+                  data.name = step.payload?.name;
+                  data.value = step.payload?.value;
+                  data.kind = 'prompt';
+              } else if (intent === 'system.setCwd') {
+                  type = 'repoNode';
+                  data.path = step.payload?.path;
+                  data.kind = 'repo';
+              } else if (intent === 'vscode.runCommand') {
+                  type = 'vscodeCommandNode';
+                  data.commandId = step.payload?.commandId;
+                  data.argsJson = typeof step.payload?.argsJson === 'string' ? step.payload.argsJson : '';
+                  data.kind = 'vscodeCommand';
+              } else {
+                  type = 'actionNode';
+                  const normalized = canonicalizeIntent('', intent);
+                  data.provider = normalized.provider;
+                  data.capability = normalized.capability;
+                 data.args = { ...step.payload, description: step.description };
+                 data.kind = 'action';
+             }
+
+              newNodes.push({
+                  id: nodeId,
+                  type,
+                  position: { x: baseX + index * xSpacing, y: baseY },
+                  data
+              });
+              nodeIds.push(nodeId);
+          });
+
+          // 2. Create Edges
+          // Connect Start -> First Step
+          if (pipeline.steps.length > 0) {
+              const firstStepNodeId = nodeIds[1];
+              newEdges.push({
+                  id: `e-start-${firstStepNodeId}`,
+                  source: 'start',
+                  target: firstStepNodeId,
+                  markerEnd: { type: MarkerType.ArrowClosed }
+              });
+          }
+
+          // Connect sequential steps (Success Path) and Failures
+          pipeline.steps.forEach((step: any, index: number) => {
+             const currentNodeId = nodeIds[index + 1]; // +1 because index 0 is Start
+
+             // Success Edge (to next step)
+             // We assume linear succession unless specified otherwise?
+             // "Si Success: next step séquentiel". So we MUST connect to next step in array.
+             if (index < pipeline.steps.length - 1) {
+                 const nextNodeId = nodeIds[index + 2];
+                 newEdges.push({
+                     id: `e-${currentNodeId}-${nextNodeId}`,
+                     source: currentNodeId,
+                     target: nextNodeId,
+                     markerEnd: { type: MarkerType.ArrowClosed }
+                 });
+             }
+
+             // Failure Edge
+             if (step.onFailure) {
+                 const targetNodeId = stepIdToNodeId.get(step.onFailure);
+                 if (targetNodeId) {
+                     newEdges.push({
+                         id: `e-${currentNodeId}-${targetNodeId}-fail`,
+                         source: currentNodeId,
+                         target: targetNodeId,
+                         sourceHandle: 'failure',
+                         markerEnd: { type: MarkerType.ArrowClosed },
+                         style: { stroke: '#f44336' }, // Optional: visual cue
+                         animated: true
+                     });
                  }
-             });
-
-             newEdges.push({
-                 id: `e-${lastId}-${nodeId}`,
-                 source: lastId,
-                 target: nodeId,
-                 markerEnd: { type: MarkerType.ArrowClosed }
-             });
-
-             lastId = nodeId;
-             y += 150;
+             }
           });
       }
 
@@ -185,8 +257,6 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
           loadPipeline(selectedRun.pipelineSnapshot);
       } else {
           // If no snapshot, we can't restore structure.
-          // We can only replay on CURRENT structure if it matches.
-          // For V1, let's warn or just try.
           console.warn('No pipeline snapshot found in history run.');
       }
 
@@ -195,9 +265,6 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
   }, [selectedRun]);
 
   // Separate Effect for Playback (triggered when nodes are ready/stable?)
-  // Actually, let's keep the original Playback Logic but adapt it.
-  // We need to know if we are in "Playback Mode".
-  // Let's use `selectedRun` to trigger a sequence of status updates.
   useEffect(() => {
       const timeouts: any[] = [];
       if (selectedRun) {
@@ -248,9 +315,6 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
       const actionNodes = nodes.filter(n => n.id !== 'start');
 
       selectedRun.steps.forEach((step: any, i: number) => {
-         // Immediate reset at step 0 if needed, but we did it above.
-
-         // Visual playback
          const t = setTimeout(() => {
            setNodes((nds) => {
               // Map index to action node ID
@@ -276,6 +340,33 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
       timeouts.forEach(clearTimeout);
     };
   }, [selectedRun]); // Re-run when selectedRun changes
+
+  // Reactive Connectors (Update Edge Colors based on Source Status)
+  useEffect(() => {
+    setEdges((eds) =>
+      eds.map((edge) => {
+        const sourceNode = nodes.find((n) => n.id === edge.source);
+        if (!sourceNode) return edge;
+
+        const status = (sourceNode.data?.status as string) || 'idle';
+        let stroke = 'var(--vscode-editor-foreground)'; // Idle
+        if (status === 'running') stroke = '#007acc';
+        else if (status === 'success') stroke = '#4caf50';
+        else if (status === 'failure') stroke = '#f44336';
+
+        // Update if changed
+        if (edge.style?.stroke !== stroke) {
+          return {
+            ...edge,
+            style: { ...edge.style, stroke, strokeWidth: 2 },
+            animated: status === 'running',
+            markerEnd: { type: MarkerType.ArrowClosed, color: stroke }
+          };
+        }
+        return edge;
+      })
+    );
+  }, [nodes, setEdges]);
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -311,12 +402,16 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
         id: getId(),
         type,
         position,
-        data: {
-          provider: provider,
-          capability: '', // Default will be set by Node
-          args: {},
-          status: 'idle'
-        },
+        data:
+          type === 'actionNode'
+            ? { provider: provider, capability: '', args: {}, status: 'idle', kind: 'action' }
+            : type === 'promptNode'
+              ? { name: '', value: '', kind: 'prompt' }
+              : type === 'repoNode'
+                ? { path: '${workspaceRoot}', kind: 'repo' }
+                : type === 'vscodeCommandNode'
+                  ? { commandId: '', argsJson: '', kind: 'vscodeCommand' }
+                  : { status: 'idle' },
       };
 
       setNodes((nds) => nds.concat(newNode));
@@ -325,36 +420,131 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
   );
 
   const savePipeline = () => {
-    // 1. Sort nodes topologically (simple: follow edges from start)
-    // For V1, we assume a single chain for simplicity, but let's try to traverse.
+    // 1. Build Graph Adjacency List
+    const nodeMap = new Map(nodes.map(n => [n.id, n]));
+    const adj = new Map<string, string[]>();
+    const inDegree = new Map<string, number>();
+    const failureMap = new Map<string, string>(); // Source -> Target
+    const successEdges = new Map<string, string>(); // Source -> Target
 
-    const steps: any[] = [];
-    let currentNodeId = 'start';
+    nodes.forEach(n => {
+        adj.set(n.id, []);
+        inDegree.set(n.id, 0);
+    });
 
-    // Find edge starting from current
-    // Loop max 100 times to prevent infinite loop bugs
-    for(let i=0; i<100; i++) {
-       const edge = edges.find(e => e.source === currentNodeId);
-       if (!edge) break;
+    edges.forEach(e => {
+        if (adj.has(e.source) && adj.has(e.target)) {
+            adj.get(e.source)?.push(e.target);
+            inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
+        }
 
-       const nextNode = nodes.find(n => n.id === edge.target);
-       if (!nextNode) break;
+        if (e.sourceHandle === 'failure') {
+            failureMap.set(e.source, e.target);
+        } else {
+            successEdges.set(e.source, e.target);
+        }
+    });
 
-       const data: any = nextNode.data;
-       const normalized = canonicalizeIntent(String(data.provider || ''), String(data.capability || ''));
-       const intent = normalized.intent;
-
-       // Separate description from payload
-       const { description, ...payload } = data.args || {};
-
-       steps.push({
-         intent,
-         description,
-         payload
-       });
-
-       currentNodeId = nextNode.id;
+    // 2. Check for Disconnected Nodes (Hard Error)
+    if (nodes.length > 1) {
+        const isolated = nodes.find(n => (inDegree.get(n.id) === 0) && (adj.get(n.id)?.length === 0));
+        if (isolated) {
+            const msg = `Node '${isolated.data.label || isolated.type}' is not connected.`;
+            if (vscode) vscode.postMessage({ type: 'error', message: msg });
+            else alert(msg);
+            return;
+        }
     }
+
+    // 3. Topological Sort (Kahn's Algorithm with Success Priority)
+    const queue: string[] = [];
+    inDegree.forEach((degree, id) => {
+        if (degree === 0) queue.push(id);
+    });
+
+    const sortedIds: string[] = [];
+    let lastProcessedId: string | null = null;
+
+    while (queue.length > 0) {
+        let u: string;
+        let index = 0;
+
+        // Try to pick the "success" successor of the last processed node
+        if (lastProcessedId && successEdges.has(lastProcessedId)) {
+            const preferredNext = successEdges.get(lastProcessedId)!;
+            const preferredIndex = queue.indexOf(preferredNext);
+            if (preferredIndex !== -1) {
+                index = preferredIndex;
+            }
+        }
+
+        u = queue.splice(index, 1)[0];
+        sortedIds.push(u);
+        lastProcessedId = u;
+
+        const neighbors = adj.get(u) || [];
+        neighbors.forEach(v => {
+            inDegree.set(v, (inDegree.get(v)! - 1));
+            if (inDegree.get(v) === 0) {
+                queue.push(v);
+            }
+        });
+    }
+
+    // 4. Cycle Detection
+    if (sortedIds.length !== nodes.length) {
+         const msg = 'Cycle detected in pipeline graph.';
+         if (vscode) vscode.postMessage({ type: 'error', message: msg });
+         else alert(msg);
+         return;
+    }
+
+    // 5. Map Sorted Nodes to Steps
+    const steps: any[] = [];
+    sortedIds.forEach(id => {
+        const node = nodeMap.get(id);
+        if (!node) return;
+
+        // Skip Start Node (input type) for executable steps
+        if (node.type === 'input') return;
+
+        let intent = '';
+        let description = '';
+        let payload: any = {};
+        const data: any = node.data;
+
+        if (node.type === 'promptNode') {
+            intent = 'system.setVar';
+            payload = { name: data.name, value: data.value };
+        } else if (node.type === 'repoNode') {
+            intent = 'system.setCwd';
+            payload = { path: data.path };
+        } else if (node.type === 'vscodeCommandNode') {
+            intent = 'vscode.runCommand';
+            payload = { commandId: data.commandId, argsJson: data.argsJson };
+        } else if (node.type === 'actionNode') {
+            const normalized = canonicalizeIntent(String(data.provider || ''), String(data.capability || ''));
+            intent = normalized.intent;
+            const { description: desc, ...rest } = data.args || {};
+            description = desc;
+            payload = rest;
+        }
+
+        if (intent) {
+            const stepObj: any = {
+                id: node.id,
+                intent,
+                description,
+                payload
+            };
+
+            if (failureMap.has(node.id)) {
+                stepObj.onFailure = failureMap.get(node.id);
+            }
+
+            steps.push(stepObj);
+        }
+    });
 
     const pipeline = {
       name: (nodes.find(n => n.id === 'start')?.data.label as string) || 'My Pipeline',

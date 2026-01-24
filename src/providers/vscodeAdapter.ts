@@ -1,0 +1,118 @@
+import * as vscode from 'vscode';
+import { registerCapabilities } from '../registry';
+
+export function registerVSCodeProvider(context: vscode.ExtensionContext) {
+    // Register internal command to install extensions
+    const internalInstallExtensions = vscode.commands.registerCommand('intentRouter.internal.installExtensions', async (payload: any) => {
+        await installExtensions(payload);
+    });
+    context.subscriptions.push(internalInstallExtensions);
+
+    const internalRunCommand = vscode.commands.registerCommand('intentRouter.internal.vscodeRunCommand', async (payload: any) => {
+        await runVSCodeCommand(payload);
+    });
+    context.subscriptions.push(internalRunCommand);
+
+    registerCapabilities({
+        provider: 'vscode',
+        type: 'vscode',
+        capabilities: [
+            {
+                capability: 'vscode.installExtensions',
+                command: 'intentRouter.internal.installExtensions',
+                description: 'Install a list of VS Code extensions',
+                args: [
+                    { name: 'extensions', type: 'string', description: 'Extension IDs (one per line)', required: true }
+                ]
+            },
+            {
+                capability: 'vscode.runCommand',
+                command: 'intentRouter.internal.vscodeRunCommand',
+                description: 'Run an arbitrary VS Code command (interactive for many commands)',
+                args: [
+                    { name: 'commandId', type: 'string', description: 'VS Code command id', required: true },
+                    { name: 'argsJson', type: 'string', description: 'JSON args (array or object). Optional.', default: '' }
+                ]
+            }
+        ]
+    });
+    console.log('[Intent Router] Registered VS Code provider capabilities.');
+}
+
+export async function installExtensions(payload: any): Promise<void> {
+    const rawExtensions = payload?.extensions;
+    if (!rawExtensions) {
+        vscode.window.showErrorMessage('No extensions provided to install.');
+        return;
+    }
+
+    let extensions: string[] = [];
+    if (Array.isArray(rawExtensions)) {
+        extensions = rawExtensions.filter(s => typeof s === 'string');
+    } else if (typeof rawExtensions === 'string') {
+        extensions = rawExtensions.split('\n').map(s => s.trim()).filter(Boolean);
+    } else {
+         vscode.window.showErrorMessage('Invalid format for extensions. Expected string (multiline) or string array.');
+         return;
+    }
+
+    if (extensions.length === 0) {
+         vscode.window.showWarningMessage('No valid extension IDs found to install.');
+         return;
+    }
+
+    vscode.window.showInformationMessage(`Installing ${extensions.length} extensions...`);
+
+    const errors: string[] = [];
+    for (const id of extensions) {
+        try {
+            console.log(`[Intent Router] Installing extension: ${id}`);
+            await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+        } catch (error: any) {
+            const msg = `Failed to install ${id}: ${error?.message || error}`;
+            console.error(`[Intent Router] ${msg}`);
+            errors.push(msg);
+        }
+    }
+
+    if (errors.length > 0) {
+        if (errors.length === extensions.length) {
+             vscode.window.showErrorMessage(`All extensions failed to install. Check console for details.`);
+        } else {
+             vscode.window.showWarningMessage(`${errors.length} extensions failed to install. Check console for details.`);
+        }
+    } else {
+        vscode.window.showInformationMessage(`Successfully installed ${extensions.length} extensions.`);
+    }
+}
+
+export async function runVSCodeCommand(payload: any): Promise<void> {
+    const commandId = payload?.commandId;
+    if (typeof commandId !== 'string' || !commandId.trim()) {
+        vscode.window.showErrorMessage('vscode.runCommand requires "commandId".');
+        return;
+    }
+
+    const rawArgs = typeof payload?.argsJson === 'string' ? payload.argsJson.trim() : '';
+    let args: any = undefined;
+    if (rawArgs) {
+        try {
+            args = JSON.parse(rawArgs);
+        } catch (e) {
+            vscode.window.showErrorMessage(`Invalid argsJson: ${e}`);
+            return;
+        }
+    }
+
+    try {
+        if (Array.isArray(args)) {
+            await vscode.commands.executeCommand(commandId.trim(), ...args);
+        } else if (args !== undefined) {
+            await vscode.commands.executeCommand(commandId.trim(), args);
+        } else {
+            await vscode.commands.executeCommand(commandId.trim());
+        }
+    } catch (e: any) {
+        vscode.window.showErrorMessage(`Failed to execute ${commandId}: ${e?.message || e}`);
+    }
+}
