@@ -12,7 +12,8 @@ import {
   Edge,
   Node,
   Connection,
-  MarkerType
+  MarkerType,
+  Position
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import './index.css';
@@ -48,6 +49,7 @@ const initialNodes: Node[] = [
     type: 'input',
     data: { label: 'Start' },
     position: { x: 250, y: 50 },
+    sourcePosition: Position.Right,
     deletable: false
   },
 ];
@@ -100,11 +102,12 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
          type: 'input',
          data: { label: pipeline.name || 'Start' },
          position: { x: 250, y: 50 },
+         sourcePosition: Position.Right,
          deletable: false
       });
 
       let lastId = 'start';
-      let y = 150;
+      let x = 600;
 
       if (Array.isArray(pipeline.steps)) {
           pipeline.steps.forEach((step: any) => {
@@ -136,7 +139,7 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
              newNodes.push({
                  id: nodeId,
                  type,
-                 position: { x: 250, y: y },
+                 position: { x, y: 50 },
                  data
              });
 
@@ -148,7 +151,7 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
              });
 
              lastId = nodeId;
-             y += 150;
+             x += 350;
           });
       }
 
@@ -283,6 +286,33 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
       timeouts.forEach(clearTimeout);
     };
   }, [selectedRun]); // Re-run when selectedRun changes
+
+  // Reactive Connectors (Update Edge Colors based on Source Status)
+  useEffect(() => {
+    setEdges((eds) =>
+      eds.map((edge) => {
+        const sourceNode = nodes.find((n) => n.id === edge.source);
+        if (!sourceNode) return edge;
+
+        const status = (sourceNode.data?.status as string) || 'idle';
+        let stroke = 'var(--vscode-editor-foreground)'; // Idle
+        if (status === 'running') stroke = '#007acc';
+        else if (status === 'success') stroke = '#4caf50';
+        else if (status === 'failure') stroke = '#f44336';
+
+        // Update if changed
+        if (edge.style?.stroke !== stroke) {
+          return {
+            ...edge,
+            style: { ...edge.style, stroke, strokeWidth: 2 },
+            animated: status === 'running',
+            markerEnd: { type: MarkerType.ArrowClosed, color: stroke }
+          };
+        }
+        return edge;
+      })
+    );
+  }, [nodes, setEdges]);
 
   const onConnect = useCallback(
     (params: Connection) => {

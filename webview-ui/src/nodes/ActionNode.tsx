@@ -176,7 +176,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
       color: 'var(--vscode-editor-foreground)',
       fontFamily: 'var(--vscode-font-family)'
     }}>
-      <Handle type="target" position={Position.Top} />
+      <Handle type="target" position={Position.Left} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', textTransform: 'capitalize' }}>
         <span>{provider}</span>
@@ -389,7 +389,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
         })}
       </div>
 
-      <Handle type="source" position={Position.Bottom} />
+      <Handle type="source" position={Position.Right} />
     </div>
   );
 };
