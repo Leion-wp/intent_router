@@ -106,15 +106,17 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
          deletable: false
       });
 
-      let y = 150;
+      const baseX = 450;
+      const baseY = 50;
+      const xSpacing = 320;
       const stepIdToNodeId = new Map<string, string>();
       const nodeIds: string[] = ['start'];
 
       if (Array.isArray(pipeline.steps)) {
           // 1. Create Nodes
-          pipeline.steps.forEach((step: any) => {
-             const nodeId = step.id || getId();
-             const intent = step.intent || '';
+          pipeline.steps.forEach((step: any, index: number) => {
+              const nodeId = step.id || getId();
+              const intent = step.intent || '';
 
              // Store ID mapping
              if (step.id) {
@@ -144,15 +146,13 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
                  data.kind = 'action';
              }
 
-             newNodes.push({
-                 id: nodeId,
-                 type,
-                 position: { x, y: 50 },
-                 data
-             });
-             nodeIds.push(nodeId);
-
-             y += 150;
+              newNodes.push({
+                  id: nodeId,
+                  type,
+                  position: { x: baseX + index * xSpacing, y: baseY },
+                  data
+              });
+              nodeIds.push(nodeId);
           });
 
           // 2. Create Edges
