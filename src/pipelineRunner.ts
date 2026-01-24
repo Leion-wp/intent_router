@@ -223,8 +223,9 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
         await config.update('activeProfile', targetProfile, true);
     }
 
-    const variableCache = new Map<string, string>(); // for ${input:...}
-    const variableStore = new Map<string, any>(); // for ${var:...}
+    const variableCache = new Map<string, string>();
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+    let currentCwd = workspaceRoot ?? '.';
     const runId = Date.now().toString(36); // Simple run ID
     currentRunId = runId;
 
@@ -260,12 +261,69 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
             const step = pipeline.steps[i];
 
-            // Handle system.setVar and system.setCwd before routing
-            // We resolve vars first so payload is ready
-            // Note: we don't compile system steps to terminal.run
-            let stepIntent: Intent = {
+            // Built-in flow-control steps used by the builder (handled here, not as VS Code commands).
+            // RepoNode -> system.setCwd
+            if (step.intent === 'system.setCwd') {
+                const rawPath = (step.payload as any)?.path;
+                if (typeof rawPath === 'string' && rawPath.trim()) {
+                    const normalized = rawPath.trim() === '${workspaceRoot}' && workspaceRoot ? workspaceRoot : rawPath.trim();
+                    currentCwd = normalized;
+                } else if (workspaceRoot) {
+                    currentCwd = workspaceRoot;
+                }
+
+                const intentId = generateSecureToken(8);
+                pipelineEventBus.emit({
+                    type: 'stepStart',
+                    runId,
+                    intentId,
+                    timestamp: Date.now(),
+                    description: step.description,
+                    index: i
+                });
+                pipelineEventBus.emit({
+                    type: 'stepEnd',
+                    runId,
+                    intentId,
+                    timestamp: Date.now(),
+                    success: true,
+                    index: i
+                });
+                continue;
+            }
+
+            // PromptNode -> system.setVar
+            if (step.intent === 'system.setVar') {
+                const name = (step.payload as any)?.name;
+                const value = (step.payload as any)?.value;
+                if (typeof name === 'string' && name.trim() && typeof value === 'string') {
+                    variableCache.set(name.trim(), value);
+                }
+
+                const intentId = generateSecureToken(8);
+                pipelineEventBus.emit({
+                    type: 'stepStart',
+                    runId,
+                    intentId,
+                    timestamp: Date.now(),
+                    description: step.description,
+                    index: i
+                });
+                pipelineEventBus.emit({
+                    type: 'stepEnd',
+                    runId,
+                    intentId,
+                    timestamp: Date.now(),
+                    success: true,
+                    index: i
+                });
+                continue;
+            }
+
+            const stepIntent: Intent = {
                 ...step,
                 description: step.description,
+                payload: step.intent === 'terminal.run' ? applyDefaultCwd(step.payload, currentCwd) : step.payload,
                 meta: {
                     ...(step.meta ?? {}),
                     dryRun: dryRun ? true : step.meta?.dryRun
@@ -368,4 +426,14 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             await config.update('activeProfile', originalProfile, true);
         }
     }
+}
+
+function applyDefaultCwd(payload: any, cwd: string): any {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return payload;
+    }
+    if (payload.cwd === undefined || payload.cwd === null || payload.cwd === '' || payload.cwd === '.' || payload.cwd === '${workspaceRoot}') {
+        return { ...payload, cwd };
+    }
+    return payload;
 }

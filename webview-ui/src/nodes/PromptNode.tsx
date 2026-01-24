@@ -1,7 +1,7 @@
-import React, { memo, useState, useEffect } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 
-const PromptNode = ({ data, id }: NodeProps) => {
+const PromptNode = ({ data }: NodeProps) => {
   const [name, setName] = useState<string>((data.name as string) || '');
   const [defaultValue, setDefaultValue] = useState<string>((data.value as string) || '');
 
