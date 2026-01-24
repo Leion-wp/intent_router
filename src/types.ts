@@ -1,4 +1,5 @@
 export type Intent = {
+    id?: string;
     intent: string;
     description?: string;
     capabilities?: string[];
@@ -6,6 +7,7 @@ export type Intent = {
     payload?: any;
     provider?: string;
     target?: string;
+    onFailure?: string;
     meta?: {
         dryRun?: boolean;
         traceId?: string;

@@ -229,8 +229,6 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
     const runId = Date.now().toString(36); // Simple run ID
     currentRunId = runId;
 
-    let currentCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '.';
-
     pipelineEventBus.emit({
         type: 'pipelineStart',
         runId,
@@ -241,7 +239,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
     });
 
     try {
-        for (let i = 0; i < pipeline.steps.length; i++) {
+        let currentIndex = 0;
+        while (currentIndex < pipeline.steps.length) {
             // Check for pause/cancel before step
             while (isPaused && !isCancelled) {
                 await new Promise(resolve => setTimeout(resolve, 100));
@@ -259,7 +258,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 return;
             }
 
-            const step = pipeline.steps[i];
+            const step = pipeline.steps[currentIndex];
 
             // Built-in flow-control steps used by the builder (handled here, not as VS Code commands).
             // RepoNode -> system.setCwd
@@ -279,7 +278,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     description: step.description,
-                    index: i
+                    index: currentIndex
                 });
                 pipelineEventBus.emit({
                     type: 'stepEnd',
@@ -287,8 +286,9 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     success: true,
-                    index: i
+                    index: currentIndex
                 });
+                currentIndex++;
                 continue;
             }
 
@@ -307,7 +307,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     description: step.description,
-                    index: i
+                    index: currentIndex
                 });
                 pipelineEventBus.emit({
                     type: 'stepEnd',
@@ -315,8 +315,9 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     success: true,
-                    index: i
+                    index: currentIndex
                 });
+                currentIndex++;
                 continue;
             }
 
@@ -334,9 +335,9 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             // We use compileStep to handle both var resolution AND terminal transformation
             let compiledStep: Intent;
             try {
-                compiledStep = await compileStep(stepIntent, variableStore, currentCwd);
+                compiledStep = await compileStep(stepIntent, variableCache, currentCwd);
             } catch (error) {
-                 vscode.window.showErrorMessage(`Compilation failed at step ${i}: ${error}`);
+                 vscode.window.showErrorMessage(`Compilation failed at step ${currentIndex}: ${error}`);
                  throw error;
             }
 
@@ -347,12 +348,13 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                  const name = compiledStep.payload?.name;
                  const value = compiledStep.payload?.value;
                  if (name && value !== undefined) {
-                     variableStore.set(name, value);
+                     variableCache.set(name, value);
                      // Emit success for this "virtual" step
                      const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
-                     pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: `Set var ${name}`, index: i });
-                     pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: true, index: i });
+                     pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: `Set var ${name}`, index: currentIndex });
+                     pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: true, index: currentIndex });
                  }
+                 currentIndex++;
                  continue; // Skip routing
             }
 
@@ -362,9 +364,10 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                      currentCwd = path;
                      // Emit success for this "virtual" step
                      const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
-                     pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: `Set cwd to ${path}`, index: i });
-                     pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: true, index: i });
+                     pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: `Set cwd to ${path}`, index: currentIndex });
+                     pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: true, index: currentIndex });
                  }
+                 currentIndex++;
                  continue; // Skip routing
             }
 
@@ -377,7 +380,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 intentId,
                 timestamp: Date.now(),
                 description: compiledStep.description,
-                index: i
+                index: currentIndex
             });
 
             // Route the compiled intent
@@ -389,10 +392,20 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 intentId,
                 timestamp: Date.now(),
                 success: ok,
-                index: i
+                index: currentIndex
             });
 
-            if (!ok) {
+            if (ok) {
+                currentIndex++;
+            } else {
+                if (step.onFailure) {
+                    const nextIndex = pipeline.steps.findIndex(s => s.id === step.onFailure);
+                    if (nextIndex !== -1) {
+                         currentIndex = nextIndex;
+                         continue;
+                    }
+                }
+
                 vscode.window.showWarningMessage('Pipeline stopped on failed step.');
                 pipelineEventBus.emit({
                     type: 'pipelineEnd',
