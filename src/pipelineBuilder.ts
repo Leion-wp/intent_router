@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { listPublicCapabilities } from './registry';
-import { PipelineFile, ensurePipelineFolder, writePipelineToUri } from './pipelineRunner';
+import { ensurePipelineFolder, writePipelineToUri } from './pipelineRunner';
+import { PipelineFile } from './pipeline/compiler';
 import { gitTemplates } from './providers/gitAdapter';
 import { dockerTemplates } from './providers/dockerAdapter';
 import { terminalTemplates } from './providers/terminalAdapter';

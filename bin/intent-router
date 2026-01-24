@@ -1,0 +1,16 @@
+#!/usr/bin/env node
+
+const path = require('path');
+const fs = require('fs');
+
+// The compiled output is expected in out/cli/index.js relative to project root
+// bin/intent-router -> project_root/bin/intent-router
+// so project_root is ..
+const cliPath = path.resolve(__dirname, '../out/cli/index.js');
+
+if (!fs.existsSync(cliPath)) {
+    console.error(`CLI entry point not found at ${cliPath}. Please run 'npm run compile' first.`);
+    process.exit(1);
+}
+
+require(cliPath);
