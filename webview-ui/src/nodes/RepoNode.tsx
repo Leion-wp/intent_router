@@ -1,4 +1,4 @@
-import React, { memo, useState, useEffect } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 
 const RepoNode = ({ data, id }: NodeProps) => {
