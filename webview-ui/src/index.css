@@ -76,3 +76,58 @@ html, body, #root {
   gap: 6px;
   border-color: var(--vscode-focusBorder);
 }
+
+/* Sidebar Tabs */
+.sidebar-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+  padding-bottom: 4px;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: normal;
+  text-transform: inherit;
+  transition: opacity 0.2s, border-color 0.2s;
+}
+
+.sidebar-tab:hover,
+.sidebar-tab:focus-visible {
+  opacity: 1;
+  outline: none;
+}
+
+.sidebar-tab:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+.sidebar-tab.active {
+  font-weight: bold;
+  opacity: 1;
+  border-bottom-color: var(--vscode-panelTitle-activeBorder);
+}
+
+/* History List Items */
+.history-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+  font-family: inherit;
+}
+
+.history-item:hover,
+.history-item:focus-visible {
+  background: var(--vscode-list-hoverBackground);
+  border-color: var(--vscode-focusBorder);
+  outline: none;
+}
