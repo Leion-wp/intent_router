@@ -115,7 +115,8 @@ function parsePipeline(text: string): PipelineFile | undefined {
 function resolveTemplateVariables(input: any, store: Map<string, any>): any {
     if (typeof input === 'string') {
         return input.replace(/\$\{var:([^}]+)\}/g, (match, varName) => {
-            return store.has(varName) ? String(store.get(varName)) : match;
+            const key = typeof varName === 'string' ? varName.trim() : '';
+            return key && store.has(key) ? String(store.get(key)) : match;
         });
     } else if (Array.isArray(input)) {
         return input.map(item => resolveTemplateVariables(item, store));
@@ -163,10 +164,11 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
             break;
         case 'git.clone': {
              const url = payload?.url;
+             const dir = payload?.dir;
              if (!url) throw new Error('git.clone requires "url"');
-             command = `git clone ${url}`;
+             command = `git clone ${url}${dir ? ` ${dir}` : ''}`;
              break;
-        }
+         }
         case 'docker.build': {
             const tag = payload?.tag;
             const path = payload?.path || '.';
@@ -223,13 +225,13 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
         await config.update('activeProfile', targetProfile, true);
     }
 
-    const variableCache = new Map<string, string>();
+    const variableCache = new Map<string, string>(); // cache for ${input:...}
+    const variableStore = new Map<string, any>(); // store for ${var:...}
+
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
     let currentCwd = workspaceRoot ?? '.';
     const runId = Date.now().toString(36); // Simple run ID
     currentRunId = runId;
-
-    let currentCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '.';
 
     pipelineEventBus.emit({
         type: 'pipelineStart',
@@ -261,65 +263,6 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
             const step = pipeline.steps[i];
 
-            // Built-in flow-control steps used by the builder (handled here, not as VS Code commands).
-            // RepoNode -> system.setCwd
-            if (step.intent === 'system.setCwd') {
-                const rawPath = (step.payload as any)?.path;
-                if (typeof rawPath === 'string' && rawPath.trim()) {
-                    const normalized = rawPath.trim() === '${workspaceRoot}' && workspaceRoot ? workspaceRoot : rawPath.trim();
-                    currentCwd = normalized;
-                } else if (workspaceRoot) {
-                    currentCwd = workspaceRoot;
-                }
-
-                const intentId = generateSecureToken(8);
-                pipelineEventBus.emit({
-                    type: 'stepStart',
-                    runId,
-                    intentId,
-                    timestamp: Date.now(),
-                    description: step.description,
-                    index: i
-                });
-                pipelineEventBus.emit({
-                    type: 'stepEnd',
-                    runId,
-                    intentId,
-                    timestamp: Date.now(),
-                    success: true,
-                    index: i
-                });
-                continue;
-            }
-
-            // PromptNode -> system.setVar
-            if (step.intent === 'system.setVar') {
-                const name = (step.payload as any)?.name;
-                const value = (step.payload as any)?.value;
-                if (typeof name === 'string' && name.trim() && typeof value === 'string') {
-                    variableCache.set(name.trim(), value);
-                }
-
-                const intentId = generateSecureToken(8);
-                pipelineEventBus.emit({
-                    type: 'stepStart',
-                    runId,
-                    intentId,
-                    timestamp: Date.now(),
-                    description: step.description,
-                    index: i
-                });
-                pipelineEventBus.emit({
-                    type: 'stepEnd',
-                    runId,
-                    intentId,
-                    timestamp: Date.now(),
-                    success: true,
-                    index: i
-                });
-                continue;
-            }
-
             const stepIntent: Intent = {
                 ...step,
                 description: step.description,
@@ -344,28 +287,32 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             // But compileStep transforms git/docker. system.* should be preserved by default.
 
             if (compiledStep.intent === 'system.setVar') {
-                 const name = compiledStep.payload?.name;
-                 const value = compiledStep.payload?.value;
-                 if (name && value !== undefined) {
-                     variableStore.set(name, value);
-                     // Emit success for this "virtual" step
-                     const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
-                     pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: `Set var ${name}`, index: i });
-                     pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: true, index: i });
-                 }
-                 continue; // Skip routing
+                const rawName = compiledStep.payload?.name;
+                const value = compiledStep.payload?.value;
+                const name = typeof rawName === 'string' ? rawName.trim() : '';
+                if (name && value !== undefined) {
+                    variableStore.set(name, value);
+                }
+
+                const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: compiledStep.description, index: i });
+                pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: true, index: i });
+                continue; // Skip routing
             }
 
             if (compiledStep.intent === 'system.setCwd') {
-                 const path = compiledStep.payload?.path;
-                 if (path) {
-                     currentCwd = path;
-                     // Emit success for this "virtual" step
-                     const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
-                     pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: `Set cwd to ${path}`, index: i });
-                     pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: true, index: i });
-                 }
-                 continue; // Skip routing
+                const rawPath = compiledStep.payload?.path;
+                if (typeof rawPath === 'string' && rawPath.trim()) {
+                    const normalized = rawPath.trim() === '${workspaceRoot}' && workspaceRoot ? workspaceRoot : rawPath.trim();
+                    currentCwd = normalized;
+                } else if (workspaceRoot) {
+                    currentCwd = workspaceRoot;
+                }
+
+                const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: compiledStep.description, index: i });
+                pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: true, index: i });
+                continue; // Skip routing
             }
 
             const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);

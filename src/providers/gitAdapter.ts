@@ -2,43 +2,25 @@ import * as vscode from 'vscode';
 import { registerCapabilities } from '../registry';
 
 export function registerGitProvider(context: vscode.ExtensionContext) {
-    const gitExtension = vscode.extensions.getExtension('vscode.git');
-    if (!gitExtension) {
-        return; // Strict discovery: if not present, do not register.
-    }
-
-    if (!gitExtension.isActive) {
-        // Try to activate if present but not active, though usually Git activates early.
-        gitExtension.activate().then(() => doRegister(context), () => {});
-    } else {
-        doRegister(context);
-    }
+    // V2 direction: Git steps compile to terminal commands in the runner.
+    // We still register schemas/templates for the builder and keep VS Code commands as a fallback for direct routing.
+    doRegister();
 }
 
-function doRegister(context: vscode.ExtensionContext) {
-    // Register internal command to list branches
-    const internalListBranches = vscode.commands.registerCommand('intentRouter.internal.git.listBranches', async () => {
-         try {
-             const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
-             const api = gitExtension.getAPI(1);
-             if (api.repositories.length > 0) {
-                 const repo = api.repositories[0]; // Simplification: V1 targets first repo
-                 const refs = await repo.getRefs();
-                 return refs.filter((r: any) => r.type === 1 || r.type === 2).map((r: any) => r.name?.replace('refs/heads/', '')).filter(Boolean);
-             }
-             return ['main', 'dev']; // Fallback
-         } catch (e) {
-             console.error('Error fetching git branches:', e);
-             return ['main'];
-         }
-    });
-    context.subscriptions.push(internalListBranches);
-
-
+function doRegister() {
     registerCapabilities({
         provider: 'git',
         type: 'vscode',
         capabilities: [
+            {
+                capability: 'git.clone',
+                command: 'git.clone',
+                description: 'Clone a repository',
+                args: [
+                    { name: 'url', type: 'string', description: 'Repository URL', required: true },
+                    { name: 'dir', type: 'path', description: 'Target directory (optional)' }
+                ]
+            },
             {
                 capability: 'git.commit',
                 command: 'git.commit',
@@ -68,13 +50,7 @@ function doRegister(context: vscode.ExtensionContext) {
                 command: 'git.checkout',
                 description: 'Checkout a branch or tag',
                 args: [
-                     {
-                         name: 'branch',
-                         type: 'enum',
-                         description: 'Branch name to checkout',
-                         required: true,
-                         options: 'intentRouter.internal.git.listBranches' // Dynamic options
-                     },
+                     { name: 'branch', type: 'string', description: 'Branch name to checkout', required: true },
                      { name: 'create', type: 'boolean', description: 'Create new branch', default: false }
                 ]
             }
@@ -84,6 +60,7 @@ function doRegister(context: vscode.ExtensionContext) {
 }
 
 export const gitTemplates: Record<string, any> = {
+    'git.clone': { "url": "https://github.com/org/repo.git", "dir": "." },
     'git.commit': { "message": "chore: update", "amend": false },
     'git.push': {},
     'git.pull': {},
