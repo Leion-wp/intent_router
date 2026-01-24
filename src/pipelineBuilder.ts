@@ -82,6 +82,7 @@ export class PipelineBuilder {
         const initialPipeline = pipeline ?? { name: '', steps: [] };
         const templates = { ...gitTemplates, ...dockerTemplates, ...terminalTemplates };
         const history = historyManager.getHistory();
+        const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
@@ -98,13 +99,27 @@ export class PipelineBuilder {
             commandGroups,
             profiles: profileNames,
             templates,
-            history
+            history,
+            environment
         });
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'savePipeline') {
                 await this.savePipeline(message.pipeline as PipelineFile);
                 vscode.window.showInformationMessage('Pipeline saved successfully.');
+                return;
+            }
+            if (message?.type === 'saveEnvironment') {
+                await vscode.workspace.getConfiguration('intentRouter').update(
+                    'environment',
+                    message.environment,
+                    vscode.ConfigurationTarget.Workspace
+                );
+                // Confirm back to UI (optional, but good for sync)
+                this.panel?.webview.postMessage({
+                    type: 'environmentUpdate',
+                    environment: message.environment
+                });
                 return;
             }
             if (message?.type === 'clearHistory') {

@@ -40,9 +40,19 @@ export async function executeTerminalCommand(args: any): Promise<void> {
 
     const TERMINAL_NAME = 'Intent Router';
     let term = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
+    const env = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
+
+    if (term) {
+        // Check if environment matches
+        const currentEnv = (term.creationOptions as vscode.TerminalOptions).env || {};
+        if (!isEnvEqual(env, currentEnv as Record<string, string>)) {
+            term.dispose();
+            term = undefined;
+        }
+    }
 
     if (!term) {
-        term = vscode.window.createTerminal(TERMINAL_NAME);
+        term = vscode.window.createTerminal({ name: TERMINAL_NAME, env });
     }
 
     term.show();
@@ -54,4 +64,18 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     }
 
     term.sendText(commandText);
+}
+
+function isEnvEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+    const keysA = Object.keys(a || {});
+    const keysB = Object.keys(b || {});
+    if (keysA.length !== keysB.length) {
+        return false;
+    }
+    for (const key of keysA) {
+        if (a[key] !== b[key]) {
+            return false;
+        }
+    }
+    return true;
 }
