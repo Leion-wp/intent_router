@@ -235,9 +235,29 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
                if (actionNodes[message.index] && actionNodes[message.index].id === node.id) {
                  return {
                    ...node,
-                   data: { ...node.data, status: message.status }
+                   data: {
+                     ...node.data,
+                     status: message.status,
+                     intentId: message.intentId
+                   }
                  };
                }
+             }
+             return node;
+           }));
+           break;
+
+         case 'stepLog':
+           setNodes((nds) => nds.map((node) => {
+             if (node.data.intentId === message.intentId) {
+                 const currentLogs = (node.data.logs as Array<any>) || [];
+                 return {
+                     ...node,
+                     data: {
+                         ...node.data,
+                         logs: [...currentLogs, { text: message.text, stream: message.stream }]
+                     }
+                 };
              }
              return node;
            }));

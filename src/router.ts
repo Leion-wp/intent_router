@@ -337,6 +337,11 @@ async function executeResolution(
         }
     }
 
+    // Inject meta into payload for internal commands
+    if (typeof payload === 'object' && payload !== null && intent.meta) {
+        payload = { ...payload, __meta: intent.meta };
+    }
+
     log(
         output,
         intent,

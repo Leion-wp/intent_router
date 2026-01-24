@@ -12,6 +12,7 @@ export type Intent = {
         dryRun?: boolean;
         traceId?: string;
         debug?: boolean;
+        runId?: string;
         ui?: any;
     };
 };

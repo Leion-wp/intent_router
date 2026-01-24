@@ -387,6 +387,13 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 index: currentIndex
             });
 
+            // Ensure traceId and runId are in meta for routeIntent
+            compiledStep.meta = {
+                ...(compiledStep.meta || {}),
+                traceId: intentId,
+                runId: runId
+            };
+
             // Route the compiled intent
             const ok = await routeIntent(compiledStep, variableCache);
 

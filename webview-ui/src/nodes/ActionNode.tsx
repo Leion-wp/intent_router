@@ -1,4 +1,4 @@
-import { memo, useState, useEffect, useContext } from 'react';
+import { memo, useState, useEffect, useContext, useRef } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { RegistryContext } from '../App';
 
@@ -21,6 +21,8 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const [expandedHelp, setExpandedHelp] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({});
+  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
+  const logsRef = useRef<HTMLDivElement>(null);
 
   // Sync from props if data changes externally
   useEffect(() => {
@@ -28,7 +30,21 @@ const ActionNode = ({ data, id }: NodeProps) => {
     if (data.capability) setCapability(data.capability as string);
     if (data.args) setArgs(data.args as Record<string, any>);
     if (data.status) setStatus(data.status as string);
+
+    // Auto-open console if logs exist and we just started running or got logs
+    if (data.logs && (data.logs as any[]).length > 0 && !isConsoleOpen) {
+        setIsConsoleOpen(true);
+    }
   }, [data]);
+
+  const logs = (data.logs as any[]) || [];
+
+  // Auto-scroll logs
+  useEffect(() => {
+    if (isConsoleOpen && logsRef.current) {
+        logsRef.current.scrollTop = logsRef.current.scrollHeight;
+    }
+  }, [logs, isConsoleOpen]);
 
   // Find capabilities for current provider
   const currentProviderGroup = commandGroups?.find((g: any) => g.provider === provider);
@@ -400,6 +416,49 @@ const ActionNode = ({ data, id }: NodeProps) => {
       </div>
 
       <Handle type="source" position={Position.Right} />
+
+      {/* Mini-Console */}
+      {logs.length > 0 && (
+        <div className="nodrag" style={{ marginTop: '8px', borderTop: '1px solid var(--vscode-widget-border)' }}>
+            <div
+                onClick={() => setIsConsoleOpen(!isConsoleOpen)}
+                style={{
+                    fontSize: '0.8em',
+                    padding: '4px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    background: 'var(--vscode-editor-background)',
+                    opacity: 0.8
+                }}>
+                <span>Output ({logs.length})</span>
+                <span>{isConsoleOpen ? '▼' : '▶'}</span>
+            </div>
+            {isConsoleOpen && (
+                <div
+                    ref={logsRef}
+                    style={{
+                        maxHeight: '150px',
+                        overflowY: 'auto',
+                        background: '#1e1e1e', // Hardcoded dark background for console look
+                        color: '#cccccc',
+                        padding: '4px',
+                        fontSize: '0.75em',
+                        fontFamily: 'monospace',
+                        whiteSpace: 'pre-wrap',
+                        borderBottomLeftRadius: '4px',
+                        borderBottomRightRadius: '4px'
+                    }}>
+                    {logs.map((log: any, i: number) => (
+                        <span key={i} style={{ color: log.stream === 'stderr' ? '#f44336' : 'inherit', display: 'block' }}>
+                            {log.text}
+                        </span>
+                    ))}
+                </div>
+            )}
+        </div>
+      )}
     </div>
   );
 };

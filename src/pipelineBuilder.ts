@@ -56,7 +56,18 @@ export class PipelineBuilder {
                    this.panel.webview.postMessage({
                        type: 'executionStatus',
                        index: e.index,
-                       status: e.type === 'stepStart' ? 'running' : (e.success ? 'success' : 'failure')
+                       status: e.type === 'stepStart' ? 'running' : (e.success ? 'success' : 'failure'),
+                       intentId: e.intentId
+                   });
+               }
+
+               if (e.type === 'stepLog') {
+                   this.panel.webview.postMessage({
+                       type: 'stepLog',
+                       runId: e.runId,
+                       intentId: e.intentId,
+                       text: e.text,
+                       stream: e.stream
                    });
                }
 
