@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 type SidebarProps = {
   history?: any[];
   onSelectHistory?: (run: any) => void;
+  onRestoreHistory?: (run: any) => void;
 };
 
 // Acquire VS Code API (safe singleton) - reuse from App or get from global
@@ -101,6 +102,7 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
     // Context / Setup Nodes
     { type: 'promptNode', label: 'Prompt', icon: 'codicon-symbol-string', desc: 'Set variable' },
     { type: 'repoNode', label: 'Repo', icon: 'codicon-repo', desc: 'Set workspace path' },
+    { type: 'vscodeCommandNode', label: 'VS Code', icon: 'codicon-vscode', desc: 'Run an arbitrary VS Code command' },
     // Providers
     { type: 'actionNode', provider: 'terminal', label: 'Terminal', icon: 'codicon-terminal', desc: 'Run shell commands' },
     { type: 'actionNode', provider: 'system', label: 'System', icon: 'codicon-settings-gear', desc: 'Workflow controls' },

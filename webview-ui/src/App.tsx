@@ -22,6 +22,7 @@ import Sidebar from './Sidebar';
 import ActionNode from './nodes/ActionNode';
 import PromptNode from './nodes/PromptNode';
 import RepoNode from './nodes/RepoNode';
+import VSCodeCommandNode from './nodes/VSCodeCommandNode';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
@@ -31,6 +32,7 @@ const nodeTypes = {
   actionNode: ActionNode,
   promptNode: PromptNode,
   repoNode: RepoNode,
+  vscodeCommandNode: VSCodeCommandNode
 };
 
 declare global {
@@ -84,7 +86,7 @@ function canonicalizeIntent(provider: string, capability: string): { provider: s
   return { provider: finalProvider, intent: cap, capability: cap };
 }
 
-function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: () => void }) {
+function Flow({ selectedRun, restoreRun, onRunHandled }: { selectedRun: any, restoreRun: any, onRunHandled: () => void }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -93,6 +95,20 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
   // Helper to load pipeline data into graph
   const loadPipeline = (pipeline: any) => {
       console.log('Loading pipeline:', pipeline);
+
+      // 1. Snapshot Restoration (Priority)
+      if (pipeline.meta?.ui?.nodes && pipeline.meta?.ui?.edges) {
+          console.log('Restoring from snapshot');
+          // Validate nodes/edges simply? Or just trust them?
+          // We might want to ensure they are arrays
+          if (Array.isArray(pipeline.meta.ui.nodes) && Array.isArray(pipeline.meta.ui.edges)) {
+              setNodes(pipeline.meta.ui.nodes);
+              setEdges(pipeline.meta.ui.edges);
+              setTimeout(() => reactFlowInstance?.fitView(), 100);
+              return;
+          }
+      }
+
       const newNodes: Node[] = [];
       const newEdges: Edge[] = [];
 
@@ -106,15 +122,17 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
          deletable: false
       });
 
-      let y = 150;
+      const baseX = 450;
+      const baseY = 50;
+      const xSpacing = 320;
       const stepIdToNodeId = new Map<string, string>();
       const nodeIds: string[] = ['start'];
 
       if (Array.isArray(pipeline.steps)) {
           // 1. Create Nodes
-          pipeline.steps.forEach((step: any) => {
-             const nodeId = step.id || getId();
-             const intent = step.intent || '';
+          pipeline.steps.forEach((step: any, index: number) => {
+              const nodeId = step.id || getId();
+              const intent = step.intent || '';
 
              // Store ID mapping
              if (step.id) {
@@ -126,33 +144,36 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
              let data: any = { status: 'idle' };
 
              // Infer type from intent
-             if (intent === 'system.setVar') {
-                 type = 'promptNode';
-                 data.name = step.payload?.name;
-                 data.value = step.payload?.value;
-                 data.kind = 'prompt';
-             } else if (intent === 'system.setCwd') {
-                 type = 'repoNode';
-                 data.path = step.payload?.path;
-                 data.kind = 'repo';
-             } else {
-                 type = 'actionNode';
-                 const normalized = canonicalizeIntent('', intent);
-                 data.provider = normalized.provider;
-                 data.capability = normalized.capability;
+              if (intent === 'system.setVar') {
+                  type = 'promptNode';
+                  data.name = step.payload?.name;
+                  data.value = step.payload?.value;
+                  data.kind = 'prompt';
+              } else if (intent === 'system.setCwd') {
+                  type = 'repoNode';
+                  data.path = step.payload?.path;
+                  data.kind = 'repo';
+              } else if (intent === 'vscode.runCommand') {
+                  type = 'vscodeCommandNode';
+                  data.commandId = step.payload?.commandId;
+                  data.argsJson = typeof step.payload?.argsJson === 'string' ? step.payload.argsJson : '';
+                  data.kind = 'vscodeCommand';
+              } else {
+                  type = 'actionNode';
+                  const normalized = canonicalizeIntent('', intent);
+                  data.provider = normalized.provider;
+                  data.capability = normalized.capability;
                  data.args = { ...step.payload, description: step.description };
                  data.kind = 'action';
              }
 
-             newNodes.push({
-                 id: nodeId,
-                 type,
-                 position: { x, y: 50 },
-                 data
-             });
-             nodeIds.push(nodeId);
-
-             y += 150;
+              newNodes.push({
+                  id: nodeId,
+                  type,
+                  position: { x: baseX + index * xSpacing, y: baseY },
+                  data
+              });
+              nodeIds.push(nodeId);
           });
 
           // 2. Create Edges
@@ -228,9 +249,29 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
                if (actionNodes[message.index] && actionNodes[message.index].id === node.id) {
                  return {
                    ...node,
-                   data: { ...node.data, status: message.status }
+                   data: {
+                     ...node.data,
+                     status: message.status,
+                     intentId: message.intentId
+                   }
                  };
                }
+             }
+             return node;
+           }));
+           break;
+
+         case 'stepLog':
+           setNodes((nds) => nds.map((node) => {
+             if (node.data.intentId === message.intentId) {
+                 const currentLogs = (node.data.logs as Array<any>) || [];
+                 return {
+                     ...node,
+                     data: {
+                         ...node.data,
+                         logs: [...currentLogs, { text: message.text, stream: message.stream }]
+                     }
+                 };
              }
              return node;
            }));
@@ -256,6 +297,15 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
       onRunHandled();
     }
   }, [selectedRun]);
+
+  // Handle Explicit Restore (Rollback)
+  useEffect(() => {
+      if (restoreRun && restoreRun.pipelineSnapshot) {
+          console.log('Restoring run:', restoreRun.name);
+          loadPipeline(restoreRun.pipelineSnapshot);
+          setRestoreRun(null); // Reset state to allow restoring the same run again
+      }
+  }, [restoreRun]);
 
   // Separate Effect for Playback (triggered when nodes are ready/stable?)
   useEffect(() => {
@@ -395,13 +445,16 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
         id: getId(),
         type,
         position,
-        data: {
-          provider: provider,
-          capability: '', // Default will be set by Node
-          args: {},
-          status: 'idle',
-          kind: type === 'promptNode' ? 'prompt' : type === 'repoNode' ? 'repo' : 'action'
-        },
+        data:
+          type === 'actionNode'
+            ? { provider: provider, capability: '', args: {}, status: 'idle', kind: 'action' }
+            : type === 'promptNode'
+              ? { name: '', value: '', kind: 'prompt' }
+              : type === 'repoNode'
+                ? { path: '${workspaceRoot}', kind: 'repo' }
+                : type === 'vscodeCommandNode'
+                  ? { commandId: '', argsJson: '', kind: 'vscodeCommand' }
+                  : { status: 'idle' },
       };
 
       setNodes((nds) => nds.concat(newNode));
@@ -509,6 +562,9 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
         } else if (node.type === 'repoNode') {
             intent = 'system.setCwd';
             payload = { path: data.path };
+        } else if (node.type === 'vscodeCommandNode') {
+            intent = 'vscode.runCommand';
+            payload = { commandId: data.commandId, argsJson: data.argsJson };
         } else if (node.type === 'actionNode') {
             const normalized = canonicalizeIntent(String(data.provider || ''), String(data.capability || ''));
             intent = normalized.intent;
@@ -536,7 +592,13 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
     const pipeline = {
       name: (nodes.find(n => n.id === 'start')?.data.label as string) || 'My Pipeline',
       intent: 'pipeline.run',
-      steps
+      steps,
+      meta: {
+        ui: {
+          nodes,
+          edges
+        }
+      }
     };
 
     if (vscode) {
@@ -596,6 +658,7 @@ export default function App() {
   const [commandGroups, setCommandGroups] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<any>(null);
+  const [restoreRun, setRestoreRun] = useState<any>(null);
 
   useEffect(() => {
     if (window.initialData) {
@@ -628,11 +691,19 @@ export default function App() {
   return (
     <RegistryContext.Provider value={{ commandGroups }}>
       <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
-         <Sidebar history={history} onSelectHistory={setSelectedRun} />
+         <Sidebar
+            history={history}
+            onSelectHistory={setSelectedRun}
+            onRestoreHistory={(run) => {
+                setRestoreRun(run);
+                setSelectedRun(null); // Stop playback/clear selection
+            }}
+         />
          <div style={{ flex: 1, position: 'relative' }}>
            <ReactFlowProvider>
              <Flow
                 selectedRun={selectedRun}
+                restoreRun={restoreRun}
                 onRunHandled={() => {
                     // Logic handled in effects
                 }}

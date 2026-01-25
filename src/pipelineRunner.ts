@@ -8,6 +8,14 @@ export type PipelineFile = {
     name: string;
     profile?: string;
     steps: Array<Intent>;
+    meta?: {
+        ui?: {
+            nodes: any[];
+            edges: any[];
+            viewport?: any;
+        };
+        [key: string]: any;
+    };
 };
 
 let currentRunId: string | null = null;
@@ -394,6 +402,13 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 description: compiledStep.description,
                 index: currentIndex
             });
+
+            // Ensure traceId and runId are in meta for routeIntent
+            compiledStep.meta = {
+                ...(compiledStep.meta || {}),
+                traceId: intentId,
+                runId: runId
+            };
 
             // Route the compiled intent
             const ok = await routeIntent(compiledStep, variableCache);
