@@ -81,9 +81,19 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     // Legacy mode (Interactive / Fire-and-forget)
     const TERMINAL_NAME = 'Intent Router';
     let term = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
+    const env = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
+
+    if (term) {
+        // Check if environment matches
+        const currentEnv = (term.creationOptions as vscode.TerminalOptions).env || {};
+        if (!isEnvEqual(env, currentEnv as Record<string, string>)) {
+            term.dispose();
+            term = undefined;
+        }
+    }
 
     if (!term) {
-        term = vscode.window.createTerminal(TERMINAL_NAME);
+        term = vscode.window.createTerminal({ name: TERMINAL_NAME, env });
     }
 
     term.show();
@@ -97,98 +107,16 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     term.sendText(commandText);
 }
 
-export function cancelTerminalRun(runId: string | undefined | null): void {
-    if (!runId) {
-        return;
+function isEnvEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+    const keysA = Object.keys(a || {});
+    const keysB = Object.keys(b || {});
+    if (keysA.length !== keysB.length) {
+        return false;
     }
-
-    const processes = runningProcessesByRunId.get(runId);
-    if (!processes || processes.size === 0) {
-        return;
-    }
-
-    for (const child of processes) {
-        if (!child.pid) {
-            continue;
-        }
-
-        try {
-            if (process.platform === 'win32') {
-                cp.spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-            } else {
-                child.kill('SIGTERM');
-            }
-        } catch {
-            // Best-effort cancellation.
+    for (const key of keysA) {
+        if (a[key] !== b[key]) {
+            return false;
         }
     }
-}
-
-function runCommand(command: string, cwd: string, runId: string, intentId: string): Promise<void> {
-    const { terminal, write } = getOrCreateTerminal();
-    terminal.show(true);
-
-    write(`\x1b[36m> Executing: ${command}\x1b[0m\n`);
-
-    return new Promise((resolve, reject) => {
-        const safeCwd = (cwd && cwd.trim() !== '') ? cwd : undefined;
-        const child = (process.platform === 'win32')
-            ? cp.spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], { cwd: safeCwd })
-            : cp.spawn(command, { cwd: safeCwd, shell: true });
-
-        const running = runningProcessesByRunId.get(runId) ?? new Set<cp.ChildProcess>();
-        running.add(child);
-        runningProcessesByRunId.set(runId, running);
-
-        child.stdout.on('data', (data) => {
-            const text = data.toString();
-            write(text);
-            pipelineEventBus.emit({
-                type: 'stepLog',
-                runId,
-                intentId,
-                text,
-                stream: 'stdout'
-            });
-        });
-
-        child.stderr.on('data', (data) => {
-            const text = data.toString();
-            write(`\x1b[31m${text}\x1b[0m`);
-            pipelineEventBus.emit({
-                type: 'stepLog',
-                runId,
-                intentId,
-                text,
-                stream: 'stderr'
-            });
-        });
-
-        child.on('close', (code) => {
-             const active = runningProcessesByRunId.get(runId);
-             if (active) {
-                 active.delete(child);
-                 if (active.size === 0) {
-                     runningProcessesByRunId.delete(runId);
-                 }
-             }
-
-             if (code === 0) {
-                 resolve();
-             } else {
-                 reject(new Error(`Command failed with exit code ${code}`));
-             }
-        });
-
-        child.on('error', (err) => {
-            const active = runningProcessesByRunId.get(runId);
-            if (active) {
-                active.delete(child);
-                if (active.size === 0) {
-                    runningProcessesByRunId.delete(runId);
-                }
-            }
-            reject(err);
-        });
-    });
+    return true;
 }
