@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Intent } from './types';
 import { routeIntent } from './router';
 import { pipelineEventBus } from './eventBus';
-import { generateSecureToken } from './security';
+import { generateSecureToken, validateStrictShellArg, sanitizeShellArg } from './security';
 
 export type PipelineFile = {
     name: string;
@@ -146,6 +146,8 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
             const branch = payload?.branch;
             const create = payload?.create;
             if (!branch) throw new Error('git.checkout requires "branch"');
+
+            validateStrictShellArg(branch, 'branch');
             command = `git checkout ${create ? '-b ' : ''}${branch}`;
             break;
         }
@@ -153,7 +155,9 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
             const message = payload?.message;
             const amend = payload?.amend;
             if (!message) throw new Error('git.commit requires "message"');
-            command = `git commit ${amend ? '--amend ' : ''}-m "${message}"`;
+
+            const safeMessage = sanitizeShellArg(message);
+            command = `git commit ${amend ? '--amend ' : ''}-m ${safeMessage}`;
             break;
         }
         case 'git.pull':
@@ -166,13 +170,23 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
              const url = payload?.url;
              const dir = payload?.dir;
              if (!url) throw new Error('git.clone requires "url"');
-             command = `git clone ${url}${dir ? ` ${dir}` : ''}`;
+
+             const safeUrl = sanitizeShellArg(url);
+             let dirPart = '';
+             if (dir) {
+                 validateStrictShellArg(dir, 'dir');
+                 dirPart = ` ${dir}`;
+             }
+             command = `git clone ${safeUrl}${dirPart}`;
              break;
          }
         case 'docker.build': {
             const tag = payload?.tag;
             const path = payload?.path || '.';
             if (!tag) throw new Error('docker.build requires "tag"');
+
+            validateStrictShellArg(tag, 'tag');
+            validateStrictShellArg(path, 'path');
             command = `docker build -t ${tag} ${path}`;
             break;
         }
@@ -180,6 +194,8 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
             const image = payload?.image;
             const detach = payload?.detach;
             if (!image) throw new Error('docker.run requires "image"');
+
+            validateStrictShellArg(image, 'image');
             command = `docker run ${detach ? '-d ' : ''}${image}`;
             break;
         }
