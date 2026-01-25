@@ -112,127 +112,70 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-header" style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}>
-          <div onClick={() => setTab('providers')} style={getTabStyle(tab === 'providers')}>NODES</div>
-          <div onClick={() => setTab('history')} style={getTabStyle(tab === 'history')}>HISTORY</div>
-          <div onClick={() => setTab('environment')} style={getTabStyle(tab === 'environment')}>ENV</div>
+      <div
+        className="sidebar-header"
+        role="tablist"
+        aria-label="Sidebar Sections"
+        style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}
+      >
+          <button
+             role="tab"
+             aria-selected={tab === 'providers'}
+             aria-controls="panel-providers"
+             id="tab-providers"
+             onClick={() => setTab('providers')}
+             className="sidebar-tab"
+          >
+              NODES
+          </button>
+          <button
+             role="tab"
+             aria-selected={tab === 'history'}
+             aria-controls="panel-history"
+             id="tab-history"
+             onClick={() => setTab('history')}
+             className="sidebar-tab"
+          >
+              HISTORY
+          </button>
       </div>
 
-      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-        {tab === 'providers' && (
-             <div className="sidebar-list">
-             {items.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="dndnode"
-                  onDragStart={(event) => onDragStart(event, item.type, item.provider)}
-                  draggable
-                  title={`Drag to add ${item.label} - ${item.desc}`}
-                  aria-label={`Add ${item.label} node`}
-                  tabIndex={0}
-                  role="listitem"
-                >
-                  <span className={`codicon ${item.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
-                  <span>{item.label}</span>
-                </div>
-              ))}
+      {tab === 'providers' ? (
+        <div
+          className="sidebar-list"
+          role="tabpanel"
+          id="panel-providers"
+          aria-labelledby="tab-providers"
+        >
+          {items.map((item, idx) => (
+            <div
+              key={idx}
+              className="dndnode"
+              onDragStart={(event) => onDragStart(event, item.type, item.provider)}
+              draggable
+              title={`Drag to add ${item.label} - ${item.desc}`}
+              aria-label={`Add ${item.label} node`}
+              tabIndex={0}
+              role="listitem"
+            >
+              <span className={`codicon ${item.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
+              <span>{item.label}</span>
             </div>
-        )}
-
-        {tab === 'history' && (
-            <div className="sidebar-list">
-                 {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
-                 {history.map((run) => (
-                      <div
-                        key={run.id}
-                        onClick={() => onSelectHistory?.(run)}
-                        style={{
-                          padding: '8px',
-                          background: 'var(--vscode-list-hoverBackground)',
-                          cursor: 'pointer',
-                          borderRadius: '4px',
-                          border: '1px solid transparent',
-                          marginBottom: '8px'
-                        }}
-                        onMouseOver={(e) => e.currentTarget.style.border = '1px solid var(--vscode-focusBorder)'}
-                        onMouseOut={(e) => e.currentTarget.style.border = '1px solid transparent'}
-                      >
-                          <div style={{fontWeight: 'bold', fontSize: '12px', marginBottom: '4px'}}>{run.name}</div>
-                          <div style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between'}}>
-                              <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
-                              <span style={{
-                                  color: run.status === 'success' ? '#4caf50' : // Green
-                                         run.status === 'failure' ? '#f44336' : // Red
-                                         run.status === 'cancelled' ? '#e6c300' : // Gold
-                                         'var(--vscode-descriptionForeground)'
-                              }}>
-                                  {run.status.toUpperCase()}
-                              </span>
-                          </div>
-                      </div>
-                  ))}
-            </div>
-        )}
-
-        {tab === 'environment' && (
-            <div style={{ padding: '0 8px' }}>
-                <div style={{ fontSize: '12px', opacity: 0.8, marginBottom: '12px' }}>
-                    Workspace Environment Variables (injected into terminal & variables)
-                </div>
-                {envVars.map((v, i) => (
-                    <div key={i} style={{ marginBottom: '8px', border: '1px solid var(--vscode-widget-border)', padding: '8px', borderRadius: '4px' }}>
-                        <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
-                            <input
-                                type="text"
-                                placeholder="Key"
-                                value={v.key}
-                                onChange={(e) => updateEnvVar(i, 'key', e.target.value)}
-                                onBlur={handleBlur}
-                                style={{
-                                    flex: 1,
-                                    background: 'var(--vscode-input-background)',
-                                    color: 'var(--vscode-input-foreground)',
-                                    border: '1px solid var(--vscode-input-border)',
-                                    padding: '4px',
-                                    fontSize: '11px'
-                                }}
-                            />
-                             <button
-                                onClick={() => removeEnvVar(i)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-errorForeground)' }}
-                                title="Delete"
-                            >
-                                <span className="codicon codicon-trash"></span>
-                            </button>
-                        </div>
-                        <div style={{ display: 'flex', gap: '4px' }}>
-                             <input
-                                type={v.visible ? "text" : "password"}
-                                placeholder="Value"
-                                value={v.value}
-                                onChange={(e) => updateEnvVar(i, 'value', e.target.value)}
-                                onBlur={handleBlur}
-                                style={{
-                                    flex: 1,
-                                    background: 'var(--vscode-input-background)',
-                                    color: 'var(--vscode-input-foreground)',
-                                    border: '1px solid var(--vscode-input-border)',
-                                    padding: '4px',
-                                    fontSize: '11px'
-                                }}
-                            />
-                            <button
-                                onClick={() => toggleVisibility(i)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-foreground)' }}
-                                title={v.visible ? "Hide" : "Show"}
-                            >
-                                <span className={`codicon ${v.visible ? 'codicon-eye-closed' : 'codicon-eye'}`}></span>
-                            </button>
-                        </div>
-                    </div>
-                ))}
-                <button
-                    onClick={addEnvVar}
+          ))}
+        </div>
+      ) : (
+          <div
+            className="sidebar-list"
+            role="tabpanel"
+            id="panel-history"
+            aria-labelledby="tab-history"
+            style={{ flex: 1, overflowY: 'auto' }}
+          >
+              {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
+              {history.map((run) => (
+                  <div
+                    key={run.id}
+                    onClick={() => onSelectHistory?.(run)}
                     style={{
                         width: '100%',
                         padding: '6px',
