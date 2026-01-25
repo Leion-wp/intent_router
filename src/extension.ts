@@ -8,7 +8,7 @@ import { PipelinesTreeDataProvider } from './pipelinesView';
 import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri, cancelCurrentPipeline, pauseCurrentPipeline, resumeCurrentPipeline } from './pipelineRunner';
 import { registerGitProvider } from './providers/gitAdapter';
 import { registerDockerProvider } from './providers/dockerAdapter';
-import { executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
+import { cancelTerminalRun, executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
 import { registerSystemProvider } from './providers/systemAdapter';
 import { registerVSCodeProvider } from './providers/vscodeAdapter';
 import { StatusBarManager } from './statusBar';
@@ -58,9 +58,13 @@ export function activate(context: vscode.ExtensionContext) {
         return count;
     });
 
-    let internalTerminalDisposable = vscode.commands.registerCommand('intentRouter.internal.terminalRun', async (args: any) => {
-        await executeTerminalCommand(args);
-    });
+	    let internalTerminalDisposable = vscode.commands.registerCommand('intentRouter.internal.terminalRun', async (args: any) => {
+	        await executeTerminalCommand(args);
+	    });
+
+	    let internalTerminalCancelDisposable = vscode.commands.registerCommand('intentRouter.internal.terminalCancel', async (args: any) => {
+	        cancelTerminalRun(args?.runId);
+	    });
 
     let promptDisposable = vscode.commands.registerCommand('intentRouter.routeFromJson', async () => {
         const input = await vscode.window.showInputBox({
@@ -261,12 +265,13 @@ export function activate(context: vscode.ExtensionContext) {
         }
     }));
 
-    context.subscriptions.push(disposable);
-    context.subscriptions.push(registerDisposable);
-    context.subscriptions.push(internalTerminalDisposable);
-    context.subscriptions.push(promptDisposable);
-    context.subscriptions.push(createPipelineDisposable);
-    context.subscriptions.push(runPipelineDisposable);
+	    context.subscriptions.push(disposable);
+	    context.subscriptions.push(registerDisposable);
+	    context.subscriptions.push(internalTerminalDisposable);
+	    context.subscriptions.push(internalTerminalCancelDisposable);
+	    context.subscriptions.push(promptDisposable);
+	    context.subscriptions.push(createPipelineDisposable);
+	    context.subscriptions.push(runPipelineDisposable);
     context.subscriptions.push(dryRunPipelineDisposable);
     context.subscriptions.push(runPipelineFromDataDisposable);
     context.subscriptions.push(generatePromptDisposable);

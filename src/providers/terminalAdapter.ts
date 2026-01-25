@@ -34,6 +34,8 @@ export const terminalTemplates: Record<string, any> = {
 let sharedPtyWriteEmitter: vscode.EventEmitter<string> | undefined;
 let sharedTerminal: vscode.Terminal | undefined;
 
+const runningProcessesByRunId = new Map<string, Set<cp.ChildProcess>>();
+
 function getOrCreateTerminal(): { terminal: vscode.Terminal, write: (data: string) => void } {
     if (!sharedTerminal) {
         sharedPtyWriteEmitter = new vscode.EventEmitter<string>();

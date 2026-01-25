@@ -9,14 +9,6 @@
         "cwd": ".",
         "command": "npm install"
       },
-      "onFailure": "node_2"
-    },
-    {
-      "id": "node_2",
-      "intent": "system.pause",
-      "payload": {
-        "message": "wait install"
-      },
       "onFailure": "node_3"
     },
     {
@@ -26,14 +18,6 @@
         "cwd": ".",
         "command": "npm run compile"
       }
-    },
-    {
-      "id": "node_4",
-      "intent": "system.pause",
-      "payload": {
-        "message": "wait for compile"
-      },
-      "onFailure": "node_5"
     },
     {
       "id": "node_5",
@@ -60,14 +44,6 @@
         "commandId": "workbench.extensions.action.installVSIX",
         "argsJson": ""
       }
-    },
-    {
-      "id": "node_8",
-      "intent": "system.pause",
-      "payload": {
-        "message": "selection du .vsix"
-      },
-      "onFailure": "node_9"
     },
     {
       "id": "node_9",
