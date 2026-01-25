@@ -113,6 +113,7 @@ function normalizeIntent(intent: Intent, config: vscode.WorkspaceConfiguration):
     const debugDefault = config.get<boolean>('debug', false);
 
     const meta = {
+        ...(intent.meta ?? {}),
         dryRun: intent.meta?.dryRun ?? false,
         traceId: intent.meta?.traceId ?? generateSecureTraceId(),
         debug: intent.meta?.debug ?? debugDefault

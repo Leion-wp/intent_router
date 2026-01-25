@@ -18,6 +18,11 @@ export function cancelCurrentPipeline() {
     if (currentRunId) {
         isCancelled = true;
         vscode.window.showInformationMessage('Pipeline cancellation requested.');
+        try {
+            void vscode.commands.executeCommand('intentRouter.internal.terminalCancel', { runId: currentRunId });
+        } catch {
+            // Best-effort cancellation.
+        }
         // If paused, we need to unpause to let the loop exit (or handle in loop)
         // But since we are checking isCancelled in the loop, we might be stuck in the pause loop.
         // We will handle this in the runPipeline loop.
@@ -409,6 +414,18 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             if (ok) {
                 currentIndex++;
             } else {
+                if (isCancelled) {
+                    vscode.window.showWarningMessage('Pipeline cancelled by user.');
+                    pipelineEventBus.emit({
+                        type: 'pipelineEnd',
+                        runId,
+                        timestamp: Date.now(),
+                        success: false,
+                        status: 'cancelled'
+                    });
+                    return;
+                }
+
                 if (step.onFailure) {
                     const nextIndex = pipeline.steps.findIndex(s => s.id === step.onFailure);
                     if (nextIndex !== -1) {

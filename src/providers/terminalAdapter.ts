@@ -34,6 +34,8 @@ export const terminalTemplates: Record<string, any> = {
 let sharedPtyWriteEmitter: vscode.EventEmitter<string> | undefined;
 let sharedTerminal: vscode.Terminal | undefined;
 
+const runningProcessesByRunId = new Map<string, Set<cp.ChildProcess>>();
+
 function getOrCreateTerminal(): { terminal: vscode.Terminal, write: (data: string) => void } {
     if (!sharedTerminal) {
         sharedPtyWriteEmitter = new vscode.EventEmitter<string>();
@@ -95,6 +97,33 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     term.sendText(commandText);
 }
 
+export function cancelTerminalRun(runId: string | undefined | null): void {
+    if (!runId) {
+        return;
+    }
+
+    const processes = runningProcessesByRunId.get(runId);
+    if (!processes || processes.size === 0) {
+        return;
+    }
+
+    for (const child of processes) {
+        if (!child.pid) {
+            continue;
+        }
+
+        try {
+            if (process.platform === 'win32') {
+                cp.spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+            } else {
+                child.kill('SIGTERM');
+            }
+        } catch {
+            // Best-effort cancellation.
+        }
+    }
+}
+
 function runCommand(command: string, cwd: string, runId: string, intentId: string): Promise<void> {
     const { terminal, write } = getOrCreateTerminal();
     terminal.show(true);
@@ -102,10 +131,14 @@ function runCommand(command: string, cwd: string, runId: string, intentId: strin
     write(`\x1b[36m> Executing: ${command}\x1b[0m\n`);
 
     return new Promise((resolve, reject) => {
-        const child = cp.spawn(command, {
-            cwd: (cwd && cwd.trim() !== '') ? cwd : undefined,
-            shell: true
-        });
+        const safeCwd = (cwd && cwd.trim() !== '') ? cwd : undefined;
+        const child = (process.platform === 'win32')
+            ? cp.spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], { cwd: safeCwd })
+            : cp.spawn(command, { cwd: safeCwd, shell: true });
+
+        const running = runningProcessesByRunId.get(runId) ?? new Set<cp.ChildProcess>();
+        running.add(child);
+        runningProcessesByRunId.set(runId, running);
 
         child.stdout.on('data', (data) => {
             const text = data.toString();
@@ -132,6 +165,14 @@ function runCommand(command: string, cwd: string, runId: string, intentId: strin
         });
 
         child.on('close', (code) => {
+             const active = runningProcessesByRunId.get(runId);
+             if (active) {
+                 active.delete(child);
+                 if (active.size === 0) {
+                     runningProcessesByRunId.delete(runId);
+                 }
+             }
+
              if (code === 0) {
                  resolve();
              } else {
@@ -140,6 +181,13 @@ function runCommand(command: string, cwd: string, runId: string, intentId: strin
         });
 
         child.on('error', (err) => {
+            const active = runningProcessesByRunId.get(runId);
+            if (active) {
+                active.delete(child);
+                if (active.size === 0) {
+                    runningProcessesByRunId.delete(runId);
+                }
+            }
             reject(err);
         });
     });
