@@ -5,6 +5,7 @@ export type PipelineEvent =
     | { type: 'pipelineEnd'; runId: string; timestamp: number; success: boolean; status?: 'success' | 'failure' | 'cancelled' }
     | { type: 'stepStart'; runId: string; intentId: string; timestamp: number; description?: string; index?: number }
     | { type: 'stepEnd'; runId: string; intentId: string; timestamp: number; success: boolean; index?: number }
+    | { type: 'stepLog'; runId: string; intentId: string; text: string; stream: 'stdout' | 'stderr' }
     | { type: 'pipelinePause'; runId: string; timestamp: number }
     | { type: 'pipelineResume'; runId: string; timestamp: number };
 

@@ -113,6 +113,7 @@ function normalizeIntent(intent: Intent, config: vscode.WorkspaceConfiguration):
     const debugDefault = config.get<boolean>('debug', false);
 
     const meta = {
+        ...(intent.meta ?? {}),
         dryRun: intent.meta?.dryRun ?? false,
         traceId: intent.meta?.traceId ?? generateSecureTraceId(),
         debug: intent.meta?.debug ?? debugDefault
@@ -335,6 +336,11 @@ async function executeResolution(
                 payload[arg.name] = arg.default;
             }
         }
+    }
+
+    // Inject meta into payload for internal commands
+    if (typeof payload === 'object' && payload !== null && intent.meta) {
+        payload = { ...payload, __meta: intent.meta };
     }
 
     log(

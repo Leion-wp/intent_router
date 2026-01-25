@@ -77,6 +77,31 @@ suite('Pipeline Builder Tests (Mocked)', () => {
         assert.strictEqual(receivedMessages[0].type, 'executionStatus');
         assert.strictEqual(receivedMessages[0].status, 'running');
         assert.strictEqual(receivedMessages[0].index, 0);
+        assert.strictEqual(receivedMessages[0].intentId, 'a'); // Verify intentId
+    });
+
+    test('Log forwarding to Webview', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+
+        const receivedMessages: any[] = [];
+        panel.onMessageReceived = (msg: any) => {
+            receivedMessages.push(msg);
+        };
+
+        // Emit stepLog event
+        pipelineEventBus.emit({
+            type: 'stepLog',
+            runId: '1',
+            intentId: 'a',
+            text: 'log line',
+            stream: 'stdout'
+        });
+
+        assert.strictEqual(receivedMessages.length, 1);
+        assert.strictEqual(receivedMessages[0].type, 'stepLog');
+        assert.strictEqual(receivedMessages[0].intentId, 'a');
+        assert.strictEqual(receivedMessages[0].text, 'log line');
     });
 
     test('Clear History message clears history and notifies webview', async () => {
