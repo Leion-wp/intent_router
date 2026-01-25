@@ -8,6 +8,14 @@ export type PipelineFile = {
     name: string;
     profile?: string;
     steps: Array<Intent>;
+    meta?: {
+        ui?: {
+            nodes: any[];
+            edges: any[];
+            viewport?: any;
+        };
+        [key: string]: any;
+    };
 };
 
 let currentRunId: string | null = null;
