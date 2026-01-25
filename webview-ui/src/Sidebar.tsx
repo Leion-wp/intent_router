@@ -1,19 +1,88 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 type SidebarProps = {
   history?: any[];
   onSelectHistory?: (run: any) => void;
+  onRestoreHistory?: (run: any) => void;
 };
 
 // Acquire VS Code API (safe singleton) - reuse from App or get from global
 declare global {
   interface Window {
     vscode: any;
+    initialData: any;
   }
 }
 
 export default function Sidebar({ history = [], onSelectHistory }: SidebarProps) {
-  const [tab, setTab] = useState<'providers' | 'history'>('providers');
+  const [tab, setTab] = useState<'providers' | 'history' | 'environment'>('providers');
+  const [envVars, setEnvVars] = useState<{ key: string, value: string, visible: boolean }[]>([]);
+
+  useEffect(() => {
+    const loadEnv = (data: any) => {
+        if (data) {
+            const loaded = Object.entries(data).map(([k, v]) => ({
+                key: k,
+                value: String(v),
+                visible: false
+            }));
+            setEnvVars(loaded);
+        }
+    };
+
+    if (window.initialData?.environment) {
+        loadEnv(window.initialData.environment);
+    }
+
+    const handleMessage = (event: MessageEvent) => {
+        if (event.data?.type === 'environmentUpdate') {
+             loadEnv(event.data.environment);
+        }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  const saveEnv = (newVars: typeof envVars) => {
+    setEnvVars(newVars);
+    const envObj = newVars.reduce((acc, curr) => {
+        if (curr.key) acc[curr.key] = curr.value;
+        return acc;
+    }, {} as Record<string, string>);
+
+    if (window.vscode) {
+        window.vscode.postMessage({
+            type: 'saveEnvironment',
+            environment: envObj
+        });
+    }
+  };
+
+  const addEnvVar = () => {
+      const newVars = [...envVars, { key: '', value: '', visible: true }];
+      setEnvVars(newVars);
+  };
+
+  const updateEnvVar = (index: number, field: 'key' | 'value', val: string) => {
+      const newVars = [...envVars];
+      newVars[index] = { ...newVars[index], [field]: val };
+      setEnvVars(newVars);
+  };
+
+  const toggleVisibility = (index: number) => {
+      const newVars = [...envVars];
+      newVars[index] = { ...newVars[index], visible: !newVars[index].visible };
+      setEnvVars(newVars);
+  };
+
+  const removeEnvVar = (index: number) => {
+      const newVars = envVars.filter((_, i) => i !== index);
+      saveEnv(newVars);
+  };
+
+  const handleBlur = () => {
+      saveEnv(envVars);
+  };
 
   const onDragStart = (event: React.DragEvent, nodeType: string, provider?: string) => {
     event.dataTransfer.setData('application/reactflow/type', nodeType);
@@ -108,40 +177,23 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
                     key={run.id}
                     onClick={() => onSelectHistory?.(run)}
                     style={{
-                      padding: '8px',
-                      background: 'var(--vscode-list-hoverBackground)',
-                      cursor: 'pointer',
-                      borderRadius: '4px',
-                      border: '1px solid transparent',
-                      marginBottom: '8px'
+                        width: '100%',
+                        padding: '6px',
+                        background: 'var(--vscode-button-background)',
+                        color: 'var(--vscode-button-foreground)',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: '11px'
                     }}
-                    onMouseOver={(e) => e.currentTarget.style.border = '1px solid var(--vscode-focusBorder)'}
-                    onMouseOut={(e) => e.currentTarget.style.border = '1px solid transparent'}
-                  >
-                      <div style={{fontWeight: 'bold', fontSize: '12px', marginBottom: '4px'}}>{run.name}</div>
-                      <div style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between'}}>
-                          <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
-                          <span style={{
-                              color: run.status === 'success' ? '#4caf50' : // Green
-                                     run.status === 'failure' ? '#f44336' : // Red
-                                     run.status === 'cancelled' ? '#e6c300' : // Gold
-                                     'var(--vscode-descriptionForeground)'
-                          }}>
-                              {run.status.toUpperCase()}
-                          </span>
-                      </div>
-                  </div>
-              ))}
-          </div>
-      )}
+                >
+                    + Add Variable
+                </button>
+            </div>
+        )}
+      </div>
 
       <div className="sidebar-footer">
-        {tab === 'providers' ? (
-            <>
-                <span className="codicon codicon-info"></span>
-                <span>Drag items to the graph</span>
-            </>
-        ) : (
+        {tab === 'history' && (
             <button
                 onClick={clearHistory}
                 style={{
@@ -159,7 +211,23 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
                 Clear History
             </button>
         )}
+         {tab === 'providers' && (
+            <>
+                <span className="codicon codicon-info"></span>
+                <span>Drag items to the graph</span>
+            </>
+        )}
       </div>
     </aside>
   );
+}
+
+function getTabStyle(active: boolean) {
+    return {
+         cursor: 'pointer',
+         fontWeight: active ? 'bold' : 'normal',
+         opacity: active ? 1 : 0.6,
+         borderBottom: active ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none',
+         paddingBottom: '4px'
+    };
 }

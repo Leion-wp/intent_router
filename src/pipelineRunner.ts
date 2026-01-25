@@ -2,12 +2,20 @@ import * as vscode from 'vscode';
 import { Intent } from './types';
 import { routeIntent } from './router';
 import { pipelineEventBus } from './eventBus';
-import { generateSecureToken } from './security';
+import { generateSecureToken, validateStrictShellArg, sanitizeShellArg } from './security';
 
 export type PipelineFile = {
     name: string;
     profile?: string;
     steps: Array<Intent>;
+    meta?: {
+        ui?: {
+            nodes: any[];
+            edges: any[];
+            viewport?: any;
+        };
+        [key: string]: any;
+    };
 };
 
 let currentRunId: string | null = null;
@@ -18,6 +26,11 @@ export function cancelCurrentPipeline() {
     if (currentRunId) {
         isCancelled = true;
         vscode.window.showInformationMessage('Pipeline cancellation requested.');
+        try {
+            void vscode.commands.executeCommand('intentRouter.internal.terminalCancel', { runId: currentRunId });
+        } catch {
+            // Best-effort cancellation.
+        }
         // If paused, we need to unpause to let the loop exit (or handle in loop)
         // But since we are checking isCancelled in the loop, we might be stuck in the pause loop.
         // We will handle this in the runPipeline loop.
@@ -146,6 +159,8 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
             const branch = payload?.branch;
             const create = payload?.create;
             if (!branch) throw new Error('git.checkout requires "branch"');
+
+            validateStrictShellArg(branch, 'branch');
             command = `git checkout ${create ? '-b ' : ''}${branch}`;
             break;
         }
@@ -153,7 +168,9 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
             const message = payload?.message;
             const amend = payload?.amend;
             if (!message) throw new Error('git.commit requires "message"');
-            command = `git commit ${amend ? '--amend ' : ''}-m "${message}"`;
+
+            const safeMessage = sanitizeShellArg(message);
+            command = `git commit ${amend ? '--amend ' : ''}-m ${safeMessage}`;
             break;
         }
         case 'git.pull':
@@ -166,13 +183,23 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
              const url = payload?.url;
              const dir = payload?.dir;
              if (!url) throw new Error('git.clone requires "url"');
-             command = `git clone ${url}${dir ? ` ${dir}` : ''}`;
+
+             const safeUrl = sanitizeShellArg(url);
+             let dirPart = '';
+             if (dir) {
+                 validateStrictShellArg(dir, 'dir');
+                 dirPart = ` ${dir}`;
+             }
+             command = `git clone ${safeUrl}${dirPart}`;
              break;
          }
         case 'docker.build': {
             const tag = payload?.tag;
             const path = payload?.path || '.';
             if (!tag) throw new Error('docker.build requires "tag"');
+
+            validateStrictShellArg(tag, 'tag');
+            validateStrictShellArg(path, 'path');
             command = `docker build -t ${tag} ${path}`;
             break;
         }
@@ -180,6 +207,8 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
             const image = payload?.image;
             const detach = payload?.detach;
             if (!image) throw new Error('docker.run requires "image"');
+
+            validateStrictShellArg(image, 'image');
             command = `docker run ${detach ? '-d ' : ''}${image}`;
             break;
         }
@@ -225,8 +254,16 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
         await config.update('activeProfile', targetProfile, true);
     }
 
-    const variableCache = new Map<string, string>(); // cache for ${input:...}
-    const variableStore = new Map<string, any>(); // store for ${var:...}
+    // Cache for ${input:...} and store for ${var:...} (environment variables)
+    const variableCache = new Map<string, string>();
+
+    // Load global environment into variableCache
+    const globalEnv = config.get<Record<string, string>>('environment') || {};
+    for (const [key, value] of Object.entries(globalEnv)) {
+        if (typeof value === 'string') {
+            variableCache.set(key, value);
+        }
+    }
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
     let currentCwd = workspaceRoot ?? '.';
@@ -409,6 +446,18 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             if (ok) {
                 currentIndex++;
             } else {
+                if (isCancelled) {
+                    vscode.window.showWarningMessage('Pipeline cancelled by user.');
+                    pipelineEventBus.emit({
+                        type: 'pipelineEnd',
+                        runId,
+                        timestamp: Date.now(),
+                        success: false,
+                        status: 'cancelled'
+                    });
+                    return;
+                }
+
                 if (step.onFailure) {
                     const nextIndex = pipeline.steps.findIndex(s => s.id === step.onFailure);
                     if (nextIndex !== -1) {

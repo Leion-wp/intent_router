@@ -34,6 +34,8 @@ export const terminalTemplates: Record<string, any> = {
 let sharedPtyWriteEmitter: vscode.EventEmitter<string> | undefined;
 let sharedTerminal: vscode.Terminal | undefined;
 
+const runningProcessesByRunId = new Map<string, Set<cp.ChildProcess>>();
+
 function getOrCreateTerminal(): { terminal: vscode.Terminal, write: (data: string) => void } {
     if (!sharedTerminal) {
         sharedPtyWriteEmitter = new vscode.EventEmitter<string>();
@@ -79,9 +81,19 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     // Legacy mode (Interactive / Fire-and-forget)
     const TERMINAL_NAME = 'Intent Router';
     let term = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
+    const env = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
+
+    if (term) {
+        // Check if environment matches
+        const currentEnv = (term.creationOptions as vscode.TerminalOptions).env || {};
+        if (!isEnvEqual(env, currentEnv as Record<string, string>)) {
+            term.dispose();
+            term = undefined;
+        }
+    }
 
     if (!term) {
-        term = vscode.window.createTerminal(TERMINAL_NAME);
+        term = vscode.window.createTerminal({ name: TERMINAL_NAME, env });
     }
 
     term.show();
@@ -95,52 +107,16 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     term.sendText(commandText);
 }
 
-function runCommand(command: string, cwd: string, runId: string, intentId: string): Promise<void> {
-    const { terminal, write } = getOrCreateTerminal();
-    terminal.show(true);
-
-    write(`\x1b[36m> Executing: ${command}\x1b[0m\n`);
-
-    return new Promise((resolve, reject) => {
-        const child = cp.spawn(command, {
-            cwd: (cwd && cwd.trim() !== '') ? cwd : undefined,
-            shell: true
-        });
-
-        child.stdout.on('data', (data) => {
-            const text = data.toString();
-            write(text);
-            pipelineEventBus.emit({
-                type: 'stepLog',
-                runId,
-                intentId,
-                text,
-                stream: 'stdout'
-            });
-        });
-
-        child.stderr.on('data', (data) => {
-            const text = data.toString();
-            write(`\x1b[31m${text}\x1b[0m`);
-            pipelineEventBus.emit({
-                type: 'stepLog',
-                runId,
-                intentId,
-                text,
-                stream: 'stderr'
-            });
-        });
-
-        child.on('close', (code) => {
-             if (code === 0) {
-                 resolve();
-             } else {
-                 reject(new Error(`Command failed with exit code ${code}`));
-             }
-        });
-
-        child.on('error', (err) => {
-            reject(err);
-        });
-    });
+function isEnvEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+    const keysA = Object.keys(a || {});
+    const keysB = Object.keys(b || {});
+    if (keysA.length !== keysB.length) {
+        return false;
+    }
+    for (const key of keysA) {
+        if (a[key] !== b[key]) {
+            return false;
+        }
+    }
+    return true;
 }

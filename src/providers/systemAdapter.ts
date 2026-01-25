@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { registerCapabilities } from '../registry';
+import { cancelCurrentPipeline } from '../pipelineRunner';
 
 export function registerSystemProvider(context: vscode.ExtensionContext) {
     doRegister();
@@ -71,6 +72,7 @@ export async function executeSystemCommand(args: any): Promise<void> {
     );
 
     if (selection !== 'Continue') {
+        cancelCurrentPipeline();
         throw new Error('Pipeline aborted by user.');
     }
 }
