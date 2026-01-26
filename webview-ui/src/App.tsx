@@ -86,7 +86,7 @@ function canonicalizeIntent(provider: string, capability: string): { provider: s
   return { provider: finalProvider, intent: cap, capability: cap };
 }
 
-function Flow({ selectedRun, restoreRun, onRunHandled }: { selectedRun: any, restoreRun: any, onRunHandled: () => void }) {
+function Flow({ selectedRun, restoreRun, onRunHandled, onRestoreHandled }: { selectedRun: any, restoreRun: any, onRunHandled: () => void, onRestoreHandled: () => void }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -303,7 +303,7 @@ function Flow({ selectedRun, restoreRun, onRunHandled }: { selectedRun: any, res
       if (restoreRun && restoreRun.pipelineSnapshot) {
           console.log('Restoring run:', restoreRun.name);
           loadPipeline(restoreRun.pipelineSnapshot);
-          setRestoreRun(null); // Reset state to allow restoring the same run again
+          onRestoreHandled(); // Reset state to allow restoring the same run again
       }
   }, [restoreRun]);
 
@@ -700,15 +700,18 @@ export default function App() {
             }}
          />
          <div style={{ flex: 1, position: 'relative' }}>
-           <ReactFlowProvider>
-             <Flow
-                selectedRun={selectedRun}
-                restoreRun={restoreRun}
-                onRunHandled={() => {
-                    // Logic handled in effects
-                }}
-             />
-           </ReactFlowProvider>
+	           <ReactFlowProvider>
+	             <Flow
+	                selectedRun={selectedRun}
+	                restoreRun={restoreRun}
+	                onRunHandled={() => {
+	                    // Logic handled in effects
+	                }}
+	                onRestoreHandled={() => {
+	                    setRestoreRun(null);
+	                }}
+	             />
+	           </ReactFlowProvider>
          </div>
       </div>
     </RegistryContext.Provider>

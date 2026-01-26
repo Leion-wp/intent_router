@@ -14,7 +14,7 @@ declare global {
   }
 }
 
-export default function Sidebar({ history = [], onSelectHistory }: SidebarProps) {
+export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory }: SidebarProps) {
   const [tab, setTab] = useState<'providers' | 'history' | 'environment'>('providers');
   const [envVars, setEnvVars] = useState<{ key: string, value: string, visible: boolean }[]>([]);
 
@@ -118,7 +118,7 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
           <div onClick={() => setTab('environment')} style={getTabStyle(tab === 'environment')}>ENV</div>
       </div>
 
-      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+	      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
         {tab === 'providers' && (
              <div className="sidebar-list">
              {items.map((item, idx) => (
@@ -139,40 +139,69 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
             </div>
         )}
 
-        {tab === 'history' && (
-            <div className="sidebar-list">
-                 {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
-                 {history.map((run) => (
-                      <div
-                        key={run.id}
-                        onClick={() => onSelectHistory?.(run)}
-                        style={{
-                          padding: '8px',
-                          background: 'var(--vscode-list-hoverBackground)',
-                          cursor: 'pointer',
-                          borderRadius: '4px',
-                          border: '1px solid transparent',
-                          marginBottom: '8px'
-                        }}
-                        onMouseOver={(e) => e.currentTarget.style.border = '1px solid var(--vscode-focusBorder)'}
-                        onMouseOut={(e) => e.currentTarget.style.border = '1px solid transparent'}
-                      >
-                          <div style={{fontWeight: 'bold', fontSize: '12px', marginBottom: '4px'}}>{run.name}</div>
-                          <div style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between'}}>
-                              <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
-                              <span style={{
-                                  color: run.status === 'success' ? '#4caf50' : // Green
-                                         run.status === 'failure' ? '#f44336' : // Red
-                                         run.status === 'cancelled' ? '#e6c300' : // Gold
-                                         'var(--vscode-descriptionForeground)'
-                              }}>
-                                  {run.status.toUpperCase()}
-                              </span>
-                          </div>
-                      </div>
-                  ))}
-            </div>
-        )}
+	        {tab === 'history' && (
+	            <div className="sidebar-list">
+	                 {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
+	                 {history.map((run) => (
+	                      <div
+	                        key={run.id}
+	                        onClick={() => onSelectHistory?.(run)}
+	                        style={{
+	                          padding: '8px',
+	                          background: 'var(--vscode-list-hoverBackground)',
+	                          cursor: 'pointer',
+	                          borderRadius: '4px',
+	                          border: '1px solid transparent',
+	                          marginBottom: '8px'
+	                        }}
+	                        onMouseOver={(e) => e.currentTarget.style.border = '1px solid var(--vscode-focusBorder)'}
+	                        onMouseOut={(e) => e.currentTarget.style.border = '1px solid transparent'}
+	                      >
+	                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+	                              <div style={{fontWeight: 'bold', fontSize: '12px'}}>{run.name}</div>
+	                              <button
+	                                  onClick={(e) => {
+	                                      e.stopPropagation();
+	                                      if (run.pipelineSnapshot) {
+	                                          onRestoreHistory?.(run);
+	                                      }
+	                                  }}
+	                                  disabled={!run.pipelineSnapshot}
+	                                  title={run.pipelineSnapshot ? 'Restore this snapshot in the builder' : 'No snapshot available for this run'}
+	                                  style={{
+	                                      padding: '2px 8px',
+	                                      fontSize: '10px',
+	                                      borderRadius: '4px',
+	                                      border: '1px solid var(--vscode-panel-border)',
+	                                      background: run.pipelineSnapshot ? 'var(--vscode-button-background)' : 'transparent',
+	                                      color: run.pipelineSnapshot ? 'var(--vscode-button-foreground)' : 'var(--vscode-descriptionForeground)',
+	                                      cursor: run.pipelineSnapshot ? 'pointer' : 'not-allowed',
+	                                      opacity: run.pipelineSnapshot ? 1 : 0.6
+	                                  }}
+	                              >
+	                                  Restore
+	                              </button>
+	                          </div>
+	                          <div style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between'}}>
+	                              <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
+	                              <span style={{
+	                                  color: run.status === 'success' ? '#4caf50' : // Green
+	                                         run.status === 'failure' ? '#f44336' : // Red
+	                                         run.status === 'cancelled' ? '#e6c300' : // Gold
+	                                         'var(--vscode-descriptionForeground)'
+	                              }}>
+	                                  {run.status.toUpperCase()}
+	                              </span>
+	                          </div>
+	                          {!run.pipelineSnapshot && (
+	                              <div style={{ fontSize: '10px', opacity: 0.6, marginTop: '6px' }}>
+	                                  Snapshot unavailable (old run).
+	                              </div>
+	                          )}
+	                      </div>
+	                  ))}
+	            </div>
+	        )}
 
         {tab === 'environment' && (
             <div style={{ padding: '0 8px' }}>

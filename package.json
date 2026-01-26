@@ -326,6 +326,14 @@
                         }
                     }
                 },
+                "intentRouter.environment": {
+                    "type": "object",
+                    "default": {},
+                    "description": "Workspace environment variables (and secrets) injected into terminal steps and available as ${var:NAME}.",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "intentRouter.demoProvider": {
                     "type": "string",
                     "enum": [
