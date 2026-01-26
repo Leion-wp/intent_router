@@ -13,6 +13,7 @@ export type Intent = {
         traceId?: string;
         debug?: boolean;
         runId?: string;
+        stepId?: string;
         ui?: any;
     };
 };

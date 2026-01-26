@@ -4,6 +4,7 @@ import { ensurePipelineFolder } from './pipelineRunner';
 
 export interface StepLog {
     index: number;
+    stepId?: string;
     intentId: string;
     description?: string;
     status: 'pending' | 'running' | 'success' | 'failure';
@@ -27,10 +28,15 @@ export class HistoryManager {
     private readonly MAX_RUNS = 50;
     private readonly FILE_NAME = 'history.json';
     private historyUri: vscode.Uri | undefined;
+    private ready: Promise<void>;
 
     constructor() {
-        this.initialize();
+        this.ready = this.initialize();
         this.registerListeners();
+    }
+
+    public whenReady(): Promise<void> {
+        return this.ready;
     }
 
     private async initialize() {
@@ -102,6 +108,7 @@ export class HistoryManager {
                 if (this.currentRun && this.currentRun.id === event.runId) {
                     this.currentRun.steps.push({
                         index: event.index ?? -1,
+                        stepId: event.stepId,
                         intentId: event.intentId,
                         description: event.description,
                         status: 'running',

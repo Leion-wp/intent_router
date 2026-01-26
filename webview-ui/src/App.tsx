@@ -86,7 +86,7 @@ function canonicalizeIntent(provider: string, capability: string): { provider: s
   return { provider: finalProvider, intent: cap, capability: cap };
 }
 
-function Flow({ selectedRun, restoreRun, onRunHandled, onRestoreHandled }: { selectedRun: any, restoreRun: any, onRunHandled: () => void, onRestoreHandled: () => void }) {
+function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any, restoreRun: any, onRestoreHandled: () => void }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -237,152 +237,90 @@ function Flow({ selectedRun, restoreRun, onRunHandled, onRestoreHandled }: { sel
     // Listen for messages from extension
     const handleMessage = (event: MessageEvent) => {
        const message = event.data;
-       switch (message.type) {
-         case 'executionStatus':
-           setNodes((nds) => nds.map((node) => {
-             // We need to map step index to node? Or pass node ID in metadata?
-             // For V1, we assume linear execution matches the linear graph order after Start.
-             // If we have index:
-             if (message.index !== undefined) {
-               // Filter out the start node (index -1 effectively)
-               const actionNodes = nds.filter(n => n.id !== 'start');
-               if (actionNodes[message.index] && actionNodes[message.index].id === node.id) {
-                 return {
-                   ...node,
-                   data: {
-                     ...node.data,
-                     status: message.status,
-                     intentId: message.intentId
-                   }
-                 };
-               }
-             }
-             return node;
-           }));
-           break;
+	       switch (message.type) {
+	         case 'executionStatus':
+	           setNodes((nds) => {
+	             if (message.stepId) {
+	               return nds.map((node) => (
+	                 node.id === message.stepId
+	                   ? { ...node, data: { ...node.data, status: message.status, intentId: message.intentId } }
+	                   : node
+	               ));
+	             }
 
-         case 'stepLog':
-           setNodes((nds) => nds.map((node) => {
-             if (node.data.intentId === message.intentId) {
-                 const currentLogs = (node.data.logs as Array<any>) || [];
-                 return {
-                     ...node,
-                     data: {
-                         ...node.data,
-                         logs: [...currentLogs, { text: message.text, stream: message.stream }]
-                     }
-                 };
-             }
-             return node;
-           }));
-           break;
-       }
-    };
+	             // Fallback: map by linear index (older engine events)
+	             if (message.index !== undefined) {
+	               const actionNodes = nds.filter(n => n.id !== 'start');
+	               const targetNode = actionNodes[message.index];
+	               if (!targetNode) return nds;
+	               return nds.map((node) => (
+	                 node.id === targetNode.id
+	                   ? { ...node, data: { ...node.data, status: message.status, intentId: message.intentId } }
+	                   : node
+	               ));
+	             }
+
+	             return nds;
+	           });
+	           break;
+
+	         case 'stepLog':
+	           setNodes((nds) => nds.map((node) => {
+	             const matchesNode = message.stepId ? node.id === message.stepId : node.data.intentId === message.intentId;
+	             if (!matchesNode) return node;
+
+	             const currentLogs = (node.data.logs as Array<any>) || [];
+	             return {
+	               ...node,
+	               data: {
+	                 ...node.data,
+	                 logs: [...currentLogs, { text: message.text, stream: message.stream }]
+	               }
+	             };
+	           }));
+	           break;
+	       }
+	    };
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [reactFlowInstance]); // Dependency on reactFlowInstance for fitView
 
-  // Handle History Selection (Restore Pipeline + Playback)
-  useEffect(() => {
-    if (selectedRun) {
-      // 1. Restore Pipeline Definition if available
-      if (selectedRun.pipelineSnapshot) {
-          loadPipeline(selectedRun.pipelineSnapshot);
-      } else {
-          // If no snapshot, we can't restore structure.
-          console.warn('No pipeline snapshot found in history run.');
-      }
-
-      onRunHandled();
-    }
-  }, [selectedRun]);
-
-  // Handle Explicit Restore (Rollback)
-  useEffect(() => {
-      if (restoreRun && restoreRun.pipelineSnapshot) {
-          console.log('Restoring run:', restoreRun.name);
-          loadPipeline(restoreRun.pipelineSnapshot);
+	  // Handle Explicit Restore (Rollback)
+	  useEffect(() => {
+	      if (restoreRun && restoreRun.pipelineSnapshot) {
+	          console.log('Restoring run:', restoreRun.name);
+	          loadPipeline(restoreRun.pipelineSnapshot);
           onRestoreHandled(); // Reset state to allow restoring the same run again
       }
   }, [restoreRun]);
 
-  // Separate Effect for Playback (triggered when nodes are ready/stable?)
-  useEffect(() => {
-      const timeouts: any[] = [];
-      if (selectedRun) {
-          // Wait a bit for nodes to potentially reload
-          const t0 = setTimeout(() => {
-              // 1. Reset all nodes to idle (in case we re-used existing)
-              setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
+	  // Separate Effect for Playback (triggered when nodes are ready/stable?)
+	  useEffect(() => {
+	      const timeouts: any[] = [];
+	      if (selectedRun) {
+	          // 1. Reset all nodes to idle (in case we re-used existing)
+	          setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
 
-              // 2. Playback steps
-              selectedRun.steps.forEach((step: any, i: number) => {
-                 const t = setTimeout(() => {
-                   setNodes((nds) => {
-                      const actionNodes = nds.filter(n => n.id !== 'start');
-                      const targetNode = actionNodes[step.index];
-                      if (!targetNode) return nds;
+	          // 2. Playback steps (prefer stepId, fallback to linear index)
+	          selectedRun.steps.forEach((step: any, i: number) => {
+	            const t = setTimeout(() => {
+	              setNodes((nds) => {
+	                const targetNodeId = step.stepId
+	                  ? String(step.stepId)
+	                  : (typeof step.index === 'number' ? nds.filter(n => n.id !== 'start')[step.index]?.id : undefined);
+	                if (!targetNodeId) return nds;
 
-                      return nds.map(n => {
-                        if (n.id === targetNode.id) {
-                          return {
-                            ...n,
-                            data: { ...n.data, status: step.status }
-                          };
-                        }
-                        return n;
-                      });
-                   });
-                 }, (i + 1) * 600);
-                 timeouts.push(t);
-              });
-          }, 100);
-          timeouts.push(t0);
-      }
-      return () => timeouts.forEach(clearTimeout);
-  }, [selectedRun]);
-
-
-  // Playback Logic
-  useEffect(() => {
-    const timeouts: any[] = [];
-
-    if (selectedRun) {
-      console.log('Replaying run:', selectedRun);
-
-      // 1. Reset all nodes to idle
-      setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
-
-      // 2. Playback steps
-      const actionNodes = nodes.filter(n => n.id !== 'start');
-
-      selectedRun.steps.forEach((step: any, i: number) => {
-         const t = setTimeout(() => {
-           setNodes((nds) => {
-              // Map index to action node ID
-              const targetNode = actionNodes[step.index];
-              if (!targetNode) return nds;
-
-              return nds.map(n => {
-                if (n.id === targetNode.id) {
-                  return {
-                    ...n,
-                    data: { ...n.data, status: step.status }
-                  };
-                }
-                return n;
-              });
-           });
-         }, (i + 1) * 600); // 600ms delay per step
-         timeouts.push(t);
-      });
-    }
-
-    return () => {
-      timeouts.forEach(clearTimeout);
-    };
-  }, [selectedRun]); // Re-run when selectedRun changes
+	                return nds.map(n => (
+	                  n.id === targetNodeId ? { ...n, data: { ...n.data, status: step.status } } : n
+	                ));
+	              });
+	            }, (i + 1) * 600);
+	            timeouts.push(t);
+	          });
+	      }
+	      return () => timeouts.forEach(clearTimeout);
+	  }, [selectedRun]);
 
   // Reactive Connectors (Update Edge Colors based on Source Status)
   useEffect(() => {
@@ -462,7 +400,7 @@ function Flow({ selectedRun, restoreRun, onRunHandled, onRestoreHandled }: { sel
     [reactFlowInstance],
   );
 
-  const savePipeline = () => {
+	  const savePipeline = () => {
     // 1. Build Graph Adjacency List
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
     const adj = new Map<string, string[]>();
@@ -589,17 +527,32 @@ function Flow({ selectedRun, restoreRun, onRunHandled, onRestoreHandled }: { sel
         }
     });
 
-    const pipeline = {
-      name: (nodes.find(n => n.id === 'start')?.data.label as string) || 'My Pipeline',
-      intent: 'pipeline.run',
-      steps,
-      meta: {
-        ui: {
-          nodes,
-          edges
-        }
-      }
-    };
+	    const pipeline = {
+	      name: (nodes.find(n => n.id === 'start')?.data.label as string) || 'My Pipeline',
+	      intent: 'pipeline.run',
+	      steps,
+	      meta: {
+	        ui: {
+	          // Avoid persisting runtime-only UI state (status/logs/edge coloring) into the pipeline file.
+	          nodes: nodes.map((n: any) => {
+	            const { status, logs, intentId, ...rest } = (n.data || {}) as any;
+	            return {
+	              ...n,
+	              data: { ...rest, status: 'idle' }
+	            };
+	          }),
+	          edges: edges.map((e: any) => {
+	            const { style, animated, ...rest } = e;
+	            if (rest.markerEnd && typeof rest.markerEnd === 'object') {
+	              const markerEnd = { ...(rest.markerEnd as any) };
+	              delete markerEnd.color;
+	              return { ...rest, markerEnd };
+	            }
+	            return rest;
+	          })
+	        }
+	      }
+	    };
 
     if (vscode) {
       vscode.postMessage({
@@ -704,9 +657,6 @@ export default function App() {
 	             <Flow
 	                selectedRun={selectedRun}
 	                restoreRun={restoreRun}
-	                onRunHandled={() => {
-	                    // Logic handled in effects
-	                }}
 	                onRestoreHandled={() => {
 	                    setRestoreRun(null);
 	                }}

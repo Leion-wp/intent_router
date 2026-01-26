@@ -75,7 +75,7 @@ export async function executeTerminalCommand(args: any): Promise<void> {
 
     // Capture mode (Pipeline)
     if (meta && meta.traceId && meta.runId) {
-        return runCommand(commandText, cwd, meta.runId, meta.traceId);
+        return runCommand(commandText, cwd, meta.runId, meta.traceId, meta.stepId);
     }
 
     // Legacy mode (Interactive / Fire-and-forget)
@@ -148,7 +148,7 @@ export function cancelTerminalRun(runId: string | undefined | null): void {
     }
 }
 
-function runCommand(command: string, cwd: string | undefined, runId: string, intentId: string): Promise<void> {
+function runCommand(command: string, cwd: string | undefined, runId: string, intentId: string, stepId?: string): Promise<void> {
     const { terminal, write } = getOrCreateTerminal();
     terminal.show(true);
 
@@ -174,6 +174,7 @@ function runCommand(command: string, cwd: string | undefined, runId: string, int
                 type: 'stepLog',
                 runId,
                 intentId,
+                stepId,
                 text,
                 stream: 'stdout'
             });
@@ -186,6 +187,7 @@ function runCommand(command: string, cwd: string | undefined, runId: string, int
                 type: 'stepLog',
                 runId,
                 intentId,
+                stepId,
                 text,
                 stream: 'stderr'
             });

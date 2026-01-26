@@ -145,7 +145,7 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 	                 {history.map((run) => (
 	                      <div
 	                        key={run.id}
-	                        onClick={() => onSelectHistory?.(run)}
+	                        onClick={() => onSelectHistory?.({ ...run })}
 	                        style={{
 	                          padding: '8px',
 	                          background: 'var(--vscode-list-hoverBackground)',
