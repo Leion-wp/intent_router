@@ -107,3 +107,74 @@ html, body, #root {
   outline-offset: 2px;
   opacity: 1;
 }
+
+/* Palette: History List Styles */
+.history-item {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--vscode-sideBar-background);
+  color: var(--vscode-sideBar-foreground);
+  border: 1px solid transparent;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  border-radius: 4px;
+  transition: all 0.1s ease;
+  margin-bottom: 4px;
+}
+
+.history-item:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-list-hoverForeground);
+}
+
+.history-item:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  width: 100%;
+}
+
+.history-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.history-meta {
+  font-size: 10px;
+  opacity: 0.7;
+  padding-left: 14px; /* Align with text start (dot width + gap) */
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-color: var(--vscode-disabledForeground); /* Default/Pending */
+}
+
+.status-dot.success {
+  background-color: var(--vscode-testing-iconPassed, #4caf50);
+}
+
+.status-dot.failure {
+  background-color: var(--vscode-errorForeground, #f44336);
+}
+
+.status-dot.running {
+  background-color: var(--vscode-charts-blue, #007acc);
+}

@@ -173,24 +173,26 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
           >
               {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
               {history.map((run) => (
-                  <div
+                  <button
                     key={run.id}
+                    className="history-item"
                     onClick={() => onSelectHistory?.(run)}
-                    style={{
-                        width: '100%',
-                        padding: '6px',
-                        background: 'var(--vscode-button-background)',
-                        color: 'var(--vscode-button-foreground)',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontSize: '11px'
-                    }}
-                >
-                    + Add Variable
-                </button>
-            </div>
-        )}
-      </div>
+                    aria-label={`Load run: ${run.name || 'Untitled'} (${run.status})`}
+                    title={`Load run: ${run.name || 'Untitled'} - ${new Date(run.timestamp).toLocaleString()}`}
+                  >
+                    <div className="history-header">
+                        <span className={`status-dot ${run.status}`}></span>
+                        <span className="history-name">{run.name || 'Untitled Run'}</span>
+                    </div>
+                    <div className="history-meta">
+                        {new Date(run.timestamp).toLocaleString(undefined, {
+                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                        })}
+                    </div>
+                  </button>
+              ))}
+        </div>
+      )}
 
       <div className="sidebar-footer">
         {tab === 'history' && (
