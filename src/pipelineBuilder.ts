@@ -83,6 +83,23 @@ export class PipelineBuilder {
         });
         this.disposables.push(eventSub);
 
+        // Keep ENV panel in sync if user edits workspace settings while builder is open.
+        const configSub = vscode.workspace.onDidChangeConfiguration(e => {
+            if (!e.affectsConfiguration('intentRouter.environment')) {
+                return;
+            }
+            try {
+                const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
+                this.panel?.webview.postMessage({
+                    type: 'environmentUpdate',
+                    environment
+                });
+            } catch {
+                // Best-effort sync.
+            }
+        });
+        this.disposables.push(configSub);
+
         panel.onDidDispose(() => {
             if (this.panel === panel) {
                 this.panel = undefined;

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -23,9 +23,15 @@ import ActionNode from './nodes/ActionNode';
 import PromptNode from './nodes/PromptNode';
 import RepoNode from './nodes/RepoNode';
 import VSCodeCommandNode from './nodes/VSCodeCommandNode';
+import { isInboundMessage, WebviewInboundMessage } from './types/messages';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
+
+// Runtime context for nodes (Prompt vars + ENV vars)
+export const FlowRuntimeContext = createContext<{ getAvailableVars: () => string[] }>({
+  getAvailableVars: () => []
+});
 
 // Register custom node types
 const nodeTypes = {
@@ -91,6 +97,37 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+  const MAX_LOG_LINES = 200;
+
+  const [environment, setEnvironment] = useState<Record<string, string>>(
+    (window.initialData?.environment as Record<string, string>) || {}
+  );
+
+  const nodesRef = useRef<any[]>(nodes);
+  const envRef = useRef<Record<string, string>>(environment);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    envRef.current = environment;
+  }, [environment]);
+
+  const getAvailableVars = useCallback((): string[] => {
+    const promptVars = (nodesRef.current || [])
+      .filter((n: any) => n?.type === 'promptNode')
+      .map((n: any) => String(n?.data?.name || '').trim())
+      .filter((s: string) => !!s);
+
+    const envVars = Object.keys(envRef.current || {}).map(s => String(s).trim()).filter(Boolean);
+
+    const all = Array.from(new Set([...promptVars, ...envVars]));
+    all.sort((a, b) => a.localeCompare(b));
+    return all;
+  }, []);
+
+  const flowRuntime = useMemo(() => ({ getAvailableVars }), [getAvailableVars]);
 
   // Helper to load pipeline data into graph
   const loadPipeline = (pipeline: any) => {
@@ -235,30 +272,54 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     }
 
     // Listen for messages from extension
-    const handleMessage = (event: MessageEvent) => {
-       const message = event.data;
-	       switch (message.type) {
+	    const handleMessage = (event: MessageEvent) => {
+	       const message = event.data as unknown;
+	       if (!isInboundMessage(message)) {
+	         return;
+	       }
+	       const typed = message as WebviewInboundMessage;
+	       switch (typed.type) {
+	         case 'environmentUpdate':
+	           setEnvironment((typed.environment as Record<string, string>) || {});
+	           break;
+
 	         case 'executionStatus':
 	           setNodes((nds) => {
-	             if (message.stepId) {
-	               return nds.map((node) => (
-	                 node.id === message.stepId
-	                   ? { ...node, data: { ...node.data, status: message.status, intentId: message.intentId } }
-	                   : node
-	               ));
-	             }
+		             if (typed.stepId) {
+		               return nds.map((node) => (
+		                 node.id === typed.stepId
+		                   ? {
+		                       ...node,
+		                       data: {
+		                         ...node.data,
+		                         status: typed.status,
+		                         intentId: typed.intentId,
+		                         logs: typed.status === 'running' ? [] : (node.data as any).logs
+		                       }
+		                     }
+		                   : node
+		               ));
+		             }
 
-	             // Fallback: map by linear index (older engine events)
-	             if (message.index !== undefined) {
-	               const actionNodes = nds.filter(n => n.id !== 'start');
-	               const targetNode = actionNodes[message.index];
-	               if (!targetNode) return nds;
-	               return nds.map((node) => (
-	                 node.id === targetNode.id
-	                   ? { ...node, data: { ...node.data, status: message.status, intentId: message.intentId } }
-	                   : node
-	               ));
-	             }
+		             // Fallback: map by linear index (older engine events)
+		             if (typed.index !== undefined) {
+		               const actionNodes = nds.filter(n => n.id !== 'start');
+		               const targetNode = actionNodes[typed.index];
+		               if (!targetNode) return nds;
+		               return nds.map((node) => (
+		                 node.id === targetNode.id
+		                   ? {
+		                       ...node,
+		                       data: {
+		                         ...node.data,
+		                         status: typed.status,
+		                         intentId: typed.intentId,
+		                         logs: typed.status === 'running' ? [] : (node.data as any).logs
+		                       }
+		                     }
+		                   : node
+		               ));
+		             }
 
 	             return nds;
 	           });
@@ -266,15 +327,25 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
 	         case 'stepLog':
 	           setNodes((nds) => nds.map((node) => {
-	             const matchesNode = message.stepId ? node.id === message.stepId : node.data.intentId === message.intentId;
+	             const matchesNode = typed.stepId ? node.id === typed.stepId : node.data.intentId === typed.intentId;
 	             if (!matchesNode) return node;
 
 	             const currentLogs = (node.data.logs as Array<any>) || [];
+
+	             // `stepLog.text` can arrive in chunks containing multiple lines.
+	             // We split so the UI counter and trimming are based on actual lines.
+	             const rawText = typeof typed.text === 'string' ? typed.text : String(typed.text ?? '');
+	             const incomingLines = rawText.split(/\r?\n/).filter((l: string) => l.length > 0);
+	             const nextLogs = [
+	               ...currentLogs,
+	               ...incomingLines.map((line: string) => ({ text: line, stream: typed.stream }))
+	             ];
+	             const trimmed = nextLogs.length > MAX_LOG_LINES ? nextLogs.slice(-MAX_LOG_LINES) : nextLogs;
 	             return {
 	               ...node,
 	               data: {
 	                 ...node.data,
-	                 logs: [...currentLogs, { text: message.text, stream: message.stream }]
+	                 logs: trimmed
 	               }
 	             };
 	           }));
@@ -527,32 +598,32 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
         }
     });
 
-	    const pipeline = {
-	      name: (nodes.find(n => n.id === 'start')?.data.label as string) || 'My Pipeline',
-	      intent: 'pipeline.run',
-	      steps,
-	      meta: {
-	        ui: {
-	          // Avoid persisting runtime-only UI state (status/logs/edge coloring) into the pipeline file.
-	          nodes: nodes.map((n: any) => {
-	            const { status, logs, intentId, ...rest } = (n.data || {}) as any;
-	            return {
-	              ...n,
-	              data: { ...rest, status: 'idle' }
-	            };
-	          }),
-	          edges: edges.map((e: any) => {
-	            const { style, animated, ...rest } = e;
-	            if (rest.markerEnd && typeof rest.markerEnd === 'object') {
-	              const markerEnd = { ...(rest.markerEnd as any) };
-	              delete markerEnd.color;
-	              return { ...rest, markerEnd };
-	            }
-	            return rest;
-	          })
-	        }
-	      }
-	    };
+		    const pipeline = {
+		      name: (nodes.find(n => n.id === 'start')?.data.label as string) || 'My Pipeline',
+		      intent: 'pipeline.run',
+		      steps,
+		      meta: {
+		        ui: {
+		          // Avoid persisting runtime-only UI state (status/logs/edge coloring) into the pipeline file.
+		          nodes: nodes.map((n: any) => {
+		            const { status, logs, intentId, ...rest } = (n.data || {}) as any;
+		            return {
+		              ...n,
+		              data: { ...rest, status: 'idle' }
+		            };
+		          }),
+		          edges: edges.map((e: any) => {
+		            const { style, animated, ...rest } = e;
+		            if (rest.markerEnd && typeof rest.markerEnd === 'object') {
+		              const markerEnd = { ...(rest.markerEnd as any) };
+		              delete markerEnd.color;
+		              return { ...rest, markerEnd };
+		            }
+		            return rest;
+		          })
+		        }
+		      }
+		    };
 
     if (vscode) {
       vscode.postMessage({
@@ -564,27 +635,29 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     }
   };
 
-  return (
-    <div className="dndflow">
-      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onInit={setReactFlowInstance}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          nodeTypes={nodeTypes}
-          snapToGrid={true}
-          fitView
-        >
-          <Controls />
-          <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
-          <MiniMap />
-        </ReactFlow>
-      </div>
+	  return (
+	    <div className="dndflow">
+	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
+	        <FlowRuntimeContext.Provider value={flowRuntime}>
+	          <ReactFlow
+	            nodes={nodes}
+	            edges={edges}
+	            onNodesChange={onNodesChange}
+	            onEdgesChange={onEdgesChange}
+	            onConnect={onConnect}
+	            onInit={setReactFlowInstance}
+	            onDrop={onDrop}
+	            onDragOver={onDragOver}
+	            nodeTypes={nodeTypes}
+	            snapToGrid={true}
+	            fitView
+	          >
+	            <Controls />
+	            <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
+	            <MiniMap />
+	          </ReactFlow>
+	        </FlowRuntimeContext.Provider>
+	      </div>
 
       <button
         onClick={savePipeline}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { isInboundMessage, WebviewOutboundMessage } from './types/messages';
 
 type SidebarProps = {
   history?: any[];
@@ -18,9 +19,9 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
   const [tab, setTab] = useState<'providers' | 'history' | 'environment'>('providers');
   const [envVars, setEnvVars] = useState<{ key: string, value: string, visible: boolean }[]>([]);
 
-  useEffect(() => {
-    const loadEnv = (data: any) => {
-        if (data) {
+	  useEffect(() => {
+	    const loadEnv = (data: any) => {
+	        if (data) {
             const loaded = Object.entries(data).map(([k, v]) => ({
                 key: k,
                 value: String(v),
@@ -34,11 +35,14 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
         loadEnv(window.initialData.environment);
     }
 
-    const handleMessage = (event: MessageEvent) => {
-        if (event.data?.type === 'environmentUpdate') {
-             loadEnv(event.data.environment);
-        }
-    };
+	    const handleMessage = (event: MessageEvent) => {
+	        if (!isInboundMessage(event.data)) {
+	            return;
+	        }
+	        if (event.data.type === 'environmentUpdate') {
+	             loadEnv(event.data.environment);
+	        }
+	    };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, []);
@@ -50,13 +54,14 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
         return acc;
     }, {} as Record<string, string>);
 
-    if (window.vscode) {
-        window.vscode.postMessage({
-            type: 'saveEnvironment',
-            environment: envObj
-        });
-    }
-  };
+	    if (window.vscode) {
+	        const msg: WebviewOutboundMessage = {
+	            type: 'saveEnvironment',
+	            environment: envObj
+	        };
+	        window.vscode.postMessage(msg);
+	    }
+	  };
 
   const addEnvVar = () => {
       const newVars = [...envVars, { key: '', value: '', visible: true }];
@@ -92,11 +97,12 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     event.dataTransfer.effectAllowed = 'move';
   };
 
-  const clearHistory = () => {
-    if (window.vscode) {
-        window.vscode.postMessage({ type: 'clearHistory' });
-    }
-  };
+	  const clearHistory = () => {
+	    if (window.vscode) {
+	        const msg: WebviewOutboundMessage = { type: 'clearHistory' };
+	        window.vscode.postMessage(msg);
+	    }
+	  };
 
   const items = [
     // Context / Setup Nodes

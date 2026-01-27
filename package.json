@@ -334,6 +334,23 @@
                         "type": "string"
                     }
                 },
+                "intentRouter.history.maxRuns": {
+                    "type": "number",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 500,
+                    "description": "Maximum number of pipeline runs to keep in history.json."
+                },
+                "intentRouter.history.snapshotMode": {
+                    "type": "string",
+                    "enum": [
+                        "full",
+                        "minimal",
+                        "none"
+                    ],
+                    "default": "full",
+                    "description": "Snapshot storage mode for history: full=store full pipeline, minimal=store only meta.ui snapshot, none=disable snapshot/restore."
+                },
                 "intentRouter.demoProvider": {
                     "type": "string",
                     "enum": [
