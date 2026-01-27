@@ -44,7 +44,6 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
   }, []);
 
   const saveEnv = (newVars: typeof envVars) => {
-    setEnvVars(newVars);
     const envObj = newVars.reduce((acc, curr) => {
         if (curr.key) acc[curr.key] = curr.value;
         return acc;
@@ -77,6 +76,7 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
 
   const removeEnvVar = (index: number) => {
       const newVars = envVars.filter((_, i) => i !== index);
+      setEnvVars(newVars);
       saveEnv(newVars);
   };
 
@@ -138,9 +138,19 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
           >
               HISTORY
           </button>
+          <button
+             role="tab"
+             aria-selected={tab === 'environment'}
+             aria-controls="panel-environment"
+             id="tab-environment"
+             onClick={() => setTab('environment')}
+             className="sidebar-tab"
+          >
+              ENV
+          </button>
       </div>
 
-      {tab === 'providers' ? (
+      {tab === 'providers' && (
         <div
           className="sidebar-list"
           role="tabpanel"
@@ -163,7 +173,9 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
             </div>
           ))}
         </div>
-      ) : (
+      )}
+
+      {tab === 'history' && (
           <div
             className="sidebar-list"
             role="tabpanel"
@@ -173,24 +185,82 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
           >
               {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
               {history.map((run) => (
-                  <div
+                  <button
                     key={run.id}
                     onClick={() => onSelectHistory?.(run)}
+                    className="history-item"
+                    aria-label={`Select run: ${run.name}, status ${run.status}, from ${new Date(run.timestamp).toLocaleString()}`}
+                >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <span style={{ fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{run.name}</span>
+                        <span style={{ opacity: 0.7, fontSize: '10px' }}>{new Date(run.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            backgroundColor: run.status === 'success' ? '#4caf50' : run.status === 'failure' ? '#f44336' : '#007acc'
+                        }} aria-hidden="true"></div>
+                        <span style={{ textTransform: 'capitalize' }}>{run.status}</span>
+                    </div>
+                </button>
+              ))}
+          </div>
+      )}
+
+      {tab === 'environment' && (
+          <div
+            className="sidebar-list"
+            role="tabpanel"
+            id="panel-environment"
+            aria-labelledby="tab-environment"
+            style={{ flex: 1, overflowY: 'auto' }}
+          >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {envVars.map((env, idx) => (
+                      <div key={idx} style={{ display: 'flex', gap: '4px' }}>
+                          <input
+                            type="text"
+                            placeholder="Key"
+                            value={env.key}
+                            onChange={(e) => updateEnvVar(idx, 'key', e.target.value)}
+                            onBlur={handleBlur}
+                            style={{ flex: 1, background: 'var(--vscode-input-background)', color: 'var(--vscode-input-foreground)', border: '1px solid var(--vscode-input-border)', padding: '4px', fontSize: '11px' }}
+                          />
+                           <input
+                            type={env.visible ? "text" : "password"}
+                            placeholder="Value"
+                            value={env.value}
+                            onChange={(e) => updateEnvVar(idx, 'value', e.target.value)}
+                            onBlur={handleBlur}
+                            style={{ flex: 1, background: 'var(--vscode-input-background)', color: 'var(--vscode-input-foreground)', border: '1px solid var(--vscode-input-border)', padding: '4px', fontSize: '11px' }}
+                          />
+                          <button onClick={() => toggleVisibility(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-icon-foreground)' }} aria-label={env.visible ? "Hide value" : "Show value"}>
+                              <span className={`codicon codicon-${env.visible ? 'eye' : 'eye-closed'}`}></span>
+                          </button>
+                          <button onClick={() => removeEnvVar(idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-icon-foreground)' }} aria-label="Remove variable">
+                              <span className="codicon codicon-close"></span>
+                          </button>
+                      </div>
+                  ))}
+                  <button
+                    onClick={addEnvVar}
                     style={{
-                        width: '100%',
                         padding: '6px',
                         background: 'var(--vscode-button-background)',
                         color: 'var(--vscode-button-foreground)',
                         border: 'none',
+                        borderRadius: '2px',
                         cursor: 'pointer',
                         fontSize: '11px'
                     }}
-                >
+                  >
                     + Add Variable
-                </button>
-            </div>
-        )}
-      </div>
+                  </button>
+              </div>
+          </div>
+      )}
 
       <div className="sidebar-footer">
         {tab === 'history' && (
@@ -220,14 +290,4 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
       </div>
     </aside>
   );
-}
-
-function getTabStyle(active: boolean) {
-    return {
-         cursor: 'pointer',
-         fontWeight: active ? 'bold' : 'normal',
-         opacity: active ? 1 : 0.6,
-         borderBottom: active ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none',
-         paddingBottom: '4px'
-    };
 }

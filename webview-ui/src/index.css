@@ -107,3 +107,28 @@ html, body, #root {
   outline-offset: 2px;
   opacity: 1;
 }
+
+.history-item {
+  width: 100%;
+  padding: 8px;
+  background: transparent;
+  color: var(--vscode-sideBar-foreground);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+  border-radius: 2px;
+}
+
+.history-item:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.history-item:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
