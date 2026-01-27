@@ -14,8 +14,23 @@ const Uri = {
 module.exports = {
   Uri,
   window: {
-    createTerminal: (name: string) => {
-      const t = { name, show: () => {}, sendText: () => {}, dispose: () => {} };
+    createTerminal: (nameOrOptions: any) => {
+      let name = nameOrOptions;
+      let creationOptions = {};
+      if (typeof nameOrOptions === 'object') {
+          name = nameOrOptions.name;
+          creationOptions = nameOrOptions;
+      }
+      const t: any = {
+          name,
+          creationOptions,
+          show: () => {},
+          sendText: () => {},
+          dispose: () => {
+              const idx = terminals.indexOf(t);
+              if (idx !== -1) terminals.splice(idx, 1);
+          }
+      };
       terminals.push(t);
       return t;
     },
@@ -65,9 +80,10 @@ module.exports = {
       fs: {
           createDirectory: async () => {},
           writeFile: async () => {},
-          readFile: async () => Buffer.from('{}')
+          readFile: async () => Buffer.from('[]')
       }
   },
   ExtensionMode: { Development: 1, Test: 2, Production: 3 },
-  ViewColumn: { Active: 1 }
+  ViewColumn: { Active: 1 },
+  ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 }
 };

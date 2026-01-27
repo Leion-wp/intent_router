@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -23,9 +23,15 @@ import ActionNode from './nodes/ActionNode';
 import PromptNode from './nodes/PromptNode';
 import RepoNode from './nodes/RepoNode';
 import VSCodeCommandNode from './nodes/VSCodeCommandNode';
+import { isInboundMessage, WebviewInboundMessage } from './types/messages';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
+
+// Runtime context for nodes (Prompt vars + ENV vars)
+export const FlowRuntimeContext = createContext<{ getAvailableVars: () => string[] }>({
+  getAvailableVars: () => []
+});
 
 // Register custom node types
 const nodeTypes = {
@@ -86,15 +92,60 @@ function canonicalizeIntent(provider: string, capability: string): { provider: s
   return { provider: finalProvider, intent: cap, capability: cap };
 }
 
-function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: () => void }) {
+function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any, restoreRun: any, onRestoreHandled: () => void }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+  const MAX_LOG_LINES = 200;
+
+  const [environment, setEnvironment] = useState<Record<string, string>>(
+    (window.initialData?.environment as Record<string, string>) || {}
+  );
+
+  const nodesRef = useRef<any[]>(nodes);
+  const envRef = useRef<Record<string, string>>(environment);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    envRef.current = environment;
+  }, [environment]);
+
+  const getAvailableVars = useCallback((): string[] => {
+    const promptVars = (nodesRef.current || [])
+      .filter((n: any) => n?.type === 'promptNode')
+      .map((n: any) => String(n?.data?.name || '').trim())
+      .filter((s: string) => !!s);
+
+    const envVars = Object.keys(envRef.current || {}).map(s => String(s).trim()).filter(Boolean);
+
+    const all = Array.from(new Set([...promptVars, ...envVars]));
+    all.sort((a, b) => a.localeCompare(b));
+    return all;
+  }, []);
+
+  const flowRuntime = useMemo(() => ({ getAvailableVars }), [getAvailableVars]);
 
   // Helper to load pipeline data into graph
   const loadPipeline = (pipeline: any) => {
       console.log('Loading pipeline:', pipeline);
+
+      // 1. Snapshot Restoration (Priority)
+      if (pipeline.meta?.ui?.nodes && pipeline.meta?.ui?.edges) {
+          console.log('Restoring from snapshot');
+          // Validate nodes/edges simply? Or just trust them?
+          // We might want to ensure they are arrays
+          if (Array.isArray(pipeline.meta.ui.nodes) && Array.isArray(pipeline.meta.ui.edges)) {
+              setNodes(pipeline.meta.ui.nodes);
+              setEdges(pipeline.meta.ui.edges);
+              setTimeout(() => reactFlowInstance?.fitView(), 100);
+              return;
+          }
+      }
+
       const newNodes: Node[] = [];
       const newEdges: Edge[] = [];
 
@@ -221,145 +272,126 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
     }
 
     // Listen for messages from extension
-    const handleMessage = (event: MessageEvent) => {
-       const message = event.data;
-       switch (message.type) {
-         case 'executionStatus':
-           setNodes((nds) => nds.map((node) => {
-             // We need to map step index to node? Or pass node ID in metadata?
-             // For V1, we assume linear execution matches the linear graph order after Start.
-             // If we have index:
-             if (message.index !== undefined) {
-               // Filter out the start node (index -1 effectively)
-               const actionNodes = nds.filter(n => n.id !== 'start');
-               if (actionNodes[message.index] && actionNodes[message.index].id === node.id) {
-                 return {
-                   ...node,
-                   data: {
-                     ...node.data,
-                     status: message.status,
-                     intentId: message.intentId
-                   }
-                 };
-               }
-             }
-             return node;
-           }));
-           break;
+	    const handleMessage = (event: MessageEvent) => {
+	       const message = event.data as unknown;
+	       if (!isInboundMessage(message)) {
+	         return;
+	       }
+	       const typed = message as WebviewInboundMessage;
+	       switch (typed.type) {
+	         case 'environmentUpdate':
+	           setEnvironment((typed.environment as Record<string, string>) || {});
+	           break;
 
-         case 'stepLog':
-           setNodes((nds) => nds.map((node) => {
-             if (node.data.intentId === message.intentId) {
-                 const currentLogs = (node.data.logs as Array<any>) || [];
-                 return {
-                     ...node,
-                     data: {
-                         ...node.data,
-                         logs: [...currentLogs, { text: message.text, stream: message.stream }]
-                     }
-                 };
-             }
-             return node;
-           }));
-           break;
-       }
-    };
+	         case 'executionStatus':
+	           setNodes((nds) => {
+		             if (typed.stepId) {
+		               return nds.map((node) => (
+		                 node.id === typed.stepId
+		                   ? {
+		                       ...node,
+		                       data: {
+		                         ...node.data,
+		                         status: typed.status,
+		                         intentId: typed.intentId,
+		                         logs: typed.status === 'running' ? [] : (node.data as any).logs
+		                       }
+		                     }
+		                   : node
+		               ));
+		             }
+
+		             // Fallback: map by linear index (older engine events)
+		             if (typed.index !== undefined) {
+		               const actionNodes = nds.filter(n => n.id !== 'start');
+		               const targetNode = actionNodes[typed.index];
+		               if (!targetNode) return nds;
+		               return nds.map((node) => (
+		                 node.id === targetNode.id
+		                   ? {
+		                       ...node,
+		                       data: {
+		                         ...node.data,
+		                         status: typed.status,
+		                         intentId: typed.intentId,
+		                         logs: typed.status === 'running' ? [] : (node.data as any).logs
+		                       }
+		                     }
+		                   : node
+		               ));
+		             }
+
+	             return nds;
+	           });
+	           break;
+
+	         case 'stepLog':
+	           setNodes((nds) => nds.map((node) => {
+	             const matchesNode = typed.stepId ? node.id === typed.stepId : node.data.intentId === typed.intentId;
+	             if (!matchesNode) return node;
+
+	             const currentLogs = (node.data.logs as Array<any>) || [];
+
+	             // `stepLog.text` can arrive in chunks containing multiple lines.
+	             // We split so the UI counter and trimming are based on actual lines.
+	             const rawText = typeof typed.text === 'string' ? typed.text : String(typed.text ?? '');
+	             const incomingLines = rawText.split(/\r?\n/).filter((l: string) => l.length > 0);
+	             const nextLogs = [
+	               ...currentLogs,
+	               ...incomingLines.map((line: string) => ({ text: line, stream: typed.stream }))
+	             ];
+	             const trimmed = nextLogs.length > MAX_LOG_LINES ? nextLogs.slice(-MAX_LOG_LINES) : nextLogs;
+	             return {
+	               ...node,
+	               data: {
+	                 ...node.data,
+	                 logs: trimmed
+	               }
+	             };
+	           }));
+	           break;
+	       }
+	    };
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [reactFlowInstance]); // Dependency on reactFlowInstance for fitView
 
-  // Handle History Selection (Restore Pipeline + Playback)
-  useEffect(() => {
-    if (selectedRun) {
-      // 1. Restore Pipeline Definition if available
-      if (selectedRun.pipelineSnapshot) {
-          loadPipeline(selectedRun.pipelineSnapshot);
-      } else {
-          // If no snapshot, we can't restore structure.
-          console.warn('No pipeline snapshot found in history run.');
+	  // Handle Explicit Restore (Rollback)
+	  useEffect(() => {
+	      if (restoreRun && restoreRun.pipelineSnapshot) {
+	          console.log('Restoring run:', restoreRun.name);
+	          loadPipeline(restoreRun.pipelineSnapshot);
+          onRestoreHandled(); // Reset state to allow restoring the same run again
       }
+  }, [restoreRun]);
 
-      onRunHandled();
-    }
-  }, [selectedRun]);
+	  // Separate Effect for Playback (triggered when nodes are ready/stable?)
+	  useEffect(() => {
+	      const timeouts: any[] = [];
+	      if (selectedRun) {
+	          // 1. Reset all nodes to idle (in case we re-used existing)
+	          setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
 
-  // Separate Effect for Playback (triggered when nodes are ready/stable?)
-  useEffect(() => {
-      const timeouts: any[] = [];
-      if (selectedRun) {
-          // Wait a bit for nodes to potentially reload
-          const t0 = setTimeout(() => {
-              // 1. Reset all nodes to idle (in case we re-used existing)
-              setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
+	          // 2. Playback steps (prefer stepId, fallback to linear index)
+	          selectedRun.steps.forEach((step: any, i: number) => {
+	            const t = setTimeout(() => {
+	              setNodes((nds) => {
+	                const targetNodeId = step.stepId
+	                  ? String(step.stepId)
+	                  : (typeof step.index === 'number' ? nds.filter(n => n.id !== 'start')[step.index]?.id : undefined);
+	                if (!targetNodeId) return nds;
 
-              // 2. Playback steps
-              selectedRun.steps.forEach((step: any, i: number) => {
-                 const t = setTimeout(() => {
-                   setNodes((nds) => {
-                      const actionNodes = nds.filter(n => n.id !== 'start');
-                      const targetNode = actionNodes[step.index];
-                      if (!targetNode) return nds;
-
-                      return nds.map(n => {
-                        if (n.id === targetNode.id) {
-                          return {
-                            ...n,
-                            data: { ...n.data, status: step.status }
-                          };
-                        }
-                        return n;
-                      });
-                   });
-                 }, (i + 1) * 600);
-                 timeouts.push(t);
-              });
-          }, 100);
-          timeouts.push(t0);
-      }
-      return () => timeouts.forEach(clearTimeout);
-  }, [selectedRun]);
-
-
-  // Playback Logic
-  useEffect(() => {
-    const timeouts: any[] = [];
-
-    if (selectedRun) {
-      console.log('Replaying run:', selectedRun);
-
-      // 1. Reset all nodes to idle
-      setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
-
-      // 2. Playback steps
-      const actionNodes = nodes.filter(n => n.id !== 'start');
-
-      selectedRun.steps.forEach((step: any, i: number) => {
-         const t = setTimeout(() => {
-           setNodes((nds) => {
-              // Map index to action node ID
-              const targetNode = actionNodes[step.index];
-              if (!targetNode) return nds;
-
-              return nds.map(n => {
-                if (n.id === targetNode.id) {
-                  return {
-                    ...n,
-                    data: { ...n.data, status: step.status }
-                  };
-                }
-                return n;
-              });
-           });
-         }, (i + 1) * 600); // 600ms delay per step
-         timeouts.push(t);
-      });
-    }
-
-    return () => {
-      timeouts.forEach(clearTimeout);
-    };
-  }, [selectedRun]); // Re-run when selectedRun changes
+	                return nds.map(n => (
+	                  n.id === targetNodeId ? { ...n, data: { ...n.data, status: step.status } } : n
+	                ));
+	              });
+	            }, (i + 1) * 600);
+	            timeouts.push(t);
+	          });
+	      }
+	      return () => timeouts.forEach(clearTimeout);
+	  }, [selectedRun]);
 
   // Reactive Connectors (Update Edge Colors based on Source Status)
   useEffect(() => {
@@ -439,7 +471,7 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
     [reactFlowInstance],
   );
 
-  const savePipeline = () => {
+	  const savePipeline = () => {
     // 1. Build Graph Adjacency List
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
     const adj = new Map<string, string[]>();
@@ -566,11 +598,32 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
         }
     });
 
-    const pipeline = {
-      name: (nodes.find(n => n.id === 'start')?.data.label as string) || 'My Pipeline',
-      intent: 'pipeline.run',
-      steps
-    };
+		    const pipeline = {
+		      name: (nodes.find(n => n.id === 'start')?.data.label as string) || 'My Pipeline',
+		      intent: 'pipeline.run',
+		      steps,
+		      meta: {
+		        ui: {
+		          // Avoid persisting runtime-only UI state (status/logs/edge coloring) into the pipeline file.
+		          nodes: nodes.map((n: any) => {
+		            const { status, logs, intentId, ...rest } = (n.data || {}) as any;
+		            return {
+		              ...n,
+		              data: { ...rest, status: 'idle' }
+		            };
+		          }),
+		          edges: edges.map((e: any) => {
+		            const { style, animated, ...rest } = e;
+		            if (rest.markerEnd && typeof rest.markerEnd === 'object') {
+		              const markerEnd = { ...(rest.markerEnd as any) };
+		              delete markerEnd.color;
+		              return { ...rest, markerEnd };
+		            }
+		            return rest;
+		          })
+		        }
+		      }
+		    };
 
     if (vscode) {
       vscode.postMessage({
@@ -582,27 +635,29 @@ function Flow({ selectedRun, onRunHandled }: { selectedRun: any, onRunHandled: (
     }
   };
 
-  return (
-    <div className="dndflow">
-      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onInit={setReactFlowInstance}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          nodeTypes={nodeTypes}
-          snapToGrid={true}
-          fitView
-        >
-          <Controls />
-          <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
-          <MiniMap />
-        </ReactFlow>
-      </div>
+	  return (
+	    <div className="dndflow">
+	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
+	        <FlowRuntimeContext.Provider value={flowRuntime}>
+	          <ReactFlow
+	            nodes={nodes}
+	            edges={edges}
+	            onNodesChange={onNodesChange}
+	            onEdgesChange={onEdgesChange}
+	            onConnect={onConnect}
+	            onInit={setReactFlowInstance}
+	            onDrop={onDrop}
+	            onDragOver={onDragOver}
+	            nodeTypes={nodeTypes}
+	            snapToGrid={true}
+	            fitView
+	          >
+	            <Controls />
+	            <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
+	            <MiniMap />
+	          </ReactFlow>
+	        </FlowRuntimeContext.Provider>
+	      </div>
 
       <button
         onClick={savePipeline}
@@ -629,6 +684,7 @@ export default function App() {
   const [commandGroups, setCommandGroups] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<any>(null);
+  const [restoreRun, setRestoreRun] = useState<any>(null);
 
   useEffect(() => {
     if (window.initialData) {
@@ -661,16 +717,24 @@ export default function App() {
   return (
     <RegistryContext.Provider value={{ commandGroups }}>
       <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
-         <Sidebar history={history} onSelectHistory={setSelectedRun} />
+         <Sidebar
+            history={history}
+            onSelectHistory={setSelectedRun}
+            onRestoreHistory={(run) => {
+                setRestoreRun(run);
+                setSelectedRun(null); // Stop playback/clear selection
+            }}
+         />
          <div style={{ flex: 1, position: 'relative' }}>
-           <ReactFlowProvider>
-             <Flow
-                selectedRun={selectedRun}
-                onRunHandled={() => {
-                    // Logic handled in effects
-                }}
-             />
-           </ReactFlowProvider>
+	           <ReactFlowProvider>
+	             <Flow
+	                selectedRun={selectedRun}
+	                restoreRun={restoreRun}
+	                onRestoreHandled={() => {
+	                    setRestoreRun(null);
+	                }}
+	             />
+	           </ReactFlowProvider>
          </div>
       </div>
     </RegistryContext.Provider>

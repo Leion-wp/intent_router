@@ -4,6 +4,7 @@ import { ensurePipelineFolder } from './pipelineRunner';
 
 export interface StepLog {
     index: number;
+    stepId?: string;
     intentId: string;
     description?: string;
     status: 'pending' | 'running' | 'success' | 'failure';
@@ -24,13 +25,17 @@ export interface PipelineRun {
 export class HistoryManager {
     private runs: PipelineRun[] = [];
     private currentRun: PipelineRun | null = null;
-    private readonly MAX_RUNS = 50;
     private readonly FILE_NAME = 'history.json';
     private historyUri: vscode.Uri | undefined;
+    private ready: Promise<void>;
 
     constructor() {
-        this.initialize();
+        this.ready = this.initialize();
         this.registerListeners();
+    }
+
+    public whenReady(): Promise<void> {
+        return this.ready;
     }
 
     private async initialize() {
@@ -67,6 +72,48 @@ export class HistoryManager {
         return this.runs;
     }
 
+    private getMaxRuns(): number {
+        const cfg = vscode.workspace.getConfiguration('intentRouter');
+        const raw = cfg.get<number>('history.maxRuns', 50);
+        const maxRuns = Number.isFinite(raw) ? Math.max(1, Math.floor(raw)) : 50;
+        return Math.min(maxRuns, 500);
+    }
+
+    private getSnapshotMode(): 'full' | 'minimal' | 'none' {
+        const cfg = vscode.workspace.getConfiguration('intentRouter');
+        const mode = cfg.get<string>('history.snapshotMode', 'full');
+        if (mode === 'minimal' || mode === 'none' || mode === 'full') {
+            return mode;
+        }
+        return 'full';
+    }
+
+    private buildSnapshot(event: Extract<PipelineEvent, { type: 'pipelineStart' }>): any | undefined {
+        const mode = this.getSnapshotMode();
+        if (mode === 'none') {
+            return undefined;
+        }
+
+        const pipeline = event.pipeline;
+        if (!pipeline) {
+            return undefined;
+        }
+
+        if (mode === 'full') {
+            return pipeline;
+        }
+
+        // minimal: store only what's needed for visual restore (meta.ui)
+        const ui = pipeline?.meta?.ui;
+        if (!ui) {
+            return undefined;
+        }
+        return {
+            name: pipeline?.name ?? event.name ?? 'Untitled Pipeline',
+            meta: { ui }
+        };
+    }
+
     private registerListeners() {
         pipelineEventBus.on(this.handleEvent.bind(this));
     }
@@ -88,12 +135,13 @@ export class HistoryManager {
                     timestamp: event.timestamp,
                     status: 'running',
                     steps: [],
-                    pipelineSnapshot: event.pipeline
+                    pipelineSnapshot: this.buildSnapshot(event)
                 };
                 // Add to start of list
                 this.runs.unshift(this.currentRun);
-                if (this.runs.length > this.MAX_RUNS) {
-                    this.runs.pop();
+                const maxRuns = this.getMaxRuns();
+                if (this.runs.length > maxRuns) {
+                    this.runs = this.runs.slice(0, maxRuns);
                 }
                 this.saveHistory();
                 break;
@@ -102,6 +150,7 @@ export class HistoryManager {
                 if (this.currentRun && this.currentRun.id === event.runId) {
                     this.currentRun.steps.push({
                         index: event.index ?? -1,
+                        stepId: event.stepId,
                         intentId: event.intentId,
                         description: event.description,
                         status: 'running',

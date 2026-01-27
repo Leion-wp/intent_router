@@ -8,6 +8,14 @@ export type PipelineFile = {
     name: string;
     profile?: string;
     steps: Array<Intent>;
+    meta?: {
+        ui?: {
+            nodes: any[];
+            edges: any[];
+            viewport?: any;
+        };
+        [key: string]: any;
+    };
 };
 
 let currentRunId: string | null = null;
@@ -230,8 +238,16 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
         await config.update('activeProfile', targetProfile, true);
     }
 
-    const variableCache = new Map<string, string>(); // cache for ${input:...}
-    const variableStore = new Map<string, any>(); // store for ${var:...}
+    // Cache for ${input:...} and store for ${var:...} (environment variables)
+    const variableCache = new Map<string, string>();
+
+    // Load global environment into variableCache
+    const globalEnv = config.get<Record<string, string>>('environment') || {};
+    for (const [key, value] of Object.entries(globalEnv)) {
+        if (typeof value === 'string') {
+            variableCache.set(key, value);
+        }
+    }
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
     let currentCwd = workspaceRoot ?? '.';
@@ -287,7 +303,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     description: step.description,
-                    index: currentIndex
+                    index: currentIndex,
+                    stepId: step.id
                 });
                 pipelineEventBus.emit({
                     type: 'stepEnd',
@@ -295,7 +312,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     success: true,
-                    index: currentIndex
+                    index: currentIndex,
+                    stepId: step.id
                 });
                 currentIndex++;
                 continue;
@@ -316,7 +334,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     description: step.description,
-                    index: currentIndex
+                    index: currentIndex,
+                    stepId: step.id
                 });
                 pipelineEventBus.emit({
                     type: 'stepEnd',
@@ -324,7 +343,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     success: true,
-                    index: currentIndex
+                    index: currentIndex,
+                    stepId: step.id
                 });
                 currentIndex++;
                 continue;
@@ -389,14 +409,16 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 intentId,
                 timestamp: Date.now(),
                 description: compiledStep.description,
-                index: currentIndex
+                index: currentIndex,
+                stepId: compiledStep.id
             });
 
             // Ensure traceId and runId are in meta for routeIntent
             compiledStep.meta = {
                 ...(compiledStep.meta || {}),
                 traceId: intentId,
-                runId: runId
+                runId: runId,
+                stepId: compiledStep.id
             };
 
             // Route the compiled intent
@@ -408,7 +430,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 intentId,
                 timestamp: Date.now(),
                 success: ok,
-                index: currentIndex
+                index: currentIndex,
+                stepId: compiledStep.id
             });
 
             if (ok) {
