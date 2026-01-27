@@ -118,10 +118,32 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-header" style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}>
-          <div onClick={() => setTab('providers')} style={getTabStyle(tab === 'providers')}>NODES</div>
-          <div onClick={() => setTab('history')} style={getTabStyle(tab === 'history')}>HISTORY</div>
-          <div onClick={() => setTab('environment')} style={getTabStyle(tab === 'environment')}>ENV</div>
+      <div
+        className="sidebar-header"
+        role="tablist"
+        aria-label="Sidebar Sections"
+        style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}
+      >
+          <button
+             role="tab"
+             aria-selected={tab === 'providers'}
+             aria-controls="panel-providers"
+             id="tab-providers"
+             onClick={() => setTab('providers')}
+             className="sidebar-tab"
+          >
+              NODES
+          </button>
+          <button
+             role="tab"
+             aria-selected={tab === 'history'}
+             aria-controls="panel-history"
+             id="tab-history"
+             onClick={() => setTab('history')}
+             className="sidebar-tab"
+          >
+              HISTORY
+          </button>
       </div>
 
 	      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
