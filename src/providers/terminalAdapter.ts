@@ -75,7 +75,7 @@ export async function executeTerminalCommand(args: any): Promise<void> {
 
     // Capture mode (Pipeline)
     if (meta && meta.traceId && meta.runId) {
-        return runCommand(commandText, cwd, meta.runId, meta.traceId);
+        return runCommand(commandText, cwd, meta.runId, meta.traceId, meta.stepId);
     }
 
     // Legacy mode (Interactive / Fire-and-forget)
@@ -119,4 +119,103 @@ function isEnvEqual(a: Record<string, string>, b: Record<string, string>): boole
         }
     }
     return true;
+}
+
+export function cancelTerminalRun(runId: string | undefined | null): void {
+    if (!runId) {
+        return;
+    }
+
+    const processes = runningProcessesByRunId.get(runId);
+    if (!processes || processes.size === 0) {
+        return;
+    }
+
+    for (const child of processes) {
+        if (!child.pid) {
+            continue;
+        }
+
+        try {
+            if (process.platform === 'win32') {
+                cp.spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+            } else {
+                child.kill('SIGTERM');
+            }
+        } catch {
+            // Best-effort cancellation.
+        }
+    }
+}
+
+function runCommand(command: string, cwd: string | undefined, runId: string, intentId: string, stepId?: string): Promise<void> {
+    const { terminal, write } = getOrCreateTerminal();
+    terminal.show(true);
+
+    write(`\x1b[36m> Executing: ${command}\x1b[0m\n`);
+
+    return new Promise((resolve, reject) => {
+        const envOverrides = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
+        const env = { ...process.env, ...envOverrides };
+        const safeCwd = (typeof cwd === 'string' && cwd.trim() !== '') ? cwd : undefined;
+
+        const child = (process.platform === 'win32')
+            ? cp.spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], { cwd: safeCwd, env })
+            : cp.spawn(command, { cwd: safeCwd, env, shell: true });
+
+        const running = runningProcessesByRunId.get(runId) ?? new Set<cp.ChildProcess>();
+        running.add(child);
+        runningProcessesByRunId.set(runId, running);
+
+        child.stdout.on('data', (data) => {
+            const text = data.toString();
+            write(text);
+            pipelineEventBus.emit({
+                type: 'stepLog',
+                runId,
+                intentId,
+                stepId,
+                text,
+                stream: 'stdout'
+            });
+        });
+
+        child.stderr.on('data', (data) => {
+            const text = data.toString();
+            write(`\x1b[31m${text}\x1b[0m`);
+            pipelineEventBus.emit({
+                type: 'stepLog',
+                runId,
+                intentId,
+                stepId,
+                text,
+                stream: 'stderr'
+            });
+        });
+
+        const cleanup = () => {
+            const active = runningProcessesByRunId.get(runId);
+            if (!active) {
+                return;
+            }
+            active.delete(child);
+            if (active.size === 0) {
+                runningProcessesByRunId.delete(runId);
+            }
+        };
+
+        child.on('close', (code) => {
+            cleanup();
+            if (code === 0) {
+                resolve();
+            } else {
+                reject(new Error(`Command failed with exit code ${code}`));
+            }
+        });
+
+        child.on('error', (err) => {
+            cleanup();
+            reject(err);
+        });
+    });
 }

@@ -1,6 +1,7 @@
-import { memo, useState, useEffect, useContext, useRef } from 'react';
+import { memo, useMemo, useState, useEffect, useContext, useRef } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
-import { RegistryContext } from '../App';
+import { FlowRuntimeContext, RegistryContext } from '../App';
+import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
@@ -14,6 +15,7 @@ const FALLBACK_CAPS: any[] = [];
 
 const ActionNode = ({ data, id }: NodeProps) => {
   const { commandGroups } = useContext(RegistryContext);
+  const { getAvailableVars } = useContext(FlowRuntimeContext);
   const [provider, setProvider] = useState<string>((data.provider as string) || 'terminal');
   const [capability, setCapability] = useState<string>((data.capability as string) || '');
   const [args, setArgs] = useState<Record<string, any>>((data.args as Record<string, any>) || {});
@@ -22,6 +24,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({});
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
+  const [varPickerOpen, setVarPickerOpen] = useState<Record<string, boolean>>({});
   const logsRef = useRef<HTMLDivElement>(null);
 
   // Sync from props if data changes externally
@@ -74,32 +77,54 @@ const ActionNode = ({ data, id }: NodeProps) => {
     updateData(provider, capability, newArgs);
   };
 
-  const insertVariable = (key: string) => {
+  const availableVars = useMemo(() => {
+    try {
+      return getAvailableVars();
+    } catch {
+      return [];
+    }
+  }, [getAvailableVars]);
+
+  const insertVariable = (key: string, varName?: string) => {
     const current = args[key] || '';
-    // Use design-time variables (PromptNode / system.setVar) rather than runtime prompts.
-    // Convention: variable name matches the argument key (e.g. `${var:branch}`).
-    handleArgChange(key, current + `\${var:${key}}`);
+    const name = (varName || '').trim();
+    if (!name) {
+      return;
+    }
+    handleArgChange(key, current + `\${var:${name}}`);
   };
 
-  const handleBrowse = (key: string) => {
-      // Send message to extension
-      if (window.vscode) {
-          window.vscode.postMessage({
-              type: 'selectPath',
-              id: id,
-              argName: key
-          });
+  const openVarPicker = (argName: string) => {
+    setVarPickerOpen(prev => ({ ...prev, [argName]: true }));
+  };
 
-          // Listen for the response
-          const handleMessage = (event: MessageEvent) => {
-              const message = event.data;
-              if (message.type === 'pathSelected' && message.id === id && message.argName === key) {
-                  handleArgChange(key, message.path);
-                  window.removeEventListener('message', handleMessage);
-              }
-          };
-          window.addEventListener('message', handleMessage);
-      } else {
+  const closeVarPicker = (argName: string) => {
+    setVarPickerOpen(prev => ({ ...prev, [argName]: false }));
+  };
+
+	  const handleBrowse = (key: string) => {
+	      // Send message to extension
+	      if (window.vscode) {
+	          const msg: WebviewOutboundMessage = {
+	              type: 'selectPath',
+	              id: id,
+	              argName: key
+	          };
+	          window.vscode.postMessage(msg);
+
+	          // Listen for the response
+	          const handleMessage = (event: MessageEvent) => {
+	              const message = event.data;
+	              if (!isInboundMessage(message)) {
+	                  return;
+	              }
+	              if (message.type === 'pathSelected' && message.id === id && message.argName === key) {
+	                  handleArgChange(key, message.path);
+	                  window.removeEventListener('message', handleMessage);
+	              }
+	          };
+	          window.addEventListener('message', handleMessage);
+	      } else {
           console.log('Browse clicked (Mock):', key);
           // Mock for browser dev
           const mockPath = '/mock/path/to/folder';
@@ -144,16 +169,17 @@ const ActionNode = ({ data, id }: NodeProps) => {
               newErrors[arg.name] = true;
           }
 
-          // Fetch dynamic options
-          if (arg.type === 'enum' && typeof arg.options === 'string' && !dynamicOptions[arg.name]) {
-             if (window.vscode) {
-                 window.vscode.postMessage({
-                     type: 'fetchOptions',
-                     command: arg.options,
-                     argName: arg.name
-                 });
-             }
-          }
+	          // Fetch dynamic options
+	          if (arg.type === 'enum' && typeof arg.options === 'string' && !dynamicOptions[arg.name]) {
+	             if (window.vscode) {
+	                 const msg: WebviewOutboundMessage = {
+	                     type: 'fetchOptions',
+	                     command: arg.options,
+	                     argName: arg.name
+	                 };
+	                 window.vscode.postMessage(msg);
+	             }
+	          }
       });
 
       if (changed) {
@@ -164,17 +190,20 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
   }, [capability, args, selectedCapConfig]);
 
-  // Listen for option responses
-  useEffect(() => {
-      const handleMessage = (event: MessageEvent) => {
-          const message = event.data;
-          if (message.type === 'optionsFetched') {
-              setDynamicOptions(prev => ({
-                  ...prev,
-                  [message.argName]: message.options
-              }));
-          }
-      };
+	  // Listen for option responses
+	  useEffect(() => {
+	      const handleMessage = (event: MessageEvent) => {
+	          const message = event.data;
+	          if (!isInboundMessage(message)) {
+	              return;
+	          }
+	          if (message.type === 'optionsFetched') {
+	              setDynamicOptions(prev => ({
+	                  ...prev,
+	                  [message.argName]: message.options
+	              }));
+	          }
+	      };
       window.addEventListener('message', handleMessage);
       return () => window.removeEventListener('message', handleMessage);
   }, []);
@@ -320,8 +349,8 @@ const ActionNode = ({ data, id }: NodeProps) => {
                            <option key={opt} value={opt}>{opt}</option>
                        ))}
                    </select>
-              ) : arg.type === 'path' ? (
-                  <div style={{ display: 'flex', gap: '4px' }}>
+	              ) : arg.type === 'path' ? (
+	                  <div style={{ display: 'flex', gap: '4px' }}>
                     <input
                       id={inputId}
                       className="nodrag"
@@ -354,26 +383,54 @@ const ActionNode = ({ data, id }: NodeProps) => {
                     >
                         <span className="codicon codicon-folder-opened"></span>
                     </button>
-                    <button
-                      className="nodrag"
-                      onClick={() => insertVariable(arg.name)}
-                      title="Insert Input Variable"
-                      style={{
-                        background: 'var(--vscode-button-background)',
-                        color: 'var(--vscode-button-foreground)',
-                        border: 'none',
-                        cursor: 'pointer',
-                        width: '24px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
-                    >
-                      {'{ }'}
-                    </button>
-                  </div>
-              ) : (
-                  <div style={{ display: 'flex', gap: '4px' }}>
+	                    <button
+	                      className="nodrag"
+	                      onClick={() => openVarPicker(arg.name)}
+	                      title="Insert variable (${var:...})"
+	                      style={{
+	                        background: 'var(--vscode-button-background)',
+	                        color: 'var(--vscode-button-foreground)',
+	                        border: 'none',
+	                        cursor: 'pointer',
+	                        width: '24px',
+	                        display: 'flex',
+	                        alignItems: 'center',
+	                        justifyContent: 'center'
+	                      }}
+	                    >
+	                      {'{ }'}
+	                    </button>
+	                    {varPickerOpen[arg.name] && (
+	                      <select
+	                        className="nodrag"
+	                        autoFocus
+	                        value=""
+	                        onBlur={() => closeVarPicker(arg.name)}
+	                        onChange={(e) => {
+	                          const selected = e.target.value;
+	                          if (selected) {
+	                            insertVariable(arg.name, selected);
+	                          }
+	                          closeVarPicker(arg.name);
+	                        }}
+	                        style={{
+	                          maxWidth: '160px',
+	                          background: 'var(--vscode-input-background)',
+	                          color: 'var(--vscode-input-foreground)',
+	                          border: '1px solid var(--vscode-input-border)',
+	                          padding: '4px',
+	                          fontSize: '0.9em'
+	                        }}
+	                      >
+	                        <option value="">Select var…</option>
+	                        {availableVars.map((v) => (
+	                          <option key={v} value={v}>{v}</option>
+	                        ))}
+	                      </select>
+	                    )}
+	                  </div>
+	              ) : (
+	                  <div style={{ display: 'flex', gap: '4px' }}>
                     <input
                       id={inputId}
                       className="nodrag"
@@ -390,26 +447,54 @@ const ActionNode = ({ data, id }: NodeProps) => {
                         fontSize: '0.9em'
                       }}
                     />
-                    <button
-                      className="nodrag"
-                      onClick={() => insertVariable(arg.name)}
-                      title="Insert Input Variable"
-                      aria-label={`Insert variable for ${arg.name}`}
-                      style={{
-                        background: 'var(--vscode-button-background)',
-                        color: 'var(--vscode-button-foreground)',
-                        border: 'none',
-                        cursor: 'pointer',
-                        width: '24px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
-                    >
-                      {'{ }'}
-                    </button>
-                  </div>
-              )}
+	                    <button
+	                      className="nodrag"
+	                      onClick={() => openVarPicker(arg.name)}
+	                      title="Insert variable (${var:...})"
+	                      aria-label={`Insert variable for ${arg.name}`}
+	                      style={{
+	                        background: 'var(--vscode-button-background)',
+	                        color: 'var(--vscode-button-foreground)',
+	                        border: 'none',
+	                        cursor: 'pointer',
+	                        width: '24px',
+	                        display: 'flex',
+	                        alignItems: 'center',
+	                        justifyContent: 'center'
+	                      }}
+	                    >
+	                      {'{ }'}
+	                    </button>
+	                    {varPickerOpen[arg.name] && (
+	                      <select
+	                        className="nodrag"
+	                        autoFocus
+	                        value=""
+	                        onBlur={() => closeVarPicker(arg.name)}
+	                        onChange={(e) => {
+	                          const selected = e.target.value;
+	                          if (selected) {
+	                            insertVariable(arg.name, selected);
+	                          }
+	                          closeVarPicker(arg.name);
+	                        }}
+	                        style={{
+	                          maxWidth: '160px',
+	                          background: 'var(--vscode-input-background)',
+	                          color: 'var(--vscode-input-foreground)',
+	                          border: '1px solid var(--vscode-input-border)',
+	                          padding: '4px',
+	                          fontSize: '0.9em'
+	                        }}
+	                      >
+	                        <option value="">Select var…</option>
+	                        {availableVars.map((v) => (
+	                          <option key={v} value={v}>{v}</option>
+	                        ))}
+	                      </select>
+	                    )}
+	                  </div>
+	              )}
             </div>
           );
         })}

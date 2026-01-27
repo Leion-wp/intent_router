@@ -319,7 +319,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     description: step.description,
-                    index: currentIndex
+                    index: currentIndex,
+                    stepId: step.id
                 });
                 pipelineEventBus.emit({
                     type: 'stepEnd',
@@ -327,7 +328,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     success: true,
-                    index: currentIndex
+                    index: currentIndex,
+                    stepId: step.id
                 });
                 currentIndex++;
                 continue;
@@ -348,7 +350,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     description: step.description,
-                    index: currentIndex
+                    index: currentIndex,
+                    stepId: step.id
                 });
                 pipelineEventBus.emit({
                     type: 'stepEnd',
@@ -356,7 +359,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     intentId,
                     timestamp: Date.now(),
                     success: true,
-                    index: currentIndex
+                    index: currentIndex,
+                    stepId: step.id
                 });
                 currentIndex++;
                 continue;
@@ -421,14 +425,16 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 intentId,
                 timestamp: Date.now(),
                 description: compiledStep.description,
-                index: currentIndex
+                index: currentIndex,
+                stepId: compiledStep.id
             });
 
             // Ensure traceId and runId are in meta for routeIntent
             compiledStep.meta = {
                 ...(compiledStep.meta || {}),
                 traceId: intentId,
-                runId: runId
+                runId: runId,
+                stepId: compiledStep.id
             };
 
             // Route the compiled intent
@@ -440,7 +446,8 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 intentId,
                 timestamp: Date.now(),
                 success: ok,
-                index: currentIndex
+                index: currentIndex,
+                stepId: compiledStep.id
             });
 
             if (ok) {

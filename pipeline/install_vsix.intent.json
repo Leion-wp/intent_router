@@ -54,5 +54,229 @@
         "argsJson": ""
       }
     }
-  ]
+  ],
+  "meta": {
+    "ui": {
+      "nodes": [
+        {
+          "id": "start",
+          "type": "input",
+          "data": {
+            "label": "install .vsix",
+            "status": "idle"
+          },
+          "position": {
+            "x": 250,
+            "y": 50
+          },
+          "sourcePosition": "right",
+          "deletable": false,
+          "measured": {
+            "width": 150,
+            "height": 38
+          }
+        },
+        {
+          "id": "node_1",
+          "type": "actionNode",
+          "position": {
+            "x": 450,
+            "y": 50
+          },
+          "data": {
+            "provider": "terminal",
+            "capability": "terminal.run",
+            "args": {
+              "cwd": ".",
+              "command": "npm install"
+            },
+            "kind": "action",
+            "status": "idle"
+          },
+          "measured": {
+            "width": 273,
+            "height": 262
+          }
+        },
+        {
+          "id": "node_3",
+          "type": "actionNode",
+          "position": {
+            "x": 770,
+            "y": 50
+          },
+          "data": {
+            "provider": "terminal",
+            "capability": "terminal.run",
+            "args": {
+              "cwd": ".",
+              "command": "npm run compile"
+            },
+            "kind": "action",
+            "status": "idle"
+          },
+          "measured": {
+            "width": 273,
+            "height": 262
+          }
+        },
+        {
+          "id": "node_5",
+          "type": "actionNode",
+          "position": {
+            "x": 1090,
+            "y": 50
+          },
+          "data": {
+            "provider": "terminal",
+            "capability": "terminal.run",
+            "args": {
+              "cwd": ".",
+              "command": "vsce package"
+            },
+            "kind": "action",
+            "status": "idle"
+          },
+          "measured": {
+            "width": 273,
+            "height": 262
+          }
+        },
+        {
+          "id": "node_6",
+          "type": "actionNode",
+          "position": {
+            "x": 1410,
+            "y": 50
+          },
+          "data": {
+            "provider": "system",
+            "capability": "system.pause",
+            "args": {
+              "message": "prepare the .vsix"
+            },
+            "kind": "action",
+            "status": "idle"
+          },
+          "measured": {
+            "width": 273,
+            "height": 205
+          }
+        },
+        {
+          "id": "node_7",
+          "type": "vscodeCommandNode",
+          "position": {
+            "x": 1730,
+            "y": 50
+          },
+          "data": {
+            "commandId": "workbench.extensions.action.installVSIX",
+            "argsJson": "",
+            "kind": "vscodeCommand",
+            "status": "idle"
+          },
+          "measured": {
+            "width": 283,
+            "height": 203
+          }
+        },
+        {
+          "id": "node_9",
+          "type": "vscodeCommandNode",
+          "position": {
+            "x": 2050,
+            "y": 50
+          },
+          "data": {
+            "commandId": "workbench.action.reloadWindow",
+            "argsJson": "",
+            "kind": "vscodeCommand",
+            "status": "idle"
+          },
+          "measured": {
+            "width": 283,
+            "height": 203
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e-start-node_1",
+          "source": "start",
+          "target": "node_1",
+          "markerEnd": {
+            "type": "arrowclosed"
+          }
+        },
+        {
+          "id": "e-node_1-node_3",
+          "source": "node_1",
+          "target": "node_3",
+          "markerEnd": {
+            "type": "arrowclosed"
+          }
+        },
+        {
+          "id": "e-node_1-node_3-fail",
+          "source": "node_1",
+          "target": "node_3",
+          "sourceHandle": "failure",
+          "markerEnd": {
+            "type": "arrowclosed"
+          }
+        },
+        {
+          "id": "e-node_3-node_5",
+          "source": "node_3",
+          "target": "node_5",
+          "markerEnd": {
+            "type": "arrowclosed"
+          }
+        },
+        {
+          "id": "e-node_5-node_6",
+          "source": "node_5",
+          "target": "node_6",
+          "markerEnd": {
+            "type": "arrowclosed"
+          }
+        },
+        {
+          "id": "e-node_5-node_6-fail",
+          "source": "node_5",
+          "target": "node_6",
+          "sourceHandle": "failure",
+          "markerEnd": {
+            "type": "arrowclosed"
+          }
+        },
+        {
+          "id": "e-node_6-node_7",
+          "source": "node_6",
+          "target": "node_7",
+          "markerEnd": {
+            "type": "arrowclosed"
+          }
+        },
+        {
+          "id": "e-node_6-node_7-fail",
+          "source": "node_6",
+          "target": "node_7",
+          "sourceHandle": "failure",
+          "markerEnd": {
+            "type": "arrowclosed"
+          }
+        },
+        {
+          "id": "e-node_7-node_9",
+          "source": "node_7",
+          "target": "node_9",
+          "markerEnd": {
+            "type": "arrowclosed"
+          }
+        }
+      ]
+    }
+  }
 }

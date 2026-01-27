@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { isInboundMessage, WebviewOutboundMessage } from './types/messages';
 
 type SidebarProps = {
   history?: any[];
@@ -14,13 +15,13 @@ declare global {
   }
 }
 
-export default function Sidebar({ history = [], onSelectHistory }: SidebarProps) {
+export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory }: SidebarProps) {
   const [tab, setTab] = useState<'providers' | 'history' | 'environment'>('providers');
   const [envVars, setEnvVars] = useState<{ key: string, value: string, visible: boolean }[]>([]);
 
-  useEffect(() => {
-    const loadEnv = (data: any) => {
-        if (data) {
+	  useEffect(() => {
+	    const loadEnv = (data: any) => {
+	        if (data) {
             const loaded = Object.entries(data).map(([k, v]) => ({
                 key: k,
                 value: String(v),
@@ -34,11 +35,14 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
         loadEnv(window.initialData.environment);
     }
 
-    const handleMessage = (event: MessageEvent) => {
-        if (event.data?.type === 'environmentUpdate') {
-             loadEnv(event.data.environment);
-        }
-    };
+	    const handleMessage = (event: MessageEvent) => {
+	        if (!isInboundMessage(event.data)) {
+	            return;
+	        }
+	        if (event.data.type === 'environmentUpdate') {
+	             loadEnv(event.data.environment);
+	        }
+	    };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, []);
@@ -50,13 +54,14 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
         return acc;
     }, {} as Record<string, string>);
 
-    if (window.vscode) {
-        window.vscode.postMessage({
-            type: 'saveEnvironment',
-            environment: envObj
-        });
-    }
-  };
+	    if (window.vscode) {
+	        const msg: WebviewOutboundMessage = {
+	            type: 'saveEnvironment',
+	            environment: envObj
+	        };
+	        window.vscode.postMessage(msg);
+	    }
+	  };
 
   const addEnvVar = () => {
       const newVars = [...envVars, { key: '', value: '', visible: true }];
@@ -92,11 +97,12 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
     event.dataTransfer.effectAllowed = 'move';
   };
 
-  const clearHistory = () => {
-    if (window.vscode) {
-        window.vscode.postMessage({ type: 'clearHistory' });
-    }
-  };
+	  const clearHistory = () => {
+	    if (window.vscode) {
+	        const msg: WebviewOutboundMessage = { type: 'clearHistory' };
+	        window.vscode.postMessage(msg);
+	    }
+	  };
 
   const items = [
     // Context / Setup Nodes
@@ -140,42 +146,150 @@ export default function Sidebar({ history = [], onSelectHistory }: SidebarProps)
           </button>
       </div>
 
-      {tab === 'providers' ? (
-        <div
-          className="sidebar-list"
-          role="tabpanel"
-          id="panel-providers"
-          aria-labelledby="tab-providers"
-        >
-          {items.map((item, idx) => (
-            <div
-              key={idx}
-              className="dndnode"
-              onDragStart={(event) => onDragStart(event, item.type, item.provider)}
-              draggable
-              title={`Drag to add ${item.label} - ${item.desc}`}
-              aria-label={`Add ${item.label} node`}
-              tabIndex={0}
-              role="listitem"
-            >
-              <span className={`codicon ${item.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
-              <span>{item.label}</span>
+	      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+        {tab === 'providers' && (
+             <div className="sidebar-list">
+             {items.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="dndnode"
+                  onDragStart={(event) => onDragStart(event, item.type, item.provider)}
+                  draggable
+                  title={`Drag to add ${item.label} - ${item.desc}`}
+                  aria-label={`Add ${item.label} node`}
+                  tabIndex={0}
+                  role="listitem"
+                >
+                  <span className={`codicon ${item.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
+                  <span>{item.label}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ) : (
-          <div
-            className="sidebar-list"
-            role="tabpanel"
-            id="panel-history"
-            aria-labelledby="tab-history"
-            style={{ flex: 1, overflowY: 'auto' }}
-          >
-              {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
-              {history.map((run) => (
-                  <div
-                    key={run.id}
-                    onClick={() => onSelectHistory?.(run)}
+        )}
+
+	        {tab === 'history' && (
+	            <div className="sidebar-list">
+	                 {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
+	                 {history.map((run) => (
+	                      <div
+	                        key={run.id}
+	                        onClick={() => onSelectHistory?.({ ...run })}
+	                        style={{
+	                          padding: '8px',
+	                          background: 'var(--vscode-list-hoverBackground)',
+	                          cursor: 'pointer',
+	                          borderRadius: '4px',
+	                          border: '1px solid transparent',
+	                          marginBottom: '8px'
+	                        }}
+	                        onMouseOver={(e) => e.currentTarget.style.border = '1px solid var(--vscode-focusBorder)'}
+	                        onMouseOut={(e) => e.currentTarget.style.border = '1px solid transparent'}
+	                      >
+	                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+	                              <div style={{fontWeight: 'bold', fontSize: '12px'}}>{run.name}</div>
+	                              <button
+	                                  onClick={(e) => {
+	                                      e.stopPropagation();
+	                                      if (run.pipelineSnapshot) {
+	                                          onRestoreHistory?.(run);
+	                                      }
+	                                  }}
+	                                  disabled={!run.pipelineSnapshot}
+	                                  title={run.pipelineSnapshot ? 'Restore this snapshot in the builder' : 'No snapshot available for this run'}
+	                                  style={{
+	                                      padding: '2px 8px',
+	                                      fontSize: '10px',
+	                                      borderRadius: '4px',
+	                                      border: '1px solid var(--vscode-panel-border)',
+	                                      background: run.pipelineSnapshot ? 'var(--vscode-button-background)' : 'transparent',
+	                                      color: run.pipelineSnapshot ? 'var(--vscode-button-foreground)' : 'var(--vscode-descriptionForeground)',
+	                                      cursor: run.pipelineSnapshot ? 'pointer' : 'not-allowed',
+	                                      opacity: run.pipelineSnapshot ? 1 : 0.6
+	                                  }}
+	                              >
+	                                  Restore
+	                              </button>
+	                          </div>
+	                          <div style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between'}}>
+	                              <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
+	                              <span style={{
+	                                  color: run.status === 'success' ? '#4caf50' : // Green
+	                                         run.status === 'failure' ? '#f44336' : // Red
+	                                         run.status === 'cancelled' ? '#e6c300' : // Gold
+	                                         'var(--vscode-descriptionForeground)'
+	                              }}>
+	                                  {run.status.toUpperCase()}
+	                              </span>
+	                          </div>
+	                          {!run.pipelineSnapshot && (
+	                              <div style={{ fontSize: '10px', opacity: 0.6, marginTop: '6px' }}>
+	                                  Snapshot unavailable (old run).
+	                              </div>
+	                          )}
+	                      </div>
+	                  ))}
+	            </div>
+	        )}
+
+        {tab === 'environment' && (
+            <div style={{ padding: '0 8px' }}>
+                <div style={{ fontSize: '12px', opacity: 0.8, marginBottom: '12px' }}>
+                    Workspace Environment Variables (injected into terminal & variables)
+                </div>
+                {envVars.map((v, i) => (
+                    <div key={i} style={{ marginBottom: '8px', border: '1px solid var(--vscode-widget-border)', padding: '8px', borderRadius: '4px' }}>
+                        <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
+                            <input
+                                type="text"
+                                placeholder="Key"
+                                value={v.key}
+                                onChange={(e) => updateEnvVar(i, 'key', e.target.value)}
+                                onBlur={handleBlur}
+                                style={{
+                                    flex: 1,
+                                    background: 'var(--vscode-input-background)',
+                                    color: 'var(--vscode-input-foreground)',
+                                    border: '1px solid var(--vscode-input-border)',
+                                    padding: '4px',
+                                    fontSize: '11px'
+                                }}
+                            />
+                             <button
+                                onClick={() => removeEnvVar(i)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-errorForeground)' }}
+                                title="Delete"
+                            >
+                                <span className="codicon codicon-trash"></span>
+                            </button>
+                        </div>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                             <input
+                                type={v.visible ? "text" : "password"}
+                                placeholder="Value"
+                                value={v.value}
+                                onChange={(e) => updateEnvVar(i, 'value', e.target.value)}
+                                onBlur={handleBlur}
+                                style={{
+                                    flex: 1,
+                                    background: 'var(--vscode-input-background)',
+                                    color: 'var(--vscode-input-foreground)',
+                                    border: '1px solid var(--vscode-input-border)',
+                                    padding: '4px',
+                                    fontSize: '11px'
+                                }}
+                            />
+                            <button
+                                onClick={() => toggleVisibility(i)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-foreground)' }}
+                                title={v.visible ? "Hide" : "Show"}
+                            >
+                                <span className={`codicon ${v.visible ? 'codicon-eye-closed' : 'codicon-eye'}`}></span>
+                            </button>
+                        </div>
+                    </div>
+                ))}
+                <button
+                    onClick={addEnvVar}
                     style={{
                         width: '100%',
                         padding: '6px',

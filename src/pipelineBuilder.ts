@@ -52,24 +52,26 @@ export class PipelineBuilder {
         // Listen to pipeline events to forward to webview
         const eventSub = pipelineEventBus.on(e => {
             if (this.panel && this.panel.visible) {
-               if (e.type === 'stepStart' || e.type === 'stepEnd') {
-                   this.panel.webview.postMessage({
-                       type: 'executionStatus',
-                       index: e.index,
-                       status: e.type === 'stepStart' ? 'running' : (e.success ? 'success' : 'failure'),
-                       intentId: e.intentId
-                   });
-               }
+	               if (e.type === 'stepStart' || e.type === 'stepEnd') {
+	                   this.panel.webview.postMessage({
+	                       type: 'executionStatus',
+	                       index: e.index,
+	                       stepId: e.stepId,
+	                       status: e.type === 'stepStart' ? 'running' : (e.success ? 'success' : 'failure'),
+	                       intentId: e.intentId
+	                   });
+	               }
 
-               if (e.type === 'stepLog') {
-                   this.panel.webview.postMessage({
-                       type: 'stepLog',
-                       runId: e.runId,
-                       intentId: e.intentId,
-                       text: e.text,
-                       stream: e.stream
-                   });
-               }
+	               if (e.type === 'stepLog') {
+	                   this.panel.webview.postMessage({
+	                       type: 'stepLog',
+	                       runId: e.runId,
+	                       intentId: e.intentId,
+	                       stepId: e.stepId,
+	                       text: e.text,
+	                       stream: e.stream
+	                   });
+	               }
 
                if (e.type === 'pipelineStart' || e.type === 'pipelineEnd') {
                    this.panel.webview.postMessage({
@@ -81,6 +83,23 @@ export class PipelineBuilder {
         });
         this.disposables.push(eventSub);
 
+        // Keep ENV panel in sync if user edits workspace settings while builder is open.
+        const configSub = vscode.workspace.onDidChangeConfiguration(e => {
+            if (!e.affectsConfiguration('intentRouter.environment')) {
+                return;
+            }
+            try {
+                const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
+                this.panel?.webview.postMessage({
+                    type: 'environmentUpdate',
+                    environment
+                });
+            } catch {
+                // Best-effort sync.
+            }
+        });
+        this.disposables.push(configSub);
+
         panel.onDidDispose(() => {
             if (this.panel === panel) {
                 this.panel = undefined;
@@ -88,12 +107,13 @@ export class PipelineBuilder {
             }
         });
 
-        const commandGroups = await this.getCommandGroups();
-        const profileNames = this.getProfileNames();
-        const initialPipeline = pipeline ?? { name: '', steps: [] };
-        const templates = { ...gitTemplates, ...dockerTemplates, ...terminalTemplates };
-        const history = historyManager.getHistory();
-        const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
+	        const commandGroups = await this.getCommandGroups();
+	        const profileNames = this.getProfileNames();
+	        const initialPipeline = pipeline ?? { name: '', steps: [] };
+	        const templates = { ...gitTemplates, ...dockerTemplates, ...terminalTemplates };
+	        await historyManager.whenReady();
+	        const history = historyManager.getHistory();
+	        const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
