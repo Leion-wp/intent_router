@@ -29,6 +29,25 @@ export function validateStrictShellArg(arg: string, context: string): void {
 }
 
 /**
+ * Validates that a path is a safe relative path (no traversal, no absolute).
+ * Enforces strict character allowlist.
+ */
+export function validateSafeRelativePath(arg: string, context: string): void {
+    validateStrictShellArg(arg, context);
+    if (arg.startsWith('/')) {
+        throw new Error(`Absolute paths not allowed in ${context}: ${arg}`);
+    }
+    // Check for Windows absolute path (e.g. C:/)
+    if (/^[a-zA-Z]:/.test(arg)) {
+        throw new Error(`Absolute paths not allowed in ${context}: ${arg}`);
+    }
+    const parts = arg.split('/');
+    if (parts.includes('..')) {
+        throw new Error(`Path traversal not allowed in ${context}: ${arg}`);
+    }
+}
+
+/**
  * Sanitizes a shell argument by escaping dangerous characters and wrapping in double quotes.
  * Escapes: " $ `
  */

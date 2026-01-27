@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Intent } from './types';
 import { routeIntent } from './router';
 import { pipelineEventBus } from './eventBus';
-import { generateSecureToken, validateStrictShellArg, sanitizeShellArg } from './security';
+import { generateSecureToken, validateStrictShellArg, sanitizeShellArg, validateSafeRelativePath } from './security';
 
 export type PipelineFile = {
     name: string;
@@ -187,7 +187,7 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
              const safeUrl = sanitizeShellArg(url);
              let dirPart = '';
              if (dir) {
-                 validateStrictShellArg(dir, 'dir');
+                 validateSafeRelativePath(dir, 'dir');
                  dirPart = ` ${dir}`;
              }
              command = `git clone ${safeUrl}${dirPart}`;
@@ -199,7 +199,7 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
             if (!tag) throw new Error('docker.build requires "tag"');
 
             validateStrictShellArg(tag, 'tag');
-            validateStrictShellArg(path, 'path');
+            validateSafeRelativePath(path, 'path');
             command = `docker build -t ${tag} ${path}`;
             break;
         }
