@@ -1,12 +1,33 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, useContext, useRef } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
+import { FlowRuntimeContext } from '../App';
 
-const VSCodeCommandNode = ({ data }: NodeProps) => {
+const VSCodeCommandNode = ({ data, id }: NodeProps) => {
+  const { isRunPreviewNode } = useContext(FlowRuntimeContext);
   const [commandId, setCommandId] = useState<string>((data.commandId as string) || '');
   const [argsJson, setArgsJson] = useState<string>((data.argsJson as string) || '');
   const [error, setError] = useState<string>('');
+  const externalSyncPendingRef = useRef(false);
+
+  // Sync from external updates (e.g. drawer edits)
+  useEffect(() => {
+    const nextCommandId = (data.commandId as string) || '';
+    const nextArgsJson = (data.argsJson as string) || '';
+    const cmdChanged = nextCommandId !== commandId;
+    const argsChanged = nextArgsJson !== argsJson;
+    if (cmdChanged || argsChanged) {
+      externalSyncPendingRef.current = true;
+      if (cmdChanged) setCommandId(nextCommandId);
+      if (argsChanged) setArgsJson(nextArgsJson);
+      return;
+    }
+    externalSyncPendingRef.current = false;
+  }, [data.commandId, data.argsJson]);
 
   useEffect(() => {
+    if (externalSyncPendingRef.current) {
+      return;
+    }
     data.kind = 'vscodeCommand';
     data.commandId = commandId;
     data.argsJson = argsJson;
@@ -31,6 +52,7 @@ const VSCodeCommandNode = ({ data }: NodeProps) => {
         borderRadius: '5px',
         background: 'var(--vscode-editor-background)',
         border: '2px solid var(--vscode-charts-blue)',
+        boxShadow: isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none',
         minWidth: '260px',
         color: 'var(--vscode-editor-foreground)',
         fontFamily: 'var(--vscode-font-family)'

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -23,18 +23,24 @@ import ActionNode from './nodes/ActionNode';
 import PromptNode from './nodes/PromptNode';
 import RepoNode from './nodes/RepoNode';
 import VSCodeCommandNode from './nodes/VSCodeCommandNode';
+import StartNode from './nodes/StartNode';
 import { isInboundMessage, WebviewInboundMessage } from './types/messages';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
 
 // Runtime context for nodes (Prompt vars + ENV vars)
-export const FlowRuntimeContext = createContext<{ getAvailableVars: () => string[] }>({
-  getAvailableVars: () => []
+export const FlowRuntimeContext = createContext<{
+  getAvailableVars: () => string[];
+  isRunPreviewNode: (id: string) => boolean;
+}>({
+  getAvailableVars: () => [],
+  isRunPreviewNode: () => false
 });
 
 // Register custom node types
 const nodeTypes = {
+  startNode: StartNode,
   actionNode: ActionNode,
   promptNode: PromptNode,
   repoNode: RepoNode,
@@ -54,8 +60,8 @@ const vscode = window.vscode || (window.vscode = (window as any).acquireVsCodeAp
 const initialNodes: Node[] = [
   {
     id: 'start',
-    type: 'input',
-    data: { label: 'Start' },
+    type: 'startNode',
+    data: { label: 'My Pipeline', description: '' },
     position: { x: 250, y: 50 },
     sourcePosition: Position.Right,
     deletable: false
@@ -98,6 +104,12 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
   const MAX_LOG_LINES = 200;
+  const [runPreviewIds, setRunPreviewIds] = useState<Set<string> | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
+  const [drawerNodeId, setDrawerNodeId] = useState<string | null>(null);
+  const [drawerDynamicOptions, setDrawerDynamicOptions] = useState<Record<string, string[]>>({});
+  const [drawerArgsJsonError, setDrawerArgsJsonError] = useState<string>('');
+  const { commandGroups } = useContext(RegistryContext);
 
   const [environment, setEnvironment] = useState<Record<string, string>>(
     (window.initialData?.environment as Record<string, string>) || {}
@@ -127,7 +139,301 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     return all;
   }, []);
 
-  const flowRuntime = useMemo(() => ({ getAvailableVars }), [getAvailableVars]);
+  const isRunPreviewNode = useCallback(
+    (id: string) => (runPreviewIds ? runPreviewIds.has(id) : false),
+    [runPreviewIds]
+  );
+
+  const flowRuntime = useMemo(
+    () => ({ getAvailableVars, isRunPreviewNode }),
+    [getAvailableVars, isRunPreviewNode]
+  );
+
+  useEffect(() => {
+    const onDocClick = () => setContextMenu(null);
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, []);
+
+  const computeRunSubset = useCallback(
+    (startNodeId: string) => {
+      const successEdges = edges.filter((e: any) => e.sourceHandle !== 'failure');
+      const failureEdges = edges.filter((e: any) => e.sourceHandle === 'failure');
+
+      const successAdj = new Map<string, string[]>();
+      const allAdj = new Map<string, string[]>();
+      const reverseSuccessAdj = new Map<string, string[]>();
+
+      for (const n of nodes) {
+        successAdj.set(n.id, []);
+        allAdj.set(n.id, []);
+        reverseSuccessAdj.set(n.id, []);
+      }
+
+      for (const e of successEdges) {
+        if (successAdj.has(e.source) && successAdj.has(e.target)) {
+          successAdj.get(e.source)!.push(e.target);
+          allAdj.get(e.source)!.push(e.target);
+          reverseSuccessAdj.get(e.target)!.push(e.source);
+        }
+      }
+
+      for (const e of failureEdges) {
+        if (allAdj.has(e.source) && allAdj.has(e.target)) {
+          allAdj.get(e.source)!.push(e.target);
+        }
+      }
+
+      // 1) Success closure (preview set)
+      const preview = new Set<string>();
+      const q1: string[] = [startNodeId];
+      while (q1.length) {
+        const u = q1.shift()!;
+        if (preview.has(u)) continue;
+        preview.add(u);
+        for (const v of successAdj.get(u) || []) {
+          q1.push(v);
+        }
+      }
+
+      // 2) Failure closure (allowed but not previewed)
+      const failureAllowed = new Set<string>();
+      const q2: string[] = Array.from(preview);
+      while (q2.length) {
+        const u = q2.shift()!;
+        for (const e of failureEdges.filter((x: any) => x.source === u)) {
+          const v = e.target;
+          if (!failureAllowed.has(v)) {
+            failureAllowed.add(v);
+            q2.push(v);
+          }
+        }
+      }
+
+      // 3) Context closure: upstream success ancestors, but only keep Prompt/Repo nodes as prerequisites
+      const upstream = new Set<string>();
+      const q3: string[] = [startNodeId];
+      while (q3.length) {
+        const u = q3.shift()!;
+        for (const v of reverseSuccessAdj.get(u) || []) {
+          if (!upstream.has(v)) {
+            upstream.add(v);
+            q3.push(v);
+          }
+        }
+      }
+
+      const nodeById = new Map(nodes.map((n: any) => [n.id, n]));
+      const context = new Set<string>();
+      for (const id of upstream) {
+        const n = nodeById.get(id);
+        if (!n) continue;
+        if (n.type === 'promptNode' || n.type === 'repoNode') {
+          context.add(id);
+        }
+      }
+
+      const allowed = new Set<string>([...preview, ...failureAllowed, ...context]);
+      return { allowed, preview };
+    },
+    [edges, nodes]
+  );
+
+  const syncIdCounterFromNodes = useCallback((list: Array<any>) => {
+    let max = -1;
+    for (const n of list || []) {
+      const id = String(n?.id ?? '');
+      const m = /^node_(\d+)$/.exec(id);
+      if (!m) continue;
+      const num = Number(m[1]);
+      if (Number.isFinite(num)) max = Math.max(max, num);
+    }
+    if (max >= 0 && max + 1 > idCounter) {
+      idCounter = max + 1;
+    }
+  }, []);
+
+  const buildPipeline = useCallback(
+    (opts?: { allowedNodeIds?: Set<string> }) => {
+      const allowedNodeIds = opts?.allowedNodeIds;
+      const effectiveNodes = allowedNodeIds ? nodes.filter((n: any) => allowedNodeIds.has(n.id)) : nodes;
+      const effectiveEdges = allowedNodeIds
+        ? edges.filter((e: any) => allowedNodeIds.has(e.source) && allowedNodeIds.has(e.target))
+        : edges;
+
+      // 1. Build Graph Adjacency List
+      const nodeMap = new Map(effectiveNodes.map(n => [n.id, n]));
+      const adj = new Map<string, string[]>();
+      const inDegree = new Map<string, number>();
+      const failureMap = new Map<string, string>(); // Source -> Target
+      const successEdgePref = new Map<string, string>(); // Source -> Target
+
+      effectiveNodes.forEach(n => {
+        adj.set(n.id, []);
+        inDegree.set(n.id, 0);
+      });
+
+      effectiveEdges.forEach(e => {
+        if (adj.has(e.source) && adj.has(e.target)) {
+          adj.get(e.source)?.push(e.target);
+          inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
+        }
+
+        if (e.sourceHandle === 'failure') {
+          failureMap.set(e.source, e.target);
+        } else {
+          successEdgePref.set(e.source, e.target);
+        }
+      });
+
+      // 2. Check for Disconnected Nodes (Hard Error)
+      if (effectiveNodes.length > 1) {
+        const hasStart = effectiveNodes.some((n: any) => n?.id === 'start');
+        const hasExecutable = effectiveNodes.some((n: any) => n?.type !== 'startNode' && n?.type !== 'input');
+        if (hasStart && hasExecutable && (adj.get('start')?.length || 0) === 0) {
+          const msg = 'Start node must be connected.';
+          if (vscode) vscode.postMessage({ type: 'error', message: msg });
+          else alert(msg);
+          return null;
+        }
+
+        const isolated = effectiveNodes.find(
+          n => n.type !== 'startNode' && n.type !== 'input' && (inDegree.get(n.id) === 0) && (adj.get(n.id)?.length === 0)
+        );
+        if (isolated) {
+          const msg = `Node '${(isolated as any).data?.label || isolated.type}' is not connected.`;
+          if (vscode) vscode.postMessage({ type: 'error', message: msg });
+          else alert(msg);
+          return null;
+        }
+      }
+
+      // 3. Topological Sort (Kahn's Algorithm with Success Priority)
+      const queue: string[] = [];
+      inDegree.forEach((degree, id) => {
+        if (degree === 0) queue.push(id);
+      });
+
+      const sortedIds: string[] = [];
+      let lastProcessedId: string | null = null;
+
+      while (queue.length > 0) {
+        let u: string;
+        let index = 0;
+
+        // Try to pick the "success" successor of the last processed node
+        if (lastProcessedId && successEdgePref.has(lastProcessedId)) {
+          const preferredNext = successEdgePref.get(lastProcessedId)!;
+          const preferredIndex = queue.indexOf(preferredNext);
+          if (preferredIndex !== -1) {
+            index = preferredIndex;
+          }
+        }
+
+        u = queue.splice(index, 1)[0];
+        sortedIds.push(u);
+        lastProcessedId = u;
+
+        const neighbors = adj.get(u) || [];
+        neighbors.forEach(v => {
+          inDegree.set(v, (inDegree.get(v)! - 1));
+          if (inDegree.get(v) === 0) {
+            queue.push(v);
+          }
+        });
+      }
+
+      // 4. Cycle Detection
+      if (sortedIds.length !== effectiveNodes.length) {
+        const msg = 'Cycle detected in pipeline graph.';
+        if (vscode) vscode.postMessage({ type: 'error', message: msg });
+        else alert(msg);
+        return null;
+      }
+
+      // 5. Map Sorted Nodes to Steps
+      const steps: any[] = [];
+      sortedIds.forEach(id => {
+        const node = nodeMap.get(id);
+        if (!node) return;
+
+        // Skip Start Node for executable steps
+        if (node.type === 'startNode' || node.type === 'input') return;
+
+        let intent = '';
+        let description = '';
+        let payload: any = {};
+        const data: any = node.data;
+
+        if (node.type === 'promptNode') {
+          intent = 'system.setVar';
+          payload = { name: data.name, value: data.value };
+        } else if (node.type === 'repoNode') {
+          intent = 'system.setCwd';
+          payload = { path: data.path };
+        } else if (node.type === 'vscodeCommandNode') {
+          intent = 'vscode.runCommand';
+          payload = { commandId: data.commandId, argsJson: data.argsJson };
+        } else if (node.type === 'actionNode') {
+          const normalized = canonicalizeIntent(String(data.provider || ''), String(data.capability || ''));
+          intent = normalized.intent;
+          const { description: desc, ...rest } = data.args || {};
+          description = desc;
+          payload = rest;
+        }
+
+        if (intent) {
+          const stepObj: any = {
+            id: node.id,
+            intent,
+            description,
+            payload
+          };
+
+          if (failureMap.has(node.id) && nodeMap.has(failureMap.get(node.id)!)) {
+            stepObj.onFailure = failureMap.get(node.id);
+          }
+
+          steps.push(stepObj);
+        }
+      });
+
+      const start = nodes.find((n: any) => n.id === 'start');
+      const pipelineName = (start?.data?.label as string) || 'My Pipeline';
+      const pipelineDescription = String(start?.data?.description ?? '').trim();
+
+      const pipeline: any = {
+        name: pipelineName,
+        description: pipelineDescription || undefined,
+        intent: 'pipeline.run',
+        steps,
+        meta: {
+          ui: {
+            // Avoid persisting runtime-only UI state (status/logs/edge coloring) into the pipeline file.
+            nodes: nodes.map((n: any) => {
+              const { status, logs, intentId, ...rest } = (n.data || {}) as any;
+              return {
+                ...n,
+                data: { ...rest, status: 'idle' }
+              };
+            }),
+            edges: edges.map((e: any) => {
+              const { style, animated, ...rest } = e;
+              if (rest.markerEnd && typeof rest.markerEnd === 'object') {
+                const markerEnd = { ...(rest.markerEnd as any) };
+                delete markerEnd.color;
+                return { ...rest, markerEnd };
+              }
+              return rest;
+            })
+          }
+        }
+      };
+
+      return pipeline;
+    },
+    [edges, nodes]
+  );
 
   // Helper to load pipeline data into graph
   const loadPipeline = (pipeline: any) => {
@@ -139,7 +445,21 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
           // Validate nodes/edges simply? Or just trust them?
           // We might want to ensure they are arrays
           if (Array.isArray(pipeline.meta.ui.nodes) && Array.isArray(pipeline.meta.ui.edges)) {
-              setNodes(pipeline.meta.ui.nodes);
+              const restoredNodes = pipeline.meta.ui.nodes.map((n: any) => {
+                  if (n?.id === 'start') {
+                      const next = { ...n, type: 'startNode' };
+                      next.data = { ...(next.data || {}) };
+                      if (pipeline?.name) next.data.label = pipeline.name;
+                      if (pipeline?.description !== undefined) next.data.description = pipeline.description;
+                      return next;
+                  }
+                  if (n?.type === 'input') {
+                      return { ...n, type: 'startNode' };
+                  }
+                  return n;
+              });
+              syncIdCounterFromNodes(restoredNodes);
+              setNodes(restoredNodes);
               setEdges(pipeline.meta.ui.edges);
               setTimeout(() => reactFlowInstance?.fitView(), 100);
               return;
@@ -152,8 +472,8 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       // Start Node
       newNodes.push({
          id: 'start',
-         type: 'input',
-         data: { label: pipeline.name || 'Start' },
+         type: 'startNode',
+         data: { label: pipeline.name || 'My Pipeline', description: pipeline.description || '' },
          position: { x: 250, y: 50 },
          sourcePosition: Position.Right,
          deletable: false
@@ -262,6 +582,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
       setNodes(newNodes);
       setEdges(newEdges);
+      syncIdCounterFromNodes(newNodes);
       setTimeout(() => reactFlowInstance?.fitView(), 100);
   };
 
@@ -279,6 +600,30 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 	       }
 	       const typed = message as WebviewInboundMessage;
 	       switch (typed.type) {
+           case 'optionsFetched':
+             setDrawerDynamicOptions((prev) => ({
+               ...prev,
+               [typed.argName]: typed.options
+             }));
+             break;
+
+           case 'pathSelected':
+             // Best-effort: if the drawer requested a path, apply it.
+             if (drawerNodeId && typed.id === drawerNodeId) {
+               setNodes((nds) => nds.map((n: any) => {
+                 if (n.id !== drawerNodeId) return n;
+                 if (n.type === 'repoNode' && typed.argName === 'path') {
+                   return { ...n, data: { ...(n.data || {}), path: typed.path } };
+                 }
+                 if (n.type === 'actionNode') {
+                   const nextArgs = { ...(n.data?.args || {}), [typed.argName]: typed.path };
+                   return { ...n, data: { ...(n.data || {}), args: nextArgs } };
+                 }
+                 return n;
+               }));
+             }
+             break;
+
 	         case 'environmentUpdate':
 	           setEnvironment((typed.environment as Record<string, string>) || {});
 	           break;
@@ -355,7 +700,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [reactFlowInstance]); // Dependency on reactFlowInstance for fitView
+  }, [reactFlowInstance, drawerNodeId]); // Dependency on reactFlowInstance for fitView
 
 	  // Handle Explicit Restore (Rollback)
 	  useEffect(() => {
@@ -471,159 +816,9 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     [reactFlowInstance],
   );
 
-	  const savePipeline = () => {
-    // 1. Build Graph Adjacency List
-    const nodeMap = new Map(nodes.map(n => [n.id, n]));
-    const adj = new Map<string, string[]>();
-    const inDegree = new Map<string, number>();
-    const failureMap = new Map<string, string>(); // Source -> Target
-    const successEdges = new Map<string, string>(); // Source -> Target
-
-    nodes.forEach(n => {
-        adj.set(n.id, []);
-        inDegree.set(n.id, 0);
-    });
-
-    edges.forEach(e => {
-        if (adj.has(e.source) && adj.has(e.target)) {
-            adj.get(e.source)?.push(e.target);
-            inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
-        }
-
-        if (e.sourceHandle === 'failure') {
-            failureMap.set(e.source, e.target);
-        } else {
-            successEdges.set(e.source, e.target);
-        }
-    });
-
-    // 2. Check for Disconnected Nodes (Hard Error)
-    if (nodes.length > 1) {
-        const isolated = nodes.find(n => (inDegree.get(n.id) === 0) && (adj.get(n.id)?.length === 0));
-        if (isolated) {
-            const msg = `Node '${isolated.data.label || isolated.type}' is not connected.`;
-            if (vscode) vscode.postMessage({ type: 'error', message: msg });
-            else alert(msg);
-            return;
-        }
-    }
-
-    // 3. Topological Sort (Kahn's Algorithm with Success Priority)
-    const queue: string[] = [];
-    inDegree.forEach((degree, id) => {
-        if (degree === 0) queue.push(id);
-    });
-
-    const sortedIds: string[] = [];
-    let lastProcessedId: string | null = null;
-
-    while (queue.length > 0) {
-        let u: string;
-        let index = 0;
-
-        // Try to pick the "success" successor of the last processed node
-        if (lastProcessedId && successEdges.has(lastProcessedId)) {
-            const preferredNext = successEdges.get(lastProcessedId)!;
-            const preferredIndex = queue.indexOf(preferredNext);
-            if (preferredIndex !== -1) {
-                index = preferredIndex;
-            }
-        }
-
-        u = queue.splice(index, 1)[0];
-        sortedIds.push(u);
-        lastProcessedId = u;
-
-        const neighbors = adj.get(u) || [];
-        neighbors.forEach(v => {
-            inDegree.set(v, (inDegree.get(v)! - 1));
-            if (inDegree.get(v) === 0) {
-                queue.push(v);
-            }
-        });
-    }
-
-    // 4. Cycle Detection
-    if (sortedIds.length !== nodes.length) {
-         const msg = 'Cycle detected in pipeline graph.';
-         if (vscode) vscode.postMessage({ type: 'error', message: msg });
-         else alert(msg);
-         return;
-    }
-
-    // 5. Map Sorted Nodes to Steps
-    const steps: any[] = [];
-    sortedIds.forEach(id => {
-        const node = nodeMap.get(id);
-        if (!node) return;
-
-        // Skip Start Node (input type) for executable steps
-        if (node.type === 'input') return;
-
-        let intent = '';
-        let description = '';
-        let payload: any = {};
-        const data: any = node.data;
-
-        if (node.type === 'promptNode') {
-            intent = 'system.setVar';
-            payload = { name: data.name, value: data.value };
-        } else if (node.type === 'repoNode') {
-            intent = 'system.setCwd';
-            payload = { path: data.path };
-        } else if (node.type === 'vscodeCommandNode') {
-            intent = 'vscode.runCommand';
-            payload = { commandId: data.commandId, argsJson: data.argsJson };
-        } else if (node.type === 'actionNode') {
-            const normalized = canonicalizeIntent(String(data.provider || ''), String(data.capability || ''));
-            intent = normalized.intent;
-            const { description: desc, ...rest } = data.args || {};
-            description = desc;
-            payload = rest;
-        }
-
-        if (intent) {
-            const stepObj: any = {
-                id: node.id,
-                intent,
-                description,
-                payload
-            };
-
-            if (failureMap.has(node.id)) {
-                stepObj.onFailure = failureMap.get(node.id);
-            }
-
-            steps.push(stepObj);
-        }
-    });
-
-		    const pipeline = {
-		      name: (nodes.find(n => n.id === 'start')?.data.label as string) || 'My Pipeline',
-		      intent: 'pipeline.run',
-		      steps,
-		      meta: {
-		        ui: {
-		          // Avoid persisting runtime-only UI state (status/logs/edge coloring) into the pipeline file.
-		          nodes: nodes.map((n: any) => {
-		            const { status, logs, intentId, ...rest } = (n.data || {}) as any;
-		            return {
-		              ...n,
-		              data: { ...rest, status: 'idle' }
-		            };
-		          }),
-		          edges: edges.map((e: any) => {
-		            const { style, animated, ...rest } = e;
-		            if (rest.markerEnd && typeof rest.markerEnd === 'object') {
-		              const markerEnd = { ...(rest.markerEnd as any) };
-		              delete markerEnd.color;
-		              return { ...rest, markerEnd };
-		            }
-		            return rest;
-		          })
-		        }
-		      }
-		    };
+  const savePipeline = () => {
+    const pipeline = buildPipeline();
+    if (!pipeline) return;
 
     if (vscode) {
       vscode.postMessage({
@@ -635,11 +830,75 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     }
   };
 
-	  return (
-	    <div className="dndflow">
-	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
-	        <FlowRuntimeContext.Provider value={flowRuntime}>
-	          <ReactFlow
+  const runPipeline = () => {
+    const pipeline = buildPipeline();
+    if (!pipeline) return;
+
+    if (vscode) {
+      vscode.postMessage({
+        type: 'runPipeline',
+        pipeline
+      });
+    } else {
+      console.log('Run Pipeline (Mock):', pipeline);
+    }
+  };
+
+  const runPipelineFromHere = (nodeId: string) => {
+    const { allowed, preview } = computeRunSubset(nodeId);
+    setRunPreviewIds(preview);
+    const pipeline = buildPipeline({ allowedNodeIds: allowed });
+    if (!pipeline) return;
+
+    if (vscode) {
+      vscode.postMessage({
+        type: 'runPipeline',
+        pipeline
+      });
+    } else {
+      console.log('Run Pipeline From Here (Mock):', pipeline);
+    }
+  };
+
+  const drawerNode = useMemo(() => nodes.find((n: any) => n.id === drawerNodeId) ?? null, [nodes, drawerNodeId]);
+
+  const updateNodeData = useCallback((id: string, patch: any) => {
+    setNodes((nds) => nds.map((n: any) => (n.id === id ? { ...n, data: { ...(n.data || {}), ...patch } } : n)));
+  }, [setNodes]);
+
+  const updateActionArgs = useCallback((id: string, patch: any) => {
+    setNodes((nds) => nds.map((n: any) => {
+      if (n.id !== id) return n;
+      const nextArgs = { ...(n.data?.args || {}), ...patch };
+      return { ...n, data: { ...(n.data || {}), args: nextArgs } };
+    }));
+  }, [setNodes]);
+
+  useEffect(() => {
+    if (!drawerNode) return;
+    setDrawerDynamicOptions({});
+    setDrawerArgsJsonError('');
+
+    if (drawerNode.type !== 'actionNode') return;
+    const provider = String(drawerNode.data?.provider ?? 'terminal');
+    const capId = String(drawerNode.data?.capability ?? '');
+    const group = (commandGroups || []).find((g: any) => g.provider === provider);
+    const caps = group?.commands || [];
+    const capConfig = caps.find((c: any) => c.capability === capId);
+    const args = capConfig?.args || [];
+
+    for (const a of args) {
+      if (typeof a?.options === 'string' && a.options && vscode) {
+        vscode.postMessage({ type: 'fetchOptions', command: a.options, argName: a.name });
+      }
+    }
+  }, [drawerNodeId, drawerNode?.data?.provider, drawerNode?.data?.capability, commandGroups]);
+
+ 	  return (
+ 	    <div className="dndflow">
+ 	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
+ 	        <FlowRuntimeContext.Provider value={flowRuntime}>
+ 	          <ReactFlow
 	            nodes={nodes}
 	            edges={edges}
 	            onNodesChange={onNodesChange}
@@ -648,45 +907,637 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 	            onInit={setReactFlowInstance}
 	            onDrop={onDrop}
 	            onDragOver={onDragOver}
-	            nodeTypes={nodeTypes}
-	            snapToGrid={true}
-	            fitView
-	          >
-	            <Controls />
-	            <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
-	            <MiniMap />
-	          </ReactFlow>
-	        </FlowRuntimeContext.Provider>
-	      </div>
+  	            nodeTypes={nodeTypes}
+  	            snapToGrid={true}
+  	            fitView
+              onNodeDoubleClick={(_, node) => {
+                setDrawerNodeId(node.id);
+                setContextMenu(null);
+              }}
+              onNodeContextMenu={(event, node) => {
+                event.preventDefault();
+                setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id });
+              }}
+  	          >
+ 	            <Controls />
+ 	            <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
+ 	            <MiniMap />
+ 	          </ReactFlow>
+ 	        </FlowRuntimeContext.Provider>
+ 	      </div>
 
-      <button
-        onClick={savePipeline}
-        style={{
-          position: 'absolute',
-          top: '10px',
-          right: '10px',
-          padding: '10px 20px',
-          background: 'var(--vscode-button-background)',
-          color: 'var(--vscode-button-foreground)',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: 'pointer',
-          zIndex: 5
-        }}
-      >
-        Save Pipeline
-      </button>
-    </div>
-  );
-}
+        {contextMenu && (
+          <div
+            className="nodrag"
+            style={{
+              position: 'fixed',
+              left: contextMenu.x,
+              top: contextMenu.y,
+              zIndex: 1000,
+              background: 'var(--vscode-editorWidget-background)',
+              border: '1px solid var(--vscode-editorWidget-border)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
+              padding: '6px',
+              borderRadius: '6px',
+              minWidth: '160px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="nodrag"
+              onClick={() => {
+                runPipelineFromHere(contextMenu.nodeId);
+                setContextMenu(null);
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'transparent',
+                color: 'var(--vscode-foreground)',
+                border: 'none',
+                padding: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              Run from here
+            </button>
+            <button
+              className="nodrag"
+              onClick={() => {
+                setRunPreviewIds(null);
+                setContextMenu(null);
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'transparent',
+                color: 'var(--vscode-foreground)',
+                border: 'none',
+                padding: '8px',
+                cursor: 'pointer',
+                opacity: 0.8
+              }}
+            >
+              Clear highlight
+            </button>
+          </div>
+        )}
+
+        {drawerNode && (
+          <div
+            className="nodrag"
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              height: '100%',
+              width: '360px',
+              background: 'var(--vscode-sideBar-background)',
+              borderLeft: '1px solid var(--vscode-sideBar-border)',
+              zIndex: 900,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                padding: '10px',
+                borderBottom: '1px solid var(--vscode-sideBar-border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {drawerNode.id === 'start'
+                  ? 'Start'
+                  : drawerNode.type === 'actionNode'
+                    ? `${drawerNode.data?.provider || 'action'} · ${drawerNode.data?.capability || ''}`
+                    : drawerNode.type}
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  className="nodrag"
+                  onClick={savePipeline}
+                  title="Save pipeline"
+                  style={{
+                    background: 'var(--vscode-button-background)',
+                    color: 'var(--vscode-button-foreground)',
+                    border: 'none',
+                    borderRadius: '4px',
+                    padding: '6px 8px',
+                    cursor: 'pointer',
+                    fontSize: '11px',
+                  }}
+                >
+                  Save
+                </button>
+                {drawerNode.id !== 'start' && (
+                  <button
+                    className="nodrag"
+                    onClick={() => {
+                      const source: any = drawerNode;
+                      const clonedData = JSON.parse(JSON.stringify(source.data || {}));
+                      clonedData.status = 'idle';
+                      delete clonedData.logs;
+                      delete clonedData.intentId;
+
+                      const newId = getId();
+                      const newNode: any = {
+                        ...source,
+                        id: newId,
+                        position: { x: (source as any).position?.x + 40, y: (source as any).position?.y + 40 },
+                        data: clonedData,
+                      };
+                      setNodes((nds) => nds.concat(newNode));
+                    }}
+                    title="Duplicate"
+                    style={{
+                      background: 'var(--vscode-button-secondaryBackground)',
+                      color: 'var(--vscode-button-secondaryForeground)',
+                      border: 'none',
+                      borderRadius: '4px',
+                      padding: '6px 8px',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                    }}
+                  >
+                    Duplicate
+                  </button>
+                )}
+                {drawerNode.id !== 'start' && (
+                  <button
+                    className="nodrag"
+                    onClick={() => {
+                      const id = drawerNode.id;
+                      setNodes((nds) => nds.filter((n: any) => n.id !== id));
+                      setEdges((eds) => eds.filter((e: any) => e.source !== id && e.target !== id));
+                      setDrawerNodeId(null);
+                    }}
+                    title="Delete"
+                    style={{
+                      background: 'transparent',
+                      color: 'var(--vscode-errorForeground)',
+                      border: '1px solid var(--vscode-errorForeground)',
+                      borderRadius: '4px',
+                      padding: '6px 8px',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
+                <button
+                  className="nodrag"
+                  onClick={() => setDrawerNodeId(null)}
+                  title="Close"
+                  style={{
+                    background: 'transparent',
+                    color: 'var(--vscode-foreground)',
+                    border: '1px solid var(--vscode-sideBar-border)',
+                    borderRadius: '4px',
+                    padding: '6px 8px',
+                    cursor: 'pointer',
+                    fontSize: '11px',
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div style={{ padding: '10px', overflow: 'auto' }}>
+              {drawerNode.id === 'start' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', opacity: 0.9 }}>Pipeline name</label>
+                    <input
+                      className="nodrag"
+                      value={String(drawerNode.data?.label ?? '')}
+                      onChange={(e) => updateNodeData('start', { label: e.target.value })}
+                      style={{
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: '1px solid var(--vscode-input-border)',
+                        padding: '6px',
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', opacity: 0.9 }}>Description</label>
+                    <textarea
+                      className="nodrag"
+                      value={String(drawerNode.data?.description ?? '')}
+                      onChange={(e) => updateNodeData('start', { description: e.target.value })}
+                      rows={4}
+                      style={{
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: '1px solid var(--vscode-input-border)',
+                        padding: '6px',
+                        resize: 'vertical',
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {drawerNode.type === 'promptNode' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', opacity: 0.9 }}>Variable name</label>
+                    <input
+                      className="nodrag"
+                      value={String(drawerNode.data?.name ?? '')}
+                      onChange={(e) => updateNodeData(drawerNode.id, { name: e.target.value })}
+                      style={{
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: '1px solid var(--vscode-input-border)',
+                        padding: '6px',
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', opacity: 0.9 }}>Default value</label>
+                    <input
+                      className="nodrag"
+                      value={String(drawerNode.data?.value ?? '')}
+                      onChange={(e) => updateNodeData(drawerNode.id, { value: e.target.value })}
+                      style={{
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: '1px solid var(--vscode-input-border)',
+                        padding: '6px',
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {drawerNode.type === 'repoNode' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', opacity: 0.9 }}>Path</label>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <input
+                        className="nodrag"
+                        value={String(drawerNode.data?.path ?? '')}
+                        onChange={(e) => updateNodeData(drawerNode.id, { path: e.target.value })}
+                        style={{
+                          flex: 1,
+                          background: 'var(--vscode-input-background)',
+                          color: 'var(--vscode-input-foreground)',
+                          border: '1px solid var(--vscode-input-border)',
+                          padding: '6px',
+                        }}
+                      />
+                      <button
+                        className="nodrag"
+                        onClick={() => {
+                          if (!vscode) return;
+                          vscode.postMessage({ type: 'selectPath', id: drawerNode.id, argName: 'path' });
+                        }}
+                        style={{
+                          background: 'var(--vscode-button-secondaryBackground)',
+                          color: 'var(--vscode-button-secondaryForeground)',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '6px 10px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Browse
+                      </button>
+                    </div>
+                    <div style={{ fontSize: '11px', opacity: 0.7 }}>
+                      Tip: use <code>${'{workspaceRoot}'}</code> to target the current workspace.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {drawerNode.type === 'vscodeCommandNode' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <label style={{ fontSize: '11px', opacity: 0.9 }}>commandId</label>
+                    <input
+                      className="nodrag"
+                      value={String(drawerNode.data?.commandId ?? '')}
+                      onChange={(e) => updateNodeData(drawerNode.id, { commandId: e.target.value })}
+                      style={{
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: '1px solid var(--vscode-input-border)',
+                        padding: '6px',
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <label style={{ fontSize: '11px', opacity: 0.9 }}>args (JSON)</label>
+                      {drawerArgsJsonError && (
+                        <span style={{ fontSize: '10px', color: 'var(--vscode-inputValidation-errorForeground)' }}>
+                          {drawerArgsJsonError}
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      className="nodrag"
+                      value={String(drawerNode.data?.argsJson ?? '')}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        updateNodeData(drawerNode.id, { argsJson: v });
+                        if (!v.trim()) {
+                          setDrawerArgsJsonError('');
+                          return;
+                        }
+                        try {
+                          JSON.parse(v);
+                          setDrawerArgsJsonError('');
+                        } catch {
+                          setDrawerArgsJsonError('Invalid JSON');
+                        }
+                      }}
+                      rows={6}
+                      style={{
+                        width: '100%',
+                        resize: 'vertical',
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: `1px solid ${drawerArgsJsonError ? 'var(--vscode-inputValidation-errorBorder)' : 'var(--vscode-input-border)'}`,
+                        padding: '6px',
+                        fontFamily: 'var(--vscode-editor-font-family, Consolas, monospace)',
+                        fontSize: '12px',
+                      }}
+                    />
+                    <div style={{ fontSize: '11px', opacity: 0.7 }}>
+                      This node can be interactive/non-deterministic depending on the command.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {drawerNode.type === 'actionNode' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ fontSize: '11px', opacity: 0.9 }}>Provider</label>
+                      <select
+                        className="nodrag"
+                        value={String(drawerNode.data?.provider ?? 'terminal')}
+                        onChange={(e) => {
+                          const provider = e.target.value;
+                          const group = (commandGroups || []).find((g: any) => g.provider === provider);
+                          const caps = group?.commands || [];
+                          const defaultCap = caps.find((c: any) => String(c.capability).endsWith('.run'))?.capability || caps[0]?.capability || '';
+                          updateNodeData(drawerNode.id, { provider, capability: defaultCap, args: {} });
+                        }}
+                        style={{
+                          background: 'var(--vscode-input-background)',
+                          color: 'var(--vscode-input-foreground)',
+                          border: '1px solid var(--vscode-input-border)',
+                          padding: '6px',
+                        }}
+                      >
+                        {(commandGroups || []).map((g: any) => (
+                          <option key={g.provider} value={g.provider}>{g.provider}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ fontSize: '11px', opacity: 0.9 }}>Capability</label>
+                      <select
+                        className="nodrag"
+                        value={String(drawerNode.data?.capability ?? '')}
+                        onChange={(e) => updateNodeData(drawerNode.id, { capability: e.target.value })}
+                        style={{
+                          background: 'var(--vscode-input-background)',
+                          color: 'var(--vscode-input-foreground)',
+                          border: '1px solid var(--vscode-input-border)',
+                          padding: '6px',
+                        }}
+                      >
+                        {(() => {
+                          const provider = String(drawerNode.data?.provider ?? 'terminal');
+                          const group = (commandGroups || []).find((g: any) => g.provider === provider);
+                          const caps = group?.commands || [];
+                          return caps.map((c: any) => (
+                            <option key={c.capability} value={c.capability}>{c.capability}</option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const provider = String(drawerNode.data?.provider ?? 'terminal');
+                    const capId = String(drawerNode.data?.capability ?? '');
+                    const group = (commandGroups || []).find((g: any) => g.provider === provider);
+                    const caps = group?.commands || [];
+                    const capConfig = caps.find((c: any) => c.capability === capId);
+                    const argsConfig = capConfig?.args || [];
+                    const currentArgs = (drawerNode.data?.args || {}) as any;
+
+                    const baseInputStyle: any = {
+                      background: 'var(--vscode-input-background)',
+                      color: 'var(--vscode-input-foreground)',
+                      border: '1px solid var(--vscode-input-border)',
+                      padding: '6px',
+                    };
+
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <label style={{ fontSize: '11px', opacity: 0.9 }}>Description</label>
+                          <input
+                            className="nodrag"
+                            value={String(currentArgs.description ?? '')}
+                            onChange={(e) => updateActionArgs(drawerNode.id, { description: e.target.value })}
+                            style={baseInputStyle}
+                          />
+                        </div>
+
+                        {argsConfig.map((a: any) => {
+                          const name = String(a.name);
+                          const required = !!a.required;
+                          const label = a.description ? `${name} — ${a.description}` : name;
+                          const value = currentArgs[name];
+
+                          const renderField = () => {
+                            if (a.type === 'boolean') {
+                              return (
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <input
+                                    className="nodrag"
+                                    type="checkbox"
+                                    checked={!!value}
+                                    onChange={(e) => updateActionArgs(drawerNode.id, { [name]: e.target.checked })}
+                                  />
+                                  <span style={{ fontSize: '11px', opacity: 0.9 }}>{label}{required ? ' *' : ''}</span>
+                                </label>
+                              );
+                            }
+
+                            if (a.type === 'enum' && Array.isArray(a.options)) {
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}{required ? ' *' : ''}</label>
+                                  <select
+                                    className="nodrag"
+                                    value={value ?? ''}
+                                    onChange={(e) => updateActionArgs(drawerNode.id, { [name]: e.target.value })}
+                                    style={baseInputStyle}
+                                  >
+                                    <option value="">(Select)</option>
+                                    {a.options.map((o: any) => (
+                                      <option key={String(o)} value={String(o)}>{String(o)}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              );
+                            }
+
+                            if (a.type === 'enum' && typeof a.options === 'string') {
+                              const dyn = drawerDynamicOptions[name] || [];
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}{required ? ' *' : ''}</label>
+                                  <select
+                                    className="nodrag"
+                                    value={value ?? ''}
+                                    onChange={(e) => updateActionArgs(drawerNode.id, { [name]: e.target.value })}
+                                    style={baseInputStyle}
+                                  >
+                                    <option value="">(Select)</option>
+                                    {dyn.map((o: any) => (
+                                      <option key={String(o)} value={String(o)}>{String(o)}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              );
+                            }
+
+                            if (a.type === 'path') {
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}{required ? ' *' : ''}</label>
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <input
+                                      className="nodrag"
+                                      value={value ?? ''}
+                                      onChange={(e) => updateActionArgs(drawerNode.id, { [name]: e.target.value })}
+                                      style={{ ...baseInputStyle, flex: 1 }}
+                                    />
+                                    <button
+                                      className="nodrag"
+                                      onClick={() => {
+                                        if (!vscode) return;
+                                        vscode.postMessage({ type: 'selectPath', id: drawerNode.id, argName: name });
+                                      }}
+                                      style={{
+                                        background: 'var(--vscode-button-secondaryBackground)',
+                                        color: 'var(--vscode-button-secondaryForeground)',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        padding: '6px 10px',
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      Browse
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}{required ? ' *' : ''}</label>
+                                <input
+                                  className="nodrag"
+                                  value={value ?? ''}
+                                  onChange={(e) => updateActionArgs(drawerNode.id, { [name]: e.target.value })}
+                                  style={baseInputStyle}
+                                />
+                              </div>
+                            );
+                          };
+
+                          return <div key={name}>{renderField()}</div>;
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+       <button
+         onClick={runPipeline}
+         style={{
+           position: 'absolute',
+           top: '10px',
+           right: '140px',
+           padding: '10px 20px',
+           background: 'var(--vscode-button-background)',
+           color: 'var(--vscode-button-foreground)',
+           border: 'none',
+           borderRadius: '4px',
+           cursor: 'pointer',
+           zIndex: 5
+         }}
+       >
+         Run
+       </button>
+
+       <button
+         onClick={savePipeline}
+         style={{
+           position: 'absolute',
+           top: '10px',
+           right: '10px',
+           padding: '10px 20px',
+           background: 'var(--vscode-button-background)',
+           color: 'var(--vscode-button-foreground)',
+           border: 'none',
+           borderRadius: '4px',
+           cursor: 'pointer',
+           zIndex: 5
+         }}
+       >
+         Save Pipeline
+       </button>
+     </div>
+   );
+ }
 
 export default function App() {
   const [commandGroups, setCommandGroups] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<any>(null);
   const [restoreRun, setRestoreRun] = useState<any>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [sidebarTab, setSidebarTab] = useState<'providers' | 'history' | 'environment'>('providers');
 
   useEffect(() => {
+    // Restore ephemeral UI state from VS Code webview state
+    try {
+      const st = vscode?.getState?.() || {};
+      if (typeof st.sidebarCollapsed === 'boolean') setSidebarCollapsed(st.sidebarCollapsed);
+      if (st.sidebarTab === 'providers' || st.sidebarTab === 'history' || st.sidebarTab === 'environment') {
+        setSidebarTab(st.sidebarTab);
+      }
+    } catch {
+      // ignore
+    }
+
     if (window.initialData) {
       if (window.initialData.commandGroups) {
         setCommandGroups(window.initialData.commandGroups);
@@ -710,23 +1561,66 @@ export default function App() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setSidebarCollapsed((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const prev = vscode?.getState?.() || {};
+      vscode?.setState?.({ ...prev, sidebarCollapsed, sidebarTab });
+    } catch {
+      // ignore
+    }
+  }, [sidebarCollapsed, sidebarTab]);
+
   // When clicking an active run again or clicking clear, we might want to toggle?
   // For now, let's allow re-selection to replay.
   // Sidebar handles the click.
 
   return (
     <RegistryContext.Provider value={{ commandGroups }}>
-      <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row' }}>
-         <Sidebar
-            history={history}
-            onSelectHistory={setSelectedRun}
-            onRestoreHistory={(run) => {
-                setRestoreRun(run);
-                setSelectedRun(null); // Stop playback/clear selection
-            }}
-         />
+      <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row', position: 'relative' }}>
+         {!sidebarCollapsed && (
+           <Sidebar
+              tab={sidebarTab}
+              onTabChange={setSidebarTab}
+              history={history}
+              onSelectHistory={setSelectedRun}
+              onRestoreHistory={(run) => {
+                  setRestoreRun(run);
+                  setSelectedRun(null); // Stop playback/clear selection
+              }}
+           />
+         )}
          <div style={{ flex: 1, position: 'relative' }}>
-	           <ReactFlowProvider>
+            <button
+              className="nodrag"
+              onClick={() => setSidebarCollapsed((v) => !v)}
+              title={sidebarCollapsed ? 'Show sidebar (Ctrl+B)' : 'Hide sidebar (Ctrl+B)'}
+              style={{
+                position: 'absolute',
+                top: '10px',
+                left: '10px',
+                zIndex: 950,
+                background: 'var(--vscode-button-secondaryBackground)',
+                color: 'var(--vscode-button-secondaryForeground)',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '8px 10px',
+                cursor: 'pointer',
+              }}
+            >
+              {sidebarCollapsed ? '≡' : '⟨'}
+            </button>
+ 	           <ReactFlowProvider>
 	             <Flow
 	                selectedRun={selectedRun}
 	                restoreRun={restoreRun}

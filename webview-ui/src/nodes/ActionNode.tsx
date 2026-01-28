@@ -15,7 +15,7 @@ const FALLBACK_CAPS: any[] = [];
 
 const ActionNode = ({ data, id }: NodeProps) => {
   const { commandGroups } = useContext(RegistryContext);
-  const { getAvailableVars } = useContext(FlowRuntimeContext);
+  const { getAvailableVars, isRunPreviewNode } = useContext(FlowRuntimeContext);
   const [provider, setProvider] = useState<string>((data.provider as string) || 'terminal');
   const [capability, setCapability] = useState<string>((data.capability as string) || '');
   const [args, setArgs] = useState<Record<string, any>>((data.args as Record<string, any>) || {});
@@ -211,6 +211,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
   const isPause = provider === 'system' && capability === 'system.pause';
   const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
+  const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none';
 
   return (
     <div style={{
@@ -218,7 +219,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
       borderRadius: '5px',
       background: 'var(--vscode-editor-background)',
       border: `2px solid ${isPause ? '#e6c300' : borderColor}`, // Gold for pause
-      boxShadow: status === 'running' ? `0 0 10px ${borderColor}` : 'none',
+      boxShadow: status === 'running' ? `0 0 10px ${borderColor}, ${previewGlow}` : previewGlow,
       minWidth: '250px',
       color: 'var(--vscode-editor-foreground)',
       fontFamily: 'var(--vscode-font-family)'

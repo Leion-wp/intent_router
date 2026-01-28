@@ -5,6 +5,8 @@ type SidebarProps = {
   history?: any[];
   onSelectHistory?: (run: any) => void;
   onRestoreHistory?: (run: any) => void;
+  tab?: 'providers' | 'history' | 'environment';
+  onTabChange?: (tab: 'providers' | 'history' | 'environment') => void;
 };
 
 // Acquire VS Code API (safe singleton) - reuse from App or get from global
@@ -15,8 +17,13 @@ declare global {
   }
 }
 
-export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory }: SidebarProps) {
-  const [tab, setTab] = useState<'providers' | 'history' | 'environment'>('providers');
+export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory, tab: tabProp, onTabChange }: SidebarProps) {
+  const [internalTab, setInternalTab] = useState<'providers' | 'history' | 'environment'>('providers');
+  const tab = tabProp ?? internalTab;
+  const setTab = (next: 'providers' | 'history' | 'environment') => {
+    if (onTabChange) onTabChange(next);
+    else setInternalTab(next);
+  };
   const [envVars, setEnvVars] = useState<{ key: string, value: string, visible: boolean }[]>([]);
 
 	  useEffect(() => {

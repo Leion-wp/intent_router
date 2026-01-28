@@ -6,6 +6,7 @@ import { generateSecureToken } from './security';
 
 export type PipelineFile = {
     name: string;
+    description?: string;
     profile?: string;
     steps: Array<Intent>;
     meta?: {

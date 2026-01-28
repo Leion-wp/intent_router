@@ -1,10 +1,27 @@
-import { memo, useState, useEffect } from 'react';
+import { memo, useState, useEffect, useContext, useRef } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
+import { FlowRuntimeContext } from '../App';
 
 const RepoNode = ({ data, id }: NodeProps) => {
+  const { isRunPreviewNode } = useContext(FlowRuntimeContext);
   const [path, setPath] = useState<string>((data.path as string) || '');
+  const externalSyncPendingRef = useRef(false);
+
+  // Sync from external updates (e.g. drawer edits)
+  useEffect(() => {
+    const nextPath = (data.path as string) || '';
+    if (nextPath !== path) {
+      externalSyncPendingRef.current = true;
+      setPath(nextPath);
+      return;
+    }
+    externalSyncPendingRef.current = false;
+  }, [data.path]);
 
   useEffect(() => {
+    if (externalSyncPendingRef.current) {
+      return;
+    }
     data.path = path;
     data.kind = 'repo'; // Mark kind for serialization
   }, [path]);
@@ -38,6 +55,7 @@ const RepoNode = ({ data, id }: NodeProps) => {
       borderRadius: '5px',
       background: 'var(--vscode-editor-background)',
       border: '2px solid var(--vscode-charts-yellow)',
+      boxShadow: isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none',
       minWidth: '200px',
       color: 'var(--vscode-editor-foreground)',
       fontFamily: 'var(--vscode-font-family)'

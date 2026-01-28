@@ -22,6 +22,7 @@ export type WebviewInboundMessage =
 // Webview -> Extension
 export type WebviewOutboundMessage =
   | { type: 'savePipeline'; pipeline: any }
+  | { type: 'runPipeline'; pipeline: any; dryRun?: boolean }
   | { type: 'saveEnvironment'; environment: Record<string, string> }
   | { type: 'clearHistory' }
   | { type: 'selectPath'; id: string; argName: string }

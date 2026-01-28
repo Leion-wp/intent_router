@@ -140,6 +140,14 @@ export class PipelineBuilder {
                 vscode.window.showInformationMessage('Pipeline saved successfully.');
                 return;
             }
+            if (message?.type === 'runPipeline') {
+                await vscode.commands.executeCommand(
+                    'intentRouter.runPipelineFromData',
+                    message.pipeline as PipelineFile,
+                    !!message.dryRun
+                );
+                return;
+            }
             if (message?.type === 'saveEnvironment') {
                 await vscode.workspace.getConfiguration('intentRouter').update(
                     'environment',
