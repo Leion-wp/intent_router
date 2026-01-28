@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Intent } from './types';
 import { routeIntent } from './router';
 import { pipelineEventBus } from './eventBus';
-import { generateSecureToken, validateStrictShellArg, sanitizeShellArg } from './security';
+import { generateSecureToken, validateStrictShellArg, sanitizeShellArg, validateSafeRelativePath } from './security';
 
 export type PipelineFile = {
     name: string;
@@ -187,7 +187,7 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
              const safeUrl = sanitizeShellArg(url);
              let dirPart = '';
              if (dir) {
-                 validateStrictShellArg(dir, 'dir');
+                 validateSafeRelativePath(dir, 'dir');
                  dirPart = ` ${dir}`;
              }
              command = `git clone ${safeUrl}${dirPart}`;
@@ -199,7 +199,7 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
             if (!tag) throw new Error('docker.build requires "tag"');
 
             validateStrictShellArg(tag, 'tag');
-            validateStrictShellArg(path, 'path');
+            validateSafeRelativePath(path, 'path');
             command = `docker build -t ${tag} ${path}`;
             break;
         }
@@ -306,7 +306,11 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             if (step.intent === 'system.setCwd') {
                 const rawPath = (step.payload as any)?.path;
                 if (typeof rawPath === 'string' && rawPath.trim()) {
-                    const normalized = rawPath.trim() === '${workspaceRoot}' && workspaceRoot ? workspaceRoot : rawPath.trim();
+                    const trimmed = rawPath.trim();
+                    if (trimmed !== '${workspaceRoot}') {
+                        validateSafeRelativePath(trimmed, 'system.setCwd path');
+                    }
+                    const normalized = trimmed === '${workspaceRoot}' && workspaceRoot ? workspaceRoot : trimmed;
                     currentCwd = normalized;
                 } else if (workspaceRoot) {
                     currentCwd = workspaceRoot;
@@ -406,6 +410,9 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             if (compiledStep.intent === 'system.setCwd') {
                  const path = compiledStep.payload?.path;
                  if (path) {
+                     if (path !== '${workspaceRoot}') {
+                         validateSafeRelativePath(path, 'system.setCwd path');
+                     }
                      currentCwd = path;
                      // Emit success for this "virtual" step
                      const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
