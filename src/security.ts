@@ -61,3 +61,28 @@ export function generateSecureToken(length: number = 8): string {
     }
     return result;
 }
+
+/**
+ * Validates that a path is relative and safe (no traversal).
+ * Enforces strict shell characters + structural checks.
+ */
+export function validateSafeRelativePath(path: string, context: string): void {
+    if (!path) return;
+
+    // 1. Base character validation
+    validateStrictShellArg(path, context);
+
+    // 2. Structural validation
+    // Check for absolute paths
+    if (path.startsWith('/') || /^[a-zA-Z]:/.test(path) || path.startsWith('\\\\')) {
+        throw new Error(`Absolute paths are not allowed in ${context}: ${path}`);
+    }
+
+    // Check for traversal
+    const parts = path.split(/[/\\]/);
+    for (const part of parts) {
+        if (part === '..') {
+            throw new Error(`Path traversal is not allowed in ${context}: ${path}`);
+        }
+    }
+}
