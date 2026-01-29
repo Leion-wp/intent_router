@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Intent } from './types';
 import { routeIntent } from './router';
 import { pipelineEventBus } from './eventBus';
-import { generateSecureToken, validateStrictShellArg, sanitizeShellArg } from './security';
+import { generateSecureToken, validateStrictShellArg, sanitizeShellArg, validateSafeRelativePath } from './security';
 
 export type PipelineFile = {
     name: string;
@@ -200,6 +200,7 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
 
             validateStrictShellArg(tag, 'tag');
             validateStrictShellArg(path, 'path');
+            validateSafeRelativePath(path, 'path');
             command = `docker build -t ${tag} ${path}`;
             break;
         }
@@ -307,6 +308,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 const rawPath = (step.payload as any)?.path;
                 if (typeof rawPath === 'string' && rawPath.trim()) {
                     const normalized = rawPath.trim() === '${workspaceRoot}' && workspaceRoot ? workspaceRoot : rawPath.trim();
+                    validateSafeRelativePath(normalized, 'system.setCwd', workspaceRoot);
                     currentCwd = normalized;
                 } else if (workspaceRoot) {
                     currentCwd = workspaceRoot;
@@ -406,6 +408,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             if (compiledStep.intent === 'system.setCwd') {
                  const path = compiledStep.payload?.path;
                  if (path) {
+                     validateSafeRelativePath(path, 'system.setCwd', workspaceRoot);
                      currentCwd = path;
                      // Emit success for this "virtual" step
                      const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);

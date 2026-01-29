@@ -61,3 +61,32 @@ export function generateSecureToken(length: number = 8): string {
     }
     return result;
 }
+
+/**
+ * Validates that a path is a safe relative path or a safe absolute path within a trusted root.
+ * Blocks absolute paths (Unix/Windows) unless they match trustedRoot.
+ * Always blocks traversal sequences (..).
+ */
+export function validateSafeRelativePath(path: string, context: string, trustedRoot?: string): void {
+    if (!path) return;
+    if (path.trim() === '') return;
+
+    // Check if path is absolute
+    const isUnixAbsolute = path.startsWith('/');
+    const isWinAbsolute = /^[a-zA-Z]:/.test(path);
+    const isAbsolute = isUnixAbsolute || isWinAbsolute;
+
+    if (isAbsolute) {
+        if (trustedRoot && path.startsWith(trustedRoot)) {
+            // Safe absolute path?
+        } else {
+            throw new Error(`Invalid ${context}: Absolute paths are not allowed (${path})`);
+        }
+    }
+
+    // Block traversal
+    const parts = path.split(/[/\\]/);
+    if (parts.includes('..')) {
+        throw new Error(`Invalid ${context}: Path traversal is not allowed (${path})`);
+    }
+}
