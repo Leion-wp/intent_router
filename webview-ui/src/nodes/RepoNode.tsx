@@ -1,30 +1,24 @@
-import { memo, useState, useEffect, useContext, useRef } from 'react';
+import { memo, useState, useEffect, useContext } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
-import { FlowRuntimeContext } from '../App';
+import { FlowEditorContext, FlowRuntimeContext } from '../App';
 
 const RepoNode = ({ data, id }: NodeProps) => {
   const { isRunPreviewNode } = useContext(FlowRuntimeContext);
+  const { updateNodeData } = useContext(FlowEditorContext);
   const [path, setPath] = useState<string>((data.path as string) || '');
-  const externalSyncPendingRef = useRef(false);
 
   // Sync from external updates (e.g. drawer edits)
   useEffect(() => {
     const nextPath = (data.path as string) || '';
-    if (nextPath !== path) {
-      externalSyncPendingRef.current = true;
-      setPath(nextPath);
-      return;
-    }
-    externalSyncPendingRef.current = false;
+    if (nextPath !== path) setPath(nextPath);
   }, [data.path]);
 
+  // Ensure kind is set
   useEffect(() => {
-    if (externalSyncPendingRef.current) {
-      return;
+    if (data.kind !== 'repo') {
+      data.kind = 'repo';
     }
-    data.path = path;
-    data.kind = 'repo'; // Mark kind for serialization
-  }, [path]);
+  }, []);
 
   const handleBrowse = () => {
       // Send message to extension
@@ -39,6 +33,7 @@ const RepoNode = ({ data, id }: NodeProps) => {
               const message = event.data;
               if (message.type === 'pathSelected' && message.id === id && message.argName === 'path') {
                   setPath(message.path);
+                  updateNodeData(id, { path: message.path });
                   window.removeEventListener('message', handleMessage);
               }
           };
@@ -76,7 +71,11 @@ const RepoNode = ({ data, id }: NodeProps) => {
               className="nodrag"
               type="text"
               value={path}
-              onChange={(e) => setPath(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setPath(v);
+                updateNodeData(id, { path: v });
+              }}
               placeholder="${workspaceRoot}"
               style={{
                 flex: 1,

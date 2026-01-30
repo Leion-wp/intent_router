@@ -343,12 +343,3 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
   );
 }
 
-function getTabStyle(active: boolean) {
-    return {
-         cursor: 'pointer',
-         fontWeight: active ? 'bold' : 'normal',
-         opacity: active ? 1 : 0.6,
-         borderBottom: active ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none',
-         paddingBottom: '4px'
-    };
-}

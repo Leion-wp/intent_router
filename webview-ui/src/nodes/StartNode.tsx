@@ -1,34 +1,26 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useContext, useEffect, useState } from 'react';
 import { Handle, NodeProps, Position } from '@xyflow/react';
+import { FlowEditorContext } from '../App';
 
-const StartNode = ({ data }: NodeProps) => {
+const StartNode = ({ data, id }: NodeProps) => {
+  const { updateNodeData } = useContext(FlowEditorContext);
   const [label, setLabel] = useState<string>((data.label as string) || 'My Pipeline');
   const [description, setDescription] = useState<string>((data.description as string) || '');
-  const externalSyncPendingRef = useRef(false);
 
   // Sync from external updates (e.g. drawer edits)
   useEffect(() => {
     const nextLabel = (data.label as string) || 'My Pipeline';
     const nextDescription = (data.description as string) || '';
-    const labelChanged = nextLabel !== label;
-    const descChanged = nextDescription !== description;
-    if (labelChanged || descChanged) {
-      externalSyncPendingRef.current = true;
-      if (labelChanged) setLabel(nextLabel);
-      if (descChanged) setDescription(nextDescription);
-      return;
-    }
-    externalSyncPendingRef.current = false;
+    if (nextLabel !== label) setLabel(nextLabel);
+    if (nextDescription !== description) setDescription(nextDescription);
   }, [data.label, data.description]);
 
+  // Ensure kind is set
   useEffect(() => {
-    if (externalSyncPendingRef.current) {
-      return;
+    if (data.kind !== 'start') {
+      data.kind = 'start';
     }
-    data.label = label;
-    data.description = description;
-    data.kind = 'start';
-  }, [label, description]);
+  }, []);
 
   return (
     <div
@@ -54,7 +46,11 @@ const StartNode = ({ data }: NodeProps) => {
             className="nodrag"
             type="text"
             value={label}
-            onChange={(e) => setLabel(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setLabel(v);
+              updateNodeData(id, { label: v });
+            }}
             placeholder="My Pipeline"
             style={{
               background: 'var(--vscode-input-background)',
@@ -70,7 +66,11 @@ const StartNode = ({ data }: NodeProps) => {
           <textarea
             className="nodrag"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDescription(v);
+              updateNodeData(id, { description: v });
+            }}
             placeholder="Optional…"
             rows={3}
             style={{

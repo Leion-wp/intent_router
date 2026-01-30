@@ -1,36 +1,27 @@
-import { memo, useState, useEffect, useContext, useRef } from 'react';
+import { memo, useState, useEffect, useContext } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
-import { FlowRuntimeContext } from '../App';
+import { FlowEditorContext, FlowRuntimeContext } from '../App';
 
 const PromptNode = ({ data, id }: NodeProps) => {
   const { isRunPreviewNode } = useContext(FlowRuntimeContext);
+  const { updateNodeData } = useContext(FlowEditorContext);
   const [name, setName] = useState<string>((data.name as string) || '');
   const [defaultValue, setDefaultValue] = useState<string>((data.value as string) || '');
-  const externalSyncPendingRef = useRef(false);
 
   // Sync from external updates (e.g. drawer edits)
   useEffect(() => {
     const nextName = (data.name as string) || '';
     const nextValue = (data.value as string) || '';
-    const nameChanged = nextName !== name;
-    const valueChanged = nextValue !== defaultValue;
-    if (nameChanged || valueChanged) {
-      externalSyncPendingRef.current = true;
-      if (nameChanged) setName(nextName);
-      if (valueChanged) setDefaultValue(nextValue);
-      return;
-    }
-    externalSyncPendingRef.current = false;
+    if (nextName !== name) setName(nextName);
+    if (nextValue !== defaultValue) setDefaultValue(nextValue);
   }, [data.name, data.value]);
 
+  // Ensure kind is set
   useEffect(() => {
-    if (externalSyncPendingRef.current) {
-      return;
+    if (data.kind !== 'prompt') {
+      data.kind = 'prompt';
     }
-    data.name = name;
-    data.value = defaultValue;
-    data.kind = 'prompt'; // Mark kind for serialization
-  }, [name, defaultValue]);
+  }, []);
 
   return (
     <div style={{
@@ -59,7 +50,11 @@ const PromptNode = ({ data, id }: NodeProps) => {
             className="nodrag"
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setName(v);
+              updateNodeData(id, { name: v });
+            }}
             placeholder="e.g. branchName"
             style={{
               background: 'var(--vscode-input-background)',
@@ -78,7 +73,11 @@ const PromptNode = ({ data, id }: NodeProps) => {
             className="nodrag"
             type="text"
             value={defaultValue}
-            onChange={(e) => setDefaultValue(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDefaultValue(v);
+              updateNodeData(id, { value: v });
+            }}
             placeholder="Default value"
             style={{
               background: 'var(--vscode-input-background)',

@@ -8,6 +8,7 @@ import { pipelineEventBus } from './eventBus';
 import { generateSecureNonce } from './security';
 import { Capability, CompositeCapability } from './types';
 import { historyManager } from './historyManager';
+import * as path from 'path';
 
 type CommandGroup = {
     provider: string;
@@ -241,6 +242,29 @@ export class PipelineBuilder {
             const fileName = pipeline.name.endsWith('.intent.json') ? pipeline.name : `${pipeline.name}.intent.json`;
             targetUri = vscode.Uri.joinPath(folder, fileName);
             this.currentUri = targetUri;
+        } else {
+            // If the pipeline name changed, rename the file to match (same folder).
+            const desiredFileName = pipeline.name.endsWith('.intent.json') ? pipeline.name : `${pipeline.name}.intent.json`;
+            const currentFileName = path.posix.basename(targetUri.path);
+            if (desiredFileName !== currentFileName) {
+                const parent = vscode.Uri.joinPath(targetUri, '..');
+                const newUri = vscode.Uri.joinPath(parent, desiredFileName);
+                try {
+                    await vscode.workspace.fs.stat(newUri);
+                    vscode.window.showErrorMessage(`Cannot rename pipeline: ${desiredFileName} already exists.`);
+                    return false;
+                } catch {
+                    // ok, target doesn't exist
+                }
+                try {
+                    await vscode.workspace.fs.rename(targetUri, newUri, { overwrite: false });
+                    targetUri = newUri;
+                    this.currentUri = newUri;
+                } catch (e) {
+                    vscode.window.showErrorMessage(`Failed to rename pipeline file: ${e}`);
+                    return false;
+                }
+            }
         }
         await writePipelineToUri(targetUri, pipeline);
         if (this.panel) this.panel.title = this.getTitle(pipeline, targetUri);

@@ -38,6 +38,13 @@ export const FlowRuntimeContext = createContext<{
   isRunPreviewNode: () => false
 });
 
+// Editor context for mutating nodes from within node components (single source of truth)
+export const FlowEditorContext = createContext<{
+  updateNodeData: (id: string, patch: Record<string, any>) => void;
+}>({
+  updateNodeData: () => {}
+});
+
 // Register custom node types
 const nodeTypes = {
   startNode: StartNode,
@@ -148,6 +155,12 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     () => ({ getAvailableVars, isRunPreviewNode }),
     [getAvailableVars, isRunPreviewNode]
   );
+
+  const updateNodeData = useCallback((id: string, patch: Record<string, any>) => {
+    setNodes((nds) =>
+      nds.map((n: any) => (n.id === id ? { ...n, data: { ...(n.data || {}), ...patch } } : n))
+    );
+  }, [setNodes]);
 
   useEffect(() => {
     const onDocClick = () => setContextMenu(null);
@@ -862,10 +875,6 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
   const drawerNode = useMemo(() => nodes.find((n: any) => n.id === drawerNodeId) ?? null, [nodes, drawerNodeId]);
 
-  const updateNodeData = useCallback((id: string, patch: any) => {
-    setNodes((nds) => nds.map((n: any) => (n.id === id ? { ...n, data: { ...(n.data || {}), ...patch } } : n)));
-  }, [setNodes]);
-
   const updateActionArgs = useCallback((id: string, patch: any) => {
     setNodes((nds) => nds.map((n: any) => {
       if (n.id !== id) return n;
@@ -897,12 +906,13 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
  	  return (
  	    <div className="dndflow">
  	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
- 	        <FlowRuntimeContext.Provider value={flowRuntime}>
- 	          <ReactFlow
-	            nodes={nodes}
-	            edges={edges}
-	            onNodesChange={onNodesChange}
-	            onEdgesChange={onEdgesChange}
+  	        <FlowRuntimeContext.Provider value={flowRuntime}>
+              <FlowEditorContext.Provider value={{ updateNodeData }}>
+  	          <ReactFlow
+ 	            nodes={nodes}
+ 	            edges={edges}
+ 	            onNodesChange={onNodesChange}
+ 	            onEdgesChange={onEdgesChange}
 	            onConnect={onConnect}
 	            onInit={setReactFlowInstance}
 	            onDrop={onDrop}
@@ -919,11 +929,12 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
                 setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id });
               }}
   	          >
- 	            <Controls />
- 	            <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
- 	            <MiniMap />
- 	          </ReactFlow>
- 	        </FlowRuntimeContext.Provider>
+  	            <Controls />
+  	            <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
+  	            <MiniMap />
+  	          </ReactFlow>
+              </FlowEditorContext.Provider>
+  	        </FlowRuntimeContext.Provider>
  	      </div>
 
         {contextMenu && (

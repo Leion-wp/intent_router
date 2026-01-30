@@ -1,36 +1,26 @@
-import { memo, useEffect, useState, useContext, useRef } from 'react';
+import { memo, useEffect, useState, useContext } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
-import { FlowRuntimeContext } from '../App';
+import { FlowEditorContext, FlowRuntimeContext } from '../App';
 
 const VSCodeCommandNode = ({ data, id }: NodeProps) => {
   const { isRunPreviewNode } = useContext(FlowRuntimeContext);
+  const { updateNodeData } = useContext(FlowEditorContext);
   const [commandId, setCommandId] = useState<string>((data.commandId as string) || '');
   const [argsJson, setArgsJson] = useState<string>((data.argsJson as string) || '');
   const [error, setError] = useState<string>('');
-  const externalSyncPendingRef = useRef(false);
 
   // Sync from external updates (e.g. drawer edits)
   useEffect(() => {
     const nextCommandId = (data.commandId as string) || '';
     const nextArgsJson = (data.argsJson as string) || '';
-    const cmdChanged = nextCommandId !== commandId;
-    const argsChanged = nextArgsJson !== argsJson;
-    if (cmdChanged || argsChanged) {
-      externalSyncPendingRef.current = true;
-      if (cmdChanged) setCommandId(nextCommandId);
-      if (argsChanged) setArgsJson(nextArgsJson);
-      return;
-    }
-    externalSyncPendingRef.current = false;
+    if (nextCommandId !== commandId) setCommandId(nextCommandId);
+    if (nextArgsJson !== argsJson) setArgsJson(nextArgsJson);
   }, [data.commandId, data.argsJson]);
 
   useEffect(() => {
-    if (externalSyncPendingRef.current) {
-      return;
+    if (data.kind !== 'vscodeCommand') {
+      data.kind = 'vscodeCommand';
     }
-    data.kind = 'vscodeCommand';
-    data.commandId = commandId;
-    data.argsJson = argsJson;
 
     if (!argsJson.trim()) {
       setError('');
@@ -74,7 +64,11 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
             className="nodrag"
             type="text"
             value={commandId}
-            onChange={(e) => setCommandId(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setCommandId(v);
+              updateNodeData(id, { commandId: v });
+            }}
             placeholder="e.g. workbench.action.files.save"
             style={{
               background: 'var(--vscode-input-background)',
@@ -93,7 +87,11 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
           <textarea
             className="nodrag"
             value={argsJson}
-            onChange={(e) => setArgsJson(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setArgsJson(v);
+              updateNodeData(id, { argsJson: v });
+            }}
             placeholder='[] or {"foo":"bar"}'
             rows={4}
             style={{
