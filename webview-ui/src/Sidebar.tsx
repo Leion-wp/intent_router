@@ -144,6 +144,16 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
           >
               HISTORY
           </button>
+          <button
+             role="tab"
+             aria-selected={tab === 'environment'}
+             aria-controls="panel-environment"
+             id="tab-environment"
+             onClick={() => setTab('environment')}
+             className="sidebar-tab"
+          >
+              ENV
+          </button>
       </div>
 
 	      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
@@ -242,6 +252,7 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                             <input
                                 type="text"
                                 placeholder="Key"
+                                aria-label="Environment variable key"
                                 value={v.key}
                                 onChange={(e) => updateEnvVar(i, 'key', e.target.value)}
                                 onBlur={handleBlur}
@@ -258,6 +269,7 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                                 onClick={() => removeEnvVar(i)}
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-errorForeground)' }}
                                 title="Delete"
+                                aria-label="Delete environment variable"
                             >
                                 <span className="codicon codicon-trash"></span>
                             </button>
@@ -266,6 +278,7 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                              <input
                                 type={v.visible ? "text" : "password"}
                                 placeholder="Value"
+                                aria-label="Environment variable value"
                                 value={v.value}
                                 onChange={(e) => updateEnvVar(i, 'value', e.target.value)}
                                 onBlur={handleBlur}
@@ -282,6 +295,7 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                                 onClick={() => toggleVisibility(i)}
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-foreground)' }}
                                 title={v.visible ? "Hide" : "Show"}
+                                aria-label={v.visible ? "Hide value" : "Show value"}
                             >
                                 <span className={`codicon ${v.visible ? 'codicon-eye-closed' : 'codicon-eye'}`}></span>
                             </button>
