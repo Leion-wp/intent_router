@@ -107,3 +107,56 @@ html, body, #root {
   outline-offset: 2px;
   opacity: 1;
 }
+
+/* History Item Styles */
+.history-item {
+  position: relative;
+  margin-bottom: 8px;
+  border-radius: 4px;
+}
+
+.history-item-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px;
+  background: var(--vscode-list-hoverBackground);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+  font-family: inherit;
+}
+
+.history-item-btn:hover {
+  border-color: var(--vscode-focusBorder);
+}
+
+.history-item-btn:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  border-color: var(--vscode-focusBorder);
+  z-index: 1; /* Ensure focus ring is visible */
+}
+
+.history-restore-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 8px;
+  font-size: 10px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  cursor: pointer;
+  z-index: 2; /* Sit above the main button */
+}
+
+.history-restore-btn:hover {
+  opacity: 0.9;
+}
+
+.history-restore-btn:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
