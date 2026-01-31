@@ -126,18 +126,22 @@ function parsePipeline(text: string): PipelineFile | undefined {
 }
 
 // Helper to resolve ${var:name} from store
-function resolveTemplateVariables(input: any, store: Map<string, any>): any {
+function resolveTemplateVariables(input: any, store: Map<string, any>, sanitize: boolean = false): any {
     if (typeof input === 'string') {
         return input.replace(/\$\{var:([^}]+)\}/g, (match, varName) => {
             const key = typeof varName === 'string' ? varName.trim() : '';
-            return key && store.has(key) ? String(store.get(key)) : match;
+            if (key && store.has(key)) {
+                const val = String(store.get(key));
+                return sanitize ? sanitizeShellArg(val) : val;
+            }
+            return match;
         });
     } else if (Array.isArray(input)) {
-        return input.map(item => resolveTemplateVariables(item, store));
+        return input.map(item => resolveTemplateVariables(item, store, sanitize));
     } else if (typeof input === 'object' && input !== null) {
         const resolved: any = {};
         for (const key of Object.keys(input)) {
-            resolved[key] = resolveTemplateVariables(input[key], store);
+            resolved[key] = resolveTemplateVariables(input[key], store, sanitize);
         }
         return resolved;
     }
@@ -233,8 +237,10 @@ function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): 
 
 // Compiler entry point
 export async function compileStep(step: Intent, variableStore: Map<string, any>, cwd: string, trustedRoot: string): Promise<Intent> {
+    const shouldSanitize = step.intent === 'terminal.run';
+
     // 1. Resolve variables
-    const resolvedPayload = resolveTemplateVariables(step.payload, variableStore);
+    const resolvedPayload = resolveTemplateVariables(step.payload, variableStore, shouldSanitize);
 
     const resolvedStep = {
         ...step,
