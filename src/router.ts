@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Intent, ProfileConfig, ProviderAdapter, Resolution, UserMapping } from './types';
 import { resolveCapabilities } from './registry';
-import { generateSecureTraceId } from './security';
+import { generateSecureTraceId, sanitizeShellArg } from './security';
 
 let cachedLogLevel: 'error' | 'warn' | 'info' | 'debug' | undefined;
 
@@ -244,7 +244,7 @@ function expandCompositeResolutions(intent: Intent, entries: Resolution[]): Reso
     return expanded;
 }
 
-export async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
+export async function resolveVariables(input: any, cache?: Map<string, string>, sanitize: boolean = false): Promise<any> {
     if (typeof input === 'string') {
         const regex = /\$\{input:([^}]+)\}/g;
         let match;
@@ -271,15 +271,18 @@ export async function resolveVariables(input: any, cache?: Map<string, string>):
                 }
             }
 
-            result = result.replace(fullMatch, value);
+            if (value !== undefined) {
+                const replacement = sanitize ? sanitizeShellArg(value) : value;
+                result = result.replace(fullMatch, replacement);
+            }
         }
         return result;
     } else if (Array.isArray(input)) {
-        return Promise.all(input.map(item => resolveVariables(item, cache)));
+        return Promise.all(input.map(item => resolveVariables(item, cache, sanitize)));
     } else if (typeof input === 'object' && input !== null) {
         const resolved: any = {};
         for (const key of Object.keys(input)) {
-            resolved[key] = await resolveVariables(input[key], cache);
+            resolved[key] = await resolveVariables(input[key], cache, sanitize);
         }
         return resolved;
     }
@@ -309,9 +312,10 @@ async function executeResolution(
     }
 
     let payload = entry.mapPayload ? entry.mapPayload(intent) : intent.payload;
+    const shouldSanitize = entry.capability === 'terminal.run';
 
     try {
-        payload = await resolveVariables(payload, variableCache);
+        payload = await resolveVariables(payload, variableCache, shouldSanitize);
     } catch (error) {
          log(output, intent, minLevel, 'warn', 'IR015', `step=resolveVariables cancelled=${error}`);
          vscode.window.showWarningMessage('Pipeline cancelled by user.');
