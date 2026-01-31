@@ -18,6 +18,7 @@ type CommandGroup = {
 export class PipelineBuilder {
     private panel: vscode.WebviewPanel | undefined;
     private currentUri: vscode.Uri | undefined;
+    private lastSavedName: string | undefined;
     private disposables: vscode.Disposable[] = [];
 
     constructor(private readonly extensionUri: vscode.Uri) {}
@@ -34,6 +35,7 @@ export class PipelineBuilder {
         }
 
         this.currentUri = uri;
+        this.lastSavedName = pipeline?.name;
         const panel = vscode.window.createWebviewPanel(
             'intentRouter.pipelineBuilder',
             this.getTitle(pipeline, uri),
@@ -128,6 +130,7 @@ export class PipelineBuilder {
 
         panel.webview.html = this.getHtml(panel.webview, webviewUri, styleUri, codiconUri, {
             pipeline: initialPipeline,
+            pipelineUri: uri ? uri.toString() : null,
             commandGroups,
             profiles: profileNames,
             templates,
@@ -138,7 +141,9 @@ export class PipelineBuilder {
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'savePipeline') {
                 await this.savePipeline(message.pipeline as PipelineFile);
-                vscode.window.showInformationMessage('Pipeline saved successfully.');
+                if (!message?.silent) {
+                    vscode.window.showInformationMessage('Pipeline saved successfully.');
+                }
                 return;
             }
             if (message?.type === 'runPipeline') {
@@ -246,7 +251,8 @@ export class PipelineBuilder {
             // If the pipeline name changed, rename the file to match (same folder).
             const desiredFileName = pipeline.name.endsWith('.intent.json') ? pipeline.name : `${pipeline.name}.intent.json`;
             const currentFileName = path.posix.basename(targetUri.path);
-            if (desiredFileName !== currentFileName) {
+            const shouldRename = typeof this.lastSavedName === 'string' && pipeline.name !== this.lastSavedName;
+            if (shouldRename && desiredFileName !== currentFileName) {
                 const parent = vscode.Uri.joinPath(targetUri, '..');
                 const newUri = vscode.Uri.joinPath(parent, desiredFileName);
                 try {
@@ -268,6 +274,7 @@ export class PipelineBuilder {
         }
         await writePipelineToUri(targetUri, pipeline);
         if (this.panel) this.panel.title = this.getTitle(pipeline, targetUri);
+        this.lastSavedName = pipeline.name;
         return true;
     }
 

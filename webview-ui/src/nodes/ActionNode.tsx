@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useEffect, useContext, useRef } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
-import { FlowRuntimeContext, RegistryContext } from '../App';
+import { FlowEditorContext, FlowRuntimeContext, RegistryContext } from '../App';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
 
 const STATUS_COLORS = {
@@ -16,6 +16,7 @@ const FALLBACK_CAPS: any[] = [];
 const ActionNode = ({ data, id }: NodeProps) => {
   const { commandGroups } = useContext(RegistryContext);
   const { getAvailableVars, isRunPreviewNode } = useContext(FlowRuntimeContext);
+  const { updateNodeData } = useContext(FlowEditorContext);
   const [provider, setProvider] = useState<string>((data.provider as string) || 'terminal');
   const [capability, setCapability] = useState<string>((data.capability as string) || '');
   const [args, setArgs] = useState<Record<string, any>>((data.args as Record<string, any>) || {});
@@ -60,21 +61,14 @@ const ActionNode = ({ data, id }: NodeProps) => {
        // Try to find 'run' or just take first
        const defaultCap = currentCaps.find((c: any) => c.capability.endsWith('.run'))?.capability || currentCaps[0].capability;
        setCapability(defaultCap);
-       updateData(provider, defaultCap, args);
+       updateNodeData(id, { provider, capability: defaultCap });
     }
   }, [provider, currentCaps]);
-
-  const updateData = (p: string, c: string, a: any) => {
-    // We mutate the data object directly because ReactFlow uses it by reference
-    data.provider = p;
-    data.capability = c;
-    data.args = a;
-  };
 
   const handleArgChange = (key: string, value: any) => {
     const newArgs = { ...args, [key]: value };
     setArgs(newArgs);
-    updateData(provider, capability, newArgs);
+    updateNodeData(id, { args: newArgs });
   };
 
   const availableVars = useMemo(() => {
@@ -184,7 +178,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
       if (changed) {
           setArgs(newArgs);
-          updateData(provider, capability, newArgs);
+          updateNodeData(id, { args: newArgs });
       }
       setErrors(newErrors);
 
@@ -248,7 +242,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
             setCapability(e.target.value);
             // We keep args that match names, but effectively "reset" behavior is complex.
             // For now, keeping overlap is fine, defaults will fill in.
-            updateData(provider, e.target.value, args);
+            updateNodeData(id, { capability: e.target.value });
           }}
           style={{
             width: '100%',

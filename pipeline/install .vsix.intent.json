@@ -32,7 +32,7 @@
       "id": "node_6",
       "intent": "system.pause",
       "payload": {
-        "message": "prepare the .vsix"
+        "message": "check the vsix path and go install"
       },
       "onFailure": "node_7"
     },
@@ -60,28 +60,31 @@
       "nodes": [
         {
           "id": "start",
-          "type": "input",
+          "type": "startNode",
           "data": {
             "label": "install .vsix",
+            "description": "",
             "status": "idle"
           },
           "position": {
-            "x": 250,
-            "y": 50
+            "x": 195,
+            "y": 90
           },
           "sourcePosition": "right",
           "deletable": false,
           "measured": {
-            "width": 150,
-            "height": 38
-          }
+            "width": 283,
+            "height": 174
+          },
+          "selected": false,
+          "dragging": false
         },
         {
           "id": "node_1",
           "type": "actionNode",
           "position": {
-            "x": 450,
-            "y": 50
+            "x": 480,
+            "y": 45
           },
           "data": {
             "provider": "terminal",
@@ -94,9 +97,11 @@
             "status": "idle"
           },
           "measured": {
-            "width": 273,
-            "height": 262
-          }
+            "width": 825,
+            "height": 412
+          },
+          "selected": false,
+          "dragging": false
         },
         {
           "id": "node_3",
@@ -116,16 +121,16 @@
             "status": "idle"
           },
           "measured": {
-            "width": 273,
-            "height": 262
+            "width": 641,
+            "height": 450
           }
         },
         {
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 1090,
-            "y": 50
+            "x": 1050,
+            "y": 45
           },
           "data": {
             "provider": "terminal",
@@ -138,22 +143,24 @@
             "status": "idle"
           },
           "measured": {
-            "width": 273,
-            "height": 262
-          }
+            "width": 825,
+            "height": 450
+          },
+          "selected": false,
+          "dragging": false
         },
         {
           "id": "node_6",
           "type": "actionNode",
           "position": {
-            "x": 1410,
-            "y": 50
+            "x": 1320,
+            "y": 45
           },
           "data": {
             "provider": "system",
             "capability": "system.pause",
             "args": {
-              "message": "prepare the .vsix"
+              "message": "check the vsix path and go install"
             },
             "kind": "action",
             "status": "idle"
@@ -161,14 +168,16 @@
           "measured": {
             "width": 273,
             "height": 205
-          }
+          },
+          "selected": false,
+          "dragging": false
         },
         {
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1730,
-            "y": 50
+            "x": 1590,
+            "y": 45
           },
           "data": {
             "commandId": "workbench.extensions.action.installVSIX",
@@ -179,14 +188,16 @@
           "measured": {
             "width": 283,
             "height": 203
-          }
+          },
+          "selected": false,
+          "dragging": false
         },
         {
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 2050,
-            "y": 50
+            "x": 1860,
+            "y": 45
           },
           "data": {
             "commandId": "workbench.action.reloadWindow",
@@ -197,7 +208,9 @@
           "measured": {
             "width": 283,
             "height": 203
-          }
+          },
+          "selected": true,
+          "dragging": false
         }
       ],
       "edges": [
