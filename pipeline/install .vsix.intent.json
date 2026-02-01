@@ -94,11 +94,13 @@
               "command": "npm install"
             },
             "kind": "action",
+            "label": "install des deps",
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
-            "width": 799,
-            "height": 412
+            "width": 273,
+            "height": 264
           },
           "selected": false,
           "dragging": false
@@ -107,7 +109,7 @@
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 890,
+            "x": 855,
             "y": 45
           },
           "data": {
@@ -118,7 +120,8 @@
               "command": "npm run compile"
             },
             "kind": "action",
-            "label": "f",
+            "label": "compilation",
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
@@ -132,7 +135,7 @@
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 1210,
+            "x": 1140,
             "y": 45
           },
           "data": {
@@ -143,11 +146,13 @@
               "command": "vsce package"
             },
             "kind": "action",
+            "label": "package vsix",
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
-            "width": 799,
-            "height": 450
+            "width": 273,
+            "height": 264
           },
           "selected": false,
           "dragging": false
@@ -156,7 +161,7 @@
           "id": "node_6",
           "type": "actionNode",
           "position": {
-            "x": 1530,
+            "x": 1410,
             "y": 45
           },
           "data": {
@@ -166,11 +171,13 @@
               "message": "check the vsix path and go install"
             },
             "kind": "action",
+            "label": "vérif humaine",
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
             "width": 273,
-            "height": 205
+            "height": 207
           },
           "selected": false,
           "dragging": false
@@ -179,18 +186,20 @@
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1850,
+            "x": 1695,
             "y": 45
           },
           "data": {
             "commandId": "workbench.extensions.action.installVSIX",
             "argsJson": "",
             "kind": "vscodeCommand",
+            "label": "installation vsix",
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
             "width": 283,
-            "height": 203
+            "height": 206
           },
           "selected": false,
           "dragging": false
@@ -199,13 +208,15 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 2170,
+            "x": 1980,
             "y": 45
           },
           "data": {
             "commandId": "workbench.action.reloadWindow",
             "argsJson": "",
             "kind": "vscodeCommand",
+            "label": "reload vsix",
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {

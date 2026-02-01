@@ -430,6 +430,15 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName?.toLowerCase();
+        const isEditable =
+          tag === 'input' ||
+          tag === 'textarea' ||
+          (target as any).isContentEditable === true;
+        if (isEditable) return;
+      }
       if (e.key === 'Escape') {
         if (quickAddOpen) setQuickAddOpen(false);
         if (dockOpen) setDockOpen(false);
