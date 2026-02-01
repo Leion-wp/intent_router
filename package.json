@@ -3,7 +3,7 @@
     "displayName": "Leion Roots",
     "description": "Human-centric visual orchestration runtime for VS Code",
     "publisher": "LeionCorp",
-    "icon": "media/icon_leion_roots.png",
+    "icon": "media/leion_roots_icon.png",
     "version": "0.0.1",
     "license": "MIT",
     "repository": {
@@ -113,11 +113,11 @@
             }
         ],
         "viewsContainers": {
-            "activitybar": [
+        "activitybar": [
                 {
                     "id": "intentRouter",
-                    "title": "Intent Router",
-                    "icon": "media/intent-router.svg"
+                    "title": "Leion Roots",
+                    "icon": "media/leion_roots_icon.png"
                 }
             ]
         },
