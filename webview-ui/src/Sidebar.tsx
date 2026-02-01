@@ -5,6 +5,8 @@ type SidebarProps = {
   history?: any[];
   onSelectHistory?: (run: any) => void;
   onRestoreHistory?: (run: any) => void;
+  tab?: 'providers' | 'history' | 'environment';
+  onTabChange?: (tab: 'providers' | 'history' | 'environment') => void;
 };
 
 // Acquire VS Code API (safe singleton) - reuse from App or get from global
@@ -15,8 +17,13 @@ declare global {
   }
 }
 
-export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory }: SidebarProps) {
-  const [tab, setTab] = useState<'providers' | 'history' | 'environment'>('providers');
+export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory, tab: tabProp, onTabChange }: SidebarProps) {
+  const [internalTab, setInternalTab] = useState<'providers' | 'history' | 'environment'>('providers');
+  const tab = tabProp ?? internalTab;
+  const setTab = (next: 'providers' | 'history' | 'environment') => {
+    if (onTabChange) onTabChange(next);
+    else setInternalTab(next);
+  };
   const [envVars, setEnvVars] = useState<{ key: string, value: string, visible: boolean }[]>([]);
 
 	  useEffect(() => {
@@ -118,10 +125,32 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-header" style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}>
-          <div onClick={() => setTab('providers')} style={getTabStyle(tab === 'providers')}>NODES</div>
-          <div onClick={() => setTab('history')} style={getTabStyle(tab === 'history')}>HISTORY</div>
-          <div onClick={() => setTab('environment')} style={getTabStyle(tab === 'environment')}>ENV</div>
+      <div
+        className="sidebar-header"
+        role="tablist"
+        aria-label="Sidebar Sections"
+        style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}
+      >
+          <button
+             role="tab"
+             aria-selected={tab === 'providers'}
+             aria-controls="panel-providers"
+             id="tab-providers"
+             onClick={() => setTab('providers')}
+             className="sidebar-tab"
+          >
+              NODES
+          </button>
+          <button
+             role="tab"
+             aria-selected={tab === 'history'}
+             aria-controls="panel-history"
+             id="tab-history"
+             onClick={() => setTab('history')}
+             className="sidebar-tab"
+          >
+              HISTORY
+          </button>
       </div>
 
 	      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
@@ -314,12 +343,3 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
   );
 }
 
-function getTabStyle(active: boolean) {
-    return {
-         cursor: 'pointer',
-         fontWeight: active ? 'bold' : 'normal',
-         opacity: active ? 1 : 0.6,
-         borderBottom: active ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none',
-         paddingBottom: '4px'
-    };
-}

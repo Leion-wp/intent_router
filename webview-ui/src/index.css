@@ -76,3 +76,110 @@ html, body, #root {
   gap: 6px;
   border-color: var(--vscode-focusBorder);
 }
+
+.sidebar-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0 0 4px 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: normal;
+  text-transform: uppercase;
+  color: inherit;
+  opacity: 0.6;
+  letter-spacing: 0.5px;
+}
+
+.sidebar-tab:hover {
+  opacity: 1;
+}
+
+.sidebar-tab[aria-selected="true"] {
+  font-weight: bold;
+  opacity: 1;
+  border-bottom-color: var(--vscode-panelTitle-activeBorder);
+}
+
+.sidebar-tab:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+.quick-add-item:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-list-hoverForeground);
+}
+
+.edge-insert-btn {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.react-flow__edge:hover .edge-insert-btn {
+  opacity: 1;
+}
+
+.react-flow__minimap {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+}
+
+.react-flow__minimap-mask {
+  fill: rgba(0, 0, 0, 0.35);
+}
+
+.react-flow__minimap-node {
+  fill: var(--vscode-editor-foreground);
+  stroke: var(--vscode-editorWidget-border);
+}
+
+.react-flow__controls {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+}
+
+.react-flow__controls-button {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-list-hoverForeground);
+}
+
+.status-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--vscode-editorWidget-border);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.status-badge.running {
+  background: #007acc;
+  color: #fff;
+  animation: statusPulse 1.6s ease-in-out infinite;
+}
+
+.status-badge.success {
+  background: #4caf50;
+  color: #fff;
+}
+
+.status-badge.failure {
+  background: #f44336;
+  color: #fff;
+}
+
+@keyframes statusPulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 122, 204, 0.45); }
+  70% { box-shadow: 0 0 0 8px rgba(0, 122, 204, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 122, 204, 0); }
+}

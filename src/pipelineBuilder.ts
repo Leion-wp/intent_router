@@ -8,6 +8,7 @@ import { pipelineEventBus } from './eventBus';
 import { generateSecureNonce } from './security';
 import { Capability, CompositeCapability } from './types';
 import { historyManager } from './historyManager';
+import * as path from 'path';
 
 type CommandGroup = {
     provider: string;
@@ -17,6 +18,7 @@ type CommandGroup = {
 export class PipelineBuilder {
     private panel: vscode.WebviewPanel | undefined;
     private currentUri: vscode.Uri | undefined;
+    private lastSavedName: string | undefined;
     private disposables: vscode.Disposable[] = [];
 
     constructor(private readonly extensionUri: vscode.Uri) {}
@@ -33,6 +35,7 @@ export class PipelineBuilder {
         }
 
         this.currentUri = uri;
+        this.lastSavedName = pipeline?.name;
         const panel = vscode.window.createWebviewPanel(
             'intentRouter.pipelineBuilder',
             this.getTitle(pipeline, uri),
@@ -127,6 +130,7 @@ export class PipelineBuilder {
 
         panel.webview.html = this.getHtml(panel.webview, webviewUri, styleUri, codiconUri, {
             pipeline: initialPipeline,
+            pipelineUri: uri ? uri.toString() : null,
             commandGroups,
             profiles: profileNames,
             templates,
@@ -137,7 +141,17 @@ export class PipelineBuilder {
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'savePipeline') {
                 await this.savePipeline(message.pipeline as PipelineFile);
-                vscode.window.showInformationMessage('Pipeline saved successfully.');
+                if (!message?.silent) {
+                    vscode.window.showInformationMessage('Pipeline saved successfully.');
+                }
+                return;
+            }
+            if (message?.type === 'runPipeline') {
+                await vscode.commands.executeCommand(
+                    'intentRouter.runPipelineFromData',
+                    message.pipeline as PipelineFile,
+                    !!message.dryRun
+                );
                 return;
             }
             if (message?.type === 'saveEnvironment') {
@@ -233,9 +247,34 @@ export class PipelineBuilder {
             const fileName = pipeline.name.endsWith('.intent.json') ? pipeline.name : `${pipeline.name}.intent.json`;
             targetUri = vscode.Uri.joinPath(folder, fileName);
             this.currentUri = targetUri;
+        } else {
+            // If the pipeline name changed, rename the file to match (same folder).
+            const desiredFileName = pipeline.name.endsWith('.intent.json') ? pipeline.name : `${pipeline.name}.intent.json`;
+            const currentFileName = path.posix.basename(targetUri.path);
+            const shouldRename = typeof this.lastSavedName === 'string' && pipeline.name !== this.lastSavedName;
+            if (shouldRename && desiredFileName !== currentFileName) {
+                const parent = vscode.Uri.joinPath(targetUri, '..');
+                const newUri = vscode.Uri.joinPath(parent, desiredFileName);
+                try {
+                    await vscode.workspace.fs.stat(newUri);
+                    vscode.window.showErrorMessage(`Cannot rename pipeline: ${desiredFileName} already exists.`);
+                    return false;
+                } catch {
+                    // ok, target doesn't exist
+                }
+                try {
+                    await vscode.workspace.fs.rename(targetUri, newUri, { overwrite: false });
+                    targetUri = newUri;
+                    this.currentUri = newUri;
+                } catch (e) {
+                    vscode.window.showErrorMessage(`Failed to rename pipeline file: ${e}`);
+                    return false;
+                }
+            }
         }
         await writePipelineToUri(targetUri, pipeline);
         if (this.panel) this.panel.title = this.getTitle(pipeline, targetUri);
+        this.lastSavedName = pipeline.name;
         return true;
     }
 

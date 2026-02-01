@@ -16,6 +16,30 @@ export function generateSecureNonce(): string {
 }
 
 /**
+ * Validates that a shell argument contains only safe characters.
+ * Allowed: alphanumeric, -, _, ., /, :, @
+ * Throws an error if invalid.
+ */
+export function validateStrictShellArg(arg: string, context: string): void {
+    if (!arg) return; // Allow empty? Caller usually checks required.
+    // Strict allowlist
+    if (!/^[a-zA-Z0-9\-_./:@]+$/.test(arg)) {
+        throw new Error(`Invalid characters in ${context}: ${arg}`);
+    }
+}
+
+/**
+ * Sanitizes a shell argument by escaping dangerous characters and wrapping in double quotes.
+ * Escapes: " $ `
+ */
+export function sanitizeShellArg(arg: string): string {
+    if (arg === undefined || arg === null) return '""';
+    // Escape backslash, double quote, dollar, and backtick
+    const escaped = arg.replace(/([\\"$`])/g, '\\$1');
+    return `"${escaped}"`;
+}
+
+/**
  * Generates a trace ID consisting of a timestamp and a secure random hex suffix.
  */
 export function generateSecureTraceId(): string {
