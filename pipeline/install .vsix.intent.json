@@ -95,12 +95,12 @@
             },
             "kind": "action",
             "label": "install des deps",
-            "collapsed": false,
+            "collapsed": true,
             "status": "idle"
           },
           "measured": {
             "width": 273,
-            "height": 264
+            "height": 51
           },
           "selected": false,
           "dragging": false
@@ -109,8 +109,8 @@
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 855,
-            "y": 45
+            "x": 570,
+            "y": 105
           },
           "data": {
             "provider": "terminal",
@@ -121,12 +121,12 @@
             },
             "kind": "action",
             "label": "compilation",
-            "collapsed": false,
+            "collapsed": true,
             "status": "idle"
           },
           "measured": {
             "width": 273,
-            "height": 264
+            "height": 51
           },
           "selected": false,
           "dragging": false
@@ -135,8 +135,8 @@
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 1140,
-            "y": 45
+            "x": 570,
+            "y": 165
           },
           "data": {
             "provider": "terminal",
@@ -147,12 +147,12 @@
             },
             "kind": "action",
             "label": "package vsix",
-            "collapsed": false,
+            "collapsed": true,
             "status": "idle"
           },
           "measured": {
             "width": 273,
-            "height": 264
+            "height": 51
           },
           "selected": false,
           "dragging": false
@@ -161,7 +161,7 @@
           "id": "node_6",
           "type": "actionNode",
           "position": {
-            "x": 1410,
+            "x": 855,
             "y": 45
           },
           "data": {
@@ -172,34 +172,34 @@
             },
             "kind": "action",
             "label": "vérif humaine",
-            "collapsed": false,
+            "collapsed": true,
             "status": "idle"
           },
           "measured": {
             "width": 273,
-            "height": 207
+            "height": 51
           },
-          "selected": false,
+          "selected": true,
           "dragging": false
         },
         {
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1695,
-            "y": 45
+            "x": 855,
+            "y": 105
           },
           "data": {
             "commandId": "workbench.extensions.action.installVSIX",
             "argsJson": "",
             "kind": "vscodeCommand",
             "label": "installation vsix",
-            "collapsed": false,
+            "collapsed": true,
             "status": "idle"
           },
           "measured": {
             "width": 283,
-            "height": 206
+            "height": 51
           },
           "selected": false,
           "dragging": false
@@ -208,20 +208,20 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1980,
-            "y": 45
+            "x": 855,
+            "y": 165
           },
           "data": {
             "commandId": "workbench.action.reloadWindow",
             "argsJson": "",
             "kind": "vscodeCommand",
             "label": "reload vsix",
-            "collapsed": false,
+            "collapsed": true,
             "status": "idle"
           },
           "measured": {
             "width": 283,
-            "height": 206
+            "height": 51
           },
           "selected": false,
           "dragging": false
