@@ -109,8 +109,8 @@
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 570,
-            "y": 105
+            "x": 660,
+            "y": 120
           },
           "data": {
             "provider": "terminal",
@@ -135,8 +135,8 @@
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 570,
-            "y": 165
+            "x": 645,
+            "y": 210
           },
           "data": {
             "provider": "terminal",
@@ -161,7 +161,7 @@
           "id": "node_6",
           "type": "actionNode",
           "position": {
-            "x": 855,
+            "x": 915,
             "y": 45
           },
           "data": {
@@ -179,15 +179,15 @@
             "width": 273,
             "height": 51
           },
-          "selected": true,
+          "selected": false,
           "dragging": false
         },
         {
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 855,
-            "y": 105
+            "x": 960,
+            "y": 120
           },
           "data": {
             "commandId": "workbench.extensions.action.installVSIX",
@@ -208,8 +208,8 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 855,
-            "y": 165
+            "x": 1020,
+            "y": 195
           },
           "data": {
             "commandId": "workbench.action.reloadWindow",
@@ -223,7 +223,7 @@
             "width": 283,
             "height": 51
           },
-          "selected": false,
+          "selected": true,
           "dragging": false
         }
       ],
