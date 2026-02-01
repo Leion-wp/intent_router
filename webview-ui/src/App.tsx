@@ -107,13 +107,16 @@ function canonicalizeIntent(provider: string, capability: string): { provider: s
 
 function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any, restoreRun: any, onRestoreHandled: () => void }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [nodes, setNodes, onNodesChangeInternal] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
   const MAX_LOG_LINES = 200;
   const [runPreviewIds, setRunPreviewIds] = useState<Set<string> | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   const [drawerNodeId, setDrawerNodeId] = useState<string | null>(null);
+  const suppressRemoveUntilRef = useRef<number>(0);
+  const lastOpenNodeIdRef = useRef<string | null>(null);
+  const lastOpenNodeAtRef = useRef<number>(0);
 
   const [environment, setEnvironment] = useState<Record<string, string>>(
     (window.initialData?.environment as Record<string, string>) || {}
@@ -160,6 +163,19 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       nds.map((n: any) => (n.id === id ? { ...n, data: { ...(n.data || {}), ...patch } } : n))
     );
   }, [setNodes]);
+
+  const onNodesChange = useCallback(
+    (changes: any) => {
+      const filtered = (changes || []).filter((c: any) => c.type !== 'remove');
+      if (filtered.length !== (changes || []).length) {
+        try {
+          console.warn('[IntentRouter] remove blocked', { changes, filtered });
+        } catch {}
+      }
+      onNodesChangeInternal(filtered);
+    },
+    [onNodesChangeInternal]
+  );
 
   useEffect(() => {
     const onDocClick = () => setContextMenu(null);
@@ -598,8 +614,21 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       setTimeout(() => reactFlowInstance?.fitView(), 100);
   };
 
-  // Load initial data if any
+  // Load initial data if any (prefer persisted webview state to avoid losing unsaved nodes)
   useEffect(() => {
+    try {
+      const st = vscode?.getState?.() || {};
+      if (st.graph?.nodes && st.graph?.edges) {
+        setNodes(st.graph.nodes);
+        setEdges(st.graph.edges);
+        syncIdCounterFromNodes(st.graph.nodes);
+        setTimeout(() => reactFlowInstance?.fitView(), 100);
+        return;
+      }
+    } catch {
+      // ignore
+    }
+
     if (window.initialData && window.initialData.pipeline) {
       loadPipeline(window.initialData.pipeline);
     }
@@ -689,6 +718,24 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [reactFlowInstance, drawerNodeId]); // Dependency on reactFlowInstance for fitView
+
+  // Persist current graph in webview state to survive reloads.
+  useEffect(() => {
+    try {
+      const prev = vscode?.getState?.() || {};
+      const safeNodes = nodes.map((n: any) => {
+        const { status, logs, intentId, ...rest } = (n.data || {}) as any;
+        return { ...n, data: { ...rest, status: 'idle' } };
+      });
+      const safeEdges = edges.map((e: any) => {
+        const { style, animated, ...rest } = e as any;
+        return rest;
+      });
+      vscode?.setState?.({ ...prev, graph: { nodes: safeNodes, edges: safeEdges } });
+    } catch {
+      // ignore
+    }
+  }, [nodes, edges]);
 
 	  // Handle Explicit Restore (Rollback)
 	  useEffect(() => {
@@ -885,6 +932,34 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
   const drawerNode = useMemo(() => nodes.find((n: any) => n.id === drawerNodeId) ?? null, [nodes, drawerNodeId]);
 
+  // When opening the drawer, the drawer overlays the right side of the canvas.
+  // Auto-pan so the selected node stays visible and doesn't look like it "disappeared".
+  useEffect(() => {
+    if (!drawerNodeId || !reactFlowInstance) return;
+    const api: any = reactFlowInstance;
+    const getNode = api.getNode?.bind(api);
+    const node = getNode ? getNode(drawerNodeId) : nodes.find((n: any) => n.id === drawerNodeId);
+    if (!node) return;
+
+    const zoom = typeof api.getZoom === 'function' ? api.getZoom() : 1;
+    const pos = (node.positionAbsolute || node.position || { x: 0, y: 0 }) as any;
+    const w = Number(node.measured?.width ?? node.width ?? 0);
+    const h = Number(node.measured?.height ?? node.height ?? 0);
+    const cx = pos.x + (w ? w / 2 : 0);
+    const cy = pos.y + (h ? h / 2 : 0);
+
+    // Drawer is 360px wide; shift center left by ~half the drawer so the node sits in view.
+    const drawerWidthPx = 360;
+    const marginPx = 24;
+    const offsetX = (drawerWidthPx / 2 + marginPx) / (zoom || 1);
+
+    if (typeof api.setCenter === 'function') {
+      api.setCenter(cx - offsetX, cy, { zoom, duration: 200 });
+    } else if (typeof api.fitView === 'function') {
+      api.fitView({ nodes: [{ id: drawerNodeId }], padding: 0.2, duration: 200 });
+    }
+  }, [drawerNodeId, reactFlowInstance, nodes]);
+
  	  return (
  	    <div className="dndflow">
  	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
@@ -935,6 +1010,9 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
             <button
               className="nodrag"
               onClick={() => {
+                suppressRemoveUntilRef.current = Date.now() + 800;
+                lastOpenNodeIdRef.current = contextMenu.nodeId;
+                lastOpenNodeAtRef.current = Date.now();
                 setDrawerNodeId(contextMenu.nodeId);
                 setContextMenu(null);
               }}
@@ -949,6 +1027,31 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
               }}
             >
               Open node
+            </button>
+            <button
+              className="nodrag"
+              onClick={() => {
+                const id = contextMenu.nodeId;
+                if (id === 'start') {
+                  setContextMenu(null);
+                  return;
+                }
+                setNodes((nds) => nds.filter((n: any) => n.id !== id));
+                setEdges((eds) => eds.filter((e: any) => e.source !== id && e.target !== id));
+                setDrawerNodeId((v) => (v === id ? null : v));
+                setContextMenu(null);
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'transparent',
+                color: 'var(--vscode-errorForeground)',
+                border: 'none',
+                padding: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              Delete node
             </button>
             <button
               className="nodrag"
