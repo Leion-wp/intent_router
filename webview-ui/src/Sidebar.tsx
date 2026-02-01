@@ -183,17 +183,17 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 	                 {history.map((run) => (
 	                      <div
 	                        key={run.id}
+                        className="history-item"
 	                        onClick={() => onSelectHistory?.({ ...run })}
-	                        style={{
-	                          padding: '8px',
-	                          background: 'var(--vscode-list-hoverBackground)',
-	                          cursor: 'pointer',
-	                          borderRadius: '4px',
-	                          border: '1px solid transparent',
-	                          marginBottom: '8px'
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                onSelectHistory?.({ ...run });
+                            }
 	                        }}
-	                        onMouseOver={(e) => e.currentTarget.style.border = '1px solid var(--vscode-focusBorder)'}
-	                        onMouseOut={(e) => e.currentTarget.style.border = '1px solid transparent'}
+                        tabIndex={0}
+                        role="listitem"
+                        aria-label={`Select run ${run.name}`}
 	                      >
 	                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
 	                              <div style={{fontWeight: 'bold', fontSize: '12px'}}>{run.name}</div>

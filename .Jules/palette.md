@@ -16,3 +16,7 @@
 ## 2026-02-05 - Nested Interactive Elements in Lists
 **Learning:** The History list implementation uses a `div` with `onClick` as a row container which also contains a nested "Restore" `<button>`. This creates a trap for converting the container to a semantic `<button>` or `<a>` tag, as nested interactive elements are invalid HTML.
 **Action:** For list items with primary and secondary actions, avoid making the entire row a button. Instead, separate the layout into distinct interactive zones (e.g., "Select" button + "Restore" button) to maintain semantic validity and keyboard navigability.
+
+## 2026-02-06 - Accessible Interactive Cards with Actions
+**Learning:** When a list item (card) needs to be the primary action target but also contains secondary buttons (like "Restore"), using `role="listitem"` with `tabIndex="0"` and `onKeyDown` provides a valid accessible structure without invalid HTML nesting (unlike `role="button"` containing another button).
+**Action:** Use `div[role="listitem"][tabIndex="0"]` for the card container to handle the primary action, and place secondary buttons inside it with `e.stopPropagation()`. Ensure distinct focus styles are applied to both the card and the internal buttons.
