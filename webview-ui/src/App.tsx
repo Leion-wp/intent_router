@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -10,10 +10,14 @@ import {
   MiniMap,
   ReactFlowProvider,
   Edge,
+  EdgeProps,
   Node,
   Connection,
   MarkerType,
-  Position
+  Position,
+  BaseEdge,
+  EdgeLabelRenderer,
+  getBezierPath
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import './index.css';
@@ -52,6 +56,78 @@ const nodeTypes = {
   promptNode: PromptNode,
   repoNode: RepoNode,
   vscodeCommandNode: VSCodeCommandNode
+};
+
+const InsertableEdge = (props: EdgeProps) => {
+  const {
+    id,
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    markerEnd,
+    style,
+    data
+  } = props;
+
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition
+  });
+
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+      <EdgeLabelRenderer>
+        <div
+          className="edge-insert-btn"
+          style={{
+            position: 'absolute',
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            pointerEvents: 'all',
+            zIndex: 5
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="nodrag"
+            onClick={(e) => {
+              e.stopPropagation();
+              const onInsert = (data as any)?.onInsert;
+              if (typeof onInsert === 'function') {
+                onInsert(props, e.clientX, e.clientY);
+              }
+            }}
+            title="Insert node"
+            style={{
+              width: '20px',
+              height: '20px',
+              borderRadius: '10px',
+              border: '1px solid var(--vscode-editorWidget-border)',
+              background: 'var(--vscode-button-secondaryBackground)',
+              color: 'var(--vscode-button-secondaryForeground)',
+              cursor: 'pointer',
+              fontSize: '12px',
+              lineHeight: '18px',
+              padding: 0
+            }}
+          >
+            +
+          </button>
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  );
+};
+
+const edgeTypes = {
+  insertable: InsertableEdge
 };
 
 declare global {
@@ -117,6 +193,17 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
   const suppressRemoveUntilRef = useRef<number>(0);
   const lastOpenNodeIdRef = useRef<string | null>(null);
   const lastOpenNodeAtRef = useRef<number>(0);
+  const { commandGroups } = useContext(RegistryContext);
+
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddQuery, setQuickAddQuery] = useState('');
+  const [quickAddAnchor, setQuickAddAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [quickAddPos, setQuickAddPos] = useState<{ x: number; y: number } | null>(null);
+  const [quickAddEdge, setQuickAddEdge] = useState<Edge | null>(null);
+  const [dockOpen, setDockOpen] = useState(false);
+  const [dockQuery, setDockQuery] = useState('');
+  const [lastCanvasPos, setLastCanvasPos] = useState<{ x: number; y: number } | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const [environment, setEnvironment] = useState<Record<string, string>>(
     (window.initialData?.environment as Record<string, string>) || {}
@@ -164,6 +251,148 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     );
   }, [setNodes]);
 
+  type QuickAddItem = {
+    id: string;
+    label: string;
+    nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode';
+    provider?: string;
+    capability?: string;
+  };
+
+  const getDefaultCapability = useCallback((providerName: string) => {
+    const group = (commandGroups || []).find((g: any) => g.provider === providerName);
+    const caps = group?.commands || [];
+    if (!caps.length) return '';
+    return caps.find((c: any) => String(c.capability || '').endsWith('.run'))?.capability || caps[0].capability || '';
+  }, [commandGroups]);
+
+  const presetItems: QuickAddItem[] = useMemo(() => ([
+    { id: 'preset-prompt', label: 'Prompt', nodeType: 'promptNode' },
+    { id: 'preset-repo', label: 'Repo', nodeType: 'repoNode' },
+    { id: 'preset-terminal', label: 'Terminal', nodeType: 'actionNode', provider: 'terminal', capability: getDefaultCapability('terminal') },
+    { id: 'preset-system', label: 'System', nodeType: 'actionNode', provider: 'system', capability: getDefaultCapability('system') },
+    { id: 'preset-git', label: 'Git', nodeType: 'actionNode', provider: 'git', capability: getDefaultCapability('git') },
+    { id: 'preset-docker', label: 'Docker', nodeType: 'actionNode', provider: 'docker', capability: getDefaultCapability('docker') },
+    { id: 'preset-vscode', label: 'VS Code', nodeType: 'vscodeCommandNode' }
+  ]), [getDefaultCapability]);
+
+  const commandItems: QuickAddItem[] = useMemo(() => {
+    const items: QuickAddItem[] = [];
+    (commandGroups || []).forEach((g: any) => {
+      (g.commands || []).forEach((c: any) => {
+        const cap = String(c.capability || '');
+        if (!cap) return;
+        items.push({
+          id: `cmd-${g.provider}-${cap}`,
+          label: `${g.provider} · ${cap}`,
+          nodeType: 'actionNode',
+          provider: g.provider,
+          capability: cap
+        });
+      });
+    });
+    return items;
+  }, [commandGroups]);
+
+  const filterQuickAdd = useCallback((items: QuickAddItem[], query: string) => {
+    const q = (query || '').trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(i => i.label.toLowerCase().includes(q));
+  }, []);
+
+  const addNodeFromItem = useCallback((item: QuickAddItem, pos?: { x: number; y: number }, edge?: Edge | null) => {
+    const newId = getId();
+    const data: any = { status: 'idle' };
+    let type: any = item.nodeType;
+
+    if (item.nodeType === 'actionNode') {
+      data.provider = item.provider || 'terminal';
+      data.capability = item.capability || getDefaultCapability(item.provider || 'terminal');
+      data.args = {};
+    } else if (item.nodeType === 'promptNode') {
+      data.name = '';
+      data.value = '';
+      data.kind = 'prompt';
+    } else if (item.nodeType === 'repoNode') {
+      data.path = '';
+      data.kind = 'repo';
+    } else if (item.nodeType === 'vscodeCommandNode') {
+      data.commandId = '';
+      data.argsJson = '';
+    }
+
+    let position = pos;
+    if (!position) {
+      if (lastCanvasPos) position = lastCanvasPos;
+      else if (reactFlowInstance?.screenToFlowPosition) {
+        position = reactFlowInstance.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+      } else {
+        position = { x: 300, y: 200 };
+      }
+    }
+
+    if (edge && reactFlowInstance?.getNode) {
+      const sourceNode = reactFlowInstance.getNode(edge.source);
+      const targetNode = reactFlowInstance.getNode(edge.target);
+      if (sourceNode && targetNode) {
+        const sx = (sourceNode.positionAbsolute?.x ?? sourceNode.position.x) + (sourceNode.width || 0) / 2;
+        const sy = (sourceNode.positionAbsolute?.y ?? sourceNode.position.y) + (sourceNode.height || 0) / 2;
+        const tx = (targetNode.positionAbsolute?.x ?? targetNode.position.x) + (targetNode.width || 0) / 2;
+        const ty = (targetNode.positionAbsolute?.y ?? targetNode.position.y) + (targetNode.height || 0) / 2;
+        position = { x: (sx + tx) / 2, y: (sy + ty) / 2 };
+      }
+    }
+
+    const newNode: any = {
+      id: newId,
+      type,
+      data,
+      position
+    };
+
+    setNodes((nds) => nds.concat(newNode));
+
+    if (edge) {
+      setEdges((eds) => {
+        const remaining = eds.filter((e) => e.id !== edge.id);
+        const e1: any = {
+          id: `e-${edge.source}-${newId}-${Date.now()}`,
+          source: edge.source,
+          target: newId,
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle,
+          markerEnd: edge.markerEnd,
+          style: edge.style,
+          animated: edge.animated,
+          type: 'insertable'
+        };
+        const e2: any = {
+          id: `e-${newId}-${edge.target}-${Date.now() + 1}`,
+          source: newId,
+          target: edge.target,
+          markerEnd: edge.markerEnd,
+          style: edge.style,
+          animated: edge.animated,
+          type: 'insertable'
+        };
+        return remaining.concat([e1, e2]);
+      });
+    }
+  }, [getDefaultCapability, lastCanvasPos, reactFlowInstance]);
+
+  const allQuickAddItems = useMemo(() => [...presetItems, ...commandItems], [presetItems, commandItems]);
+  const filteredQuickAddItems = useMemo(
+    () => filterQuickAdd(allQuickAddItems, quickAddQuery),
+    [allQuickAddItems, quickAddQuery, filterQuickAdd]
+  );
+  const filteredDockItems = useMemo(
+    () => filterQuickAdd(allQuickAddItems, dockQuery),
+    [allQuickAddItems, dockQuery, filterQuickAdd]
+  );
+
+  const paletteLeft = quickAddAnchor ? Math.min(quickAddAnchor.x, window.innerWidth - 280) : 0;
+  const paletteTop = quickAddAnchor ? Math.min(quickAddAnchor.y, window.innerHeight - 320) : 0;
+
   const onNodesChange = useCallback(
     (changes: any) => {
       const filtered = (changes || []).filter((c: any) => c.type !== 'remove');
@@ -176,6 +405,52 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     },
     [onNodesChangeInternal]
   );
+
+  const handleEdgeInsert = useCallback((edgeProps: any, clientX: number, clientY: number) => {
+    const pos = reactFlowInstance?.screenToFlowPosition
+      ? reactFlowInstance.screenToFlowPosition({ x: clientX, y: clientY })
+      : undefined;
+    const edge = edges.find((e) => e.id === edgeProps.id) || (edgeProps as Edge);
+    setQuickAddEdge(edge);
+    setQuickAddPos(pos || null);
+    setQuickAddAnchor({ x: clientX, y: clientY });
+    setQuickAddQuery('');
+    setQuickAddOpen(true);
+  }, [reactFlowInstance, edges]);
+
+  const edgesWithHandlers = useMemo(
+    () =>
+      edges.map((e) => ({
+        ...e,
+        type: e.type ?? 'insertable',
+        data: { ...(e.data || {}), onInsert: handleEdgeInsert }
+      })),
+    [edges, handleEdgeInsert]
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (quickAddOpen) setQuickAddOpen(false);
+        if (dockOpen) setDockOpen(false);
+      }
+      if (e.key.toLowerCase() === 'f') {
+        reactFlowInstance?.fitView?.({ duration: 200, padding: 0.2 });
+      }
+      if (e.key.toLowerCase() === 'z' && selectedNodeId && reactFlowInstance?.getNode) {
+        const node = reactFlowInstance.getNode(selectedNodeId);
+        if (node) {
+          const zoom = reactFlowInstance.getZoom?.() || 1;
+          const pos = node.positionAbsolute || node.position;
+          const cx = pos.x + (node.width || 0) / 2;
+          const cy = pos.y + (node.height || 0) / 2;
+          reactFlowInstance.setCenter?.(cx, cy, { zoom, duration: 200 });
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [quickAddOpen, dockOpen, reactFlowInstance, selectedNodeId]);
 
   useEffect(() => {
     const onDocClick = () => setContextMenu(null);
@@ -930,6 +1205,47 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     }
   };
 
+  const autoLayout = useCallback(() => {
+    const ids = nodes.map((n) => n.id);
+    const adj = new Map<string, string[]>();
+    const inDegree = new Map<string, number>();
+    ids.forEach((id) => {
+      adj.set(id, []);
+      inDegree.set(id, 0);
+    });
+    edges.forEach((e) => {
+      if (!adj.has(e.source) || !adj.has(e.target)) return;
+      adj.get(e.source)!.push(e.target);
+      inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
+    });
+    const queue: string[] = [];
+    inDegree.forEach((deg, id) => {
+      if (deg === 0) queue.push(id);
+    });
+    const order: string[] = [];
+    while (queue.length) {
+      const u = queue.shift()!;
+      order.push(u);
+      (adj.get(u) || []).forEach((v) => {
+        inDegree.set(v, (inDegree.get(v)! - 1));
+        if (inDegree.get(v) === 0) queue.push(v);
+      });
+    }
+    const sorted = order.length === ids.length ? order : ids;
+    const baseX = 250;
+    const baseY = 50;
+    const xSpacing = 320;
+    setNodes((nds) =>
+      nds.map((n) => {
+        const index = sorted.indexOf(n.id);
+        if (index === -1) return n;
+        const y = n.id === 'start' ? baseY : (n.position?.y ?? baseY);
+        return { ...n, position: { x: baseX + index * xSpacing, y } };
+      })
+    );
+    setTimeout(() => reactFlowInstance?.fitView(), 50);
+  }, [nodes, edges, reactFlowInstance]);
+
   const drawerNode = useMemo(() => nodes.find((n: any) => n.id === drawerNodeId) ?? null, [nodes, drawerNodeId]);
 
   // When opening the drawer, the drawer overlays the right side of the canvas.
@@ -965,27 +1281,44 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
  	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
   	        <FlowRuntimeContext.Provider value={flowRuntime}>
               <FlowEditorContext.Provider value={{ updateNodeData }}>
-  	          <ReactFlow
- 	            nodes={nodes}
- 	            edges={edges}
- 	            onNodesChange={onNodesChange}
- 	            onEdgesChange={onEdgesChange}
-	            onConnect={onConnect}
-	            onInit={setReactFlowInstance}
-	            onDrop={onDrop}
-	            onDragOver={onDragOver}
-  	            nodeTypes={nodeTypes}
-  	            snapToGrid={true}
-  	            fitView
+              <ReactFlow
+                nodes={nodes}
+                edges={edgesWithHandlers}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onInit={setReactFlowInstance}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+                onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+                onPaneClick={(event: any) => {
+                  if (quickAddOpen) setQuickAddOpen(false);
+                  if (reactFlowInstance?.screenToFlowPosition) {
+                    const pos = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+                    setLastCanvasPos(pos);
+                  }
+                  if (event?.detail === 2 && reactFlowInstance?.screenToFlowPosition) {
+                    const pos = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+                    setQuickAddPos(pos);
+                    setQuickAddAnchor({ x: event.clientX, y: event.clientY });
+                    setQuickAddEdge(null);
+                    setQuickAddQuery('');
+                    setQuickAddOpen(true);
+                  }
+                }}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                snapToGrid={true}
+                fitView
               onNodeContextMenu={(event, node) => {
                 event.preventDefault();
                 setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id });
               }}
-  	          >
-  	            <Controls />
-  	            <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
-  	            <MiniMap />
-  	          </ReactFlow>
+              >
+                <Controls />
+                <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
+                <MiniMap />
+              </ReactFlow>
               </FlowEditorContext.Provider>
   	        </FlowRuntimeContext.Provider>
  	      </div>
@@ -1090,6 +1423,78 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
             >
               Clear highlight
             </button>
+          </div>
+        )}
+
+        {quickAddOpen && quickAddAnchor && (
+          <div
+            className="nodrag quick-add-palette"
+            style={{
+              position: 'fixed',
+              left: paletteLeft,
+              top: paletteTop,
+              zIndex: 1200,
+              width: '260px',
+              background: 'var(--vscode-editorWidget-background)',
+              border: '1px solid var(--vscode-editorWidget-border)',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+              borderRadius: '8px',
+              padding: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              className="nodrag"
+              autoFocus
+              placeholder="Search nodes…"
+              value={quickAddQuery}
+              onChange={(e) => setQuickAddQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && filteredQuickAddItems.length > 0) {
+                  addNodeFromItem(filteredQuickAddItems[0], quickAddPos || undefined, quickAddEdge);
+                  setQuickAddOpen(false);
+                  setQuickAddEdge(null);
+                }
+                if (e.key === 'Escape') {
+                  setQuickAddOpen(false);
+                }
+              }}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                borderRadius: '6px',
+                border: '1px solid var(--vscode-input-border)',
+                background: 'var(--vscode-input-background)',
+                color: 'var(--vscode-input-foreground)'
+              }}
+            />
+            <div style={{ maxHeight: '220px', overflow: 'auto' }}>
+              {filteredQuickAddItems.length === 0 && (
+                <div style={{ fontSize: '12px', opacity: 0.7, padding: '6px' }}>No results</div>
+              )}
+              {filteredQuickAddItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="quick-add-item"
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '12px'
+                  }}
+                  onClick={() => {
+                    addNodeFromItem(item, quickAddPos || undefined, quickAddEdge);
+                    setQuickAddOpen(false);
+                    setQuickAddEdge(null);
+                  }}
+                >
+                  {item.label}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1615,6 +2020,97 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
           </div>
         )}
 
+        <div
+          className="nodrag"
+          style={{
+            position: 'absolute',
+            bottom: '18px',
+            right: '18px',
+            zIndex: 950,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: '8px'
+          }}
+        >
+          {dockOpen && (
+            <div
+              className="nodrag quick-add-dock"
+              style={{
+                width: '240px',
+                background: 'var(--vscode-editorWidget-background)',
+                border: '1px solid var(--vscode-editorWidget-border)',
+                boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+                borderRadius: '8px',
+                padding: '8px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                className="nodrag"
+                placeholder="Search nodes…"
+                value={dockQuery}
+                onChange={(e) => setDockQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && filteredDockItems.length > 0) {
+                    addNodeFromItem(filteredDockItems[0], lastCanvasPos || undefined, null);
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--vscode-input-border)',
+                  background: 'var(--vscode-input-background)',
+                  color: 'var(--vscode-input-foreground)'
+                }}
+              />
+              <div style={{ maxHeight: '200px', overflow: 'auto' }}>
+                {filteredDockItems.length === 0 && (
+                  <div style={{ fontSize: '12px', opacity: 0.7, padding: '6px' }}>No results</div>
+                )}
+                {filteredDockItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="quick-add-item"
+                    style={{
+                      padding: '6px 8px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px'
+                    }}
+                    onClick={() => addNodeFromItem(item, lastCanvasPos || undefined, null)}
+                  >
+                    {item.label}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <button
+            className="nodrag"
+            onClick={() => setDockOpen((v) => !v)}
+            title="Quick Add"
+            style={{
+              width: '34px',
+              height: '34px',
+              borderRadius: '18px',
+              border: '1px solid var(--vscode-editorWidget-border)',
+              background: 'var(--vscode-button-background)',
+              color: 'var(--vscode-button-foreground)',
+              cursor: 'pointer',
+              fontSize: '18px',
+              lineHeight: '30px',
+              padding: 0
+            }}
+          >
+            +
+          </button>
+        </div>
+
        <button
          onClick={runPipeline}
          style={{
@@ -1631,6 +2127,24 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
          }}
        >
          Run
+       </button>
+
+       <button
+         onClick={autoLayout}
+         style={{
+           position: 'absolute',
+           top: '10px',
+           right: '260px',
+           padding: '10px 14px',
+           background: 'var(--vscode-button-secondaryBackground)',
+           color: 'var(--vscode-button-secondaryForeground)',
+           border: 'none',
+           borderRadius: '4px',
+           cursor: 'pointer',
+           zIndex: 5
+         }}
+       >
+         Auto layout
        </button>
 
        <button

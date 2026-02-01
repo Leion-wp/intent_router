@@ -67,8 +67,8 @@
             "status": "idle"
           },
           "position": {
-            "x": 195,
-            "y": 90
+            "x": 250,
+            "y": 50
           },
           "sourcePosition": "right",
           "deletable": false,
@@ -83,7 +83,7 @@
           "id": "node_1",
           "type": "actionNode",
           "position": {
-            "x": 480,
+            "x": 570,
             "y": 45
           },
           "data": {
@@ -107,8 +107,8 @@
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 770,
-            "y": 50
+            "x": 890,
+            "y": 45
           },
           "data": {
             "provider": "terminal",
@@ -118,18 +118,21 @@
               "command": "npm run compile"
             },
             "kind": "action",
+            "label": "f",
             "status": "idle"
           },
           "measured": {
-            "width": 641,
-            "height": 450
-          }
+            "width": 273,
+            "height": 264
+          },
+          "selected": false,
+          "dragging": false
         },
         {
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 1050,
+            "x": 1210,
             "y": 45
           },
           "data": {
@@ -153,7 +156,7 @@
           "id": "node_6",
           "type": "actionNode",
           "position": {
-            "x": 1320,
+            "x": 1530,
             "y": 45
           },
           "data": {
@@ -176,7 +179,7 @@
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1590,
+            "x": 1850,
             "y": 45
           },
           "data": {
@@ -196,7 +199,7 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1920,
+            "x": 2175,
             "y": 45
           },
           "data": {
@@ -207,9 +210,9 @@
           },
           "measured": {
             "width": 283,
-            "height": 203
+            "height": 206
           },
-          "selected": false,
+          "selected": true,
           "dragging": false
         }
       ],

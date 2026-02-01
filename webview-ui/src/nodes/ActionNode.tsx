@@ -21,12 +21,15 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const [capability, setCapability] = useState<string>((data.capability as string) || '');
   const [args, setArgs] = useState<Record<string, any>>((data.args as Record<string, any>) || {});
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
+  const [label, setLabel] = useState<string>((data.label as string) || '');
+  const [editingLabel, setEditingLabel] = useState(false);
   const [expandedHelp, setExpandedHelp] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({});
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const [varPickerOpen, setVarPickerOpen] = useState<Record<string, boolean>>({});
   const logsRef = useRef<HTMLDivElement>(null);
+  const collapsed = !!data.collapsed;
 
   // Sync from props if data changes externally
   useEffect(() => {
@@ -34,6 +37,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
     if (data.capability) setCapability(data.capability as string);
     if (data.args) setArgs(data.args as Record<string, any>);
     if (data.status) setStatus(data.status as string);
+    if (data.label !== undefined) setLabel((data.label as string) || '');
 
     // Auto-open console if logs exist and we just started running or got logs
     if (data.logs && (data.logs as any[]).length > 0 && !isConsoleOpen) {
@@ -207,6 +211,8 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
   const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none';
 
+  const fallbackTitle = `${provider} · ${selectedCapConfig?.capability || capability}`.trim();
+
   return (
     <div style={{
       padding: '10px',
@@ -228,11 +234,63 @@ const ActionNode = ({ data, id }: NodeProps) => {
         style={{ top: '30%', background: '#f44336' }}
       />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', textTransform: 'capitalize' }}>
-        <span>{provider}</span>
-        {status !== 'idle' && <span style={{ fontSize: '0.8em', color: borderColor }}>●</span>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+          <span className="codicon codicon-gear"></span>
+          {editingLabel ? (
+            <input
+              className="nodrag"
+              value={label}
+              autoFocus
+              onChange={(e) => {
+                const v = e.target.value;
+                setLabel(v);
+                updateNodeData(id, { label: v });
+              }}
+              onBlur={() => setEditingLabel(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') setEditingLabel(false);
+              }}
+              style={{
+                flex: 1,
+                background: 'var(--vscode-input-background)',
+                color: 'var(--vscode-input-foreground)',
+                border: '1px solid var(--vscode-input-border)',
+                padding: '2px 4px',
+                borderRadius: '4px'
+              }}
+            />
+          ) : (
+            <span
+              title="Click to rename"
+              onClick={() => setEditingLabel(true)}
+              style={{ cursor: 'text', userSelect: 'none' }}
+            >
+              {label || fallbackTitle}
+            </span>
+          )}
+        </div>
+        {status !== 'idle' && <span className={`status-badge ${status}`}>{status}</span>}
+        <button
+          className="nodrag"
+          onClick={() => updateNodeData(id, { collapsed: !collapsed })}
+          title={collapsed ? 'Expand' : 'Collapse'}
+          style={{
+            background: 'transparent',
+            color: 'var(--vscode-foreground)',
+            border: '1px solid var(--vscode-editorWidget-border)',
+            borderRadius: '4px',
+            width: '20px',
+            height: '20px',
+            cursor: 'pointer'
+          }}
+        >
+          {collapsed ? '▸' : '▾'}
+        </button>
       </div>
 
+      {!collapsed && (
+      <>
       <div style={{ marginBottom: '8px' }}>
         <select
           aria-label="Select capability"
@@ -494,11 +552,13 @@ const ActionNode = ({ data, id }: NodeProps) => {
           );
         })}
       </div>
+      </>
+      )}
 
       <Handle type="source" position={Position.Right} />
 
       {/* Mini-Console */}
-      {logs.length > 0 && (
+      {!collapsed && logs.length > 0 && (
         <div className="nodrag" style={{ marginTop: '8px', borderTop: '1px solid var(--vscode-widget-border)' }}>
             <div
                 onClick={() => setIsConsoleOpen(!isConsoleOpen)}
@@ -544,3 +604,4 @@ const ActionNode = ({ data, id }: NodeProps) => {
 };
 
 export default memo(ActionNode);
+
