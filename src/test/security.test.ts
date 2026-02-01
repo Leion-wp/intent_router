@@ -16,12 +16,28 @@ suite('Security Tests', () => {
         assert.throws(() => validateStrictShellArg('abc>def', 'context'), /Invalid characters/);
     });
 
-    test('sanitizeShellArg', () => {
-        assert.strictEqual(sanitizeShellArg('abc'), '"abc"');
-        assert.strictEqual(sanitizeShellArg('abc def'), '"abc def"');
-        assert.strictEqual(sanitizeShellArg('abc"def'), '"abc\\"def"');
-        assert.strictEqual(sanitizeShellArg('abc$def'), '"abc\\$def"');
-        assert.strictEqual(sanitizeShellArg('abc`def'), '"abc\\`def"');
+    test('sanitizeShellArg - POSIX (default/linux)', () => {
+        // Explicitly test linux (sh) behavior
+        assert.strictEqual(sanitizeShellArg('abc', 'linux'), '"abc"');
+        assert.strictEqual(sanitizeShellArg('abc def', 'linux'), '"abc def"');
+        assert.strictEqual(sanitizeShellArg('abc"def', 'linux'), '"abc\\"def"');
+        assert.strictEqual(sanitizeShellArg('abc$def', 'linux'), '"abc\\$def"');
+        assert.strictEqual(sanitizeShellArg('abc`def', 'linux'), '"abc\\`def"');
+        assert.strictEqual(sanitizeShellArg('abc\\def', 'linux'), '"abc\\\\def"');
+    });
+
+    test('sanitizeShellArg - Windows (PowerShell)', () => {
+        // Explicitly test win32 (PowerShell) behavior
+        assert.strictEqual(sanitizeShellArg('abc', 'win32'), '"abc"');
+        assert.strictEqual(sanitizeShellArg('abc def', 'win32'), '"abc def"');
+        assert.strictEqual(sanitizeShellArg('abc"def', 'win32'), '"abc`"def"');
+        assert.strictEqual(sanitizeShellArg('abc$def', 'win32'), '"abc`$def"');
+        assert.strictEqual(sanitizeShellArg('abc`def', 'win32'), '"abc``def"');
+        // Backslash is literal in PowerShell strings
+        assert.strictEqual(sanitizeShellArg('abc\\def', 'win32'), '"abc\\def"');
+
+        // Vulnerability check: $(calc) should be escaped
+        assert.strictEqual(sanitizeShellArg('$(calc)', 'win32'), '"`$(calc)"');
     });
 
     test('validateSafeRelativePath - Basic Relative', () => {
