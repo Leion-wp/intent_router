@@ -1,7 +1,9 @@
 {
-    "name": "intent-router",
-    "displayName": "Intent Router",
-    "description": "Centralized intent routing for VS Code / Cursor / Agentic extensions",
+    "name": "leion-roots",
+    "displayName": "Leion Roots",
+    "description": "Human-centric visual orchestration runtime for VS Code",
+    "publisher": "LeionCorp",
+    "icon": "media/icon_leion_roots.png",
     "version": "0.0.1",
     "license": "MIT",
     "repository": {
