@@ -199,7 +199,7 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 2175,
+            "x": 2170,
             "y": 45
           },
           "data": {
@@ -212,7 +212,7 @@
             "width": 283,
             "height": 206
           },
-          "selected": true,
+          "selected": false,
           "dragging": false
         }
       ],
