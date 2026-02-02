@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import { validateSafeRelativePath, validateStrictShellArg, sanitizeShellArg } from '../security';
+import { validateSafeRelativePath, validateStrictShellArg, sanitizeShellArg, sanitizeShArg, sanitizePowerShellArg } from '../security';
 
 suite('Security Tests', () => {
 
@@ -16,12 +16,26 @@ suite('Security Tests', () => {
         assert.throws(() => validateStrictShellArg('abc>def', 'context'), /Invalid characters/);
     });
 
-    test('sanitizeShellArg', () => {
-        assert.strictEqual(sanitizeShellArg('abc'), '"abc"');
-        assert.strictEqual(sanitizeShellArg('abc def'), '"abc def"');
-        assert.strictEqual(sanitizeShellArg('abc"def'), '"abc\\"def"');
-        assert.strictEqual(sanitizeShellArg('abc$def'), '"abc\\$def"');
-        assert.strictEqual(sanitizeShellArg('abc`def'), '"abc\\`def"');
+    test('sanitizeShArg', () => {
+        assert.strictEqual(sanitizeShArg('abc'), '"abc"');
+        assert.strictEqual(sanitizeShArg('abc def'), '"abc def"');
+        assert.strictEqual(sanitizeShArg('abc"def'), '"abc\\"def"');
+        assert.strictEqual(sanitizeShArg('abc$def'), '"abc\\$def"');
+        assert.strictEqual(sanitizeShArg('abc`def'), '"abc\\`def"');
+    });
+
+    test('sanitizePowerShellArg', () => {
+        assert.strictEqual(sanitizePowerShellArg('abc'), '"abc"');
+        assert.strictEqual(sanitizePowerShellArg('abc def'), '"abc def"');
+        assert.strictEqual(sanitizePowerShellArg('abc"def'), '"abc`"def"');
+        assert.strictEqual(sanitizePowerShellArg('abc$def'), '"abc`$def"');
+        assert.strictEqual(sanitizePowerShellArg('abc`def'), '"abc``def"');
+    });
+
+    test('sanitizeShellArg (Dispatcher)', () => {
+        // Just verify it doesn't crash and returns a quoted string
+        const result = sanitizeShellArg('foo');
+        assert.ok(result.startsWith('"') && result.endsWith('"'));
     });
 
     test('validateSafeRelativePath - Basic Relative', () => {
