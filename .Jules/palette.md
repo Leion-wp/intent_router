@@ -16,3 +16,7 @@
 ## 2026-02-05 - Nested Interactive Elements in Lists
 **Learning:** The History list implementation uses a `div` with `onClick` as a row container which also contains a nested "Restore" `<button>`. This creates a trap for converting the container to a semantic `<button>` or `<a>` tag, as nested interactive elements are invalid HTML.
 **Action:** For list items with primary and secondary actions, avoid making the entire row a button. Instead, separate the layout into distinct interactive zones (e.g., "Select" button + "Restore" button) to maintain semantic validity and keyboard navigability.
+
+## 2026-02-05 - In-Place Confirmation for Destructive Actions
+**Learning:** Small sidebar actions (like "Restore") often lack confirmation due to space constraints, leading to accidental data loss. Standard modals are too heavy for micro-interactions.
+**Action:** Use an in-place state toggle to temporarily swap the trigger button with small "Confirm/Cancel" controls. This adds safety without breaking the layout or requiring overlay handling.

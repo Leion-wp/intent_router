@@ -18,6 +18,7 @@ declare global {
 export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory }: SidebarProps) {
   const [tab, setTab] = useState<'providers' | 'history' | 'environment'>('providers');
   const [envVars, setEnvVars] = useState<{ key: string, value: string, visible: boolean }[]>([]);
+  const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
 
 	  useEffect(() => {
 	    const loadEnv = (data: any) => {
@@ -178,7 +179,7 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
         )}
 
 	        {tab === 'history' && (
-	            <div className="sidebar-list">
+	            <div className="sidebar-list" role="list">
 	                 {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
 	                 {history.map((run) => (
 	                      <div
@@ -194,31 +195,77 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 	                        }}
 	                        onMouseOver={(e) => e.currentTarget.style.border = '1px solid var(--vscode-focusBorder)'}
 	                        onMouseOut={(e) => e.currentTarget.style.border = '1px solid transparent'}
+                            role="listitem"
 	                      >
 	                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
 	                              <div style={{fontWeight: 'bold', fontSize: '12px'}}>{run.name}</div>
-	                              <button
-	                                  onClick={(e) => {
-	                                      e.stopPropagation();
-	                                      if (run.pipelineSnapshot) {
-	                                          onRestoreHistory?.(run);
-	                                      }
-	                                  }}
-	                                  disabled={!run.pipelineSnapshot}
-	                                  title={run.pipelineSnapshot ? 'Restore this snapshot in the builder' : 'No snapshot available for this run'}
-	                                  style={{
-	                                      padding: '2px 8px',
-	                                      fontSize: '10px',
-	                                      borderRadius: '4px',
-	                                      border: '1px solid var(--vscode-panel-border)',
-	                                      background: run.pipelineSnapshot ? 'var(--vscode-button-background)' : 'transparent',
-	                                      color: run.pipelineSnapshot ? 'var(--vscode-button-foreground)' : 'var(--vscode-descriptionForeground)',
-	                                      cursor: run.pipelineSnapshot ? 'pointer' : 'not-allowed',
-	                                      opacity: run.pipelineSnapshot ? 1 : 0.6
-	                                  }}
-	                              >
-	                                  Restore
-	                              </button>
+                                  {confirmRestoreId === run.id ? (
+                                      <div style={{ display: 'flex', gap: '4px' }}>
+                                          <button
+                                              onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  onRestoreHistory?.(run);
+                                                  setConfirmRestoreId(null);
+                                              }}
+                                              title="Confirm Restore"
+                                              aria-label="Confirm restore"
+                                              style={{
+                                                  padding: '2px 8px',
+                                                  fontSize: '10px',
+                                                  borderRadius: '4px',
+                                                  border: 'none',
+                                                  background: 'var(--vscode-button-background)',
+                                                  color: 'var(--vscode-button-foreground)',
+                                                  cursor: 'pointer'
+                                              }}
+                                          >
+                                              Confirm
+                                          </button>
+                                          <button
+                                              onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setConfirmRestoreId(null);
+                                              }}
+                                              title="Cancel Restore"
+                                              aria-label="Cancel restore"
+                                              style={{
+                                                  padding: '2px 6px',
+                                                  fontSize: '10px',
+                                                  borderRadius: '4px',
+                                                  border: '1px solid var(--vscode-button-secondaryHoverBackground)',
+                                                  background: 'transparent',
+                                                  color: 'var(--vscode-descriptionForeground)',
+                                                  cursor: 'pointer'
+                                              }}
+                                          >
+                                              Cancel
+                                          </button>
+                                      </div>
+                                  ) : (
+                                      <button
+                                          onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (run.pipelineSnapshot) {
+                                                  setConfirmRestoreId(run.id);
+                                              }
+                                          }}
+                                          disabled={!run.pipelineSnapshot}
+                                          title={run.pipelineSnapshot ? 'Restore this snapshot in the builder' : 'No snapshot available for this run'}
+                                          aria-label={`Restore ${run.name}`}
+                                          style={{
+                                              padding: '2px 8px',
+                                              fontSize: '10px',
+                                              borderRadius: '4px',
+                                              border: '1px solid var(--vscode-panel-border)',
+                                              background: run.pipelineSnapshot ? 'var(--vscode-button-background)' : 'transparent',
+                                              color: run.pipelineSnapshot ? 'var(--vscode-button-foreground)' : 'var(--vscode-descriptionForeground)',
+                                              cursor: run.pipelineSnapshot ? 'pointer' : 'not-allowed',
+                                              opacity: run.pipelineSnapshot ? 1 : 0.6
+                                          }}
+                                      >
+                                          Restore
+                                      </button>
+                                  )}
 	                          </div>
 	                          <div style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between'}}>
 	                              <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
