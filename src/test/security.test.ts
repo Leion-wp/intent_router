@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import { validateSafeRelativePath, validateStrictShellArg, sanitizeShellArg } from '../security';
+import { validateSafeRelativePath, validateStrictShellArg, sanitizeShellArg, sanitizeShArg, sanitizePowerShellArg } from '../security';
 
 suite('Security Tests', () => {
 
@@ -16,12 +16,35 @@ suite('Security Tests', () => {
         assert.throws(() => validateStrictShellArg('abc>def', 'context'), /Invalid characters/);
     });
 
-    test('sanitizeShellArg', () => {
-        assert.strictEqual(sanitizeShellArg('abc'), '"abc"');
-        assert.strictEqual(sanitizeShellArg('abc def'), '"abc def"');
-        assert.strictEqual(sanitizeShellArg('abc"def'), '"abc\\"def"');
-        assert.strictEqual(sanitizeShellArg('abc$def'), '"abc\\$def"');
-        assert.strictEqual(sanitizeShellArg('abc`def'), '"abc\\`def"');
+    test('sanitizeShArg (POSIX)', () => {
+        assert.strictEqual(sanitizeShArg('abc'), '"abc"');
+        assert.strictEqual(sanitizeShArg('abc def'), '"abc def"');
+        assert.strictEqual(sanitizeShArg('abc"def'), '"abc\\"def"');
+        assert.strictEqual(sanitizeShArg('abc$def'), '"abc\\$def"');
+        assert.strictEqual(sanitizeShArg('abc`def'), '"abc\\`def"');
+        assert.strictEqual(sanitizeShArg('abc\\def'), '"abc\\\\def"');
+    });
+
+    test('sanitizePowerShellArg (Windows)', () => {
+        assert.strictEqual(sanitizePowerShellArg('abc'), '"abc"');
+        assert.strictEqual(sanitizePowerShellArg('abc def'), '"abc def"');
+        assert.strictEqual(sanitizePowerShellArg('abc"def'), '"abc`"def"');
+        assert.strictEqual(sanitizePowerShellArg('abc$def'), '"abc`$def"');
+        assert.strictEqual(sanitizePowerShellArg('abc`def'), '"abc``def"');
+        assert.strictEqual(sanitizePowerShellArg('abc\\def'), '"abc\\def"');
+    });
+
+    test('sanitizeShellArg (Platform Aware)', () => {
+        if (process.platform === 'win32') {
+            assert.strictEqual(sanitizeShellArg('foo"bar'), '"foo`"bar"');
+        } else {
+            assert.strictEqual(sanitizeShellArg('foo"bar'), '"foo\\"bar"');
+        }
+    });
+
+    test('sanitizeShellArg (Explicit Style)', () => {
+        assert.strictEqual(sanitizeShellArg('foo"bar', 'sh'), '"foo\\"bar"');
+        assert.strictEqual(sanitizeShellArg('foo"bar', 'powershell'), '"foo`"bar"');
     });
 
     test('validateSafeRelativePath - Basic Relative', () => {

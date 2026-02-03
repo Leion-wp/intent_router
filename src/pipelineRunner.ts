@@ -170,7 +170,7 @@ function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): 
             const amend = payload?.amend;
             if (!message) throw new Error('git.commit requires "message"');
 
-            const safeMessage = sanitizeShellArg(message);
+            const safeMessage = sanitizeShellArg(message, process.platform === 'win32' ? 'powershell' : 'sh');
             command = `git commit ${amend ? '--amend ' : ''}-m ${safeMessage}`;
             break;
         }
@@ -185,7 +185,7 @@ function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): 
              const dir = payload?.dir;
              if (!url) throw new Error('git.clone requires "url"');
 
-             const safeUrl = sanitizeShellArg(url);
+             const safeUrl = sanitizeShellArg(url, process.platform === 'win32' ? 'powershell' : 'sh');
              let dirPart = '';
              if (dir) {
                  validateStrictShellArg(dir, 'dir');
