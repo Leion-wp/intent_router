@@ -107,3 +107,39 @@ html, body, #root {
   outline-offset: 2px;
   opacity: 1;
 }
+
+/* History List Item Styles */
+.history-item {
+  padding: 8px;
+  background: var(--vscode-list-hoverBackground);
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-item:hover,
+.history-item:focus-visible {
+  border-color: var(--vscode-focusBorder);
+  outline: none;
+}
+
+.restore-btn {
+  padding: 2px 8px;
+  font-size: 10px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  cursor: pointer;
+  opacity: 1;
+}
+
+.restore-btn:disabled {
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: not-allowed;
+  opacity: 0.6;
+}

@@ -158,7 +158,7 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 
 	      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
         {tab === 'providers' && (
-             <div className="sidebar-list">
+             <div className="sidebar-list" role="list">
              {items.map((item, idx) => (
                 <div
                   key={idx}
@@ -169,6 +169,11 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                   aria-label={`Add ${item.label} node`}
                   tabIndex={0}
                   role="listitem"
+                  onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                          // Draggables usually don't have click action here, but good practice
+                      }
+                  }}
                 >
                   <span className={`codicon ${item.icon}`} style={{ fontSize: '16px', marginRight: '8px' }}></span>
                   <span>{item.label}</span>
@@ -178,26 +183,27 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
         )}
 
 	        {tab === 'history' && (
-	            <div className="sidebar-list">
+	            <div className="sidebar-list" role="list">
 	                 {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
 	                 {history.map((run) => (
 	                      <div
 	                        key={run.id}
+	                        className="history-item"
+	                        role="listitem"
+	                        tabIndex={0}
+	                        aria-label={`Select run: ${run.name}`}
 	                        onClick={() => onSelectHistory?.({ ...run })}
-	                        style={{
-	                          padding: '8px',
-	                          background: 'var(--vscode-list-hoverBackground)',
-	                          cursor: 'pointer',
-	                          borderRadius: '4px',
-	                          border: '1px solid transparent',
-	                          marginBottom: '8px'
+	                        onKeyDown={(e) => {
+	                           if (e.key === 'Enter' || e.key === ' ') {
+	                               e.preventDefault();
+	                               onSelectHistory?.({ ...run });
+	                           }
 	                        }}
-	                        onMouseOver={(e) => e.currentTarget.style.border = '1px solid var(--vscode-focusBorder)'}
-	                        onMouseOut={(e) => e.currentTarget.style.border = '1px solid transparent'}
 	                      >
 	                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
 	                              <div style={{fontWeight: 'bold', fontSize: '12px'}}>{run.name}</div>
 	                              <button
+	                                  className="restore-btn"
 	                                  onClick={(e) => {
 	                                      e.stopPropagation();
 	                                      if (run.pipelineSnapshot) {
@@ -206,16 +212,7 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 	                                  }}
 	                                  disabled={!run.pipelineSnapshot}
 	                                  title={run.pipelineSnapshot ? 'Restore this snapshot in the builder' : 'No snapshot available for this run'}
-	                                  style={{
-	                                      padding: '2px 8px',
-	                                      fontSize: '10px',
-	                                      borderRadius: '4px',
-	                                      border: '1px solid var(--vscode-panel-border)',
-	                                      background: run.pipelineSnapshot ? 'var(--vscode-button-background)' : 'transparent',
-	                                      color: run.pipelineSnapshot ? 'var(--vscode-button-foreground)' : 'var(--vscode-descriptionForeground)',
-	                                      cursor: run.pipelineSnapshot ? 'pointer' : 'not-allowed',
-	                                      opacity: run.pipelineSnapshot ? 1 : 0.6
-	                                  }}
+	                                  aria-label={run.pipelineSnapshot ? `Restore snapshot for ${run.name}` : 'Snapshot unavailable'}
 	                              >
 	                                  Restore
 	                              </button>
