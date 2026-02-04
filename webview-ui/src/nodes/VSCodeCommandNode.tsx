@@ -57,6 +57,9 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
       <div style={{ marginBottom: '8px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
           <span className="codicon codicon-vscode"></span>
+          <span title="Interactive (requires human / UI)" style={{ fontSize: '12px' }}>
+            👤
+          </span>
           {editingLabel ? (
             <input
               className="nodrag"

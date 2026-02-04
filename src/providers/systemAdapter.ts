@@ -35,6 +35,7 @@ function doRegister() {
                 capability: 'system.pause',
                 command: 'intentRouter.internal.systemPause',
                 description: 'Pause execution for human verification',
+                determinism: 'interactive',
                 args: [
                     { name: 'message', type: 'string', description: 'Message to display in the modal', required: true, default: 'Pipeline paused for review.' }
                 ]
@@ -43,6 +44,7 @@ function doRegister() {
                 capability: 'system.setVar',
                 command: 'intentRouter.internal.systemSetVar',
                 description: 'Set a pipeline variable for later steps',
+                determinism: 'deterministic',
                 args: [
                     { name: 'name', type: 'string', description: 'Variable name (used by ${input:Name} / ${var:Name})', required: true },
                     { name: 'value', type: 'string', description: 'Variable value', required: true }
@@ -52,6 +54,7 @@ function doRegister() {
                 capability: 'system.setCwd',
                 command: 'intentRouter.internal.systemSetCwd',
                 description: 'Set the working directory for subsequent steps',
+                determinism: 'deterministic',
                 args: [
                     { name: 'path', type: 'path', description: 'Working directory path', required: true }
                 ]

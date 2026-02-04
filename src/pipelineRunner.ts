@@ -3,6 +3,8 @@ import { Intent } from './types';
 import { routeIntent } from './router';
 import { pipelineEventBus } from './eventBus';
 import { generateSecureToken, validateStrictShellArg, sanitizeShellArg } from './security';
+import { listPublicCapabilities } from './registry';
+import { Determinism } from './types';
 
 export type PipelineFile = {
     name: string;
@@ -22,6 +24,52 @@ export type PipelineFile = {
 let currentRunId: string | null = null;
 let isCancelled = false;
 let isPaused = false;
+
+function canonicalizeCapabilityId(capability: string): string {
+    const raw = (capability ?? '').trim();
+    if (!raw) {
+        return raw;
+    }
+
+    const parts = raw.split('.').filter(Boolean);
+    if (parts.length < 3) {
+        return raw;
+    }
+
+    const first = parts[0];
+    let i = 1;
+    while (i < parts.length - 1 && parts[i] === first) {
+        i += 1;
+    }
+    if (i === 1) {
+        return raw;
+    }
+
+    return [first, ...parts.slice(i)].join('.');
+}
+
+function buildDeterminismMap(): Map<string, Determinism> {
+    const map = new Map<string, Determinism>();
+    const caps = listPublicCapabilities();
+    for (const cap of caps as any[]) {
+        if (cap?.capability && (cap.determinism === 'deterministic' || cap.determinism === 'interactive')) {
+            map.set(String(cap.capability), cap.determinism as Determinism);
+        }
+    }
+    return map;
+}
+
+function isInteractiveIntent(intent: Intent, determinismByCapability: Map<string, Determinism>): boolean {
+    const rawCaps = (intent.capabilities && intent.capabilities.length > 0) ? intent.capabilities : [intent.intent];
+    const caps = rawCaps.map(canonicalizeCapabilityId);
+    for (const cap of caps) {
+        const d = determinismByCapability.get(cap);
+        if (d === 'interactive') {
+            return true;
+        }
+    }
+    return false;
+}
 
 export function cancelCurrentPipeline() {
     if (currentRunId) {
@@ -258,6 +306,10 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
     // Cache for ${input:...} and store for ${var:...} (environment variables)
     const variableCache = new Map<string, string>();
 
+    const ciStrict = config.get<boolean>('policy.ciStrict', false);
+    const interactiveBehavior = config.get<'confirm' | 'allow'>('policy.interactiveBehavior', 'confirm');
+    const determinismByCapability = buildDeterminismMap();
+
     // Load global environment into variableCache
     const globalEnv = config.get<Record<string, string>>('environment') || {};
     for (const [key, value] of Object.entries(globalEnv)) {
@@ -376,6 +428,45 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     dryRun: dryRun ? true : step.meta?.dryRun
                 }
             };
+
+            const interactive = isInteractiveIntent(stepIntent, determinismByCapability);
+            if (interactive) {
+                if (ciStrict) {
+                    vscode.window.showErrorMessage(
+                        `Blocked interactive step by policy (CI strict): ${stepIntent.intent}. Disable "Intent Router: Policy › CI Strict" to allow interactive steps.`
+                    );
+                    pipelineEventBus.emit({
+                        type: 'pipelineEnd',
+                        runId,
+                        timestamp: Date.now(),
+                        success: false,
+                        status: 'failure'
+                    });
+                    return;
+                }
+
+                if (interactiveBehavior === 'confirm' && stepIntent.intent !== 'system.pause') {
+                    const selection = await vscode.window.showWarningMessage(
+                        `Interactive step detected: ${stepIntent.intent}\nThis may open UI or require human input. Continue?`,
+                        { modal: true },
+                        'Continue',
+                        'Cancel'
+                    );
+
+                    if (selection !== 'Continue') {
+                        isCancelled = true;
+                        vscode.window.showWarningMessage('Pipeline cancelled by user.');
+                        pipelineEventBus.emit({
+                            type: 'pipelineEnd',
+                            runId,
+                            timestamp: Date.now(),
+                            success: false,
+                            status: 'cancelled'
+                        });
+                        return;
+                    }
+                }
+            }
 
             // Resolve variables for compilation
             // We use compileStep to handle both var resolution AND terminal transformation

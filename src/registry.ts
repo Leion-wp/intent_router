@@ -1,4 +1,4 @@
-import { Capability, CompositeCapability, Intent, RegisterCapabilitiesArgs, Resolution, UserMapping } from './types';
+import { Capability, CompositeCapability, Determinism, Intent, RegisterCapabilitiesArgs, Resolution, UserMapping } from './types';
 
 const registeredCapabilities: Capability[] = [];
 const compositeCapabilities: CompositeCapability[] = [];
@@ -38,7 +38,16 @@ export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
         return count;
     }
 
-    for (const entry of args.capabilities as Array<{ capability: string; command: string; capabilityType?: string; steps?: any[]; args?: any[]; description?: string; mapPayload?: (intent: Intent) => any; }>) {
+    for (const entry of args.capabilities as Array<{
+        capability: string;
+        command: string;
+        capabilityType?: string;
+        steps?: any[];
+        args?: any[];
+        description?: string;
+        mapPayload?: (intent: Intent) => any;
+        determinism?: Determinism;
+    }>) {
         if (!entry.capability || !entry.command) {
             continue;
         }
@@ -54,7 +63,8 @@ export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
                 type: args.type ?? 'vscode',
                 steps: entry.steps,
                 args: entry.args,
-                description: entry.description
+                description: entry.description,
+                determinism: entry.determinism
             });
             count += 1;
         } else {
@@ -64,6 +74,7 @@ export function registerCapabilities(args: RegisterCapabilitiesArgs): number {
                 description: entry.description || `Resolved capability: ${entry.capability}`,
                 args: entry.args,
                 mapPayload: entry.mapPayload ?? args.mapPayload,
+                determinism: entry.determinism,
                 ...base
             });
             count += 1;
@@ -144,7 +155,8 @@ export function resolveCapabilities(
                 capabilityType: 'composite',
                 source: 'registry',
                 compositeSteps: compositeMatch.steps,
-                args: compositeMatch.args
+                args: compositeMatch.args,
+                determinism: compositeMatch.determinism
             });
             continue;
         }
@@ -161,7 +173,8 @@ export function resolveCapabilities(
                     capabilityType: 'atomic',
                     mapPayload: entry.mapPayload,
                     source: 'registry',
-                    args: entry.args
+                    args: entry.args,
+                    determinism: entry.determinism
                 });
             }
             continue;

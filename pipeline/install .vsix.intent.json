@@ -109,7 +109,7 @@
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 660,
+            "x": 570,
             "y": 120
           },
           "data": {
@@ -135,7 +135,7 @@
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 645,
+            "x": 570,
             "y": 210
           },
           "data": {
@@ -162,7 +162,7 @@
           "type": "actionNode",
           "position": {
             "x": 915,
-            "y": 45
+            "y": 30
           },
           "data": {
             "provider": "system",
@@ -179,14 +179,14 @@
             "width": 273,
             "height": 51
           },
-          "selected": false,
+          "selected": true,
           "dragging": false
         },
         {
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 960,
+            "x": 915,
             "y": 120
           },
           "data": {
@@ -208,8 +208,8 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1020,
-            "y": 195
+            "x": 915,
+            "y": 210
           },
           "data": {
             "commandId": "workbench.action.reloadWindow",
@@ -223,7 +223,7 @@
             "width": 283,
             "height": 51
           },
-          "selected": true,
+          "selected": false,
           "dragging": false
         }
       ],

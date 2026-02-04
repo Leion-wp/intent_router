@@ -9,6 +9,7 @@ import { generateSecureNonce } from './security';
 import { Capability, CompositeCapability } from './types';
 import { historyManager } from './historyManager';
 import * as path from 'path';
+import { deleteCustomNodeInWorkspace, readCustomNodesFromWorkspace, upsertCustomNodeInWorkspace } from './customNodesStore';
 
 type CommandGroup = {
     provider: string;
@@ -117,6 +118,7 @@ export class PipelineBuilder {
 	        await historyManager.whenReady();
 	        const history = historyManager.getHistory();
 	        const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
+            const customNodes = await readCustomNodesFromWorkspace();
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
@@ -135,8 +137,24 @@ export class PipelineBuilder {
             profiles: profileNames,
             templates,
             history,
-            environment
+            environment,
+            customNodes
         });
+
+        // Keep custom nodes in sync while builder is open
+        const customNodesWatcher = vscode.workspace.createFileSystemWatcher('**/.intent-router/nodes.json');
+        const pushCustomNodes = async () => {
+            try {
+                const nodes = await readCustomNodesFromWorkspace();
+                this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes });
+            } catch {
+                // best-effort
+            }
+        };
+        customNodesWatcher.onDidChange(pushCustomNodes);
+        customNodesWatcher.onDidCreate(pushCustomNodes);
+        customNodesWatcher.onDidDelete(pushCustomNodes);
+        this.disposables.push(customNodesWatcher);
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'savePipeline') {
@@ -209,6 +227,24 @@ export class PipelineBuilder {
                     }
                 } catch (error) {
                     console.error(`Failed to fetch dynamic options for ${command}:`, error);
+                }
+                return;
+            }
+            if (message?.type === 'customNodes.upsert') {
+                try {
+                    const nodes = await upsertCustomNodeInWorkspace(message.node);
+                    this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes });
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(`Failed to save custom node: ${e?.message || e}`);
+                }
+                return;
+            }
+            if (message?.type === 'customNodes.delete') {
+                try {
+                    const nodes = await deleteCustomNodeInWorkspace(String(message.id || ''));
+                    this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes });
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(`Failed to delete custom node: ${e?.message || e}`);
                 }
                 return;
             }

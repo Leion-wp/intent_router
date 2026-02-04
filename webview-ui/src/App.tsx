@@ -28,6 +28,7 @@ import PromptNode from './nodes/PromptNode';
 import RepoNode from './nodes/RepoNode';
 import VSCodeCommandNode from './nodes/VSCodeCommandNode';
 import StartNode from './nodes/StartNode';
+import CustomNode from './nodes/CustomNode';
 import { isInboundMessage, WebviewInboundMessage } from './types/messages';
 
 // Context for Registry
@@ -49,13 +50,22 @@ export const FlowEditorContext = createContext<{
   updateNodeData: () => {}
 });
 
+export const CustomNodesContext = createContext<{
+  nodes: any[];
+  getById: (id: string) => any | undefined;
+}>({
+  nodes: [],
+  getById: () => undefined
+});
+
 // Register custom node types
 const nodeTypes = {
   startNode: StartNode,
   actionNode: ActionNode,
   promptNode: PromptNode,
   repoNode: RepoNode,
-  vscodeCommandNode: VSCodeCommandNode
+  vscodeCommandNode: VSCodeCommandNode,
+  customNode: CustomNode
 };
 
 const InsertableEdge = (props: EdgeProps) => {
@@ -194,6 +204,9 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
   const lastOpenNodeIdRef = useRef<string | null>(null);
   const lastOpenNodeAtRef = useRef<number>(0);
   const { commandGroups } = useContext(RegistryContext);
+  const [customNodes, setCustomNodes] = useState<any[]>(
+    (window.initialData?.customNodes as any[]) || []
+  );
 
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddQuery, setQuickAddQuery] = useState('');
@@ -251,12 +264,30 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     );
   }, [setNodes]);
 
+  const customNodesById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const n of customNodes || []) {
+      const nid = String((n as any)?.id || '').trim();
+      if (!nid) continue;
+      map.set(nid, n);
+    }
+    return map;
+  }, [customNodes]);
+
+  const customNodesContextValue = useMemo(() => {
+    return {
+      nodes: customNodes || [],
+      getById: (nid: string) => customNodesById.get(String(nid || '').trim())
+    };
+  }, [customNodes, customNodesById]);
+
   type QuickAddItem = {
     id: string;
     label: string;
-    nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode';
+    nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode' | 'customNode';
     provider?: string;
     capability?: string;
+    customNodeId?: string;
   };
 
   const getDefaultCapability = useCallback((providerName: string) => {
@@ -309,6 +340,16 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       data.provider = item.provider || 'terminal';
       data.capability = item.capability || getDefaultCapability(item.provider || 'terminal');
       data.args = {};
+    } else if (item.nodeType === 'customNode') {
+      const cnid = String(item.customNodeId || '').trim();
+      const def = cnid ? customNodesById.get(cnid) : undefined;
+      data.customNodeId = cnid;
+      data.title = def?.title || '';
+      data.intent = def?.intent || '';
+      data.schema = def?.schema || [];
+      data.mapping = def?.mapping;
+      data.args = {};
+      data.kind = 'custom';
     } else if (item.nodeType === 'promptNode') {
       data.name = '';
       data.value = '';
@@ -378,9 +419,22 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
         return remaining.concat([e1, e2]);
       });
     }
-  }, [getDefaultCapability, lastCanvasPos, reactFlowInstance]);
+  }, [getDefaultCapability, lastCanvasPos, reactFlowInstance, customNodesById]);
 
-  const allQuickAddItems = useMemo(() => [...presetItems, ...commandItems], [presetItems, commandItems]);
+  const customNodeItems: QuickAddItem[] = useMemo(() => {
+    return (customNodes || []).map((n: any) => {
+      const id = String(n?.id || '').trim();
+      const title = String(n?.title || id || 'Custom').trim();
+      return {
+        id: `custom-${id}`,
+        label: `Custom · ${title}`,
+        nodeType: 'customNode',
+        customNodeId: id
+      };
+    }).filter((i: any) => !!i.customNodeId);
+  }, [customNodes]);
+
+  const allQuickAddItems = useMemo(() => [...presetItems, ...customNodeItems, ...commandItems], [presetItems, customNodeItems, commandItems]);
   const filteredQuickAddItems = useMemo(
     () => filterQuickAdd(allQuickAddItems, quickAddQuery),
     [allQuickAddItems, quickAddQuery, filterQuickAdd]
@@ -548,7 +602,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       const allowed = new Set<string>([...preview, ...failureAllowed, ...context]);
       return { allowed, preview };
     },
-    [edges, nodes]
+    [edges, nodes, customNodesById]
   );
 
   const syncIdCounterFromNodes = useCallback((list: Array<any>) => {
@@ -564,6 +618,55 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       idCounter = max + 1;
     }
   }, []);
+
+  const setDeepValue = (obj: any, path: string, value: any) => {
+    const parts = String(path || '').split('.').map(p => p.trim()).filter(Boolean);
+    if (parts.length === 0) return;
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const key = parts[i];
+      if (!cur[key] || typeof cur[key] !== 'object') {
+        cur[key] = {};
+      }
+      cur = cur[key];
+    }
+    cur[parts[parts.length - 1]] = value;
+  };
+
+  const buildCustomPayload = (defOrSnapshot: any, nodeData: any): { description: string; payload: any; intent: string } => {
+    const intent = String(defOrSnapshot?.intent || nodeData?.intent || '').trim();
+    const mapping = (defOrSnapshot?.mapping || nodeData?.mapping) as any;
+    const schema = Array.isArray(defOrSnapshot?.schema) ? defOrSnapshot.schema : (Array.isArray(nodeData?.schema) ? nodeData.schema : []);
+    const allArgs = (nodeData?.args && typeof nodeData.args === 'object') ? nodeData.args : {};
+    const { description, ...rest } = allArgs as any;
+
+    // Default behavior: identity mapping of schema fields (excluding description)
+    if (!mapping || typeof mapping !== 'object') {
+      return { intent, description: String(description || ''), payload: rest };
+    }
+
+    const payload: any = {};
+    for (const [payloadKey, mapValue] of Object.entries(mapping)) {
+      if (typeof mapValue === 'string' && Object.prototype.hasOwnProperty.call(rest, mapValue)) {
+        setDeepValue(payload, payloadKey, (rest as any)[mapValue]);
+      } else {
+        setDeepValue(payload, payloadKey, mapValue);
+      }
+    }
+
+    // If mapping is provided but empty, fall back to schema-driven identity.
+    if (Object.keys(payload).length === 0 && Array.isArray(schema) && schema.length > 0) {
+      for (const f of schema) {
+        const name = String((f as any)?.name || '').trim();
+        if (!name) continue;
+        if (Object.prototype.hasOwnProperty.call(rest, name)) {
+          payload[name] = (rest as any)[name];
+        }
+      }
+    }
+
+    return { intent, description: String(description || ''), payload };
+  };
 
   const buildPipeline = useCallback(
     (opts?: { allowedNodeIds?: Set<string> }) => {
@@ -692,6 +795,13 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
           const { description: desc, ...rest } = data.args || {};
           description = desc;
           payload = rest;
+        } else if (node.type === 'customNode') {
+          const cnid = String(data.customNodeId || '').trim();
+          const def = cnid ? customNodesById.get(cnid) : undefined;
+          const built = buildCustomPayload(def || data, data);
+          intent = built.intent;
+          description = built.description;
+          payload = built.payload;
         }
 
         if (intent) {
@@ -929,6 +1039,10 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 	           setEnvironment((typed.environment as Record<string, string>) || {});
 	           break;
 
+           case 'customNodesUpdate':
+             setCustomNodes((typed as any).nodes || []);
+             break;
+
 	         case 'executionStatus':
 	           setNodes((nds) => {
 		             if (typed.stepId) {
@@ -1104,6 +1218,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
       const type = event.dataTransfer.getData('application/reactflow/type');
       const provider = event.dataTransfer.getData('application/reactflow/provider');
+      const customNodeId = event.dataTransfer.getData('application/reactflow/customNodeId');
 
       if (typeof type === 'undefined' || !type) {
         return;
@@ -1121,6 +1236,21 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
         data:
           type === 'actionNode'
             ? { provider: provider, capability: '', args: {}, status: 'idle', kind: 'action' }
+            : type === 'customNode'
+              ? (() => {
+                  const cnid = String(customNodeId || '').trim();
+                  const def = cnid ? customNodesById.get(cnid) : undefined;
+                  return {
+                    customNodeId: cnid,
+                    title: def?.title || '',
+                    intent: def?.intent || '',
+                    schema: def?.schema || [],
+                    mapping: def?.mapping,
+                    args: {},
+                    status: 'idle',
+                    kind: 'custom'
+                  };
+                })()
             : type === 'promptNode'
               ? { name: '', value: '', kind: 'prompt' }
               : type === 'repoNode'
@@ -1132,7 +1262,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
       setNodes((nds) => nds.concat(newNode));
     },
-    [reactFlowInstance],
+    [reactFlowInstance, customNodesById],
   );
 
   const savePipeline = () => {
@@ -1287,9 +1417,10 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
  	  return (
  	    <div className="dndflow">
- 	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
+  	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
   	        <FlowRuntimeContext.Provider value={flowRuntime}>
               <FlowEditorContext.Provider value={{ updateNodeData }}>
+              <CustomNodesContext.Provider value={customNodesContextValue}>
               <ReactFlow
                 nodes={nodes}
                 edges={edgesWithHandlers}
@@ -1328,9 +1459,10 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
                 <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
                 <MiniMap />
               </ReactFlow>
+              </CustomNodesContext.Provider>
               </FlowEditorContext.Provider>
   	        </FlowRuntimeContext.Provider>
- 	      </div>
+  	      </div>
 
         {contextMenu && (
           <div
@@ -2183,14 +2315,14 @@ export default function App() {
   const [selectedRun, setSelectedRun] = useState<any>(null);
   const [restoreRun, setRestoreRun] = useState<any>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [sidebarTab, setSidebarTab] = useState<'providers' | 'history' | 'environment'>('providers');
+  const [sidebarTab, setSidebarTab] = useState<'providers' | 'history' | 'environment' | 'studio'>('providers');
 
   useEffect(() => {
     // Restore ephemeral UI state from VS Code webview state
     try {
       const st = vscode?.getState?.() || {};
       if (typeof st.sidebarCollapsed === 'boolean') setSidebarCollapsed(st.sidebarCollapsed);
-      if (st.sidebarTab === 'providers' || st.sidebarTab === 'history' || st.sidebarTab === 'environment') {
+      if (st.sidebarTab === 'providers' || st.sidebarTab === 'history' || st.sidebarTab === 'environment' || st.sidebarTab === 'studio') {
         setSidebarTab(st.sidebarTab);
       }
     } catch {

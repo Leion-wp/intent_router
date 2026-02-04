@@ -2,6 +2,7 @@ import { memo, useMemo, useState, useEffect, useContext, useRef } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext, RegistryContext } from '../App';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
+import SchemaArgsForm from '../components/SchemaArgsForm';
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
@@ -148,9 +149,13 @@ const ActionNode = ({ data, id }: NodeProps) => {
      ...schemaArgs,
      { name: 'description', type: 'string', description: 'Step description for logs' }
   ];
+  const useSharedForm = true;
 
   // Initialize Defaults & Validate & Fetch Dynamic Options
   useEffect(() => {
+      if (useSharedForm) {
+          return;
+      }
       const newArgs = { ...args };
       let changed = false;
       const newErrors: Record<string, boolean> = {};
@@ -190,6 +195,9 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
 	  // Listen for option responses
 	  useEffect(() => {
+        if (useSharedForm) {
+            return;
+        }
 	      const handleMessage = (event: MessageEvent) => {
 	          const message = event.data;
 	          if (!isInboundMessage(message)) {
@@ -210,6 +218,9 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const isPause = provider === 'system' && capability === 'system.pause';
   const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
   const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none';
+  const determinism: 'deterministic' | 'interactive' =
+    selectedCapConfig?.determinism === 'interactive' ? 'interactive' : 'deterministic';
+  const determinismBadge = determinism === 'interactive' ? '👤' : '⚙';
 
   const fallbackTitle = `${provider} · ${selectedCapConfig?.capability || capability}`.trim();
 
@@ -237,6 +248,12 @@ const ActionNode = ({ data, id }: NodeProps) => {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', alignItems: 'center', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
           <span className="codicon codicon-gear"></span>
+          <span
+            title={determinism === 'interactive' ? 'Interactive (requires human / UI)' : 'Deterministic'}
+            style={{ fontSize: '12px', opacity: determinism === 'interactive' ? 1 : 0.85 }}
+          >
+            {determinismBadge}
+          </span>
           {editingLabel ? (
             <input
               className="nodrag"
@@ -323,6 +340,10 @@ const ActionNode = ({ data, id }: NodeProps) => {
         )}
       </div>
 
+      <SchemaArgsForm nodeId={id} fields={displayArgs as any} values={args} onChange={handleArgChange} availableVars={availableVars} />
+
+      {/* Legacy inline renderer kept for reference (disabled) */}
+      {false && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {displayArgs.map((arg: any) => {
           const inputId = `input-${id}-${arg.name}`;
@@ -552,6 +573,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
           );
         })}
       </div>
+      )}
       </>
       )}
 

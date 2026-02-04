@@ -21,6 +21,7 @@ export function registerVSCodeProvider(context: vscode.ExtensionContext) {
                 capability: 'vscode.installExtensions',
                 command: 'intentRouter.internal.installExtensions',
                 description: 'Install a list of VS Code extensions',
+                determinism: 'deterministic',
                 args: [
                     { name: 'extensions', type: 'string', description: 'Extension IDs (one per line)', required: true }
                 ]
@@ -29,6 +30,7 @@ export function registerVSCodeProvider(context: vscode.ExtensionContext) {
                 capability: 'vscode.runCommand',
                 command: 'intentRouter.internal.vscodeRunCommand',
                 description: 'Run an arbitrary VS Code command (interactive for many commands)',
+                determinism: 'interactive',
                 args: [
                     { name: 'commandId', type: 'string', description: 'VS Code command id', required: true },
                     { name: 'argsJson', type: 'string', description: 'JSON args (array or object). Optional.', default: '' }

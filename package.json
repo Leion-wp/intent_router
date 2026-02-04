@@ -361,6 +361,20 @@
                     ],
                     "default": "",
                     "description": "Enable a built-in demo provider (git) for quick testing."
+                },
+                "intentRouter.policy.ciStrict": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "CI strict mode: block interactive (non-deterministic) steps like system.pause or vscode.runCommand."
+                },
+                "intentRouter.policy.interactiveBehavior": {
+                    "type": "string",
+                    "enum": [
+                        "confirm",
+                        "allow"
+                    ],
+                    "default": "confirm",
+                    "description": "Behavior when an interactive step is encountered (when ciStrict=false). confirm=warn+confirm, allow=run without prompts."
                 }
             }
         }
