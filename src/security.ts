@@ -31,12 +31,30 @@ export function validateStrictShellArg(arg: string, context: string): void {
 
 /**
  * Sanitizes a shell argument by escaping dangerous characters and wrapping in double quotes.
- * Escapes: " $ `
+ * Supports 'sh' (POSIX) and 'powershell' styles.
  */
-export function sanitizeShellArg(arg: string): string {
+export function sanitizeShellArg(arg: string, style?: 'sh' | 'powershell'): string {
     if (arg === undefined || arg === null) return '""';
+
+    const targetStyle = style || (process.platform === 'win32' ? 'powershell' : 'sh');
+
+    if (targetStyle === 'powershell') {
+        return sanitizePowerShellArg(arg);
+    }
+
+    // Default to sh
     // Escape backslash, double quote, dollar, and backtick
     const escaped = arg.replace(/([\\"$`])/g, '\\$1');
+    return `"${escaped}"`;
+}
+
+/**
+ * Sanitizes a shell argument for PowerShell by escaping special characters with backtick.
+ */
+export function sanitizePowerShellArg(arg: string): string {
+    if (arg === undefined || arg === null) return '""';
+    // Escape backtick, double quote, and dollar with backtick
+    const escaped = arg.replace(/([`"$])/g, '`$1');
     return `"${escaped}"`;
 }
 

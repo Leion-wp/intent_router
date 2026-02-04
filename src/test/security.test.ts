@@ -16,12 +16,28 @@ suite('Security Tests', () => {
         assert.throws(() => validateStrictShellArg('abc>def', 'context'), /Invalid characters/);
     });
 
-    test('sanitizeShellArg', () => {
-        assert.strictEqual(sanitizeShellArg('abc'), '"abc"');
-        assert.strictEqual(sanitizeShellArg('abc def'), '"abc def"');
-        assert.strictEqual(sanitizeShellArg('abc"def'), '"abc\\"def"');
-        assert.strictEqual(sanitizeShellArg('abc$def'), '"abc\\$def"');
-        assert.strictEqual(sanitizeShellArg('abc`def'), '"abc\\`def"');
+    test('sanitizeShellArg - sh', () => {
+        assert.strictEqual(sanitizeShellArg('abc', 'sh'), '"abc"');
+        assert.strictEqual(sanitizeShellArg('abc def', 'sh'), '"abc def"');
+        assert.strictEqual(sanitizeShellArg('abc"def', 'sh'), '"abc\\"def"');
+        assert.strictEqual(sanitizeShellArg('abc$def', 'sh'), '"abc\\$def"');
+        assert.strictEqual(sanitizeShellArg('abc`def', 'sh'), '"abc\\`def"');
+    });
+
+    test('sanitizeShellArg - powershell', () => {
+        assert.strictEqual(sanitizeShellArg('abc', 'powershell'), '"abc"');
+        assert.strictEqual(sanitizeShellArg('abc def', 'powershell'), '"abc def"');
+        assert.strictEqual(sanitizeShellArg('abc"def', 'powershell'), '"abc`"def"');
+        assert.strictEqual(sanitizeShellArg('abc$def', 'powershell'), '"abc`$def"');
+        assert.strictEqual(sanitizeShellArg('abc`def', 'powershell'), '"abc``def"');
+        assert.strictEqual(sanitizeShellArg('abc\\def', 'powershell'), '"abc\\def"');
+    });
+
+    test('sanitizeShellArg - default', () => {
+        const style = process.platform === 'win32' ? 'powershell' : 'sh';
+        const arg = 'test$value';
+        const expected = style === 'powershell' ? '"test`$value"' : '"test\\$value"';
+        assert.strictEqual(sanitizeShellArg(arg), expected);
     });
 
     test('validateSafeRelativePath - Basic Relative', () => {
