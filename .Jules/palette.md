@@ -16,3 +16,7 @@
 ## 2026-02-05 - Nested Interactive Elements in Lists
 **Learning:** The History list implementation uses a `div` with `onClick` as a row container which also contains a nested "Restore" `<button>`. This creates a trap for converting the container to a semantic `<button>` or `<a>` tag, as nested interactive elements are invalid HTML.
 **Action:** For list items with primary and secondary actions, avoid making the entire row a button. Instead, separate the layout into distinct interactive zones (e.g., "Select" button + "Restore" button) to maintain semantic validity and keyboard navigability.
+
+## 2026-02-05 - Stacked Interactive Elements Pattern
+**Learning:** To implement "Card with Action" designs where the whole card is clickable but contains a secondary action, using nested buttons is invalid.
+**Action:** Use a relative container with two sibling buttons. The primary "Card" button fills the container (via width:100%), and the secondary action is absolutely positioned over it. This maintains the visual "nested" look while keeping valid, accessible DOM structure.
