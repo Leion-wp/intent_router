@@ -287,8 +287,11 @@ const ActionNode = ({ data, id }: NodeProps) => {
                   </label>
                   {arg.description && (
                       <button
+                          type="button"
                           onClick={() => toggleHelp(arg.name)}
                           title="Toggle description"
+                          aria-label="Toggle description"
+                          aria-expanded={!!showHelp}
                           className="nodrag"
                           style={{
                               background: 'none',
@@ -505,8 +508,11 @@ const ActionNode = ({ data, id }: NodeProps) => {
       {/* Mini-Console */}
       {logs.length > 0 && (
         <div className="nodrag" style={{ marginTop: '8px', borderTop: '1px solid var(--vscode-widget-border)' }}>
-            <div
+            <button
+                type="button"
                 onClick={() => setIsConsoleOpen(!isConsoleOpen)}
+                aria-expanded={isConsoleOpen}
+                aria-label="Toggle console output"
                 style={{
                     fontSize: '0.8em',
                     padding: '4px',
@@ -515,11 +521,16 @@ const ActionNode = ({ data, id }: NodeProps) => {
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     background: 'var(--vscode-editor-background)',
-                    opacity: 0.8
+                    opacity: 0.8,
+                    width: '100%',
+                    border: 'none',
+                    color: 'inherit',
+                    fontFamily: 'inherit',
+                    textAlign: 'left'
                 }}>
                 <span>Output ({logs.length})</span>
                 <span>{isConsoleOpen ? '▼' : '▶'}</span>
-            </div>
+            </button>
             {isConsoleOpen && (
                 <div
                     ref={logsRef}
