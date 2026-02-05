@@ -153,6 +153,10 @@ function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): 
         return intent;
     }
 
+    // Determine shell style based on platform
+    // This matches the logic in terminalAdapter.ts which forces PowerShell on Windows
+    const style = process.platform === 'win32' ? 'powershell' : 'sh';
+
     let command = '';
 
     switch (name) {
@@ -170,7 +174,7 @@ function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): 
             const amend = payload?.amend;
             if (!message) throw new Error('git.commit requires "message"');
 
-            const safeMessage = sanitizeShellArg(message);
+            const safeMessage = sanitizeShellArg(message, style);
             command = `git commit ${amend ? '--amend ' : ''}-m ${safeMessage}`;
             break;
         }
@@ -185,7 +189,7 @@ function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): 
              const dir = payload?.dir;
              if (!url) throw new Error('git.clone requires "url"');
 
-             const safeUrl = sanitizeShellArg(url);
+             const safeUrl = sanitizeShellArg(url, style);
              let dirPart = '';
              if (dir) {
                  validateStrictShellArg(dir, 'dir');

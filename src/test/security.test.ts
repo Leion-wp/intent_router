@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import { validateSafeRelativePath, validateStrictShellArg, sanitizeShellArg } from '../security';
+import { validateSafeRelativePath, validateStrictShellArg, sanitizeShellArg, sanitizePowerShellArg } from '../security';
 
 suite('Security Tests', () => {
 
@@ -16,12 +16,35 @@ suite('Security Tests', () => {
         assert.throws(() => validateStrictShellArg('abc>def', 'context'), /Invalid characters/);
     });
 
-    test('sanitizeShellArg', () => {
+    test('sanitizeShellArg - Default (sh)', () => {
         assert.strictEqual(sanitizeShellArg('abc'), '"abc"');
         assert.strictEqual(sanitizeShellArg('abc def'), '"abc def"');
         assert.strictEqual(sanitizeShellArg('abc"def'), '"abc\\"def"');
         assert.strictEqual(sanitizeShellArg('abc$def'), '"abc\\$def"');
         assert.strictEqual(sanitizeShellArg('abc`def'), '"abc\\`def"');
+        // Backslash escaping
+        assert.strictEqual(sanitizeShellArg('abc\\def'), '"abc\\\\def"');
+    });
+
+    test('sanitizeShellArg - PowerShell', () => {
+        // Normal
+        assert.strictEqual(sanitizeShellArg('abc', 'powershell'), '"abc"');
+        assert.strictEqual(sanitizeShellArg('abc def', 'powershell'), '"abc def"');
+
+        // Quotes (escaped with backtick)
+        assert.strictEqual(sanitizeShellArg('abc"def', 'powershell'), '"abc`"def"');
+
+        // Dollar (escaped with backtick)
+        assert.strictEqual(sanitizeShellArg('abc$def', 'powershell'), '"abc`$def"');
+
+        // Backtick (escaped with backtick)
+        assert.strictEqual(sanitizeShellArg('abc`def', 'powershell'), '"abc``def"');
+
+        // Backslash (NOT escaped)
+        assert.strictEqual(sanitizeShellArg('abc\\def', 'powershell'), '"abc\\def"');
+
+        // Complex
+        assert.strictEqual(sanitizeShellArg('foo"bar$baz`qux', 'powershell'), '"foo`"bar`$baz``qux"');
     });
 
     test('validateSafeRelativePath - Basic Relative', () => {
