@@ -155,6 +155,10 @@ function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): 
 
     let command = '';
 
+    // Detect shell style based on platform
+    // 'sh' for Linux/macOS, 'powershell' for Windows (default behavior of terminalAdapter)
+    const shellStyle = process.platform === 'win32' ? 'powershell' : 'sh';
+
     switch (name) {
         case 'git.checkout': {
             const branch = payload?.branch;
@@ -170,7 +174,7 @@ function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): 
             const amend = payload?.amend;
             if (!message) throw new Error('git.commit requires "message"');
 
-            const safeMessage = sanitizeShellArg(message);
+            const safeMessage = sanitizeShellArg(message, shellStyle);
             command = `git commit ${amend ? '--amend ' : ''}-m ${safeMessage}`;
             break;
         }
@@ -185,7 +189,7 @@ function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): 
              const dir = payload?.dir;
              if (!url) throw new Error('git.clone requires "url"');
 
-             const safeUrl = sanitizeShellArg(url);
+             const safeUrl = sanitizeShellArg(url, shellStyle);
              let dirPart = '';
              if (dir) {
                  validateStrictShellArg(dir, 'dir');
