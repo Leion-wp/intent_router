@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { Intent } from './types';
 import { routeIntent } from './router';
 import { pipelineEventBus } from './eventBus';
@@ -193,7 +194,7 @@ function resolveTemplateVariables(input: any, store: Map<string, any>): any {
 }
 
 // Helper to compile high-level intents to terminal.run
-function transformToTerminal(intent: Intent, cwd: string): Intent {
+function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): Intent {
     const { intent: name, payload } = intent;
 
     // Pass through if not a compile target
@@ -237,6 +238,7 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
              let dirPart = '';
              if (dir) {
                  validateStrictShellArg(dir, 'dir');
+                 validateSafeRelativePath(dir, trustedRoot, cwd);
                  dirPart = ` ${dir}`;
              }
              command = `git clone ${safeUrl}${dirPart}`;
@@ -249,6 +251,7 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
 
             validateStrictShellArg(tag, 'tag');
             validateStrictShellArg(path, 'path');
+            validateSafeRelativePath(path, trustedRoot, cwd);
             command = `docker build -t ${tag} ${path}`;
             break;
         }
@@ -278,7 +281,7 @@ function transformToTerminal(intent: Intent, cwd: string): Intent {
 }
 
 // Compiler entry point
-export async function compileStep(step: Intent, variableStore: Map<string, any>, cwd: string): Promise<Intent> {
+export async function compileStep(step: Intent, variableStore: Map<string, any>, cwd: string, trustedRoot: string): Promise<Intent> {
     // 1. Resolve variables
     const resolvedPayload = resolveTemplateVariables(step.payload, variableStore);
 
@@ -288,7 +291,7 @@ export async function compileStep(step: Intent, variableStore: Map<string, any>,
     };
 
     // 2. Transform to terminal if needed
-    return transformToTerminal(resolvedStep, cwd);
+    return transformToTerminal(resolvedStep, cwd, trustedRoot);
 }
 
 function buildStepAdjacency(pipeline: PipelineFile): Map<string, Set<string>> {
@@ -556,6 +559,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
     let currentCwd = workspaceRoot ?? '.';
+    const trustedRoot = workspaceRoot ?? path.resolve('.');
     const runId = Date.now().toString(36); // Simple run ID
     currentRunId = runId;
 
@@ -602,6 +606,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 const rawPath = (step.payload as any)?.path;
                 if (typeof rawPath === 'string' && rawPath.trim()) {
                     const normalized = rawPath.trim() === '${workspaceRoot}' && workspaceRoot ? workspaceRoot : rawPath.trim();
+                    validateSafeRelativePath(normalized, trustedRoot, currentCwd);
                     currentCwd = normalized;
                 } else if (workspaceRoot) {
                     currentCwd = workspaceRoot;
@@ -714,7 +719,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             // We use compileStep to handle both var resolution AND terminal transformation
             let compiledStep: Intent;
             try {
-                compiledStep = await compileStep(stepIntent, variableCache, currentCwd);
+                compiledStep = await compileStep(stepIntent, variableCache, currentCwd, trustedRoot);
             } catch (error) {
                  vscode.window.showErrorMessage(`Compilation failed at step ${currentIndex}: ${error}`);
                  throw error;
@@ -828,6 +833,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             if (compiledStep.intent === 'system.setCwd') {
                  const path = compiledStep.payload?.path;
                  if (path) {
+                     validateSafeRelativePath(path, trustedRoot, currentCwd);
                      currentCwd = path;
                      // Emit success for this "virtual" step
                      const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);

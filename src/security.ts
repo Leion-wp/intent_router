@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import * as path from 'path';
 
 /**
  * Generates a cryptographically secure nonce (alphanumeric).
@@ -37,6 +38,33 @@ export function sanitizeShellArg(arg: string): string {
     // Escape backslash, double quote, dollar, and backtick
     const escaped = arg.replace(/([\\"$`])/g, '\\$1');
     return `"${escaped}"`;
+}
+
+/**
+ * Validates that a path does not escape a trusted root directory.
+ * @param p The path to validate (relative or absolute).
+ * @param trustedRoot The absolute path of the trusted root directory.
+ * @param currentCwd The current working directory to resolve relative paths against. Defaults to trustedRoot.
+ */
+export function validateSafeRelativePath(p: string, trustedRoot: string, currentCwd?: string): void {
+    if (!p) return;
+
+    // Block null bytes
+    if (p.includes('\0')) {
+         throw new Error('Path contains null bytes');
+    }
+
+    const resolvedRoot = path.resolve(trustedRoot);
+    const base = currentCwd ? path.resolve(currentCwd) : resolvedRoot;
+    const target = path.resolve(base, p);
+
+    // Ensure strict containment
+    // Check for exact match or subdirectory (startsWith root + sep) to prevent partial path attacks
+    // e.g. /root/safe-suffix vs /root/safe
+    const rootWithSep = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
+    if (target !== resolvedRoot && !target.startsWith(rootWithSep)) {
+        throw new Error(`Path ${p} resolves to ${target} which is outside trusted root ${resolvedRoot}`);
+    }
 }
 
 /**
