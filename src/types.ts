@@ -20,6 +20,7 @@ export type Intent = {
 
 export type ProviderType = 'vscode' | 'external';
 export type CapabilityType = 'atomic' | 'composite';
+export type Determinism = 'deterministic' | 'interactive';
 
 export type CapabilityArgument = {
     name: string;
@@ -39,6 +40,7 @@ export type Capability = {
     type?: ProviderType;
     args?: CapabilityArgument[];
     mapPayload?: (intent: Intent) => any;
+    determinism?: Determinism;
 };
 
 export type Resolution = {
@@ -52,6 +54,7 @@ export type Resolution = {
     source: 'user' | 'registry' | 'fallback' | 'composite';
     compositeSteps?: CompositeStep[];
     args?: CapabilityArgument[];
+    determinism?: Determinism;
 };
 
 export type ProviderAdapter = {
@@ -85,6 +88,7 @@ export type CompositeCapability = {
     steps: CompositeStep[];
     args?: CapabilityArgument[];
     description?: string;
+    determinism?: Determinism;
 };
 
 export type UserMapping = {
@@ -107,6 +111,7 @@ export type RegisterCapabilitiesArgs = {
         args?: CapabilityArgument[];
         description?: string;
         mapPayload?: (intent: Intent) => any;
+        determinism?: Determinism;
     }>;
     command?: string;
     mapPayload?: (intent: Intent) => any;

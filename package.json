@@ -1,8 +1,10 @@
 {
-    "name": "intent-router",
-    "displayName": "Intent Router",
-    "description": "Centralized intent routing for VS Code / Cursor / Agentic extensions",
-    "version": "0.0.1",
+    "name": "leion-roots",
+    "displayName": "Leion Roots",
+    "description": "Human-centric visual orchestration runtime for VS Code",
+    "publisher": "LeionCorp",
+    "icon": "media/leion_roots_icon.png",
+    "version": "0.0.2",
     "license": "MIT",
     "repository": {
         "type": "git",
@@ -111,11 +113,11 @@
             }
         ],
         "viewsContainers": {
-            "activitybar": [
+        "activitybar": [
                 {
                     "id": "intentRouter",
-                    "title": "Intent Router",
-                    "icon": "media/intent-router.svg"
+                    "title": "Leion Roots",
+                    "icon": "media/leion_roots_icon.png"
                 }
             ]
         },
@@ -359,6 +361,25 @@
                     ],
                     "default": "",
                     "description": "Enable a built-in demo provider (git) for quick testing."
+                },
+                "intentRouter.policy.ciStrict": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "CI strict mode: block interactive (non-deterministic) steps like system.pause or vscode.runCommand."
+                },
+                "intentRouter.policy.interactiveBehavior": {
+                    "type": "string",
+                    "enum": [
+                        "confirm",
+                        "allow"
+                    ],
+                    "default": "confirm",
+                    "description": "Behavior when an interactive step is encountered (when ciStrict=false). confirm=warn+confirm, allow=run without prompts."
+                },
+                "intentRouter.devMode": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Dev mode: show self-packaging preset pipeline (npm install/compile/vsce package/install vsix/reload)."
                 }
             }
         }

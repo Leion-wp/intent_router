@@ -8,6 +8,8 @@ import { pipelineEventBus } from './eventBus';
 import { generateSecureNonce } from './security';
 import { Capability, CompositeCapability } from './types';
 import { historyManager } from './historyManager';
+import * as path from 'path';
+import { deleteCustomNodeInWorkspace, exportCustomNodes, importCustomNodesJson, readCustomNodesFromWorkspace, upsertCustomNodeInWorkspace, writeCustomNodesToWorkspace } from './customNodesStore';
 
 type CommandGroup = {
     provider: string;
@@ -17,6 +19,7 @@ type CommandGroup = {
 export class PipelineBuilder {
     private panel: vscode.WebviewPanel | undefined;
     private currentUri: vscode.Uri | undefined;
+    private lastSavedName: string | undefined;
     private disposables: vscode.Disposable[] = [];
 
     constructor(private readonly extensionUri: vscode.Uri) {}
@@ -33,6 +36,7 @@ export class PipelineBuilder {
         }
 
         this.currentUri = uri;
+        this.lastSavedName = pipeline?.name;
         const panel = vscode.window.createWebviewPanel(
             'intentRouter.pipelineBuilder',
             this.getTitle(pipeline, uri),
@@ -114,6 +118,8 @@ export class PipelineBuilder {
 	        await historyManager.whenReady();
 	        const history = historyManager.getHistory();
 	        const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
+            const customNodes = await readCustomNodesFromWorkspace();
+            const devMode = vscode.workspace.getConfiguration('intentRouter').get<boolean>('devMode', false);
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
@@ -127,17 +133,45 @@ export class PipelineBuilder {
 
         panel.webview.html = this.getHtml(panel.webview, webviewUri, styleUri, codiconUri, {
             pipeline: initialPipeline,
+            pipelineUri: uri ? uri.toString() : null,
             commandGroups,
             profiles: profileNames,
             templates,
             history,
-            environment
+            environment,
+            customNodes,
+            devMode
         });
+
+        // Keep custom nodes in sync while builder is open
+        const customNodesWatcher = vscode.workspace.createFileSystemWatcher('**/.intent-router/nodes.json');
+        const pushCustomNodes = async () => {
+            try {
+                const nodes = await readCustomNodesFromWorkspace();
+                this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes });
+            } catch {
+                // best-effort
+            }
+        };
+        customNodesWatcher.onDidChange(pushCustomNodes);
+        customNodesWatcher.onDidCreate(pushCustomNodes);
+        customNodesWatcher.onDidDelete(pushCustomNodes);
+        this.disposables.push(customNodesWatcher);
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'savePipeline') {
                 await this.savePipeline(message.pipeline as PipelineFile);
-                vscode.window.showInformationMessage('Pipeline saved successfully.');
+                if (!message?.silent) {
+                    vscode.window.showInformationMessage('Pipeline saved successfully.');
+                }
+                return;
+            }
+            if (message?.type === 'runPipeline') {
+                await vscode.commands.executeCommand(
+                    'intentRouter.runPipelineFromData',
+                    message.pipeline as PipelineFile,
+                    !!message.dryRun
+                );
                 return;
             }
             if (message?.type === 'saveEnvironment') {
@@ -198,6 +232,83 @@ export class PipelineBuilder {
                 }
                 return;
             }
+            if (message?.type === 'customNodes.upsert') {
+                try {
+                    const nodes = await upsertCustomNodeInWorkspace(message.node);
+                    this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes });
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(`Failed to save custom node: ${e?.message || e}`);
+                }
+                return;
+            }
+            if (message?.type === 'customNodes.delete') {
+                try {
+                    const nodes = await deleteCustomNodeInWorkspace(String(message.id || ''));
+                    this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes });
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(`Failed to delete custom node: ${e?.message || e}`);
+                }
+                return;
+            }
+            if (message?.type === 'customNodes.export') {
+                try {
+                    const nodes = await readCustomNodesFromWorkspace();
+                    const scope = String(message.scope || 'all');
+                    const id = String(message.id || '');
+                    const selected = scope === 'one' ? nodes.find(n => n.id === id) : undefined;
+                    const json = exportCustomNodes(selected ? selected : nodes);
+                    await vscode.env.clipboard.writeText(json);
+                    this.panel?.webview.postMessage({ type: 'customNodesExported', scope, id, json });
+                    vscode.window.showInformationMessage('Custom nodes JSON copied to clipboard.');
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(`Failed to export custom nodes: ${e?.message || e}`);
+                }
+                return;
+            }
+            if (message?.type === 'customNodes.import') {
+                try {
+                    const source = String(message.source || 'paste');
+                    let jsonText = String(message.jsonText || '');
+
+                    if (source === 'file') {
+                        const uris = await vscode.window.showOpenDialog({
+                            canSelectFiles: true,
+                            canSelectFolders: false,
+                            canSelectMany: false,
+                            openLabel: 'Import',
+                            filters: { JSON: ['json'] }
+                        });
+                        if (!uris || uris.length === 0) {
+                            return;
+                        }
+                        const bytes = await vscode.workspace.fs.readFile(uris[0]);
+                        jsonText = Buffer.from(bytes).toString('utf8');
+                    }
+
+                    const existing = await readCustomNodesFromWorkspace();
+                    const { merged, imported, renames } = importCustomNodesJson(existing, jsonText);
+                    await writeCustomNodesToWorkspace(merged);
+                    this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes: merged });
+                    this.panel?.webview.postMessage({ type: 'customNodesImported', imported, renames, total: merged.length });
+                    vscode.window.showInformationMessage(`Imported ${imported.length} custom node(s).`);
+                } catch (e: any) {
+                    const msg = e?.message || String(e);
+                    vscode.window.showErrorMessage(`Failed to import custom nodes: ${msg}`);
+                    this.panel?.webview.postMessage({ type: 'customNodesImportError', message: msg });
+                }
+                return;
+            }
+            if (message?.type === 'devPackager.loadPreset') {
+                const enabled = vscode.workspace.getConfiguration('intentRouter').get<boolean>('devMode', false);
+                if (!enabled) {
+                    vscode.window.showWarningMessage('Dev mode is disabled. Enable "Intent Router: Dev Mode" in workspace settings.');
+                    return;
+                }
+                const preset = buildDevPackagerPreset();
+                this.panel?.webview.postMessage({ type: 'loadPipeline', pipeline: preset });
+                vscode.window.showInformationMessage('Loaded Dev Packager preset in the builder.');
+                return;
+            }
         });
     }
 
@@ -233,9 +344,34 @@ export class PipelineBuilder {
             const fileName = pipeline.name.endsWith('.intent.json') ? pipeline.name : `${pipeline.name}.intent.json`;
             targetUri = vscode.Uri.joinPath(folder, fileName);
             this.currentUri = targetUri;
+        } else {
+            // If the pipeline name changed, rename the file to match (same folder).
+            const desiredFileName = pipeline.name.endsWith('.intent.json') ? pipeline.name : `${pipeline.name}.intent.json`;
+            const currentFileName = path.posix.basename(targetUri.path);
+            const shouldRename = typeof this.lastSavedName === 'string' && pipeline.name !== this.lastSavedName;
+            if (shouldRename && desiredFileName !== currentFileName) {
+                const parent = vscode.Uri.joinPath(targetUri, '..');
+                const newUri = vscode.Uri.joinPath(parent, desiredFileName);
+                try {
+                    await vscode.workspace.fs.stat(newUri);
+                    vscode.window.showErrorMessage(`Cannot rename pipeline: ${desiredFileName} already exists.`);
+                    return false;
+                } catch {
+                    // ok, target doesn't exist
+                }
+                try {
+                    await vscode.workspace.fs.rename(targetUri, newUri, { overwrite: false });
+                    targetUri = newUri;
+                    this.currentUri = newUri;
+                } catch (e) {
+                    vscode.window.showErrorMessage(`Failed to rename pipeline file: ${e}`);
+                    return false;
+                }
+            }
         }
         await writePipelineToUri(targetUri, pipeline);
         if (this.panel) this.panel.title = this.getTitle(pipeline, targetUri);
+        this.lastSavedName = pipeline.name;
         return true;
     }
 
@@ -285,4 +421,57 @@ export class PipelineBuilder {
 </body>
 </html>`;
     }
+}
+
+function buildDevPackagerPreset(): PipelineFile {
+    // Keep the output VSIX path stable (no parsing output).
+    // Use relative path for install step; vscode.installVsix resolves relative to workspace root.
+    return {
+        name: 'Dev Packager',
+        description: 'Dev-only preset: build and install the current extension VSIX, then reload VS Code.',
+        steps: [
+            {
+                id: 'dev.npmInstall',
+                intent: 'terminal.run',
+                description: 'npm install',
+                payload: { command: 'npm install', cwd: '${workspaceRoot}' }
+            },
+            {
+                id: 'dev.compile',
+                intent: 'terminal.run',
+                description: 'npm run compile',
+                payload: { command: 'npm run compile', cwd: '${workspaceRoot}' }
+            },
+            {
+                id: 'dev.vscePackage',
+                intent: 'terminal.run',
+                description: 'vsce package (pipeline/dev-build.vsix)',
+                payload: { command: 'npx vsce package -o pipeline/dev-build.vsix', cwd: '${workspaceRoot}' }
+            },
+            {
+                id: 'dev.pauseBeforeInstall',
+                intent: 'system.pause',
+                description: 'Pause before install',
+                payload: { message: 'About to install pipeline/dev-build.vsix into VS Code. Review changes, then Continue.' }
+            },
+            {
+                id: 'dev.installVsix',
+                intent: 'vscode.installVsix',
+                description: 'Install VSIX',
+                payload: { vsixPath: 'pipeline/dev-build.vsix' }
+            },
+            {
+                id: 'dev.pauseBeforeReload',
+                intent: 'system.pause',
+                description: 'Pause before reload',
+                payload: { message: 'VSIX installed. Continue to reload VS Code window?' }
+            },
+            {
+                id: 'dev.reload',
+                intent: 'vscode.runCommand',
+                description: 'Reload window',
+                payload: { commandId: 'workbench.action.reloadWindow', argsJson: '' }
+            }
+        ]
+    };
 }

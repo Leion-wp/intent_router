@@ -1,82 +1,76 @@
-# Intent Router (VS Code Extension)
+# Leion Roots (VS Code Extension)
 
-**The Human-Centric Orchestration Cockpit for VS Code.**
+**The Human‑Centric Orchestration Cockpit for VS Code.**
 
-Intent Router is a low-level orchestration layer designed to manage workflows between humans and AI agents with absolute transparency. It prioritizes **Human Sovereignty** over AI autonomy.
+Leion Roots is a low‑level orchestration layer designed to manage workflows between humans and AI agents with absolute transparency. It prioritizes **Human Sovereignty** over AI autonomy.
 
-## 🧠 Philosophy
+## Philosophy
 
-> **"No Magic. No Opaque Autonomy. Strict Human Validation."**
+> **“No Magic. No Opaque Autonomy. Strict Human Validation.”**
 
-Intent Router is designed to support a clear "Review & Merge" workflow where AI agents (like Codex or Jules) are producers/reviewers, but **never decision-makers**.
+Leion Roots is designed to support a clear “Review & Merge” workflow where AI agents (like Codex or Jules) are producers/reviewers, but **never decision‑makers**.
 
-*   **Orchestration + Traceability:** Every action is visible, logged, and reproducible.
-*   **Terminal as Bedrock:** The primary interface is the `Terminal` provider. It is brutal, deterministic, and visible.
-*   **Agents are Tools:** Intent Router proposes actions (e.g., checkout a PR), but destructive actions (e.g., merge) require explicit human confirmation.
+- **Orchestration + Traceability:** Every action is visible, logged, and reproducible.
+- **Terminal as Bedrock:** The primary interface is the `Terminal` provider. It is deterministic and visible.
+- **Agents are Tools:** Intentions are proposed; destructive actions require explicit human confirmation.
 
-If Intent Router becomes magical, opaque, or autonomous, the project has failed.
+If Leion Roots becomes magical, opaque, or autonomous, the project has failed.
 
----
-
-## 🚀 Key Features
+## Key Features
 
 ### 1. Visual Pipeline Builder (The Cockpit)
-Construct workflows visually using a Drag-and-Drop interface.
-*   **Drag & Drop:** Pull providers (Terminal, Git, System) from the sidebar.
-*   **Inline Configuration:** Edit commands and arguments directly in the graph.
-*   **Live Status:** Watch steps execute in real-time with Blue (Running), Green (Success), and Red (Failure) indicators.
-*   **Launch:** Open via the "Intent Pipelines" view in the Activity Bar.
+Construct workflows visually using a drag‑and‑drop interface.
+
+- **Drag & Drop:** Pull providers (Terminal, Git, System) from the sidebar.
+- **Inline Configuration:** Edit commands and arguments directly in the graph.
+- **Live Status:** Watch steps execute in real time with Running/Success/Failure indicators.
+- **Launch:** Open via the **Leion Roots** view in the Activity Bar.
 
 ### 2. Core Providers
-Intent Router comes with strict, low-level providers:
-*   **Terminal:** The neutral base. Reuses a single "Intent Router" terminal instance to keep history visible.
-    *   Capability: `terminal.run`
-*   **System:** Control flow and safety.
-    *   Capability: `system.pause` (Triggers a modal dialog for mandatory human review).
-*   **Git:** Wrapper around VS Code's built-in Git extension.
-    *   Capabilities: `git.checkout`, `git.commit`, `git.push`, `git.pull`.
-*   **Docker:** Wrapper around VS Code's Docker extension.
-    *   Capabilities: `docker.build`, `docker.run`.
+Leion Roots comes with strict, low‑level providers:
+
+- **Terminal:** The neutral base. Reuses a single “Intent Router” terminal instance to keep history visible.
+  - Capability: `terminal.run`
+- **System:** Control flow and safety.
+  - Capability: `system.pause` (Triggers a modal dialog for mandatory human review).
+- **Git:** Wrapper around VS Code’s built‑in Git extension.
+  - Capabilities: `git.checkout`, `git.commit`, `git.push`, `git.pull`.
+- **Docker:** Wrapper around VS Code’s Docker extension.
+  - Capabilities: `docker.build`, `docker.run`.
 
 ### 3. Workflow Logic
-*   **Variables (`${input:Prompt}`):** Ask the human for input at runtime (e.g., "Which branch?"). Values are cached per session.
-*   **Pause (`system.pause`):** Stop execution and wait for user confirmation. Essential for the "Review" phase.
-*   **Linear Execution:** Steps run sequentially. If one fails, the pipeline stops.
+- **Variables (`${input:Prompt}`):** Ask the human for input at runtime (e.g., “Which branch?”). Values are cached per session.
+- **Pause (`system.pause`):** Stop execution and wait for user confirmation.
+- **Linear Execution:** Steps run sequentially. If one fails, the pipeline stops.
 
----
+## Target Workflow (V1)
 
-## 🎯 Target Workflow (V1)
+1. **Detection:** Select the latest PR branch.
+2. **Checkout:** `terminal.run` checks out the branch.
+3. **AI Review:** An AI agent reads code, tests, and fixes locally.
+4. **Human Validation:** `system.pause` halts the pipeline for review.
+5. **Merge:** You manually merge if satisfied.
+6. **Loop:** The pipeline continues to the next PR.
 
-The ideal flow supported by Intent Router:
+Rules:
+- No agent merges code automatically.
+- All Git actions are visible in the Terminal.
 
-1.  **Detection:** Intent Router selects the latest PR branch.
-2.  **Checkout:** `terminal.run` checks out the branch.
-3.  **AI Review:** An AI Agent (e.g., Codex) reads code, tests, and fixes locally.
-4.  **Human Validation:** `system.pause` halts the pipeline. **You** review the changes.
-5.  **Merge:** You manually merge if satisfied.
-6.  **Loop:** The pipeline continues to the next PR.
-
-**⚠️ Rules:**
-*   No Agent merges code automatically.
-*   All Git actions are visible in the Terminal.
-
----
-
-## 🛠 Usage
+## Usage
 
 ### Creating a Pipeline
-1.  Open the **Intent Router** view in the Activity Bar.
-2.  Click **"+" (New Pipeline)**.
-3.  Drag nodes (e.g., Terminal) onto the canvas.
-4.  Configure steps:
-    *   *Terminal:* `echo "Checking out..." && git checkout -b feature/demo`
-    *   *System:* Pause with message "Check the code now!"
-5.  Click **Save Pipeline**. It is saved as `pipeline/<name>.intent.json`.
+1. Open the **Leion Roots** view in the Activity Bar.
+2. Click **+ (New Pipeline)**.
+3. Drag nodes (e.g., Terminal) onto the canvas.
+4. Configure steps:
+   - Terminal: `echo "Checking out..." && git checkout -b feature/demo`
+   - System: Pause with message “Check the code now!”
+5. Click **Save Pipeline**. It is saved as `pipeline/<name>.intent.json`.
 
 ### Running a Pipeline
-*   **From the Builder:** Click "Run" (planned feature) or use the command palette.
-*   **From the Tree View:** Right-click a pipeline in the "Intent Pipelines" view and select **Run**.
-*   **Dry Run:** Simulates execution without side effects (where supported).
+- **From the Builder:** Click **Run** or use the Command Palette.
+- **From the Tree View:** Right‑click a pipeline in **Intent Pipelines** and select **Run**.
+- **Dry Run:** Simulates execution without side effects (where supported).
 
 ### JSON Format
 Pipelines are stored as simple JSON files:
@@ -102,18 +96,16 @@ Pipelines are stored as simple JSON files:
 }
 ```
 
----
+## Architecture
 
-## 🧩 Architecture
-
-*   **Intent:** An abstract definition of "what needs to be done".
-*   **Router:** Resolves intents to specific capabilities based on installed extensions.
-*   **Providers:** Adapters that map Intent Router commands to VS Code APIs or external tools.
-*   **Pipeline Runner:** Executes a linear sequence of intents, handling state and events.
+- **Intent:** An abstract definition of “what needs to be done.”
+- **Router:** Resolves intents to specific capabilities based on installed extensions.
+- **Providers:** Adapters that map intents to VS Code APIs or external tools.
+- **Pipeline Runner:** Executes a linear sequence of intents, handling state and events.
 
 ## Contributing
 
-1.  **Clone** the repository.
-2.  `npm install`
-3.  `npm run compile`
-4.  `F5` to launch the Extension Development Host.
+1. Clone the repository.
+2. `npm install`
+3. `npm run compile`
+4. `F5` to launch the Extension Development Host.

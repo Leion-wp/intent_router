@@ -19,6 +19,7 @@ function doRegister() {
                 capability: 'terminal.run',
                 command: 'intentRouter.internal.terminalRun',
                 description: 'Run a shell command in the integrated terminal',
+                determinism: 'deterministic',
                 args: [
                     { name: 'command', type: 'string', description: 'The shell command to execute', required: true },
                     { name: 'cwd', type: 'path', description: 'Working directory', default: '.' }

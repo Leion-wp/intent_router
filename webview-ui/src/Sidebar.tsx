@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { isInboundMessage, WebviewOutboundMessage } from './types/messages';
+import SchemaArgsForm, { SchemaField } from './components/SchemaArgsForm';
 
 type SidebarProps = {
   history?: any[];
   onSelectHistory?: (run: any) => void;
   onRestoreHistory?: (run: any) => void;
+  tab?: 'providers' | 'history' | 'environment' | 'studio';
+  onTabChange?: (tab: 'providers' | 'history' | 'environment' | 'studio') => void;
 };
 
 // Acquire VS Code API (safe singleton) - reuse from App or get from global
@@ -15,9 +18,24 @@ declare global {
   }
 }
 
-export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory }: SidebarProps) {
-  const [tab, setTab] = useState<'providers' | 'history' | 'environment'>('providers');
+export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory, tab: tabProp, onTabChange }: SidebarProps) {
+  const [internalTab, setInternalTab] = useState<'providers' | 'history' | 'environment' | 'studio'>('providers');
+  const tab = tabProp ?? internalTab;
+  const setTab = (next: 'providers' | 'history' | 'environment' | 'studio') => {
+    if (onTabChange) onTabChange(next);
+    else setInternalTab(next);
+  };
   const [envVars, setEnvVars] = useState<{ key: string, value: string, visible: boolean }[]>([]);
+  const [customNodes, setCustomNodes] = useState<any[]>((window.initialData?.customNodes as any[]) || []);
+  const [studioSelectedId, setStudioSelectedId] = useState<string>('');
+  const [studioDraft, setStudioDraft] = useState<any>(null);
+  const [studioMappingJson, setStudioMappingJson] = useState<string>('{}');
+  const [studioPreviewValues, setStudioPreviewValues] = useState<Record<string, any>>({});
+  const [studioError, setStudioError] = useState<string>('');
+  const [studioExportJson, setStudioExportJson] = useState<string>('');
+  const [studioImportJson, setStudioImportJson] = useState<string>('');
+  const [studioImportSummary, setStudioImportSummary] = useState<string>('');
+  const devMode = !!window.initialData?.devMode;
 
 	  useEffect(() => {
 	    const loadEnv = (data: any) => {
@@ -42,9 +60,39 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 	        if (event.data.type === 'environmentUpdate') {
 	             loadEnv(event.data.environment);
 	        }
+          if (event.data.type === 'customNodesUpdate') {
+            setCustomNodes((event.data as any).nodes || []);
+          }
+          if (event.data.type === 'customNodesExported') {
+            setStudioExportJson(String((event.data as any).json || ''));
+          }
+          if (event.data.type === 'customNodesImported') {
+            const renames = (event.data as any).renames || {};
+            const renamedCount = Object.keys(renames).length;
+            const importedCount = ((event.data as any).imported || []).length;
+            setStudioImportSummary(
+              `Imported ${importedCount} node(s).` + (renamedCount ? ` Renamed ${renamedCount} due to ID conflicts.` : '')
+            );
+          }
+          if (event.data.type === 'customNodesImportError') {
+            setStudioImportSummary(`Import failed: ${String((event.data as any).message || '')}`);
+          }
 	    };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  const allCapabilities: string[] = useMemo(() => {
+    const groups = (window.initialData?.commandGroups as any[]) || [];
+    const out: string[] = [];
+    for (const g of groups) {
+      for (const c of (g?.commands || [])) {
+        const cap = String(c?.capability || '').trim();
+        if (cap) out.push(cap);
+      }
+    }
+    out.sort();
+    return out;
   }, []);
 
   const saveEnv = (newVars: typeof envVars) => {
@@ -97,6 +145,12 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     event.dataTransfer.effectAllowed = 'move';
   };
 
+  const onDragStartCustomNode = (event: React.DragEvent, customNodeId: string) => {
+    event.dataTransfer.setData('application/reactflow/type', 'customNode');
+    event.dataTransfer.setData('application/reactflow/customNodeId', customNodeId);
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
 	  const clearHistory = () => {
 	    if (window.vscode) {
 	        const msg: WebviewOutboundMessage = { type: 'clearHistory' };
@@ -107,6 +161,8 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
   const items = [
     // Context / Setup Nodes
     { type: 'promptNode', label: 'Prompt', icon: 'codicon-symbol-string', desc: 'Set variable' },
+    { type: 'formNode', label: 'Form', icon: 'codicon-list-selection', desc: 'Collect inputs (HITL)' },
+    { type: 'switchNode', label: 'Switch', icon: 'codicon-filter', desc: 'Route by variable' },
     { type: 'repoNode', label: 'Repo', icon: 'codicon-repo', desc: 'Set workspace path' },
     { type: 'vscodeCommandNode', label: 'VS Code', icon: 'codicon-vscode', desc: 'Run an arbitrary VS Code command' },
     // Providers
@@ -115,6 +171,106 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     { type: 'actionNode', provider: 'git', label: 'Git', icon: 'codicon-git-commit', desc: 'Version control operations' },
     { type: 'actionNode', provider: 'docker', label: 'Docker', icon: 'codicon-container', desc: 'Container operations' }
   ];
+
+  const startNewDraft = () => {
+    const draft = { id: '', title: '', intent: '', schema: [] as SchemaField[], mapping: {} as any };
+    setStudioDraft(draft);
+    setStudioSelectedId('');
+    setStudioMappingJson('{}');
+    setStudioPreviewValues({});
+    setStudioExportJson('');
+    setStudioImportJson('');
+    setStudioImportSummary('');
+    setStudioError('');
+  };
+
+  const selectDraft = (id: string) => {
+    const found = (customNodes || []).find((n: any) => String(n?.id || '') === id);
+    if (!found) return;
+    setStudioSelectedId(id);
+    setStudioDraft({
+      id: String(found.id || ''),
+      title: String(found.title || ''),
+      intent: String(found.intent || ''),
+      schema: Array.isArray(found.schema) ? found.schema : [],
+      mapping: found.mapping && typeof found.mapping === 'object' ? found.mapping : {}
+    });
+    setStudioMappingJson(JSON.stringify((found.mapping && typeof found.mapping === 'object') ? found.mapping : {}, null, 2));
+    setStudioPreviewValues({});
+    setStudioExportJson('');
+    setStudioImportJson('');
+    setStudioImportSummary('');
+    setStudioError('');
+  };
+
+  const saveDraft = () => {
+    if (!studioDraft) return;
+    const id = String(studioDraft.id || '').trim();
+    const title = String(studioDraft.title || '').trim();
+    const intent = String(studioDraft.intent || '').trim();
+    if (!id || !title || !intent) {
+      setStudioError('id, title, intent are required.');
+      return;
+    }
+
+    let mapping: any = {};
+    try {
+      mapping = studioMappingJson.trim() ? JSON.parse(studioMappingJson) : {};
+    } catch (e: any) {
+      setStudioError(`Invalid mapping JSON: ${e?.message || e}`);
+      return;
+    }
+
+    const node = {
+      id,
+      title,
+      intent,
+      schema: Array.isArray(studioDraft.schema) ? studioDraft.schema : [],
+      mapping: mapping && typeof mapping === 'object' ? mapping : {}
+    };
+
+    setStudioError('');
+    if (window.vscode) {
+      const msg: WebviewOutboundMessage = { type: 'customNodes.upsert', node };
+      window.vscode.postMessage(msg);
+    }
+    setStudioSelectedId(id);
+  };
+
+  const deleteDraft = (id: string) => {
+    const target = String(id || '').trim();
+    if (!target) return;
+    if (window.vscode) {
+      const msg: WebviewOutboundMessage = { type: 'customNodes.delete', id: target };
+      window.vscode.postMessage(msg);
+    }
+    if (studioSelectedId === target) {
+      setStudioSelectedId('');
+      setStudioDraft(null);
+      setStudioMappingJson('{}');
+      setStudioPreviewValues({});
+      setStudioError('');
+    }
+  };
+
+  const exportSelectedOrAll = (scope: 'one' | 'all') => {
+    if (!window.vscode) return;
+    const id = scope === 'one' ? String(studioSelectedId || '') : undefined;
+    const msg: WebviewOutboundMessage = { type: 'customNodes.export', scope, id };
+    window.vscode.postMessage(msg);
+  };
+
+  const importFromPaste = () => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'customNodes.import', source: 'paste', jsonText: studioImportJson };
+    window.vscode.postMessage(msg);
+  };
+
+  const importFromFile = () => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'customNodes.import', source: 'file' };
+    window.vscode.postMessage(msg);
+  };
 
   return (
     <aside className="sidebar">
@@ -154,6 +310,16 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
           >
               ENV
           </button>
+          <button
+             role="tab"
+             aria-selected={tab === 'studio'}
+             aria-controls="panel-studio"
+             id="tab-studio"
+             onClick={() => setTab('studio')}
+             className="sidebar-tab"
+          >
+              STUDIO
+          </button>
       </div>
 
 	      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
@@ -174,6 +340,73 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                   <span>{item.label}</span>
                 </div>
               ))}
+
+              <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--vscode-panel-border)' }}>
+                <div style={{ fontSize: '11px', opacity: 0.85, padding: '0 8px 6px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Custom Nodes</span>
+                  <button
+                    className="nodrag"
+                    onClick={() => setTab('studio')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--vscode-textLink-foreground)',
+                      cursor: 'pointer',
+                      fontSize: '11px'
+                    }}
+                    title="Open Node Studio"
+                  >
+                    Open Studio
+                  </button>
+                </div>
+                {customNodes.length === 0 ? (
+                  <div style={{ opacity: 0.6, fontSize: '12px', padding: '0 8px 8px 8px' }}>No custom nodes yet.</div>
+                ) : (
+                  <div className="sidebar-list">
+                    {customNodes.map((n: any) => (
+                      <div
+                        key={String(n?.id || '')}
+                        className="dndnode"
+                        onDragStart={(event) => onDragStartCustomNode(event, String(n?.id || ''))}
+                        draggable
+                        title={`Drag to add ${String(n?.title || n?.id || 'Custom')}`}
+                        aria-label={`Add custom node ${String(n?.title || n?.id || 'Custom')}`}
+                        tabIndex={0}
+                        role="listitem"
+                      >
+                        <span className="codicon codicon-symbol-structure" style={{ fontSize: '16px', marginRight: '8px' }}></span>
+                        <span>{String(n?.title || n?.id || 'Custom')}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {devMode && (
+                <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--vscode-panel-border)' }}>
+                  <div style={{ fontSize: '11px', opacity: 0.85, padding: '0 8px 6px 8px' }}>Dev</div>
+                  <button
+                    className="nodrag"
+                    onClick={() => {
+                      if (!window.vscode) return;
+                      const msg: WebviewOutboundMessage = { type: 'devPackager.loadPreset' };
+                      window.vscode.postMessage(msg);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '6px',
+                      background: 'var(--vscode-button-background)',
+                      color: 'var(--vscode-button-foreground)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '11px'
+                    }}
+                    title="Load the Dev Packager preset pipeline into the builder"
+                  >
+                    Load Dev Packager
+                  </button>
+                </div>
+              )}
             </div>
         )}
 
@@ -240,6 +473,405 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 	                  ))}
 	            </div>
 	        )}
+
+        {tab === 'studio' && (
+          <div style={{ padding: '0 8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
+              <button
+                className="nodrag"
+                onClick={startNewDraft}
+                style={{
+                  flex: 1,
+                  padding: '6px',
+                  background: 'var(--vscode-button-secondaryBackground)',
+                  color: 'var(--vscode-button-secondaryForeground)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '11px'
+                }}
+              >
+                + New
+              </button>
+              <button
+                className="nodrag"
+                onClick={saveDraft}
+                disabled={!studioDraft}
+                style={{
+                  flex: 1,
+                  padding: '6px',
+                  background: studioDraft ? 'var(--vscode-button-background)' : 'transparent',
+                  color: studioDraft ? 'var(--vscode-button-foreground)' : 'var(--vscode-descriptionForeground)',
+                  border: studioDraft ? 'none' : '1px solid var(--vscode-panel-border)',
+                  cursor: studioDraft ? 'pointer' : 'not-allowed',
+                  fontSize: '11px',
+                  opacity: studioDraft ? 1 : 0.6
+                }}
+              >
+                Save
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+              <button
+                className="nodrag"
+                onClick={() => exportSelectedOrAll(studioSelectedId ? 'one' : 'all')}
+                style={{
+                  flex: 1,
+                  padding: '6px',
+                  background: 'var(--vscode-button-secondaryBackground)',
+                  color: 'var(--vscode-button-secondaryForeground)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '11px'
+                }}
+                title="Export JSON (copies to clipboard)"
+              >
+                Export
+              </button>
+              <button
+                className="nodrag"
+                onClick={importFromFile}
+                style={{
+                  flex: 1,
+                  padding: '6px',
+                  background: 'var(--vscode-button-secondaryBackground)',
+                  color: 'var(--vscode-button-secondaryForeground)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '11px'
+                }}
+                title="Import JSON from file"
+              >
+                Import File
+              </button>
+            </div>
+
+            {studioError && (
+              <div style={{ color: 'var(--vscode-errorForeground)', fontSize: '11px', marginBottom: '8px' }}>
+                {studioError}
+              </div>
+            )}
+            {studioImportSummary && (
+              <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '8px' }}>
+                {studioImportSummary}
+              </div>
+            )}
+
+            <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '6px' }}>Existing</div>
+            <div className="sidebar-list" style={{ marginBottom: '12px' }}>
+              {customNodes.length === 0 && (
+                <div style={{ opacity: 0.6, fontSize: '12px', padding: '6px 0' }}>No custom nodes yet.</div>
+              )}
+              {customNodes.map((n: any) => {
+                const nid = String(n?.id || '');
+                const selected = studioSelectedId === nid;
+                return (
+                  <div
+                    key={nid}
+                    onClick={() => selectDraft(nid)}
+                    draggable
+                    onDragStart={(event) => onDragStartCustomNode(event, nid)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
+                      padding: '6px 8px',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      border: selected ? '1px solid var(--vscode-focusBorder)' : '1px solid transparent',
+                      background: selected ? 'var(--vscode-list-activeSelectionBackground)' : 'transparent'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                      <span className="codicon codicon-symbol-structure"></span>
+                      <span style={{ fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {String(n?.title || nid)}
+                      </span>
+                    </div>
+                    <button
+                      className="nodrag"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteDraft(nid);
+                      }}
+                      title="Delete"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-errorForeground)' }}
+                    >
+                      <span className="codicon codicon-trash"></span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            {studioDraft && (
+              <div style={{ borderTop: '1px solid var(--vscode-panel-border)', paddingTop: '10px' }}>
+                <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '8px' }}>Editor</div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input
+                    className="nodrag"
+                    placeholder="id (unique)"
+                    value={String(studioDraft.id || '')}
+                    onChange={(e) => setStudioDraft({ ...studioDraft, id: e.target.value })}
+                    style={{
+                      width: '100%',
+                      background: 'var(--vscode-input-background)',
+                      color: 'var(--vscode-input-foreground)',
+                      border: '1px solid var(--vscode-input-border)',
+                      padding: '6px',
+                      fontSize: '11px'
+                    }}
+                  />
+                  <input
+                    className="nodrag"
+                    placeholder="title"
+                    value={String(studioDraft.title || '')}
+                    onChange={(e) => setStudioDraft({ ...studioDraft, title: e.target.value })}
+                    style={{
+                      width: '100%',
+                      background: 'var(--vscode-input-background)',
+                      color: 'var(--vscode-input-foreground)',
+                      border: '1px solid var(--vscode-input-border)',
+                      padding: '6px',
+                      fontSize: '11px'
+                    }}
+                  />
+
+                  <div>
+                    <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '4px' }}>Intent</div>
+                    <input
+                      className="nodrag"
+                      list="studio-intents"
+                      placeholder="intent (e.g. git.checkout)"
+                      value={String(studioDraft.intent || '')}
+                      onChange={(e) => setStudioDraft({ ...studioDraft, intent: e.target.value })}
+                      style={{
+                        width: '100%',
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: '1px solid var(--vscode-input-border)',
+                        padding: '6px',
+                        fontSize: '11px'
+                      }}
+                    />
+                    <datalist id="studio-intents">
+                      {allCapabilities.map((cap) => (
+                        <option key={cap} value={cap} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  <div style={{ border: '1px solid var(--vscode-widget-border)', borderRadius: '4px', padding: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '11px', opacity: 0.85 }}>Schema</div>
+                      <button
+                        className="nodrag"
+                        onClick={() => setStudioDraft({ ...studioDraft, schema: [...(studioDraft.schema || []), { name: '', type: 'string' }] })}
+                        style={{
+                          background: 'none',
+                          border: '1px solid var(--vscode-panel-border)',
+                          color: 'var(--vscode-foreground)',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          padding: '2px 6px',
+                          borderRadius: '4px'
+                        }}
+                      >
+                        + Field
+                      </button>
+                    </div>
+
+                    {(studioDraft.schema || []).map((f: SchemaField, i: number) => (
+                      <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 70px 1fr 24px', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
+                        <input
+                          className="nodrag"
+                          placeholder="name"
+                          value={String(f?.name || '')}
+                          onChange={(e) => {
+                            const next = [...(studioDraft.schema || [])];
+                            next[i] = { ...next[i], name: e.target.value };
+                            setStudioDraft({ ...studioDraft, schema: next });
+                          }}
+                          style={{
+                            background: 'var(--vscode-input-background)',
+                            color: 'var(--vscode-input-foreground)',
+                            border: '1px solid var(--vscode-input-border)',
+                            padding: '4px',
+                            fontSize: '11px'
+                          }}
+                        />
+                        <select
+                          className="nodrag"
+                          value={String(f?.type || 'string')}
+                          onChange={(e) => {
+                            const next = [...(studioDraft.schema || [])];
+                            next[i] = { ...next[i], type: e.target.value as any };
+                            setStudioDraft({ ...studioDraft, schema: next });
+                          }}
+                          style={{
+                            background: 'var(--vscode-input-background)',
+                            color: 'var(--vscode-input-foreground)',
+                            border: '1px solid var(--vscode-input-border)',
+                            padding: '4px',
+                            fontSize: '11px'
+                          }}
+                        >
+                          <option value="string">string</option>
+                          <option value="boolean">boolean</option>
+                          <option value="enum">enum</option>
+                          <option value="path">path</option>
+                        </select>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
+                          <input
+                            className="nodrag"
+                            type="checkbox"
+                            checked={!!f?.required}
+                            onChange={(e) => {
+                              const next = [...(studioDraft.schema || [])];
+                              next[i] = { ...next[i], required: e.target.checked };
+                              setStudioDraft({ ...studioDraft, schema: next });
+                            }}
+                          />
+                          req
+                        </label>
+                        <input
+                          className="nodrag"
+                          placeholder="default / options (enum: a,b,c)"
+                          value={
+                            f?.type === 'enum'
+                              ? (Array.isArray(f?.options) ? (f?.options as any[]).join(',') : String(f?.options || ''))
+                              : (f?.default !== undefined ? String(f?.default) : '')
+                          }
+                          onChange={(e) => {
+                            const next = [...(studioDraft.schema || [])];
+                            if (String(next[i]?.type) === 'enum') {
+                              const raw = e.target.value;
+                              next[i] = { ...next[i], options: raw.split(',').map(s => s.trim()).filter(Boolean) };
+                            } else {
+                              next[i] = { ...next[i], default: e.target.value };
+                            }
+                            setStudioDraft({ ...studioDraft, schema: next });
+                          }}
+                          style={{
+                            background: 'var(--vscode-input-background)',
+                            color: 'var(--vscode-input-foreground)',
+                            border: '1px solid var(--vscode-input-border)',
+                            padding: '4px',
+                            fontSize: '11px'
+                          }}
+                        />
+                        <button
+                          className="nodrag"
+                          onClick={() => {
+                            const next = [...(studioDraft.schema || [])];
+                            next.splice(i, 1);
+                            setStudioDraft({ ...studioDraft, schema: next });
+                          }}
+                          title="Remove"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-errorForeground)' }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <div style={{ fontSize: '10px', opacity: 0.65 }}>Mapping defaults to identity if left empty.</div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '4px' }}>Mapping (JSON)</div>
+                    <textarea
+                      className="nodrag"
+                      value={studioMappingJson}
+                      onChange={(e) => setStudioMappingJson(e.target.value)}
+                      placeholder='{ "payloadKey": "fieldName" }'
+                      style={{
+                        width: '100%',
+                        minHeight: '90px',
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: '1px solid var(--vscode-input-border)',
+                        padding: '6px',
+                        fontSize: '11px',
+                        fontFamily: 'var(--vscode-editor-font-family, monospace)'
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ borderTop: '1px solid var(--vscode-panel-border)', paddingTop: '10px' }}>
+                    <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '8px' }}>Import (paste JSON)</div>
+                    <textarea
+                      className="nodrag"
+                      value={studioImportJson}
+                      onChange={(e) => setStudioImportJson(e.target.value)}
+                      placeholder='{"version":1,"nodes":[...]}'
+                      style={{
+                        width: '100%',
+                        minHeight: '90px',
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: '1px solid var(--vscode-input-border)',
+                        padding: '6px',
+                        fontSize: '11px',
+                        fontFamily: 'var(--vscode-editor-font-family, monospace)'
+                      }}
+                    />
+                    <button
+                      className="nodrag"
+                      onClick={importFromPaste}
+                      style={{
+                        marginTop: '8px',
+                        width: '100%',
+                        padding: '6px',
+                        background: 'var(--vscode-button-background)',
+                        color: 'var(--vscode-button-foreground)',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: '11px'
+                      }}
+                    >
+                      Import Paste
+                    </button>
+                  </div>
+
+                  {studioExportJson && (
+                    <div style={{ borderTop: '1px solid var(--vscode-panel-border)', paddingTop: '10px' }}>
+                      <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '8px' }}>Last Export</div>
+                      <textarea
+                        className="nodrag"
+                        readOnly
+                        value={studioExportJson}
+                        style={{
+                          width: '100%',
+                          minHeight: '90px',
+                          background: 'var(--vscode-input-background)',
+                          color: 'var(--vscode-input-foreground)',
+                          border: '1px solid var(--vscode-input-border)',
+                          padding: '6px',
+                          fontSize: '11px',
+                          fontFamily: 'var(--vscode-editor-font-family, monospace)'
+                        }}
+                      />
+                      <div style={{ fontSize: '10px', opacity: 0.65 }}>Copied to clipboard on export.</div>
+                    </div>
+                  )}
+
+                  <div style={{ borderTop: '1px solid var(--vscode-panel-border)', paddingTop: '10px' }}>
+                    <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '8px' }}>Preview</div>
+                    <SchemaArgsForm
+                      nodeId="studio-preview"
+                      fields={[...(studioDraft.schema || []), { name: 'description', type: 'string', description: 'Step description for logs' }]}
+                      values={studioPreviewValues}
+                      onChange={(name, value) => setStudioPreviewValues((prev) => ({ ...prev, [name]: value }))}
+                      availableVars={[]}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {tab === 'environment' && (
             <div style={{ padding: '0 8px' }}>
@@ -350,12 +982,3 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
   );
 }
 
-function getTabStyle(active: boolean) {
-    return {
-         cursor: 'pointer',
-         fontWeight: active ? 'bold' : 'normal',
-         opacity: active ? 1 : 0.6,
-         borderBottom: active ? '2px solid var(--vscode-panelTitle-activeBorder)' : 'none',
-         paddingBottom: '4px'
-    };
-}

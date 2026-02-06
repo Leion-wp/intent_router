@@ -1,7 +1,8 @@
 import { memo, useMemo, useState, useEffect, useContext, useRef } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
-import { FlowRuntimeContext, RegistryContext } from '../App';
+import { FlowEditorContext, FlowRuntimeContext, RegistryContext } from '../App';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
+import SchemaArgsForm from '../components/SchemaArgsForm';
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
@@ -15,17 +16,21 @@ const FALLBACK_CAPS: any[] = [];
 
 const ActionNode = ({ data, id }: NodeProps) => {
   const { commandGroups } = useContext(RegistryContext);
-  const { getAvailableVars } = useContext(FlowRuntimeContext);
+  const { getAvailableVars, isRunPreviewNode } = useContext(FlowRuntimeContext);
+  const { updateNodeData } = useContext(FlowEditorContext);
   const [provider, setProvider] = useState<string>((data.provider as string) || 'terminal');
   const [capability, setCapability] = useState<string>((data.capability as string) || '');
   const [args, setArgs] = useState<Record<string, any>>((data.args as Record<string, any>) || {});
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
+  const [label, setLabel] = useState<string>((data.label as string) || '');
+  const [editingLabel, setEditingLabel] = useState(false);
   const [expandedHelp, setExpandedHelp] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({});
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const [varPickerOpen, setVarPickerOpen] = useState<Record<string, boolean>>({});
   const logsRef = useRef<HTMLDivElement>(null);
+  const collapsed = !!data.collapsed;
 
   // Sync from props if data changes externally
   useEffect(() => {
@@ -33,6 +38,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
     if (data.capability) setCapability(data.capability as string);
     if (data.args) setArgs(data.args as Record<string, any>);
     if (data.status) setStatus(data.status as string);
+    if (data.label !== undefined) setLabel((data.label as string) || '');
 
     // Auto-open console if logs exist and we just started running or got logs
     if (data.logs && (data.logs as any[]).length > 0 && !isConsoleOpen) {
@@ -60,21 +66,14 @@ const ActionNode = ({ data, id }: NodeProps) => {
        // Try to find 'run' or just take first
        const defaultCap = currentCaps.find((c: any) => c.capability.endsWith('.run'))?.capability || currentCaps[0].capability;
        setCapability(defaultCap);
-       updateData(provider, defaultCap, args);
+       updateNodeData(id, { provider, capability: defaultCap });
     }
   }, [provider, currentCaps]);
-
-  const updateData = (p: string, c: string, a: any) => {
-    // We mutate the data object directly because ReactFlow uses it by reference
-    data.provider = p;
-    data.capability = c;
-    data.args = a;
-  };
 
   const handleArgChange = (key: string, value: any) => {
     const newArgs = { ...args, [key]: value };
     setArgs(newArgs);
-    updateData(provider, capability, newArgs);
+    updateNodeData(id, { args: newArgs });
   };
 
   const availableVars = useMemo(() => {
@@ -150,9 +149,13 @@ const ActionNode = ({ data, id }: NodeProps) => {
      ...schemaArgs,
      { name: 'description', type: 'string', description: 'Step description for logs' }
   ];
+  const useSharedForm = true;
 
   // Initialize Defaults & Validate & Fetch Dynamic Options
   useEffect(() => {
+      if (useSharedForm) {
+          return;
+      }
       const newArgs = { ...args };
       let changed = false;
       const newErrors: Record<string, boolean> = {};
@@ -184,7 +187,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
       if (changed) {
           setArgs(newArgs);
-          updateData(provider, capability, newArgs);
+          updateNodeData(id, { args: newArgs });
       }
       setErrors(newErrors);
 
@@ -192,6 +195,9 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
 	  // Listen for option responses
 	  useEffect(() => {
+        if (useSharedForm) {
+            return;
+        }
 	      const handleMessage = (event: MessageEvent) => {
 	          const message = event.data;
 	          if (!isInboundMessage(message)) {
@@ -211,6 +217,12 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
   const isPause = provider === 'system' && capability === 'system.pause';
   const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
+  const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none';
+  const determinism: 'deterministic' | 'interactive' =
+    selectedCapConfig?.determinism === 'interactive' ? 'interactive' : 'deterministic';
+  const determinismBadge = determinism === 'interactive' ? '👤' : '⚙';
+
+  const fallbackTitle = `${provider} · ${selectedCapConfig?.capability || capability}`.trim();
 
   return (
     <div style={{
@@ -218,7 +230,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
       borderRadius: '5px',
       background: 'var(--vscode-editor-background)',
       border: `2px solid ${isPause ? '#e6c300' : borderColor}`, // Gold for pause
-      boxShadow: status === 'running' ? `0 0 10px ${borderColor}` : 'none',
+      boxShadow: status === 'running' ? `0 0 10px ${borderColor}, ${previewGlow}` : previewGlow,
       minWidth: '250px',
       color: 'var(--vscode-editor-foreground)',
       fontFamily: 'var(--vscode-font-family)'
@@ -233,11 +245,69 @@ const ActionNode = ({ data, id }: NodeProps) => {
         style={{ top: '30%', background: '#f44336' }}
       />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', textTransform: 'capitalize' }}>
-        <span>{provider}</span>
-        {status !== 'idle' && <span style={{ fontSize: '0.8em', color: borderColor }}>●</span>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+          <span className="codicon codicon-gear"></span>
+          <span
+            title={determinism === 'interactive' ? 'Interactive (requires human / UI)' : 'Deterministic'}
+            style={{ fontSize: '12px', opacity: determinism === 'interactive' ? 1 : 0.85 }}
+          >
+            {determinismBadge}
+          </span>
+          {editingLabel ? (
+            <input
+              className="nodrag"
+              value={label}
+              autoFocus
+              onChange={(e) => {
+                const v = e.target.value;
+                setLabel(v);
+                updateNodeData(id, { label: v });
+              }}
+              onBlur={() => setEditingLabel(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') setEditingLabel(false);
+              }}
+              style={{
+                flex: 1,
+                background: 'var(--vscode-input-background)',
+                color: 'var(--vscode-input-foreground)',
+                border: '1px solid var(--vscode-input-border)',
+                padding: '2px 4px',
+                borderRadius: '4px'
+              }}
+            />
+          ) : (
+            <span
+              title="Click to rename"
+              onClick={() => setEditingLabel(true)}
+              style={{ cursor: 'text', userSelect: 'none' }}
+            >
+              {label || fallbackTitle}
+            </span>
+          )}
+        </div>
+        {status !== 'idle' && <span className={`status-badge ${status}`}>{status}</span>}
+        <button
+          className="nodrag"
+          onClick={() => updateNodeData(id, { collapsed: !collapsed })}
+          title={collapsed ? 'Expand' : 'Collapse'}
+          style={{
+            background: 'transparent',
+            color: 'var(--vscode-foreground)',
+            border: '1px solid var(--vscode-editorWidget-border)',
+            borderRadius: '4px',
+            width: '20px',
+            height: '20px',
+            cursor: 'pointer'
+          }}
+        >
+          {collapsed ? '▸' : '▾'}
+        </button>
       </div>
 
+      {!collapsed && (
+      <>
       <div style={{ marginBottom: '8px' }}>
         <select
           aria-label="Select capability"
@@ -247,7 +317,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
             setCapability(e.target.value);
             // We keep args that match names, but effectively "reset" behavior is complex.
             // For now, keeping overlap is fine, defaults will fill in.
-            updateData(provider, e.target.value, args);
+            updateNodeData(id, { capability: e.target.value });
           }}
           style={{
             width: '100%',
@@ -270,6 +340,10 @@ const ActionNode = ({ data, id }: NodeProps) => {
         )}
       </div>
 
+      <SchemaArgsForm nodeId={id} fields={displayArgs as any} values={args} onChange={handleArgChange} availableVars={availableVars} />
+
+      {/* Legacy inline renderer kept for reference (disabled) */}
+      {false && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {displayArgs.map((arg: any) => {
           const inputId = `input-${id}-${arg.name}`;
@@ -499,11 +573,14 @@ const ActionNode = ({ data, id }: NodeProps) => {
           );
         })}
       </div>
+      )}
+      </>
+      )}
 
       <Handle type="source" position={Position.Right} />
 
       {/* Mini-Console */}
-      {logs.length > 0 && (
+      {!collapsed && logs.length > 0 && (
         <div className="nodrag" style={{ marginTop: '8px', borderTop: '1px solid var(--vscode-widget-border)' }}>
             <div
                 onClick={() => setIsConsoleOpen(!isConsoleOpen)}
@@ -549,3 +626,4 @@ const ActionNode = ({ data, id }: NodeProps) => {
 };
 
 export default memo(ActionNode);
+
