@@ -158,7 +158,8 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 
 	      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
         {tab === 'providers' && (
-             <div className="sidebar-list">
+             <div className="sidebar-list" role="tabpanel" id="panel-providers" aria-labelledby="tab-providers">
+             <div role="list" style={{ display: 'contents' }}>
              {items.map((item, idx) => (
                 <div
                   key={idx}
@@ -174,16 +175,26 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                   <span>{item.label}</span>
                 </div>
               ))}
+             </div>
             </div>
         )}
 
 	        {tab === 'history' && (
-	            <div className="sidebar-list">
+	            <div className="sidebar-list" role="tabpanel" id="panel-history" aria-labelledby="tab-history">
 	                 {history.length === 0 && <div style={{opacity: 0.6, fontSize: '12px', padding: '8px'}}>No history available.</div>}
+	                 <div role="list" style={{ display: 'contents' }}>
 	                 {history.map((run) => (
 	                      <div
 	                        key={run.id}
 	                        onClick={() => onSelectHistory?.({ ...run })}
+	                        onKeyDown={(e) => {
+	                             if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+	                                 e.preventDefault();
+	                                 onSelectHistory?.({ ...run });
+	                             }
+	                        }}
+	                        role="listitem"
+	                        tabIndex={0}
 	                        style={{
 	                          padding: '8px',
 	                          background: 'var(--vscode-list-hoverBackground)',
@@ -238,11 +249,12 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 	                          )}
 	                      </div>
 	                  ))}
+                     </div>
 	            </div>
 	        )}
 
         {tab === 'environment' && (
-            <div style={{ padding: '0 8px' }}>
+            <div style={{ padding: '0 8px' }} role="tabpanel" id="panel-environment" aria-labelledby="tab-environment">
                 <div style={{ fontSize: '12px', opacity: 0.8, marginBottom: '12px' }}>
                     Workspace Environment Variables (injected into terminal & variables)
                 </div>

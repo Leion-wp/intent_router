@@ -14,5 +14,9 @@
 **Action:** When implementing tab interfaces, always use `role="tablist"` container with `role="tab"` buttons and proper `aria-controls`/`aria-labelledby` associations, and avoid inline styles for interactive states.
 
 ## 2026-02-05 - Nested Interactive Elements in Lists
-**Learning:** The History list implementation uses a `div` with `onClick` as a row container which also contains a nested "Restore" `<button>`. This creates a trap for converting the container to a semantic `<button>` or `<a>` tag, as nested interactive elements are invalid HTML.
-**Action:** For list items with primary and secondary actions, avoid making the entire row a button. Instead, separate the layout into distinct interactive zones (e.g., "Select" button + "Restore" button) to maintain semantic validity and keyboard navigability.
+**Learning:** The History list implementation uses a `div` with `onClick` as a row container which also contains a nested "Restore" `<button>`. Converting this to a semantic `<button>` is invalid HTML (nested buttons).
+**Action:** Use `role="listitem"` with `tabIndex="0"` and `onKeyDown` for the container. Crucially, in the `onKeyDown` handler, check `e.target === e.currentTarget` to prevent the container's action from firing when the user interacts with the nested secondary button.
+
+## 2026-02-05 - List Semantics
+**Learning:** Visual lists created with flexbox `div`s often lack the semantic `role="list"` and `role="listitem"` structure, making them appear as unstructured text to screen readers.
+**Action:** Always wrap lists of items in a container with `role="list"` (if not using `<ul>`/`<ol>`) to communicate the number of items and list structure to assistive technology.
