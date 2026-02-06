@@ -29,6 +29,8 @@ import RepoNode from './nodes/RepoNode';
 import VSCodeCommandNode from './nodes/VSCodeCommandNode';
 import StartNode from './nodes/StartNode';
 import CustomNode from './nodes/CustomNode';
+import FormNode from './nodes/FormNode';
+import SwitchNode from './nodes/SwitchNode';
 import { isInboundMessage, WebviewInboundMessage } from './types/messages';
 
 // Context for Registry
@@ -65,7 +67,9 @@ const nodeTypes = {
   promptNode: PromptNode,
   repoNode: RepoNode,
   vscodeCommandNode: VSCodeCommandNode,
-  customNode: CustomNode
+  customNode: CustomNode,
+  formNode: FormNode,
+  switchNode: SwitchNode
 };
 
 const InsertableEdge = (props: EdgeProps) => {
@@ -105,6 +109,26 @@ const InsertableEdge = (props: EdgeProps) => {
           }}
           onClick={(e) => e.stopPropagation()}
         >
+          {(data as any)?.label && (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '24px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'var(--vscode-editorWidget-background)',
+                border: '1px solid var(--vscode-editorWidget-border)',
+                color: 'var(--vscode-foreground)',
+                fontSize: '10px',
+                padding: '2px 6px',
+                borderRadius: '10px',
+                whiteSpace: 'nowrap',
+                opacity: 0.9
+              }}
+            >
+              {(data as any).label}
+            </div>
+          )}
           <button
             className="nodrag"
             onClick={(e) => {
@@ -241,9 +265,15 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       .map((n: any) => String(n?.data?.name || '').trim())
       .filter((s: string) => !!s);
 
+    const formVars = (nodesRef.current || [])
+      .filter((n: any) => n?.type === 'formNode')
+      .flatMap((n: any) => (Array.isArray(n?.data?.fields) ? n.data.fields : []))
+      .map((f: any) => String(f?.key || '').trim())
+      .filter(Boolean);
+
     const envVars = Object.keys(envRef.current || {}).map(s => String(s).trim()).filter(Boolean);
 
-    const all = Array.from(new Set([...promptVars, ...envVars]));
+    const all = Array.from(new Set([...promptVars, ...formVars, ...envVars]));
     all.sort((a, b) => a.localeCompare(b));
     return all;
   }, []);
@@ -284,7 +314,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
   type QuickAddItem = {
     id: string;
     label: string;
-    nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode' | 'customNode';
+    nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode' | 'customNode' | 'formNode' | 'switchNode';
     provider?: string;
     capability?: string;
     customNodeId?: string;
@@ -299,6 +329,8 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
   const presetItems: QuickAddItem[] = useMemo(() => ([
     { id: 'preset-prompt', label: 'Prompt', nodeType: 'promptNode' },
+    { id: 'preset-form', label: 'Form', nodeType: 'formNode' },
+    { id: 'preset-switch', label: 'Switch', nodeType: 'switchNode' },
     { id: 'preset-repo', label: 'Repo', nodeType: 'repoNode' },
     { id: 'preset-terminal', label: 'Terminal', nodeType: 'actionNode', provider: 'terminal', capability: getDefaultCapability('terminal') },
     { id: 'preset-system', label: 'System', nodeType: 'actionNode', provider: 'system', capability: getDefaultCapability('system') },
@@ -350,6 +382,13 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       data.mapping = def?.mapping;
       data.args = {};
       data.kind = 'custom';
+    } else if (item.nodeType === 'formNode') {
+      data.fields = [];
+      data.kind = 'form';
+    } else if (item.nodeType === 'switchNode') {
+      data.variableKey = '';
+      data.routes = [];
+      data.kind = 'switch';
     } else if (item.nodeType === 'promptNode') {
       data.name = '';
       data.value = '';
@@ -768,6 +807,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
       // 5. Map Sorted Nodes to Steps
       const steps: any[] = [];
+      let stepBuildError: string | null = null;
       sortedIds.forEach(id => {
         const node = nodeMap.get(id);
         if (!node) return;
@@ -783,6 +823,36 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
         if (node.type === 'promptNode') {
           intent = 'system.setVar';
           payload = { name: data.name, value: data.value };
+        } else if (node.type === 'formNode') {
+          intent = 'system.form';
+          payload = { fields: Array.isArray(data.fields) ? data.fields : [] };
+        } else if (node.type === 'switchNode') {
+          intent = 'system.switch';
+
+          const outgoing = effectiveEdges.filter((e: any) => e.source === node.id);
+          const routes = Array.isArray(data.routes) ? data.routes : [];
+          const routePayload = routes.map((r: any, i: number) => {
+            const handleId = `route_${i}`;
+            const edge = outgoing.find((e: any) => String(e.sourceHandle || '') === handleId);
+            return {
+              label: String(r?.label || handleId),
+              equalsValue: String(r?.equalsValue || ''),
+              targetStepId: edge?.target
+            };
+          });
+
+          const defaultEdge = outgoing.find((e: any) => String(e.sourceHandle || '') === 'default');
+          const defaultStepId = defaultEdge?.target;
+          if (!defaultStepId) {
+            stepBuildError = 'Switch node must have a connected "default" output.';
+            return;
+          }
+
+          payload = {
+            variableKey: String(data.variableKey || '').trim(),
+            routes: routePayload,
+            defaultStepId
+          };
         } else if (node.type === 'repoNode') {
           intent = 'system.setCwd';
           payload = { path: data.path };
@@ -819,6 +889,12 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
           steps.push(stepObj);
         }
       });
+
+      if (stepBuildError) {
+        if (vscode) vscode.postMessage({ type: 'error', message: stepBuildError });
+        else alert(stepBuildError);
+        return null;
+      }
 
       const start = nodes.find((n: any) => n.id === 'start');
       const pipelineName = (start?.data?.label as string) || 'My Pipeline';
@@ -928,6 +1004,18 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
                   data.name = step.payload?.name;
                   data.value = step.payload?.value;
                   data.kind = 'prompt';
+              } else if (intent === 'system.switch') {
+                  type = 'switchNode';
+                  data.variableKey = step.payload?.variableKey || '';
+                  data.routes = Array.isArray(step.payload?.routes) ? step.payload.routes.map((r: any) => ({
+                      label: String(r?.label || ''),
+                      equalsValue: String(r?.equalsValue || '')
+                  })) : [];
+                  data.kind = 'switch';
+              } else if (intent === 'system.form') {
+                  type = 'formNode';
+                  data.fields = Array.isArray(step.payload?.fields) ? step.payload.fields : [];
+                  data.kind = 'form';
               } else if (intent === 'system.setCwd') {
                   type = 'repoNode';
                   data.path = step.payload?.path;
@@ -974,7 +1062,35 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
              // Success Edge (to next step)
              // We assume linear succession unless specified otherwise?
              // "Si Success: next step séquentiel". So we MUST connect to next step in array.
-             if (index < pipeline.steps.length - 1) {
+             if (step.intent === 'system.switch') {
+                 const routes = Array.isArray(step.payload?.routes) ? step.payload.routes : [];
+                 routes.forEach((r: any, i: number) => {
+                     const target = String(r?.targetStepId || '').trim();
+                     if (!target) return;
+                     const targetNodeId = stepIdToNodeId.get(target) || target;
+                     newEdges.push({
+                         id: `e-${currentNodeId}-route_${i}-${targetNodeId}`,
+                         source: currentNodeId,
+                         target: targetNodeId,
+                         sourceHandle: `route_${i}`,
+                         markerEnd: { type: MarkerType.ArrowClosed },
+                         data: { label: String(r?.label || `route_${i}`) }
+                     } as any);
+                 });
+
+                 const defTarget = String(step.payload?.defaultStepId || '').trim();
+                 if (defTarget) {
+                     const targetNodeId = stepIdToNodeId.get(defTarget) || defTarget;
+                     newEdges.push({
+                         id: `e-${currentNodeId}-default-${targetNodeId}`,
+                         source: currentNodeId,
+                         target: targetNodeId,
+                         sourceHandle: 'default',
+                         markerEnd: { type: MarkerType.ArrowClosed },
+                         data: { label: 'default' }
+                     } as any);
+                 }
+             } else if (index < pipeline.steps.length - 1) {
                  const nextNodeId = nodeIds[index + 2];
                  newEdges.push({
                      id: `e-${currentNodeId}-${nextNodeId}`,
@@ -1035,16 +1151,24 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 	       }
 	       const typed = message as WebviewInboundMessage;
 	       switch (typed.type) {
-	         case 'environmentUpdate':
-	           setEnvironment((typed.environment as Record<string, string>) || {});
-	           break;
+         case 'environmentUpdate':
+           setEnvironment((typed.environment as Record<string, string>) || {});
+           break;
 
            case 'customNodesUpdate':
              setCustomNodes((typed as any).nodes || []);
              break;
 
-	         case 'executionStatus':
-	           setNodes((nds) => {
+           case 'loadPipeline':
+             try {
+               loadPipeline((typed as any).pipeline);
+             } catch (e) {
+               console.warn('[IntentRouter] loadPipeline failed', e);
+             }
+             break;
+
+         case 'executionStatus':
+           setNodes((nds) => {
 		             if (typed.stepId) {
 		               return nds.map((node) => (
 		                 node.id === typed.stepId
@@ -1202,9 +1326,34 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     (params: Connection) => {
       // Prevent self-loops
       if (params.source === params.target) return;
-      setEdges((eds) => addEdge({ ...params, markerEnd: { type: MarkerType.ArrowClosed } }, eds));
+      setEdges((eds) => {
+        let label: string | undefined = undefined;
+        try {
+          const sourceNode = nodes.find((n: any) => n.id === params.source);
+          if (sourceNode?.type === 'switchNode' && params.sourceHandle) {
+            const handle = String(params.sourceHandle);
+            if (handle === 'default') {
+              label = 'default';
+            } else if (handle.startsWith('route_')) {
+              const idx = Number(handle.slice('route_'.length));
+              const routes = Array.isArray((sourceNode.data as any)?.routes) ? (sourceNode.data as any).routes : [];
+              const routeLabel = routes?.[idx]?.label;
+              label = String(routeLabel || handle);
+            }
+          }
+        } catch {
+          // best-effort
+        }
+
+        const edge: any = {
+          ...params,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          data: label ? { label } : undefined
+        };
+        return addEdge(edge, eds);
+      });
     },
-    [setEdges],
+    [setEdges, nodes],
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -1251,9 +1400,13 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
                     kind: 'custom'
                   };
                 })()
+            : type === 'formNode'
+              ? { fields: [], status: 'idle', kind: 'form' }
+            : type === 'switchNode'
+              ? { variableKey: '', routes: [], status: 'idle', kind: 'switch' }
             : type === 'promptNode'
               ? { name: '', value: '', kind: 'prompt' }
-              : type === 'repoNode'
+            : type === 'repoNode'
                 ? { path: '${workspaceRoot}', kind: 'repo' }
                 : type === 'vscodeCommandNode'
                   ? { commandId: '', argsJson: '', kind: 'vscodeCommand' }

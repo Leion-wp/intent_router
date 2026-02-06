@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { registerCapabilities } from '../registry';
+import * as path from 'path';
 
 export function registerVSCodeProvider(context: vscode.ExtensionContext) {
     // Register internal command to install extensions
@@ -12,6 +13,11 @@ export function registerVSCodeProvider(context: vscode.ExtensionContext) {
         await runVSCodeCommand(payload);
     });
     context.subscriptions.push(internalRunCommand);
+
+    const internalInstallVsix = vscode.commands.registerCommand('intentRouter.internal.installVsix', async (payload: any) => {
+        await installVsix(payload);
+    });
+    context.subscriptions.push(internalInstallVsix);
 
     registerCapabilities({
         provider: 'vscode',
@@ -34,6 +40,15 @@ export function registerVSCodeProvider(context: vscode.ExtensionContext) {
                 args: [
                     { name: 'commandId', type: 'string', description: 'VS Code command id', required: true },
                     { name: 'argsJson', type: 'string', description: 'JSON args (array or object). Optional.', default: '' }
+                ]
+            },
+            {
+                capability: 'vscode.installVsix',
+                command: 'intentRouter.internal.installVsix',
+                description: 'Install a VSIX from disk (path can be relative to workspace root)',
+                determinism: 'interactive',
+                args: [
+                    { name: 'vsixPath', type: 'path', description: 'Path to .vsix file (relative ok)', required: true }
                 ]
             }
         ]
@@ -116,5 +131,27 @@ export async function runVSCodeCommand(payload: any): Promise<void> {
         }
     } catch (e: any) {
         vscode.window.showErrorMessage(`Failed to execute ${commandId}: ${e?.message || e}`);
+    }
+}
+
+export async function installVsix(payload: any): Promise<void> {
+    const raw = payload?.vsixPath;
+    const vsixPath = typeof raw === 'string' ? raw.trim() : '';
+    if (!vsixPath) {
+        vscode.window.showErrorMessage('vscode.installVsix requires "vsixPath".');
+        return;
+    }
+
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+    const resolved = path.isAbsolute(vsixPath)
+        ? vsixPath
+        : (workspaceRoot ? path.join(workspaceRoot, vsixPath) : vsixPath);
+
+    try {
+        await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(resolved));
+        vscode.window.showInformationMessage(`Installed VSIX: ${resolved}`);
+    } catch (e: any) {
+        vscode.window.showErrorMessage(`Failed to install VSIX: ${e?.message || e}`);
+        throw e;
     }
 }

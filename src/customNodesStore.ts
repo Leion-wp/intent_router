@@ -103,6 +103,40 @@ export async function deleteCustomNodeInWorkspace(id: string): Promise<CustomNod
     return next;
 }
 
+export function exportCustomNodes(nodes: CustomNodeDefinition[] | CustomNodeDefinition): string {
+    const list = Array.isArray(nodes) ? nodes : [nodes];
+    const file: CustomNodesFile = { version: FILE_VERSION, nodes: sanitizeCustomNodes(list) };
+    return JSON.stringify(file, null, 2);
+}
+
+export function importCustomNodesJson(existing: CustomNodeDefinition[], jsonText: string): {
+    merged: CustomNodeDefinition[];
+    imported: CustomNodeDefinition[];
+    renames: Record<string, string>;
+} {
+    const parsed = JSON.parse(String(jsonText || ''));
+    const file = coerceNodesFile(parsed);
+    const incoming = sanitizeCustomNodes(file.nodes);
+
+    const byId = new Map(existing.map(n => [n.id, n]));
+    const renames: Record<string, string> = {};
+    const imported: CustomNodeDefinition[] = [];
+
+    for (const node of incoming) {
+        const desired = node.id;
+        const finalId = byId.has(desired) ? generateUniqueId(desired, byId) : desired;
+        if (finalId !== desired) {
+            renames[desired] = finalId;
+        }
+        const normalized = { ...node, id: finalId };
+        byId.set(finalId, normalized);
+        imported.push(normalized);
+    }
+
+    const merged = sanitizeCustomNodes(Array.from(byId.values()));
+    return { merged, imported, renames };
+}
+
 function sanitizeCustomNodes(nodes: CustomNodeDefinition[]): CustomNodeDefinition[] {
     const out: CustomNodeDefinition[] = [];
     const seen = new Set<string>();
@@ -118,6 +152,20 @@ function sanitizeCustomNodes(nodes: CustomNodeDefinition[]): CustomNodeDefinitio
     }
     out.sort((a, b) => a.title.localeCompare(b.title));
     return out;
+}
+
+function generateUniqueId(base: string, existing: Map<string, any>): string {
+    const cleanBase = String(base || '').trim() || 'custom';
+    if (!existing.has(cleanBase)) return cleanBase;
+    let i = 2;
+    while (existing.has(`${cleanBase}-${i}`)) {
+        i += 1;
+        if (i > 10_000) {
+            // extremely unlikely, but avoid infinite loop
+            return `${cleanBase}-${Date.now()}`;
+        }
+    }
+    return `${cleanBase}-${i}`;
 }
 
 function normalizeCustomNode(node: any): CustomNodeDefinition {
@@ -157,4 +205,3 @@ function normalizeSchemaField(field: any): CustomNodeSchemaField | undefined {
     if (field?.options !== undefined) out.options = field.options;
     return out;
 }
-

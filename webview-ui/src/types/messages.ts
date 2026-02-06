@@ -16,6 +16,10 @@ export type WebviewInboundMessage =
   | { type: 'historyUpdate'; history: PipelineRun[] }
   | { type: 'environmentUpdate'; environment: Record<string, string> }
   | { type: 'customNodesUpdate'; nodes: Array<any> }
+  | { type: 'customNodesExported'; scope: 'one' | 'all'; id?: string; json: string }
+  | { type: 'customNodesImported'; imported: Array<any>; renames: Record<string, string>; total: number }
+  | { type: 'customNodesImportError'; message: string }
+  | { type: 'loadPipeline'; pipeline: any }
   | { type: 'pathSelected'; id: string; argName: string; path: string }
   | { type: 'optionsFetched'; argName: string; options: string[] }
   | { type: 'error'; message: string };
@@ -28,6 +32,9 @@ export type WebviewOutboundMessage =
   | { type: 'clearHistory' }
   | { type: 'customNodes.upsert'; node: any }
   | { type: 'customNodes.delete'; id: string }
+  | { type: 'customNodes.export'; scope: 'one' | 'all'; id?: string }
+  | { type: 'customNodes.import'; source: 'file' | 'paste'; jsonText?: string }
+  | { type: 'devPackager.loadPreset' }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };
 

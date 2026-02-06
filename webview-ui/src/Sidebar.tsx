@@ -32,6 +32,10 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
   const [studioMappingJson, setStudioMappingJson] = useState<string>('{}');
   const [studioPreviewValues, setStudioPreviewValues] = useState<Record<string, any>>({});
   const [studioError, setStudioError] = useState<string>('');
+  const [studioExportJson, setStudioExportJson] = useState<string>('');
+  const [studioImportJson, setStudioImportJson] = useState<string>('');
+  const [studioImportSummary, setStudioImportSummary] = useState<string>('');
+  const devMode = !!window.initialData?.devMode;
 
 	  useEffect(() => {
 	    const loadEnv = (data: any) => {
@@ -58,6 +62,20 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 	        }
           if (event.data.type === 'customNodesUpdate') {
             setCustomNodes((event.data as any).nodes || []);
+          }
+          if (event.data.type === 'customNodesExported') {
+            setStudioExportJson(String((event.data as any).json || ''));
+          }
+          if (event.data.type === 'customNodesImported') {
+            const renames = (event.data as any).renames || {};
+            const renamedCount = Object.keys(renames).length;
+            const importedCount = ((event.data as any).imported || []).length;
+            setStudioImportSummary(
+              `Imported ${importedCount} node(s).` + (renamedCount ? ` Renamed ${renamedCount} due to ID conflicts.` : '')
+            );
+          }
+          if (event.data.type === 'customNodesImportError') {
+            setStudioImportSummary(`Import failed: ${String((event.data as any).message || '')}`);
           }
 	    };
     window.addEventListener('message', handleMessage);
@@ -143,6 +161,8 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
   const items = [
     // Context / Setup Nodes
     { type: 'promptNode', label: 'Prompt', icon: 'codicon-symbol-string', desc: 'Set variable' },
+    { type: 'formNode', label: 'Form', icon: 'codicon-list-selection', desc: 'Collect inputs (HITL)' },
+    { type: 'switchNode', label: 'Switch', icon: 'codicon-filter', desc: 'Route by variable' },
     { type: 'repoNode', label: 'Repo', icon: 'codicon-repo', desc: 'Set workspace path' },
     { type: 'vscodeCommandNode', label: 'VS Code', icon: 'codicon-vscode', desc: 'Run an arbitrary VS Code command' },
     // Providers
@@ -158,6 +178,9 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     setStudioSelectedId('');
     setStudioMappingJson('{}');
     setStudioPreviewValues({});
+    setStudioExportJson('');
+    setStudioImportJson('');
+    setStudioImportSummary('');
     setStudioError('');
   };
 
@@ -174,6 +197,9 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     });
     setStudioMappingJson(JSON.stringify((found.mapping && typeof found.mapping === 'object') ? found.mapping : {}, null, 2));
     setStudioPreviewValues({});
+    setStudioExportJson('');
+    setStudioImportJson('');
+    setStudioImportSummary('');
     setStudioError('');
   };
 
@@ -225,6 +251,25 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
       setStudioPreviewValues({});
       setStudioError('');
     }
+  };
+
+  const exportSelectedOrAll = (scope: 'one' | 'all') => {
+    if (!window.vscode) return;
+    const id = scope === 'one' ? String(studioSelectedId || '') : undefined;
+    const msg: WebviewOutboundMessage = { type: 'customNodes.export', scope, id };
+    window.vscode.postMessage(msg);
+  };
+
+  const importFromPaste = () => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'customNodes.import', source: 'paste', jsonText: studioImportJson };
+    window.vscode.postMessage(msg);
+  };
+
+  const importFromFile = () => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'customNodes.import', source: 'file' };
+    window.vscode.postMessage(msg);
   };
 
   return (
@@ -336,6 +381,32 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                   </div>
                 )}
               </div>
+
+              {devMode && (
+                <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--vscode-panel-border)' }}>
+                  <div style={{ fontSize: '11px', opacity: 0.85, padding: '0 8px 6px 8px' }}>Dev</div>
+                  <button
+                    className="nodrag"
+                    onClick={() => {
+                      if (!window.vscode) return;
+                      const msg: WebviewOutboundMessage = { type: 'devPackager.loadPreset' };
+                      window.vscode.postMessage(msg);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '6px',
+                      background: 'var(--vscode-button-background)',
+                      color: 'var(--vscode-button-foreground)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '11px'
+                    }}
+                    title="Load the Dev Packager preset pipeline into the builder"
+                  >
+                    Load Dev Packager
+                  </button>
+                </div>
+              )}
             </div>
         )}
 
@@ -440,9 +511,49 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
               </button>
             </div>
 
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+              <button
+                className="nodrag"
+                onClick={() => exportSelectedOrAll(studioSelectedId ? 'one' : 'all')}
+                style={{
+                  flex: 1,
+                  padding: '6px',
+                  background: 'var(--vscode-button-secondaryBackground)',
+                  color: 'var(--vscode-button-secondaryForeground)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '11px'
+                }}
+                title="Export JSON (copies to clipboard)"
+              >
+                Export
+              </button>
+              <button
+                className="nodrag"
+                onClick={importFromFile}
+                style={{
+                  flex: 1,
+                  padding: '6px',
+                  background: 'var(--vscode-button-secondaryBackground)',
+                  color: 'var(--vscode-button-secondaryForeground)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '11px'
+                }}
+                title="Import JSON from file"
+              >
+                Import File
+              </button>
+            </div>
+
             {studioError && (
               <div style={{ color: 'var(--vscode-errorForeground)', fontSize: '11px', marginBottom: '8px' }}>
                 {studioError}
+              </div>
+            )}
+            {studioImportSummary && (
+              <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '8px' }}>
+                {studioImportSummary}
               </div>
             )}
 
@@ -687,6 +798,64 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                       }}
                     />
                   </div>
+
+                  <div style={{ borderTop: '1px solid var(--vscode-panel-border)', paddingTop: '10px' }}>
+                    <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '8px' }}>Import (paste JSON)</div>
+                    <textarea
+                      className="nodrag"
+                      value={studioImportJson}
+                      onChange={(e) => setStudioImportJson(e.target.value)}
+                      placeholder='{"version":1,"nodes":[...]}'
+                      style={{
+                        width: '100%',
+                        minHeight: '90px',
+                        background: 'var(--vscode-input-background)',
+                        color: 'var(--vscode-input-foreground)',
+                        border: '1px solid var(--vscode-input-border)',
+                        padding: '6px',
+                        fontSize: '11px',
+                        fontFamily: 'var(--vscode-editor-font-family, monospace)'
+                      }}
+                    />
+                    <button
+                      className="nodrag"
+                      onClick={importFromPaste}
+                      style={{
+                        marginTop: '8px',
+                        width: '100%',
+                        padding: '6px',
+                        background: 'var(--vscode-button-background)',
+                        color: 'var(--vscode-button-foreground)',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: '11px'
+                      }}
+                    >
+                      Import Paste
+                    </button>
+                  </div>
+
+                  {studioExportJson && (
+                    <div style={{ borderTop: '1px solid var(--vscode-panel-border)', paddingTop: '10px' }}>
+                      <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '8px' }}>Last Export</div>
+                      <textarea
+                        className="nodrag"
+                        readOnly
+                        value={studioExportJson}
+                        style={{
+                          width: '100%',
+                          minHeight: '90px',
+                          background: 'var(--vscode-input-background)',
+                          color: 'var(--vscode-input-foreground)',
+                          border: '1px solid var(--vscode-input-border)',
+                          padding: '6px',
+                          fontSize: '11px',
+                          fontFamily: 'var(--vscode-editor-font-family, monospace)'
+                        }}
+                      />
+                      <div style={{ fontSize: '10px', opacity: 0.65 }}>Copied to clipboard on export.</div>
+                    </div>
+                  )}
 
                   <div style={{ borderTop: '1px solid var(--vscode-panel-border)', paddingTop: '10px' }}>
                     <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '8px' }}>Preview</div>

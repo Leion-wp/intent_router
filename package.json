@@ -4,7 +4,7 @@
     "description": "Human-centric visual orchestration runtime for VS Code",
     "publisher": "LeionCorp",
     "icon": "media/leion_roots_icon.png",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "license": "MIT",
     "repository": {
         "type": "git",
@@ -375,6 +375,11 @@
                     ],
                     "default": "confirm",
                     "description": "Behavior when an interactive step is encountered (when ciStrict=false). confirm=warn+confirm, allow=run without prompts."
+                },
+                "intentRouter.devMode": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Dev mode: show self-packaging preset pipeline (npm install/compile/vsce package/install vsix/reload)."
                 }
             }
         }

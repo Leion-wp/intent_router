@@ -9,7 +9,7 @@ import { generateSecureNonce } from './security';
 import { Capability, CompositeCapability } from './types';
 import { historyManager } from './historyManager';
 import * as path from 'path';
-import { deleteCustomNodeInWorkspace, readCustomNodesFromWorkspace, upsertCustomNodeInWorkspace } from './customNodesStore';
+import { deleteCustomNodeInWorkspace, exportCustomNodes, importCustomNodesJson, readCustomNodesFromWorkspace, upsertCustomNodeInWorkspace, writeCustomNodesToWorkspace } from './customNodesStore';
 
 type CommandGroup = {
     provider: string;
@@ -119,6 +119,7 @@ export class PipelineBuilder {
 	        const history = historyManager.getHistory();
 	        const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
             const customNodes = await readCustomNodesFromWorkspace();
+            const devMode = vscode.workspace.getConfiguration('intentRouter').get<boolean>('devMode', false);
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
@@ -138,7 +139,8 @@ export class PipelineBuilder {
             templates,
             history,
             environment,
-            customNodes
+            customNodes,
+            devMode
         });
 
         // Keep custom nodes in sync while builder is open
@@ -246,6 +248,65 @@ export class PipelineBuilder {
                 } catch (e: any) {
                     vscode.window.showErrorMessage(`Failed to delete custom node: ${e?.message || e}`);
                 }
+                return;
+            }
+            if (message?.type === 'customNodes.export') {
+                try {
+                    const nodes = await readCustomNodesFromWorkspace();
+                    const scope = String(message.scope || 'all');
+                    const id = String(message.id || '');
+                    const selected = scope === 'one' ? nodes.find(n => n.id === id) : undefined;
+                    const json = exportCustomNodes(selected ? selected : nodes);
+                    await vscode.env.clipboard.writeText(json);
+                    this.panel?.webview.postMessage({ type: 'customNodesExported', scope, id, json });
+                    vscode.window.showInformationMessage('Custom nodes JSON copied to clipboard.');
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(`Failed to export custom nodes: ${e?.message || e}`);
+                }
+                return;
+            }
+            if (message?.type === 'customNodes.import') {
+                try {
+                    const source = String(message.source || 'paste');
+                    let jsonText = String(message.jsonText || '');
+
+                    if (source === 'file') {
+                        const uris = await vscode.window.showOpenDialog({
+                            canSelectFiles: true,
+                            canSelectFolders: false,
+                            canSelectMany: false,
+                            openLabel: 'Import',
+                            filters: { JSON: ['json'] }
+                        });
+                        if (!uris || uris.length === 0) {
+                            return;
+                        }
+                        const bytes = await vscode.workspace.fs.readFile(uris[0]);
+                        jsonText = Buffer.from(bytes).toString('utf8');
+                    }
+
+                    const existing = await readCustomNodesFromWorkspace();
+                    const { merged, imported, renames } = importCustomNodesJson(existing, jsonText);
+                    await writeCustomNodesToWorkspace(merged);
+                    this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes: merged });
+                    this.panel?.webview.postMessage({ type: 'customNodesImported', imported, renames, total: merged.length });
+                    vscode.window.showInformationMessage(`Imported ${imported.length} custom node(s).`);
+                } catch (e: any) {
+                    const msg = e?.message || String(e);
+                    vscode.window.showErrorMessage(`Failed to import custom nodes: ${msg}`);
+                    this.panel?.webview.postMessage({ type: 'customNodesImportError', message: msg });
+                }
+                return;
+            }
+            if (message?.type === 'devPackager.loadPreset') {
+                const enabled = vscode.workspace.getConfiguration('intentRouter').get<boolean>('devMode', false);
+                if (!enabled) {
+                    vscode.window.showWarningMessage('Dev mode is disabled. Enable "Intent Router: Dev Mode" in workspace settings.');
+                    return;
+                }
+                const preset = buildDevPackagerPreset();
+                this.panel?.webview.postMessage({ type: 'loadPipeline', pipeline: preset });
+                vscode.window.showInformationMessage('Loaded Dev Packager preset in the builder.');
                 return;
             }
         });
@@ -360,4 +421,57 @@ export class PipelineBuilder {
 </body>
 </html>`;
     }
+}
+
+function buildDevPackagerPreset(): PipelineFile {
+    // Keep the output VSIX path stable (no parsing output).
+    // Use relative path for install step; vscode.installVsix resolves relative to workspace root.
+    return {
+        name: 'Dev Packager',
+        description: 'Dev-only preset: build and install the current extension VSIX, then reload VS Code.',
+        steps: [
+            {
+                id: 'dev.npmInstall',
+                intent: 'terminal.run',
+                description: 'npm install',
+                payload: { command: 'npm install', cwd: '${workspaceRoot}' }
+            },
+            {
+                id: 'dev.compile',
+                intent: 'terminal.run',
+                description: 'npm run compile',
+                payload: { command: 'npm run compile', cwd: '${workspaceRoot}' }
+            },
+            {
+                id: 'dev.vscePackage',
+                intent: 'terminal.run',
+                description: 'vsce package (pipeline/dev-build.vsix)',
+                payload: { command: 'npx vsce package -o pipeline/dev-build.vsix', cwd: '${workspaceRoot}' }
+            },
+            {
+                id: 'dev.pauseBeforeInstall',
+                intent: 'system.pause',
+                description: 'Pause before install',
+                payload: { message: 'About to install pipeline/dev-build.vsix into VS Code. Review changes, then Continue.' }
+            },
+            {
+                id: 'dev.installVsix',
+                intent: 'vscode.installVsix',
+                description: 'Install VSIX',
+                payload: { vsixPath: 'pipeline/dev-build.vsix' }
+            },
+            {
+                id: 'dev.pauseBeforeReload',
+                intent: 'system.pause',
+                description: 'Pause before reload',
+                payload: { message: 'VSIX installed. Continue to reload VS Code window?' }
+            },
+            {
+                id: 'dev.reload',
+                intent: 'vscode.runCommand',
+                description: 'Reload window',
+                payload: { commandId: 'workbench.action.reloadWindow', argsJson: '' }
+            }
+        ]
+    };
 }
