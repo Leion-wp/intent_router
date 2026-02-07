@@ -74,7 +74,7 @@
           "id": "node_1",
           "type": "actionNode",
           "position": {
-            "x": 375,
+            "x": 345,
             "y": -60
           },
           "data": {
@@ -86,21 +86,21 @@
             },
             "kind": "action",
             "label": "install des deps",
-            "collapsed": true,
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
             "width": 273,
-            "height": 51
+            "height": 319
           },
-          "selected": true,
+          "selected": false,
           "dragging": false
         },
         {
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 705,
+            "x": 675,
             "y": -60
           },
           "data": {
@@ -112,14 +112,14 @@
             },
             "kind": "action",
             "label": "compilation",
-            "collapsed": true,
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
             "width": 273,
-            "height": 51
+            "height": 319
           },
-          "selected": false,
+          "selected": true,
           "dragging": false
         },
         {
@@ -138,12 +138,12 @@
             },
             "kind": "action",
             "label": "package vsix",
-            "collapsed": true,
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
             "width": 273,
-            "height": 51
+            "height": 319
           },
           "selected": false,
           "dragging": false

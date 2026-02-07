@@ -1437,11 +1437,12 @@ function Flow({
              break;
 
          case 'executionStatus':
-          if (typed.status === 'running') {
+          const normalizedStatus = typed.status === 'failure' ? 'error' : typed.status;
+          if (normalizedStatus === 'running') {
             setRunPillStatus('running');
-          } else if (typed.status === 'failure') {
+          } else if (normalizedStatus === 'failure' || normalizedStatus === 'error') {
             setRunPillStatus('error');
-          } else if (typed.status === 'success' && runPillStatus !== 'error') {
+          } else if (normalizedStatus === 'success' && runPillStatus !== 'error') {
             setRunPillStatus('success');
           }
           setNodes((nds) => {
@@ -1452,9 +1453,9 @@ function Flow({
 		                       ...node,
 		                       data: {
 		                         ...node.data,
-		                         status: typed.status,
+		                         status: normalizedStatus,
 		                         intentId: typed.intentId,
-		                         logs: typed.status === 'running' ? [] : (node.data as any).logs
+		                         logs: normalizedStatus === 'running' ? [] : (node.data as any).logs
 		                       }
 		                     }
 		                   : node
@@ -1472,9 +1473,9 @@ function Flow({
 		                       ...node,
 		                       data: {
 		                         ...node.data,
-		                         status: typed.status,
+		                         status: normalizedStatus,
 		                         intentId: typed.intentId,
-		                         logs: typed.status === 'running' ? [] : (node.data as any).logs
+		                         logs: normalizedStatus === 'running' ? [] : (node.data as any).logs
 		                       }
 		                     }
 		                   : node
@@ -1642,7 +1643,7 @@ function Flow({
         let stroke = edgeIdle;
         if (status === 'running') stroke = edgeRunning;
         else if (status === 'success') stroke = edgeSuccess;
-        else if (status === 'failure') stroke = edgeFailure;
+        else if (status === 'failure' || status === 'error') stroke = edgeFailure;
 
         const nextAnimated = status === 'running';
         const nextDash = status === 'running' ? '7 5' : undefined;

@@ -8,7 +8,8 @@ const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
   running: 'var(--ir-status-running)',
   success: 'var(--ir-status-success)',
-  failure: 'var(--ir-status-error)'
+  failure: 'var(--ir-status-error)',
+  error: 'var(--ir-status-error)'
 };
 
 const CustomNode = ({ data, id }: NodeProps) => {

@@ -3,8 +3,8 @@
   "theme": {
     "tokens": {
       "runButton": {
-        "idle": "#0e639c",
-        "running": "#007acc",
+        "idle": "#4d5356",
+        "running": "#0068ad",
         "success": "#4caf50",
         "error": "#f44336",
         "foreground": "#ffffff"
@@ -12,11 +12,11 @@
       "addButton": {
         "background": "#0e639c",
         "foreground": "#ffffff",
-        "border": "#3c3c3c"
+        "border": "#000000"
       },
       "node": {
-        "background": "#1e1e1e",
-        "border": "#3c3c3c",
+        "background": "#000000",
+        "border": "#b0a0a0",
         "text": "#cccccc"
       },
       "status": {
