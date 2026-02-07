@@ -380,6 +380,11 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Dev mode: show self-packaging preset pipeline (npm install/compile/vsce package/install vsix/reload)."
+                },
+                "leionRoots.adminMode": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Admin mode: enables Theme Studio draft editing for UI tokens."
                 }
             }
         }
@@ -389,7 +394,8 @@
         "compile": "npm run build:webview && tsc -p ./",
         "watch": "tsc -watch -p ./",
         "test": "npm run compile && node ./out/test/runTest.js",
-        "build:webview": "cd webview-ui && npm run build"
+        "build:webview": "node ./scripts/build-webview-with-retry.js",
+        "build:webview:raw": "cd webview-ui && npm run build"
     },
     "devDependencies": {
         "@types/mocha": "^10.0.10",

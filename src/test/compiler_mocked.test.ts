@@ -14,6 +14,7 @@ Module.prototype.require = function (request: string) {
 
 // Import module under test
 const { compileStep } = require('../../out/pipelineRunner');
+Module.prototype.require = originalRequire;
 
 suite('Compiler Mocked Test', () => {
 

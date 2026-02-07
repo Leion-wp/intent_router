@@ -10,6 +10,7 @@ import { Capability, CompositeCapability } from './types';
 import { historyManager } from './historyManager';
 import * as path from 'path';
 import { deleteCustomNodeInWorkspace, exportCustomNodes, importCustomNodesJson, readCustomNodesFromWorkspace, upsertCustomNodeInWorkspace, writeCustomNodesToWorkspace } from './customNodesStore';
+import { deleteUiDraftFromWorkspace, resolveUiPreset, writeUiDraftToWorkspace } from './uiPresetStore';
 
 type CommandGroup = {
     provider: string;
@@ -87,11 +88,19 @@ export class PipelineBuilder {
         });
         this.disposables.push(eventSub);
 
-        // Keep ENV panel in sync if user edits workspace settings while builder is open.
+        const pushUiPreset = async () => {
+            const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
+            const uiPreset = await resolveUiPreset(this.extensionUri, adminMode);
+            this.panel?.webview.postMessage({ type: 'adminModeUpdate', adminMode });
+            this.panel?.webview.postMessage({ type: 'uiPresetUpdate', uiPreset });
+        };
+
+        // Keep ENV panel and admin flags in sync if settings change while builder is open.
         const configSub = vscode.workspace.onDidChangeConfiguration(e => {
-            if (!e.affectsConfiguration('intentRouter.environment')) {
-                return;
+            if (e.affectsConfiguration('leionRoots.adminMode')) {
+                void pushUiPreset();
             }
+            if (!e.affectsConfiguration('intentRouter.environment')) return;
             try {
                 const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
                 this.panel?.webview.postMessage({
@@ -120,6 +129,8 @@ export class PipelineBuilder {
 	        const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
             const customNodes = await readCustomNodesFromWorkspace();
             const devMode = vscode.workspace.getConfiguration('intentRouter').get<boolean>('devMode', false);
+            const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
+            const uiPreset = await resolveUiPreset(this.extensionUri, adminMode);
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
@@ -140,7 +151,9 @@ export class PipelineBuilder {
             history,
             environment,
             customNodes,
-            devMode
+            devMode,
+            adminMode,
+            uiPreset
         });
 
         // Keep custom nodes in sync while builder is open
@@ -157,6 +170,12 @@ export class PipelineBuilder {
         customNodesWatcher.onDidCreate(pushCustomNodes);
         customNodesWatcher.onDidDelete(pushCustomNodes);
         this.disposables.push(customNodesWatcher);
+
+        const uiDraftWatcher = vscode.workspace.createFileSystemWatcher('**/leion-roots.ui.draft.json');
+        uiDraftWatcher.onDidChange(() => void pushUiPreset());
+        uiDraftWatcher.onDidCreate(() => void pushUiPreset());
+        uiDraftWatcher.onDidDelete(() => void pushUiPreset());
+        this.disposables.push(uiDraftWatcher);
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'savePipeline') {
@@ -295,6 +314,53 @@ export class PipelineBuilder {
                     const msg = e?.message || String(e);
                     vscode.window.showErrorMessage(`Failed to import custom nodes: ${msg}`);
                     this.panel?.webview.postMessage({ type: 'customNodesImportError', message: msg });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.saveDraft') {
+                try {
+                    await writeUiDraftToWorkspace(message.uiPreset);
+                    await pushUiPreset();
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    this.panel?.webview.postMessage({ type: 'error', message: `Failed to save UI draft: ${err}` });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.resetDraft') {
+                try {
+                    await deleteUiDraftFromWorkspace();
+                    await pushUiPreset();
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    this.panel?.webview.postMessage({ type: 'error', message: `Failed to reset UI draft: ${err}` });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.exportCurrent') {
+                try {
+                    const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
+                    const uiPreset = await resolveUiPreset(this.extensionUri, adminMode);
+                    const json = JSON.stringify(uiPreset, null, 2);
+                    await vscode.env.clipboard.writeText(json);
+                    this.panel?.webview.postMessage({ type: 'uiPresetExported', json });
+                    vscode.window.showInformationMessage('UI preset JSON copied to clipboard.');
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    this.panel?.webview.postMessage({ type: 'error', message: `Failed to export UI preset: ${err}` });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.importDraft') {
+                try {
+                    const text = String(message.jsonText || '').trim();
+                    if (!text) throw new Error('Empty JSON');
+                    const parsed = JSON.parse(text);
+                    await writeUiDraftToWorkspace(parsed);
+                    await pushUiPreset();
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    this.panel?.webview.postMessage({ type: 'error', message: `Failed to import UI preset: ${err}` });
                 }
                 return;
             }

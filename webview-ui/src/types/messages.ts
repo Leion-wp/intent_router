@@ -19,6 +19,9 @@ export type WebviewInboundMessage =
   | { type: 'customNodesExported'; scope: 'one' | 'all'; id?: string; json: string }
   | { type: 'customNodesImported'; imported: Array<any>; renames: Record<string, string>; total: number }
   | { type: 'customNodesImportError'; message: string }
+  | { type: 'uiPresetUpdate'; uiPreset: any }
+  | { type: 'adminModeUpdate'; adminMode: boolean }
+  | { type: 'uiPresetExported'; json: string }
   | { type: 'loadPipeline'; pipeline: any }
   | { type: 'pathSelected'; id: string; argName: string; path: string }
   | { type: 'optionsFetched'; argName: string; options: string[] }
@@ -34,6 +37,10 @@ export type WebviewOutboundMessage =
   | { type: 'customNodes.delete'; id: string }
   | { type: 'customNodes.export'; scope: 'one' | 'all'; id?: string }
   | { type: 'customNodes.import'; source: 'file' | 'paste'; jsonText?: string }
+  | { type: 'uiPreset.saveDraft'; uiPreset: any }
+  | { type: 'uiPreset.resetDraft' }
+  | { type: 'uiPreset.exportCurrent' }
+  | { type: 'uiPreset.importDraft'; jsonText: string }
   | { type: 'devPackager.loadPreset' }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };

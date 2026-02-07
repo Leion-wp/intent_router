@@ -128,7 +128,7 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
                 }}
               >
                 {field.name}
-                {field.required && <span style={{ color: '#f44336', marginLeft: '2px' }}>*</span>}
+                {field.required && <span style={{ color: 'var(--ir-status-error)', marginLeft: '2px' }}>*</span>}
               </label>
               {field.description && (
                 <button

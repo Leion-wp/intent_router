@@ -5,9 +5,9 @@ import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
-  running: '#007acc',
-  success: '#4caf50',
-  failure: '#f44336'
+  running: 'var(--ir-status-running)',
+  success: 'var(--ir-status-success)',
+  failure: 'var(--ir-status-error)'
 };
 
 const toArgsString = (value: unknown): string => {
@@ -100,7 +100,7 @@ const ScriptNode = ({ data, id }: NodeProps) => {
       }}
     >
       <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} id="failure" style={{ top: '30%', background: '#f44336' }} />
+      <Handle type="source" position={Position.Right} id="failure" style={{ top: '30%', background: 'var(--ir-status-error)' }} />
       <Handle type="source" position={Position.Right} />
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>

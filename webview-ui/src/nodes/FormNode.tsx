@@ -16,9 +16,9 @@ export type FormField = {
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
-  running: '#007acc',
-  success: '#4caf50',
-  failure: '#f44336'
+  running: 'var(--ir-status-running)',
+  success: 'var(--ir-status-success)',
+  failure: 'var(--ir-status-error)'
 };
 
 const FormNode = ({ data, id }: NodeProps) => {
@@ -281,7 +281,7 @@ const FormNode = ({ data, id }: NodeProps) => {
               }}
             >
               {logs.map((log: any, i: number) => (
-                <span key={i} style={{ color: log.stream === 'stderr' ? '#f44336' : 'inherit', display: 'block' }}>
+                <span key={i} style={{ color: log.stream === 'stderr' ? 'var(--ir-status-error)' : 'inherit', display: 'block' }}>
                   {log.text}
                 </span>
               ))}

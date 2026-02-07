@@ -5,9 +5,9 @@ import SchemaArgsForm, { SchemaField } from '../components/SchemaArgsForm';
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
-  running: '#007acc',
-  success: '#4caf50',
-  failure: '#f44336'
+  running: 'var(--ir-status-running)',
+  success: 'var(--ir-status-success)',
+  failure: 'var(--ir-status-error)'
 };
 
 const CustomNode = ({ data, id }: NodeProps) => {
@@ -104,7 +104,7 @@ const CustomNode = ({ data, id }: NodeProps) => {
         position={Position.Right}
         id="failure"
         title="On Failure"
-        style={{ top: '30%', background: '#f44336' }}
+        style={{ top: '30%', background: 'var(--ir-status-error)' }}
       />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', alignItems: 'center', gap: '8px' }}>
@@ -200,7 +200,7 @@ const CustomNode = ({ data, id }: NodeProps) => {
               }}
             >
               {logs.map((log: any, i: number) => (
-                <span key={i} style={{ color: log.stream === 'stderr' ? '#f44336' : 'inherit', display: 'block' }}>
+                <span key={i} style={{ color: log.stream === 'stderr' ? 'var(--ir-status-error)' : 'inherit', display: 'block' }}>
                   {log.text}
                 </span>
               ))}
@@ -213,4 +213,3 @@ const CustomNode = ({ data, id }: NodeProps) => {
 };
 
 export default memo(CustomNode);
-

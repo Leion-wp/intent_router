@@ -19,10 +19,14 @@ Module.prototype.require = function (request: string) {
 
 const terminalAdapter = require('../../out/providers/terminalAdapter');
 const router = require('../../out/router');
+Module.prototype.require = originalRequire;
 
 suite('Flow Logic Tests (Mocked)', () => {
 
     setup(() => {
+        if (mockVscode.__mock?.reset) {
+            mockVscode.__mock.reset();
+        }
         mockVscode.window.terminals.length = 0;
     });
 

@@ -33,6 +33,7 @@ import FormNode from './nodes/FormNode';
 import SwitchNode from './nodes/SwitchNode';
 import ScriptNode from './nodes/ScriptNode';
 import { isInboundMessage, WebviewInboundMessage } from './types/messages';
+import { applyThemeTokensToRoot, defaultThemeTokens, tokensFromPreset } from './types/theme';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
@@ -1190,13 +1191,14 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
              if (step.onFailure) {
                  const targetNodeId = stepIdToNodeId.get(step.onFailure);
                  if (targetNodeId) {
+                    const failureColor = getComputedStyle(document.documentElement).getPropertyValue('--ir-edge-error').trim() || '#f44336';
                      newEdges.push({
                          id: `e-${currentNodeId}-${targetNodeId}-fail`,
                          source: currentNodeId,
                          target: targetNodeId,
                          sourceHandle: 'failure',
                          markerEnd: { type: MarkerType.ArrowClosed },
-                         style: { stroke: '#f44336' }, // Optional: visual cue
+                         style: { stroke: failureColor },
                          animated: true
                      });
                  }
@@ -1383,16 +1385,25 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
   // Reactive Connectors (Update Edge Colors based on Source Status)
   useEffect(() => {
+    const readColor = (name: string, fallback: string) => {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    };
+    const edgeIdle = readColor('--ir-edge-idle', 'var(--vscode-editor-foreground)');
+    const edgeRunning = readColor('--ir-edge-running', '#007acc');
+    const edgeSuccess = readColor('--ir-edge-success', '#4caf50');
+    const edgeFailure = readColor('--ir-edge-error', '#f44336');
+
     setEdges((eds) =>
       eds.map((edge) => {
         const sourceNode = nodes.find((n) => n.id === edge.source);
         if (!sourceNode) return edge;
 
         const status = (sourceNode.data?.status as string) || 'idle';
-        let stroke = 'var(--vscode-editor-foreground)'; // Idle
-        if (status === 'running') stroke = '#007acc';
-        else if (status === 'success') stroke = '#4caf50';
-        else if (status === 'failure') stroke = '#f44336';
+        let stroke = edgeIdle;
+        if (status === 'running') stroke = edgeRunning;
+        else if (status === 'success') stroke = edgeSuccess;
+        else if (status === 'failure') stroke = edgeFailure;
 
         // Update if changed
         if (edge.style?.stroke !== stroke) {
@@ -2480,9 +2491,9 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
               width: '34px',
               height: '34px',
               borderRadius: '18px',
-              border: '1px solid var(--vscode-editorWidget-border)',
-              background: 'var(--vscode-button-background)',
-              color: 'var(--vscode-button-foreground)',
+              border: '1px solid var(--ir-add-border)',
+              background: 'var(--ir-add-bg)',
+              color: 'var(--ir-add-fg)',
               cursor: 'pointer',
               fontSize: '18px',
               lineHeight: '30px',
@@ -2500,8 +2511,8 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
            top: '10px',
            right: '140px',
            padding: '10px 20px',
-           background: 'var(--vscode-button-background)',
-           color: 'var(--vscode-button-foreground)',
+           background: 'var(--ir-run-idle)',
+           color: 'var(--ir-run-foreground)',
            border: 'none',
            borderRadius: '4px',
            cursor: 'pointer',
@@ -2555,6 +2566,8 @@ export default function App() {
   const [history, setHistory] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<any>(null);
   const [restoreRun, setRestoreRun] = useState<any>(null);
+  const [themeTokens, setThemeTokens] = useState(() => tokensFromPreset(window.initialData?.uiPreset || { theme: { tokens: defaultThemeTokens } }));
+  const [adminMode, setAdminMode] = useState<boolean>(!!window.initialData?.adminMode);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [sidebarTab, setSidebarTab] = useState<'providers' | 'history' | 'environment' | 'studio'>('providers');
 
@@ -2577,6 +2590,12 @@ export default function App() {
       if (window.initialData.history) {
         setHistory(window.initialData.history);
       }
+      if (window.initialData.uiPreset) {
+        setThemeTokens(tokensFromPreset(window.initialData.uiPreset));
+      }
+      if (typeof window.initialData.adminMode === 'boolean') {
+        setAdminMode(!!window.initialData.adminMode);
+      }
     }
 
     const handleMessage = (event: MessageEvent) => {
@@ -2587,6 +2606,10 @@ export default function App() {
            if (event.data.history.length === 0) {
                setSelectedRun(null);
            }
+       } else if (event.data?.type === 'uiPresetUpdate') {
+           setThemeTokens(tokensFromPreset(event.data.uiPreset));
+       } else if (event.data?.type === 'adminModeUpdate') {
+           setAdminMode(!!event.data.adminMode);
        }
     };
     window.addEventListener('message', handleMessage);
@@ -2613,6 +2636,10 @@ export default function App() {
     }
   }, [sidebarCollapsed, sidebarTab]);
 
+  useEffect(() => {
+    applyThemeTokensToRoot(themeTokens);
+  }, [themeTokens]);
+
   // When clicking an active run again or clicking clear, we might want to toggle?
   // For now, let's allow re-selection to replay.
   // Sidebar handles the click.
@@ -2625,6 +2652,7 @@ export default function App() {
               tab={sidebarTab}
               onTabChange={setSidebarTab}
               history={history}
+              adminMode={adminMode}
               onSelectHistory={setSelectedRun}
               onRestoreHistory={(run) => {
                   setRestoreRun(run);

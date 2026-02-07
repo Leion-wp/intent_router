@@ -6,9 +6,9 @@ import SchemaArgsForm from '../components/SchemaArgsForm';
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
-  running: '#007acc', // VS Code Blue
-  success: '#4caf50', // Green
-  failure: '#f44336'  // Red
+  running: 'var(--ir-status-running)',
+  success: 'var(--ir-status-success)',
+  failure: 'var(--ir-status-error)'
 };
 
 // Fallback if registry is empty (during loading or error)
@@ -242,7 +242,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
         position={Position.Right}
         id="failure"
         title="On Failure"
-        style={{ top: '30%', background: '#f44336' }}
+        style={{ top: '30%', background: 'var(--ir-status-error)' }}
       />
 
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', alignItems: 'center', gap: '8px' }}>
@@ -357,7 +357,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <label htmlFor={inputId} style={{ fontSize: '0.75em', opacity: 0.9, display: 'flex', alignItems: 'center', color: hasError ? 'var(--vscode-inputValidation-errorForeground)' : 'inherit' }}>
                       {arg.name}
-                      {isRequired && <span style={{ color: '#f44336', marginLeft: '2px' }}>*</span>}
+                      {isRequired && <span style={{ color: 'var(--ir-status-error)', marginLeft: '2px' }}>*</span>}
                   </label>
                   {arg.description && (
                       <button
@@ -613,7 +613,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
                         borderBottomRightRadius: '4px'
                     }}>
                     {logs.map((log: any, i: number) => (
-                        <span key={i} style={{ color: log.stream === 'stderr' ? '#f44336' : 'inherit', display: 'block' }}>
+                        <span key={i} style={{ color: log.stream === 'stderr' ? 'var(--ir-status-error)' : 'inherit', display: 'block' }}>
                             {log.text}
                         </span>
                     ))}

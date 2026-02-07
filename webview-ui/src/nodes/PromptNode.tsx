@@ -98,7 +98,7 @@ const PromptNode = ({ data, id }: NodeProps) => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           <label style={{ fontSize: '0.75em', opacity: 0.9 }}>
-            Variable Name <span style={{ color: '#f44336' }}>*</span>
+            Variable Name <span style={{ color: 'var(--ir-status-error)' }}>*</span>
           </label>
           <input
             className="nodrag"

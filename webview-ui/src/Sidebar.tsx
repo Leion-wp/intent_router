@@ -1,11 +1,13 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { isInboundMessage, WebviewOutboundMessage } from './types/messages';
 import SchemaArgsForm, { SchemaField } from './components/SchemaArgsForm';
+import { defaultThemeTokens, normalizeThemeTokens, tokensFromPreset, UiPreset } from './types/theme';
 
 type SidebarProps = {
   history?: any[];
   onSelectHistory?: (run: any) => void;
   onRestoreHistory?: (run: any) => void;
+  adminMode?: boolean;
   tab?: 'providers' | 'history' | 'environment' | 'studio';
   onTabChange?: (tab: 'providers' | 'history' | 'environment' | 'studio') => void;
 };
@@ -18,7 +20,7 @@ declare global {
   }
 }
 
-export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory, tab: tabProp, onTabChange }: SidebarProps) {
+export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory, adminMode = false, tab: tabProp, onTabChange }: SidebarProps) {
   const [internalTab, setInternalTab] = useState<'providers' | 'history' | 'environment' | 'studio'>('providers');
   const tab = tabProp ?? internalTab;
   const setTab = (next: 'providers' | 'history' | 'environment' | 'studio') => {
@@ -35,6 +37,13 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
   const [studioExportJson, setStudioExportJson] = useState<string>('');
   const [studioImportJson, setStudioImportJson] = useState<string>('');
   const [studioImportSummary, setStudioImportSummary] = useState<string>('');
+  const [themePreset, setThemePreset] = useState<UiPreset>(() => ({
+    version: 1,
+    theme: { tokens: tokensFromPreset(window.initialData?.uiPreset || { theme: { tokens: defaultThemeTokens } }) }
+  }));
+  const [themeExportJson, setThemeExportJson] = useState<string>('');
+  const [themeImportJson, setThemeImportJson] = useState<string>('');
+  const [themeError, setThemeError] = useState<string>('');
   const devMode = !!window.initialData?.devMode;
 
 	  useEffect(() => {
@@ -76,6 +85,18 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
           }
           if (event.data.type === 'customNodesImportError') {
             setStudioImportSummary(`Import failed: ${String((event.data as any).message || '')}`);
+          }
+          if (event.data.type === 'uiPresetUpdate') {
+            setThemePreset({
+              version: Number((event.data as any)?.uiPreset?.version || 1),
+              theme: { tokens: tokensFromPreset((event.data as any)?.uiPreset) }
+            });
+          }
+          if (event.data.type === 'uiPresetExported') {
+            setThemeExportJson(String((event.data as any).json || ''));
+          }
+          if (event.data.type === 'error') {
+            setThemeError(String((event.data as any).message || ''));
           }
 	    };
     window.addEventListener('message', handleMessage);
@@ -273,6 +294,47 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     window.vscode.postMessage(msg);
   };
 
+  const setThemeToken = (path: string, value: string) => {
+    const current = normalizeThemeTokens(themePreset?.theme?.tokens || {});
+    const [group, key] = path.split('.');
+    if (!group || !key) return;
+    const next: any = {
+      ...current,
+      [group]: {
+        ...(current as any)[group],
+        [key]: value
+      }
+    };
+    setThemePreset({ version: 1, theme: { tokens: normalizeThemeTokens(next) } });
+  };
+
+  const saveThemeDraft = () => {
+    if (!window.vscode) return;
+    setThemeError('');
+    const msg: WebviewOutboundMessage = { type: 'uiPreset.saveDraft', uiPreset: themePreset };
+    window.vscode.postMessage(msg);
+  };
+
+  const resetThemeDraft = () => {
+    if (!window.vscode) return;
+    setThemeError('');
+    const msg: WebviewOutboundMessage = { type: 'uiPreset.resetDraft' };
+    window.vscode.postMessage(msg);
+  };
+
+  const exportTheme = () => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'uiPreset.exportCurrent' };
+    window.vscode.postMessage(msg);
+  };
+
+  const importTheme = () => {
+    if (!window.vscode) return;
+    setThemeError('');
+    const msg: WebviewOutboundMessage = { type: 'uiPreset.importDraft', jsonText: themeImportJson };
+    window.vscode.postMessage(msg);
+  };
+
   return (
     <aside className="sidebar">
       <div
@@ -457,8 +519,8 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 	                          <div style={{fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between'}}>
 	                              <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
 	                              <span style={{
-	                                  color: run.status === 'success' ? '#4caf50' : // Green
-	                                         run.status === 'failure' ? '#f44336' : // Red
+	                                  color: run.status === 'success' ? 'var(--ir-status-success)' : // Green
+	                                         run.status === 'failure' ? 'var(--ir-status-error)' : // Red
 	                                         run.status === 'cancelled' ? '#e6c300' : // Gold
 	                                         'var(--vscode-descriptionForeground)'
 	                              }}>
@@ -477,6 +539,105 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 
         {tab === 'studio' && (
           <div style={{ padding: '0 8px' }}>
+            {adminMode && (
+              <div style={{ border: '1px solid var(--vscode-panel-border)', borderRadius: '6px', padding: '10px', marginBottom: '12px' }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px' }}>Theme Studio (Admin)</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 92px', gap: '6px', alignItems: 'center' }}>
+                  {[
+                    ['runButton.idle', 'Run idle'],
+                    ['runButton.running', 'Run running'],
+                    ['runButton.success', 'Run success'],
+                    ['runButton.error', 'Run error'],
+                    ['runButton.foreground', 'Run fg'],
+                    ['addButton.background', 'Add bg'],
+                    ['addButton.foreground', 'Add fg'],
+                    ['addButton.border', 'Add border'],
+                    ['node.background', 'Node bg'],
+                    ['node.border', 'Node border'],
+                    ['node.text', 'Node text'],
+                    ['status.running', 'Status running'],
+                    ['status.success', 'Status success'],
+                    ['status.error', 'Status error'],
+                    ['edges.idle', 'Edge idle'],
+                    ['edges.running', 'Edge running'],
+                    ['edges.success', 'Edge success'],
+                    ['edges.error', 'Edge error']
+                  ].map(([path, label]) => {
+                    const [group, key] = path.split('.');
+                    const value = String(((themePreset.theme.tokens as any)[group] || {})[key] || '#000000');
+                    return (
+                      <React.Fragment key={path}>
+                        <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}</label>
+                        <input
+                          className="nodrag"
+                          type="color"
+                          value={value}
+                          onChange={(e) => setThemeToken(path, e.target.value)}
+                          style={{ width: '100%', height: '24px', border: '1px solid var(--vscode-panel-border)', background: 'transparent' }}
+                        />
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                  <button className="nodrag" onClick={saveThemeDraft} style={{ flex: 1, padding: '6px', background: 'var(--vscode-button-background)', color: 'var(--vscode-button-foreground)', border: 'none', cursor: 'pointer', fontSize: '11px' }}>
+                    Save Draft
+                  </button>
+                  <button className="nodrag" onClick={resetThemeDraft} style={{ flex: 1, padding: '6px', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', cursor: 'pointer', fontSize: '11px' }}>
+                    Reset
+                  </button>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                  <button className="nodrag" onClick={exportTheme} style={{ flex: 1, padding: '6px', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', cursor: 'pointer', fontSize: '11px' }}>
+                    Export
+                  </button>
+                  <button className="nodrag" onClick={importTheme} style={{ flex: 1, padding: '6px', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', cursor: 'pointer', fontSize: '11px' }}>
+                    Import
+                  </button>
+                </div>
+                <textarea
+                  className="nodrag"
+                  value={themeImportJson}
+                  onChange={(e) => setThemeImportJson(e.target.value)}
+                  placeholder='{"version":1,"theme":{"tokens":{...}}}'
+                  style={{
+                    marginTop: '8px',
+                    width: '100%',
+                    minHeight: '70px',
+                    background: 'var(--vscode-input-background)',
+                    color: 'var(--vscode-input-foreground)',
+                    border: '1px solid var(--vscode-input-border)',
+                    padding: '6px',
+                    fontSize: '11px',
+                    fontFamily: 'var(--vscode-editor-font-family, monospace)'
+                  }}
+                />
+                {themeExportJson && (
+                  <textarea
+                    className="nodrag"
+                    readOnly
+                    value={themeExportJson}
+                    style={{
+                      marginTop: '8px',
+                      width: '100%',
+                      minHeight: '70px',
+                      background: 'var(--vscode-input-background)',
+                      color: 'var(--vscode-input-foreground)',
+                      border: '1px solid var(--vscode-input-border)',
+                      padding: '6px',
+                      fontSize: '11px',
+                      fontFamily: 'var(--vscode-editor-font-family, monospace)'
+                    }}
+                  />
+                )}
+                {themeError && (
+                  <div style={{ marginTop: '8px', color: 'var(--vscode-errorForeground)', fontSize: '11px' }}>
+                    {themeError}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
               <button
                 className="nodrag"

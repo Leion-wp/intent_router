@@ -15,11 +15,15 @@ Module.prototype.require = function (request: string) {
 // Now import the actual code to test
 // Note: We need to point to the compiled output because we are running node tests on compiled JS
 const { installExtensions } = require('../../out/providers/vscodeAdapter');
+Module.prototype.require = originalRequire;
 
 suite('VSCode Adapter Tests (Mocked)', () => {
     let executedCommands: string[] = [];
 
     setup(() => {
+        if (mockVscode.__mock?.reset) {
+            mockVscode.__mock.reset();
+        }
         executedCommands = [];
         mockVscode.commands.executeCommand = async (cmd: string, arg: any) => {
             executedCommands.push(`${cmd}:${arg}`);

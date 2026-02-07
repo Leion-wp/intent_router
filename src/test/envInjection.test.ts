@@ -17,6 +17,7 @@ Module.prototype.require = function (request: string) {
 const { runPipelineFromData } = require('../../out/pipelineRunner');
 const { pipelineEventBus } = require('../../out/eventBus');
 const { executeTerminalCommand } = require('../../out/providers/terminalAdapter');
+Module.prototype.require = originalRequire;
 
 suite('Environment Injection Test (Mocked)', () => {
     let originalGetConfiguration: any;

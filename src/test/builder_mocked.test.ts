@@ -15,12 +15,16 @@ Module.prototype.require = function (request: string) {
 // Now import the actual code to test
 const { PipelineBuilder } = require('../../out/pipelineBuilder');
 const { pipelineEventBus } = require('../../out/eventBus');
+Module.prototype.require = originalRequire;
 
 suite('Pipeline Builder Tests (Mocked)', () => {
     let builder: any;
     let writtenFiles: any[] = [];
 
     setup(() => {
+        if (mockVscode.__mock?.reset) {
+            mockVscode.__mock.reset();
+        }
         mockVscode.workspace.fs.writeFile = async (uri: any, content: any) => {
             writtenFiles.push({ uri, content: content.toString() });
         };

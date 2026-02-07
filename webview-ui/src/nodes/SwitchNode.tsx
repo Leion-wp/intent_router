@@ -12,9 +12,9 @@ type SwitchRoute = {
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
-  running: '#007acc',
-  success: '#4caf50',
-  failure: '#f44336'
+  running: 'var(--ir-status-running)',
+  success: 'var(--ir-status-success)',
+  failure: 'var(--ir-status-error)'
 };
 
 const normalizeCondition = (value: unknown): SwitchCondition => {
@@ -38,6 +38,18 @@ const normalizeRoutes = (raw: any): SwitchRoute[] => {
       value: fallbackValue
     };
   });
+};
+
+const isValidRegex = (pattern: string): boolean => {
+  if (!pattern) {
+    return false;
+  }
+  try {
+    new RegExp(pattern);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const SwitchNode = ({ data, id }: NodeProps) => {
@@ -333,6 +345,11 @@ const SwitchNode = ({ data, id }: NodeProps) => {
                 <div style={{ fontSize: '10px', opacity: 0.65, marginTop: '4px' }}>
                   Connect the <span style={{ fontFamily: 'monospace' }}>{`route_${i}`}</span> output handle to the first step of this branch.
                 </div>
+                {r.condition === 'regex' && String(r.value || '').trim().length > 0 && !isValidRegex(String(r.value || '').trim()) && (
+                  <div style={{ fontSize: '10px', color: 'var(--vscode-errorForeground)', marginTop: '4px' }}>
+                    Invalid regex pattern.
+                  </div>
+                )}
               </div>
             ))}
           </div>
