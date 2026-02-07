@@ -9,6 +9,8 @@ import { generateSecureNonce } from './security';
 import { Capability, CompositeCapability } from './types';
 import { historyManager } from './historyManager';
 import * as path from 'path';
+import { deleteCustomNodeInWorkspace, exportCustomNodes, importCustomNodesJson, readCustomNodesFromWorkspace, upsertCustomNodeInWorkspace, writeCustomNodesToWorkspace } from './customNodesStore';
+import { deleteUiDraftFromWorkspace, getDefaultUiPreset, resolveUiPreset, writeUiDraftToWorkspace } from './uiPresetStore';
 
 type CommandGroup = {
     provider: string;
@@ -86,11 +88,19 @@ export class PipelineBuilder {
         });
         this.disposables.push(eventSub);
 
-        // Keep ENV panel in sync if user edits workspace settings while builder is open.
+        const pushUiPreset = async () => {
+            const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
+            const uiPreset = await resolveUiPreset(this.extensionUri, adminMode);
+            this.panel?.webview.postMessage({ type: 'adminModeUpdate', adminMode });
+            this.panel?.webview.postMessage({ type: 'uiPresetUpdate', uiPreset });
+        };
+
+        // Keep ENV panel and admin flags in sync if settings change while builder is open.
         const configSub = vscode.workspace.onDidChangeConfiguration(e => {
-            if (!e.affectsConfiguration('intentRouter.environment')) {
-                return;
+            if (e.affectsConfiguration('leionRoots.adminMode')) {
+                void pushUiPreset();
             }
+            if (!e.affectsConfiguration('intentRouter.environment')) return;
             try {
                 const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
                 this.panel?.webview.postMessage({
@@ -117,6 +127,10 @@ export class PipelineBuilder {
 	        await historyManager.whenReady();
 	        const history = historyManager.getHistory();
 	        const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
+            const customNodes = await readCustomNodesFromWorkspace();
+            const devMode = vscode.workspace.getConfiguration('intentRouter').get<boolean>('devMode', false);
+            const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
+            const uiPreset = await resolveUiPreset(this.extensionUri, adminMode);
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
@@ -135,8 +149,33 @@ export class PipelineBuilder {
             profiles: profileNames,
             templates,
             history,
-            environment
+            environment,
+            customNodes,
+            devMode,
+            adminMode,
+            uiPreset
         });
+
+        // Keep custom nodes in sync while builder is open
+        const customNodesWatcher = vscode.workspace.createFileSystemWatcher('**/.intent-router/nodes.json');
+        const pushCustomNodes = async () => {
+            try {
+                const nodes = await readCustomNodesFromWorkspace();
+                this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes });
+            } catch {
+                // best-effort
+            }
+        };
+        customNodesWatcher.onDidChange(pushCustomNodes);
+        customNodesWatcher.onDidCreate(pushCustomNodes);
+        customNodesWatcher.onDidDelete(pushCustomNodes);
+        this.disposables.push(customNodesWatcher);
+
+        const uiDraftWatcher = vscode.workspace.createFileSystemWatcher('**/leion-roots.ui.draft.json');
+        uiDraftWatcher.onDidChange(() => void pushUiPreset());
+        uiDraftWatcher.onDidCreate(() => void pushUiPreset());
+        uiDraftWatcher.onDidDelete(() => void pushUiPreset());
+        this.disposables.push(uiDraftWatcher);
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'savePipeline') {
@@ -210,6 +249,155 @@ export class PipelineBuilder {
                 } catch (error) {
                     console.error(`Failed to fetch dynamic options for ${command}:`, error);
                 }
+                return;
+            }
+            if (message?.type === 'customNodes.upsert') {
+                try {
+                    const nodes = await upsertCustomNodeInWorkspace(message.node);
+                    this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes });
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(`Failed to save custom node: ${e?.message || e}`);
+                }
+                return;
+            }
+            if (message?.type === 'customNodes.delete') {
+                try {
+                    const nodes = await deleteCustomNodeInWorkspace(String(message.id || ''));
+                    this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes });
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(`Failed to delete custom node: ${e?.message || e}`);
+                }
+                return;
+            }
+            if (message?.type === 'customNodes.export') {
+                try {
+                    const nodes = await readCustomNodesFromWorkspace();
+                    const scope = String(message.scope || 'all');
+                    const id = String(message.id || '');
+                    const selected = scope === 'one' ? nodes.find(n => n.id === id) : undefined;
+                    const json = exportCustomNodes(selected ? selected : nodes);
+                    await vscode.env.clipboard.writeText(json);
+                    this.panel?.webview.postMessage({ type: 'customNodesExported', scope, id, json });
+                    vscode.window.showInformationMessage('Custom nodes JSON copied to clipboard.');
+                } catch (e: any) {
+                    vscode.window.showErrorMessage(`Failed to export custom nodes: ${e?.message || e}`);
+                }
+                return;
+            }
+            if (message?.type === 'customNodes.import') {
+                try {
+                    const source = String(message.source || 'paste');
+                    let jsonText = String(message.jsonText || '');
+
+                    if (source === 'file') {
+                        const uris = await vscode.window.showOpenDialog({
+                            canSelectFiles: true,
+                            canSelectFolders: false,
+                            canSelectMany: false,
+                            openLabel: 'Import',
+                            filters: { JSON: ['json'] }
+                        });
+                        if (!uris || uris.length === 0) {
+                            return;
+                        }
+                        const bytes = await vscode.workspace.fs.readFile(uris[0]);
+                        jsonText = Buffer.from(bytes).toString('utf8');
+                    }
+
+                    const existing = await readCustomNodesFromWorkspace();
+                    const { merged, imported, renames } = importCustomNodesJson(existing, jsonText);
+                    await writeCustomNodesToWorkspace(merged);
+                    this.panel?.webview.postMessage({ type: 'customNodesUpdate', nodes: merged });
+                    this.panel?.webview.postMessage({ type: 'customNodesImported', imported, renames, total: merged.length });
+                    vscode.window.showInformationMessage(`Imported ${imported.length} custom node(s).`);
+                } catch (e: any) {
+                    const msg = e?.message || String(e);
+                    vscode.window.showErrorMessage(`Failed to import custom nodes: ${msg}`);
+                    this.panel?.webview.postMessage({ type: 'customNodesImportError', message: msg });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.saveDraft') {
+                try {
+                    await writeUiDraftToWorkspace(message.uiPreset);
+                    await pushUiPreset();
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    this.panel?.webview.postMessage({ type: 'error', message: `Failed to save UI draft: ${err}` });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.resetDraft') {
+                try {
+                    await deleteUiDraftFromWorkspace();
+                    await pushUiPreset();
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    this.panel?.webview.postMessage({ type: 'error', message: `Failed to reset UI draft: ${err}` });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.exportCurrent') {
+                try {
+                    const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
+                    const uiPreset = await resolveUiPreset(this.extensionUri, adminMode);
+                    const json = JSON.stringify(uiPreset, null, 2);
+                    await vscode.env.clipboard.writeText(json);
+                    this.panel?.webview.postMessage({ type: 'uiPresetExported', json });
+                    vscode.window.showInformationMessage('UI preset JSON copied to clipboard.');
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    this.panel?.webview.postMessage({ type: 'error', message: `Failed to export UI preset: ${err}` });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.importDraft') {
+                try {
+                    let text = String(message.jsonText || '').trim();
+                    const source = String(message.source || 'paste');
+                    if (source === 'file') {
+                        const uris = await vscode.window.showOpenDialog({
+                            canSelectFiles: true,
+                            canSelectFolders: false,
+                            canSelectMany: false,
+                            openLabel: 'Import Theme Preset',
+                            filters: { JSON: ['json'] }
+                        });
+                        if (!uris || uris.length === 0) {
+                            return;
+                        }
+                        const bytes = await vscode.workspace.fs.readFile(uris[0]);
+                        text = Buffer.from(bytes).toString('utf8').trim();
+                    }
+                    if (!text) throw new Error('Empty JSON');
+                    const parsed = JSON.parse(text);
+                    await writeUiDraftToWorkspace(parsed);
+                    await pushUiPreset();
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    this.panel?.webview.postMessage({ type: 'error', message: `Failed to import UI preset: ${err}` });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.resetToDefaults') {
+                try {
+                    await writeUiDraftToWorkspace(getDefaultUiPreset());
+                    await pushUiPreset();
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    this.panel?.webview.postMessage({ type: 'error', message: `Failed to reset UI preset to defaults: ${err}` });
+                }
+                return;
+            }
+            if (message?.type === 'devPackager.loadPreset') {
+                const enabled = vscode.workspace.getConfiguration('intentRouter').get<boolean>('devMode', false);
+                if (!enabled) {
+                    vscode.window.showWarningMessage('Dev mode is disabled. Enable "Intent Router: Dev Mode" in workspace settings.');
+                    return;
+                }
+                const preset = buildDevPackagerPreset();
+                this.panel?.webview.postMessage({ type: 'loadPipeline', pipeline: preset });
+                vscode.window.showInformationMessage('Loaded Dev Packager preset in the builder.');
                 return;
             }
         });
@@ -324,4 +512,57 @@ export class PipelineBuilder {
 </body>
 </html>`;
     }
+}
+
+function buildDevPackagerPreset(): PipelineFile {
+    // Keep the output VSIX path stable (no parsing output).
+    // Use relative path for install step; vscode.installVsix resolves relative to workspace root.
+    return {
+        name: 'Dev Packager',
+        description: 'Dev-only preset: build and install the current extension VSIX, then reload VS Code.',
+        steps: [
+            {
+                id: 'dev.npmInstall',
+                intent: 'terminal.run',
+                description: 'npm install',
+                payload: { command: 'npm install', cwd: '${workspaceRoot}' }
+            },
+            {
+                id: 'dev.compile',
+                intent: 'terminal.run',
+                description: 'npm run compile',
+                payload: { command: 'npm run compile', cwd: '${workspaceRoot}' }
+            },
+            {
+                id: 'dev.vscePackage',
+                intent: 'terminal.run',
+                description: 'vsce package (pipeline/dev-build.vsix)',
+                payload: { command: 'npx vsce package -o pipeline/dev-build.vsix', cwd: '${workspaceRoot}' }
+            },
+            {
+                id: 'dev.pauseBeforeInstall',
+                intent: 'system.pause',
+                description: 'Pause before install',
+                payload: { message: 'About to install pipeline/dev-build.vsix into VS Code. Review changes, then Continue.' }
+            },
+            {
+                id: 'dev.installVsix',
+                intent: 'vscode.installVsix',
+                description: 'Install VSIX',
+                payload: { vsixPath: 'pipeline/dev-build.vsix' }
+            },
+            {
+                id: 'dev.pauseBeforeReload',
+                intent: 'system.pause',
+                description: 'Pause before reload',
+                payload: { message: 'VSIX installed. Continue to reload VS Code window?' }
+            },
+            {
+                id: 'dev.reload',
+                intent: 'vscode.runCommand',
+                description: 'Reload window',
+                payload: { commandId: 'workbench.action.reloadWindow', argsJson: '' }
+            }
+        ]
+    };
 }

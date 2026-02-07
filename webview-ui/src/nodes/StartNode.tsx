@@ -1,6 +1,7 @@
 import { memo, useContext, useEffect, useState } from 'react';
 import { Handle, NodeProps, Position } from '@xyflow/react';
 import { FlowEditorContext } from '../App';
+import IoSpec from '../components/IoSpec';
 
 const StartNode = ({ data, id }: NodeProps) => {
   const { updateNodeData } = useContext(FlowEditorContext);
@@ -25,6 +26,7 @@ const StartNode = ({ data, id }: NodeProps) => {
   return (
     <div
       style={{
+        position: 'relative',
         padding: '10px',
         borderRadius: '6px',
         background: 'var(--vscode-editor-background)',
@@ -40,6 +42,7 @@ const StartNode = ({ data, id }: NodeProps) => {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <IoSpec inputs={[]} outputs={['success']} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           <label style={{ fontSize: '0.75em', opacity: 0.9 }}>Pipeline name</label>
           <input
@@ -87,7 +90,8 @@ const StartNode = ({ data, id }: NodeProps) => {
         </div>
       </div>
 
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={Position.Right} id="success" />
+      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
     </div>
   );
 };

@@ -2,12 +2,15 @@ import { memo, useMemo, useState, useEffect, useContext, useRef } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext, RegistryContext } from '../App';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
+import SchemaArgsForm from '../components/SchemaArgsForm';
+import IoSpec from '../components/IoSpec';
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
-  running: '#007acc', // VS Code Blue
-  success: '#4caf50', // Green
-  failure: '#f44336'  // Red
+  running: 'var(--ir-status-running)',
+  success: 'var(--ir-status-success)',
+  failure: 'var(--ir-status-error)',
+  error: 'var(--ir-status-error)'
 };
 
 // Fallback if registry is empty (during loading or error)
@@ -148,9 +151,28 @@ const ActionNode = ({ data, id }: NodeProps) => {
      ...schemaArgs,
      { name: 'description', type: 'string', description: 'Step description for logs' }
   ];
+  const useSharedForm = true;
+  const inputHandles = useMemo(() => {
+    const argsList = Array.isArray(schemaArgs) ? schemaArgs : [];
+    const names = argsList
+      .map((arg: any) => String(arg?.name || '').trim())
+      .filter((name: string) => name.length > 0);
+    return ['in', ...names];
+  }, [schemaArgs]);
+
+  const handleTop = (index: number, total: number) => {
+    if (total <= 1) return '50%';
+    const min = 24;
+    const max = 82;
+    const value = min + ((max - min) * index) / (total - 1);
+    return `${value}%`;
+  };
 
   // Initialize Defaults & Validate & Fetch Dynamic Options
   useEffect(() => {
+      if (useSharedForm) {
+          return;
+      }
       const newArgs = { ...args };
       let changed = false;
       const newErrors: Record<string, boolean> = {};
@@ -190,6 +212,9 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
 	  // Listen for option responses
 	  useEffect(() => {
+        if (useSharedForm) {
+            return;
+        }
 	      const handleMessage = (event: MessageEvent) => {
 	          const message = event.data;
 	          if (!isInboundMessage(message)) {
@@ -210,11 +235,25 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const isPause = provider === 'system' && capability === 'system.pause';
   const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
   const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none';
+  const determinism: 'deterministic' | 'interactive' =
+    selectedCapConfig?.determinism === 'interactive' ? 'interactive' : 'deterministic';
+  const determinismBadge = determinism === 'interactive' ? '👤' : '⚙';
 
   const fallbackTitle = `${provider} · ${selectedCapConfig?.capability || capability}`.trim();
+  const ioInputs = useMemo(() => {
+    const argsList = Array.isArray(schemaArgs) ? schemaArgs : [];
+    const names = argsList.map((arg: any) => {
+      const name = String(arg?.name || '').trim();
+      if (!name) return '';
+      return arg?.required ? `${name}*` : name;
+    }).filter(Boolean);
+    return names.length ? names : ['payload'];
+  }, [schemaArgs]);
+  const ioOutputs = ['success', 'error'];
 
   return (
     <div style={{
+      position: 'relative',
       padding: '10px',
       borderRadius: '5px',
       background: 'var(--vscode-editor-background)',
@@ -224,19 +263,48 @@ const ActionNode = ({ data, id }: NodeProps) => {
       color: 'var(--vscode-editor-foreground)',
       fontFamily: 'var(--vscode-font-family)'
     }}>
-      <Handle type="target" position={Position.Left} />
+      {inputHandles.map((inputName, index) => (
+        <div key={`in-${inputName}`}>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id={inputName === 'in' ? 'in' : `in_${inputName}`}
+            style={{ top: handleTop(index, inputHandles.length) }}
+          />
+          <span
+            style={{
+              position: 'absolute',
+              left: '-2px',
+              top: handleTop(index, inputHandles.length),
+              transform: 'translate(-100%, -50%)',
+              fontSize: '10px',
+              opacity: inputName === 'in' ? 0.8 : 0.65,
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {inputName}
+          </span>
+        </div>
+      ))}
 
       <Handle
         type="source"
         position={Position.Right}
         id="failure"
         title="On Failure"
-        style={{ top: '30%', background: '#f44336' }}
+        style={{ top: '30%', background: 'var(--ir-status-error)' }}
       />
+      <span style={{ position: 'absolute', right: '-2px', top: '30%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>error</span>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', alignItems: 'center', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
           <span className="codicon codicon-gear"></span>
+          <span
+            title={determinism === 'interactive' ? 'Interactive (requires human / UI)' : 'Deterministic'}
+            style={{ fontSize: '12px', opacity: determinism === 'interactive' ? 1 : 0.85 }}
+          >
+            {determinismBadge}
+          </span>
           {editingLabel ? (
             <input
               className="nodrag"
@@ -291,6 +359,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
       {!collapsed && (
       <>
+      <IoSpec inputs={ioInputs} outputs={ioOutputs} />
       <div style={{ marginBottom: '8px' }}>
         <select
           aria-label="Select capability"
@@ -323,6 +392,10 @@ const ActionNode = ({ data, id }: NodeProps) => {
         )}
       </div>
 
+      <SchemaArgsForm nodeId={id} fields={displayArgs as any} values={args} onChange={handleArgChange} availableVars={availableVars} />
+
+      {/* Legacy inline renderer kept for reference (disabled) */}
+      {false && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {displayArgs.map((arg: any) => {
           const inputId = `input-${id}-${arg.name}`;
@@ -336,7 +409,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <label htmlFor={inputId} style={{ fontSize: '0.75em', opacity: 0.9, display: 'flex', alignItems: 'center', color: hasError ? 'var(--vscode-inputValidation-errorForeground)' : 'inherit' }}>
                       {arg.name}
-                      {isRequired && <span style={{ color: '#f44336', marginLeft: '2px' }}>*</span>}
+                      {isRequired && <span style={{ color: 'var(--ir-status-error)', marginLeft: '2px' }}>*</span>}
                   </label>
                   {arg.description && (
                       <button
@@ -552,10 +625,12 @@ const ActionNode = ({ data, id }: NodeProps) => {
           );
         })}
       </div>
+      )}
       </>
       )}
 
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={Position.Right} id="success" />
+      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
 
       {/* Mini-Console */}
       {!collapsed && logs.length > 0 && (
@@ -591,7 +666,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
                         borderBottomRightRadius: '4px'
                     }}>
                     {logs.map((log: any, i: number) => (
-                        <span key={i} style={{ color: log.stream === 'stderr' ? '#f44336' : 'inherit', display: 'block' }}>
+                        <span key={i} style={{ color: log.stream === 'stderr' ? 'var(--ir-status-error)' : 'inherit', display: 'block' }}>
                             {log.text}
                         </span>
                     ))}

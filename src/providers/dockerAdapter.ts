@@ -16,6 +16,7 @@ function doRegister() {
                 capability: 'docker.build',
                 command: 'vscode-docker.configure', // Best approximation for build workflow in V1
                 description: 'Build a Docker image',
+                determinism: 'deterministic',
                 args: [
                     { name: 'tag', type: 'string', description: 'Image tag', required: true },
                     { name: 'path', type: 'path', description: 'Context path', default: '.' }
@@ -25,6 +26,7 @@ function doRegister() {
                 capability: 'docker.run',
                 command: 'vscode-docker.containers.start',
                 description: 'Run a Docker container',
+                determinism: 'deterministic',
                 args: [
                     { name: 'image', type: 'string', description: 'Image ID or name', required: true },
                     { name: 'detach', type: 'boolean', description: 'Run in background', default: true }

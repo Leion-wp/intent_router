@@ -1,6 +1,7 @@
 import { memo, useEffect, useState, useContext } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext } from '../App';
+import IoSpec from '../components/IoSpec';
 
 const VSCodeCommandNode = ({ data, id }: NodeProps) => {
   const { isRunPreviewNode } = useContext(FlowRuntimeContext);
@@ -11,6 +12,14 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
   const [label, setLabel] = useState<string>((data.label as string) || '');
   const [editingLabel, setEditingLabel] = useState(false);
   const collapsed = !!data.collapsed;
+  const inputHandles = ['in', 'commandId', 'argsJson'];
+  const handleTop = (index: number, total: number) => {
+    if (total <= 1) return '50%';
+    const min = 24;
+    const max = 80;
+    const value = min + ((max - min) * index) / (total - 1);
+    return `${value}%`;
+  };
 
   // Sync from external updates (e.g. drawer edits)
   useEffect(() => {
@@ -42,6 +51,7 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
   return (
     <div
       style={{
+        position: 'relative',
         padding: '10px',
         borderRadius: '5px',
         background: 'var(--vscode-editor-background)',
@@ -52,11 +62,36 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
         fontFamily: 'var(--vscode-font-family)'
       }}
     >
-      <Handle type="target" position={Position.Left} />
+      {inputHandles.map((inputName, index) => (
+        <div key={`in-${inputName}`}>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id={inputName === 'in' ? 'in' : `in_${inputName}`}
+            style={{ top: handleTop(index, inputHandles.length) }}
+          />
+          <span
+            style={{
+              position: 'absolute',
+              left: '-2px',
+              top: handleTop(index, inputHandles.length),
+              transform: 'translate(-100%, -50%)',
+              fontSize: '10px',
+              opacity: inputName === 'in' ? 0.8 : 0.65,
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {inputName}
+          </span>
+        </div>
+      ))}
 
       <div style={{ marginBottom: '8px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
           <span className="codicon codicon-vscode"></span>
+          <span title="Interactive (requires human / UI)" style={{ fontSize: '12px' }}>
+            👤
+          </span>
           {editingLabel ? (
             <input
               className="nodrag"
@@ -110,9 +145,10 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
 
       {!collapsed && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <IoSpec inputs={['commandId*', 'argsJson']} outputs={['success']} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           <label style={{ fontSize: '0.75em', opacity: 0.9 }}>
-            commandId <span style={{ color: '#f44336' }}>*</span>
+            commandId <span style={{ color: 'var(--ir-status-error)' }}>*</span>
           </label>
           <input
             className="nodrag"
@@ -167,7 +203,8 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
       </div>
       )}
 
-      <Handle id="out" type="source" position={Position.Right} />
+      <Handle id="success" type="source" position={Position.Right} />
+      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
     </div>
   );
 };

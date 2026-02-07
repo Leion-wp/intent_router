@@ -9,6 +9,7 @@
 **/webview-ui/src/**
 **/webview-ui/node_modules/**
 **/webview-ui/dist/**
+**/webview-ui/**
 **/test/**
 **/tests/**
 **/coverage/**
@@ -17,3 +18,11 @@
 **/pipeline/**
 **/*.intent.json
 **/reports/**
+**/.Jules/**
+**/.atom8n/**
+**/.thorclient/**
+PR_PROMPT.md
+VISION.md
+SECURITY.md
+.gitignore
+tsconfig.json

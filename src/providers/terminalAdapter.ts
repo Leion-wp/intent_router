@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as path from 'path';
 import { pipelineEventBus } from '../eventBus';
 import { registerCapabilities } from '../registry';
+import { validateSafeRelativePath } from '../security';
 
 export function registerTerminalProvider(context: vscode.ExtensionContext) {
     // Terminal is a built-in feature, so we always register it.
@@ -17,6 +19,7 @@ function doRegister() {
                 capability: 'terminal.run',
                 command: 'intentRouter.internal.terminalRun',
                 description: 'Run a shell command in the integrated terminal',
+                determinism: 'deterministic',
                 args: [
                     { name: 'command', type: 'string', description: 'The shell command to execute', required: true },
                     { name: 'cwd', type: 'path', description: 'Working directory', default: '.' }
@@ -101,6 +104,13 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     // Avoid shell-specific chaining tokens (PowerShell 5.1 doesn't support `&&`).
     // `pushd` works across PowerShell/cmd/bash/zsh and also switches drives on Windows.
     if (typeof cwd === 'string' && cwd.trim() && cwd.trim() !== '.') {
+        const trustedRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || path.resolve('.');
+        try {
+            validateSafeRelativePath(cwd, trustedRoot);
+        } catch (e: any) {
+            vscode.window.showErrorMessage(`Security Error: ${e.message}`);
+            return;
+        }
         term.sendText(`pushd "${cwd.trim()}"`);
     }
 
@@ -158,6 +168,16 @@ function runCommand(command: string, cwd: string | undefined, runId: string, int
         const envOverrides = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
         const env = { ...process.env, ...envOverrides };
         const safeCwd = (typeof cwd === 'string' && cwd.trim() !== '') ? cwd : undefined;
+
+        if (safeCwd) {
+            const trustedRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || path.resolve('.');
+            try {
+                validateSafeRelativePath(safeCwd, trustedRoot);
+            } catch (error: any) {
+                write(`\x1b[31mSecurity Error: ${error.message}\x1b[0m\n`);
+                return reject(error);
+            }
+        }
 
         const child = (process.platform === 'win32')
             ? cp.spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], { cwd: safeCwd, env })

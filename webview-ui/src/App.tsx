@@ -28,7 +28,12 @@ import PromptNode from './nodes/PromptNode';
 import RepoNode from './nodes/RepoNode';
 import VSCodeCommandNode from './nodes/VSCodeCommandNode';
 import StartNode from './nodes/StartNode';
+import CustomNode from './nodes/CustomNode';
+import FormNode from './nodes/FormNode';
+import SwitchNode from './nodes/SwitchNode';
+import ScriptNode from './nodes/ScriptNode';
 import { isInboundMessage, WebviewInboundMessage } from './types/messages';
+import { applyThemeTokensToRoot, defaultThemeTokens, tokensFromPreset } from './types/theme';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
@@ -49,13 +54,25 @@ export const FlowEditorContext = createContext<{
   updateNodeData: () => {}
 });
 
+export const CustomNodesContext = createContext<{
+  nodes: any[];
+  getById: (id: string) => any | undefined;
+}>({
+  nodes: [],
+  getById: () => undefined
+});
+
 // Register custom node types
 const nodeTypes = {
   startNode: StartNode,
   actionNode: ActionNode,
   promptNode: PromptNode,
   repoNode: RepoNode,
-  vscodeCommandNode: VSCodeCommandNode
+  vscodeCommandNode: VSCodeCommandNode,
+  customNode: CustomNode,
+  formNode: FormNode,
+  switchNode: SwitchNode,
+  scriptNode: ScriptNode
 };
 
 const InsertableEdge = (props: EdgeProps) => {
@@ -95,6 +112,26 @@ const InsertableEdge = (props: EdgeProps) => {
           }}
           onClick={(e) => e.stopPropagation()}
         >
+          {(data as any)?.label && (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '24px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'var(--vscode-editorWidget-background)',
+                border: '1px solid var(--vscode-editorWidget-border)',
+                color: 'var(--vscode-foreground)',
+                fontSize: '10px',
+                padding: '2px 6px',
+                borderRadius: '10px',
+                whiteSpace: 'nowrap',
+                opacity: 0.9
+              }}
+            >
+              {(data as any).label}
+            </div>
+          )}
           <button
             className="nodrag"
             onClick={(e) => {
@@ -181,7 +218,86 @@ function canonicalizeIntent(provider: string, capability: string): { provider: s
   return { provider: finalProvider, intent: cap, capability: cap };
 }
 
-function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any, restoreRun: any, onRestoreHandled: () => void }) {
+function inferScriptInterpreter(scriptPath: string): string {
+  const lower = String(scriptPath || '').trim().toLowerCase();
+  if (lower.endsWith('.ps1')) return 'pwsh -File';
+  if (lower.endsWith('.py')) return 'python';
+  if (lower.endsWith('.js')) return 'node';
+  if (lower.endsWith('.sh')) return 'bash';
+  return '';
+}
+
+function quoteShell(value: string): string {
+  const input = String(value || '');
+  if (!input) return '""';
+  if (!/[\s"]/g.test(input)) return input;
+  return `"${input.replace(/"/g, '\\"')}"`;
+}
+
+function buildScriptCommand(scriptPath: string, args: string, interpreter?: string): string {
+  const script = String(scriptPath || '').trim();
+  const argsString = String(args || '').trim();
+  const runtimeOverride = String(interpreter || '').trim();
+  const runtime = runtimeOverride || inferScriptInterpreter(script);
+  const lower = script.toLowerCase();
+
+  if (!runtimeOverride && lower.endsWith('.ps1')) {
+    const baseArg = `${quoteShell(script)}${argsString ? ` ${argsString}` : ''}`;
+    return `if (Get-Command pwsh -ErrorAction SilentlyContinue) { pwsh -File ${baseArg} } else { powershell -File ${baseArg} }`;
+  }
+
+  const prefix = runtime ? `${runtime} ` : '';
+  const base = `${prefix}${quoteShell(script)}`;
+  return argsString ? `${base} ${argsString}` : base;
+}
+
+function isRequiredValueMissing(value: any, type: string): boolean {
+  if (type === 'boolean') {
+    return value === undefined || value === null;
+  }
+  if (value === undefined || value === null) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+  if (typeof value === 'string') {
+    return value.trim().length === 0;
+  }
+  return false;
+}
+
+function firstMissingRequiredField(fields: any[], args: Record<string, any>): string | null {
+  for (const rawField of fields || []) {
+    const field = rawField || {};
+    if (!field.required) {
+      continue;
+    }
+    const name = String(field.name || '').trim();
+    if (!name) {
+      continue;
+    }
+    const type = String(field.type || 'string');
+    if (isRequiredValueMissing(args?.[name], type)) {
+      return name;
+    }
+  }
+  return null;
+}
+
+function Flow({
+  selectedRun,
+  restoreRun,
+  onRestoreHandled,
+  sidebarCollapsed,
+  onSetSidebarCollapsed
+}: {
+  selectedRun: any,
+  restoreRun: any,
+  onRestoreHandled: () => void,
+  sidebarCollapsed: boolean,
+  onSetSidebarCollapsed: (next: boolean) => void
+}) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -194,6 +310,9 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
   const lastOpenNodeIdRef = useRef<string | null>(null);
   const lastOpenNodeAtRef = useRef<number>(0);
   const { commandGroups } = useContext(RegistryContext);
+  const [customNodes, setCustomNodes] = useState<any[]>(
+    (window.initialData?.customNodes as any[]) || []
+  );
 
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddQuery, setQuickAddQuery] = useState('');
@@ -204,6 +323,19 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
   const [dockQuery, setDockQuery] = useState('');
   const [lastCanvasPos, setLastCanvasPos] = useState<{ x: number; y: number } | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [chromeOpacity, setChromeOpacity] = useState<number>(0.95);
+  const [showMiniMap, setShowMiniMap] = useState<boolean>(true);
+  const [showControls, setShowControls] = useState<boolean>(true);
+  const [focusGraph, setFocusGraph] = useState<boolean>(false);
+  const [chromeCollapsed, setChromeCollapsed] = useState<boolean>(false);
+  const [chromePanelPos, setChromePanelPos] = useState<{ x: number; y: number }>({ x: 430, y: 56 });
+  const [runMenuOpen, setRunMenuOpen] = useState<boolean>(false);
+  const [runPillStatus, setRunPillStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const previousSidebarCollapsedRef = useRef<boolean>(false);
+  const runPillResetTimerRef = useRef<number | null>(null);
+  const chromePanelDragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const copiedNodeRef = useRef<Node | null>(null);
 
   const [environment, setEnvironment] = useState<Record<string, string>>(
     (window.initialData?.environment as Record<string, string>) || {}
@@ -222,15 +354,40 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     envRef.current = environment;
   }, [environment]);
 
+  useEffect(() => {
+    try {
+      const st = vscode?.getState?.() || {};
+      const chrome = st.chrome || {};
+      if (typeof chrome.opacity === 'number') {
+        setChromeOpacity(Math.max(0.3, Math.min(1, chrome.opacity)));
+      }
+      if (typeof chrome.showMiniMap === 'boolean') setShowMiniMap(chrome.showMiniMap);
+      if (typeof chrome.showControls === 'boolean') setShowControls(chrome.showControls);
+      if (typeof chrome.focusGraph === 'boolean') setFocusGraph(chrome.focusGraph);
+      if (typeof chrome.collapsed === 'boolean') setChromeCollapsed(chrome.collapsed);
+      if (chrome.position && typeof chrome.position.x === 'number' && typeof chrome.position.y === 'number') {
+        setChromePanelPos({ x: chrome.position.x, y: chrome.position.y });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const getAvailableVars = useCallback((): string[] => {
     const promptVars = (nodesRef.current || [])
       .filter((n: any) => n?.type === 'promptNode')
       .map((n: any) => String(n?.data?.name || '').trim())
       .filter((s: string) => !!s);
 
+    const formVars = (nodesRef.current || [])
+      .filter((n: any) => n?.type === 'formNode')
+      .flatMap((n: any) => (Array.isArray(n?.data?.fields) ? n.data.fields : []))
+      .map((f: any) => String(f?.key || '').trim())
+      .filter(Boolean);
+
     const envVars = Object.keys(envRef.current || {}).map(s => String(s).trim()).filter(Boolean);
 
-    const all = Array.from(new Set([...promptVars, ...envVars]));
+    const all = Array.from(new Set([...promptVars, ...formVars, ...envVars]));
     all.sort((a, b) => a.localeCompare(b));
     return all;
   }, []);
@@ -251,12 +408,30 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     );
   }, [setNodes]);
 
+  const customNodesById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const n of customNodes || []) {
+      const nid = String((n as any)?.id || '').trim();
+      if (!nid) continue;
+      map.set(nid, n);
+    }
+    return map;
+  }, [customNodes]);
+
+  const customNodesContextValue = useMemo(() => {
+    return {
+      nodes: customNodes || [],
+      getById: (nid: string) => customNodesById.get(String(nid || '').trim())
+    };
+  }, [customNodes, customNodesById]);
+
   type QuickAddItem = {
     id: string;
     label: string;
-    nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode';
+    nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode' | 'customNode' | 'formNode' | 'switchNode' | 'scriptNode';
     provider?: string;
     capability?: string;
+    customNodeId?: string;
   };
 
   const getDefaultCapability = useCallback((providerName: string) => {
@@ -268,6 +443,9 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
   const presetItems: QuickAddItem[] = useMemo(() => ([
     { id: 'preset-prompt', label: 'Prompt', nodeType: 'promptNode' },
+    { id: 'preset-form', label: 'Form', nodeType: 'formNode' },
+    { id: 'preset-switch', label: 'Switch', nodeType: 'switchNode' },
+    { id: 'preset-script', label: 'Script', nodeType: 'scriptNode' },
     { id: 'preset-repo', label: 'Repo', nodeType: 'repoNode' },
     { id: 'preset-terminal', label: 'Terminal', nodeType: 'actionNode', provider: 'terminal', capability: getDefaultCapability('terminal') },
     { id: 'preset-system', label: 'System', nodeType: 'actionNode', provider: 'system', capability: getDefaultCapability('system') },
@@ -309,6 +487,30 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       data.provider = item.provider || 'terminal';
       data.capability = item.capability || getDefaultCapability(item.provider || 'terminal');
       data.args = {};
+    } else if (item.nodeType === 'customNode') {
+      const cnid = String(item.customNodeId || '').trim();
+      const def = cnid ? customNodesById.get(cnid) : undefined;
+      data.customNodeId = cnid;
+      data.title = def?.title || '';
+      data.intent = def?.intent || '';
+      data.schema = def?.schema || [];
+      data.mapping = def?.mapping;
+      data.args = {};
+      data.kind = 'custom';
+    } else if (item.nodeType === 'formNode') {
+      data.fields = [];
+      data.kind = 'form';
+    } else if (item.nodeType === 'switchNode') {
+      data.label = 'Switch';
+      data.variableKey = '';
+      data.routes = [];
+      data.kind = 'switch';
+    } else if (item.nodeType === 'scriptNode') {
+      data.scriptPath = '';
+      data.args = '';
+      data.cwd = '';
+      data.interpreter = '';
+      data.kind = 'script';
     } else if (item.nodeType === 'promptNode') {
       data.name = '';
       data.value = '';
@@ -378,9 +580,22 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
         return remaining.concat([e1, e2]);
       });
     }
-  }, [getDefaultCapability, lastCanvasPos, reactFlowInstance]);
+  }, [getDefaultCapability, lastCanvasPos, reactFlowInstance, customNodesById]);
 
-  const allQuickAddItems = useMemo(() => [...presetItems, ...commandItems], [presetItems, commandItems]);
+  const customNodeItems: QuickAddItem[] = useMemo(() => {
+    return (customNodes || []).map((n: any) => {
+      const id = String(n?.id || '').trim();
+      const title = String(n?.title || id || 'Custom').trim();
+      return {
+        id: `custom-${id}`,
+        label: `Custom · ${title}`,
+        nodeType: 'customNode',
+        customNodeId: id
+      };
+    }).filter((i: any) => !!i.customNodeId);
+  }, [customNodes]);
+
+  const allQuickAddItems = useMemo(() => [...presetItems, ...customNodeItems, ...commandItems], [presetItems, customNodeItems, commandItems]);
   const filteredQuickAddItems = useMemo(
     () => filterQuickAdd(allQuickAddItems, quickAddQuery),
     [allQuickAddItems, quickAddQuery, filterQuickAdd]
@@ -428,6 +643,54 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     [edges, handleEdgeInsert]
   );
 
+  const duplicateNodeById = useCallback((nodeId: string, explicitPosition?: { x: number; y: number }) => {
+    let createdId: string | null = null;
+    setNodes((prev) => {
+      const source = prev.find((entry: any) => entry.id === nodeId);
+      if (!source || source.id === 'start') return prev;
+
+      const cloneId = getId();
+      createdId = cloneId;
+      const base = source.position || { x: 120, y: 120 };
+      const nextPos = explicitPosition || { x: base.x + 44, y: base.y + 44 };
+      const nextNode: any = {
+        ...source,
+        id: cloneId,
+        position: nextPos,
+        selected: false,
+        dragging: false,
+        data: JSON.parse(JSON.stringify(source.data || {}))
+      };
+      return [...prev, nextNode];
+    });
+    if (createdId) {
+      setSelectedNodeId(createdId);
+    }
+  }, [setNodes]);
+
+  const copyNodeById = useCallback((nodeId: string) => {
+    const source = nodes.find((entry: any) => entry.id === nodeId);
+    if (!source || source.id === 'start') return;
+    copiedNodeRef.current = JSON.parse(JSON.stringify(source));
+  }, [nodes]);
+
+  const pasteCopiedNode = useCallback(() => {
+    const source = copiedNodeRef.current;
+    if (!source) return;
+    const pos = lastCanvasPos || { x: 220, y: 140 };
+    const cloneId = getId();
+    const nextNode: any = {
+      ...source,
+      id: cloneId,
+      position: { x: pos.x + 12, y: pos.y + 12 },
+      selected: false,
+      dragging: false,
+      data: JSON.parse(JSON.stringify(source.data || {}))
+    };
+    setNodes((prev) => [...prev, nextNode]);
+    setSelectedNodeId(cloneId);
+  }, [lastCanvasPos, setNodes]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -442,6 +705,26 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       if (e.key === 'Escape') {
         if (quickAddOpen) setQuickAddOpen(false);
         if (dockOpen) setDockOpen(false);
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'c' && selectedNodeId && selectedNodeId !== 'start') {
+        e.preventDefault();
+        copyNodeById(selectedNodeId);
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        pasteCopiedNode();
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'd' && selectedNodeId && selectedNodeId !== 'start') {
+        e.preventDefault();
+        duplicateNodeById(selectedNodeId);
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId && selectedNodeId !== 'start') {
+        e.preventDefault();
+        const nodeId = selectedNodeId;
+        setNodes((prev) => prev.filter((entry: any) => entry.id !== nodeId));
+        setEdges((prev) => prev.filter((edge: any) => edge.source !== nodeId && edge.target !== nodeId));
+        setDrawerNodeId((entry) => (entry === nodeId ? null : entry));
+        setSelectedNodeId(null);
       }
       if (e.key.toLowerCase() === 'f') {
         reactFlowInstance?.fitView?.({ duration: 200, padding: 0.2 });
@@ -459,7 +742,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [quickAddOpen, dockOpen, reactFlowInstance, selectedNodeId]);
+  }, [quickAddOpen, dockOpen, reactFlowInstance, selectedNodeId, copyNodeById, pasteCopiedNode, duplicateNodeById, setNodes, setEdges]);
 
   useEffect(() => {
     const onDocClick = () => setContextMenu(null);
@@ -548,7 +831,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       const allowed = new Set<string>([...preview, ...failureAllowed, ...context]);
       return { allowed, preview };
     },
-    [edges, nodes]
+    [edges, nodes, customNodesById]
   );
 
   const syncIdCounterFromNodes = useCallback((list: Array<any>) => {
@@ -564,6 +847,55 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       idCounter = max + 1;
     }
   }, []);
+
+  const setDeepValue = (obj: any, path: string, value: any) => {
+    const parts = String(path || '').split('.').map(p => p.trim()).filter(Boolean);
+    if (parts.length === 0) return;
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const key = parts[i];
+      if (!cur[key] || typeof cur[key] !== 'object') {
+        cur[key] = {};
+      }
+      cur = cur[key];
+    }
+    cur[parts[parts.length - 1]] = value;
+  };
+
+  const buildCustomPayload = (defOrSnapshot: any, nodeData: any): { description: string; payload: any; intent: string } => {
+    const intent = String(defOrSnapshot?.intent || nodeData?.intent || '').trim();
+    const mapping = (defOrSnapshot?.mapping || nodeData?.mapping) as any;
+    const schema = Array.isArray(defOrSnapshot?.schema) ? defOrSnapshot.schema : (Array.isArray(nodeData?.schema) ? nodeData.schema : []);
+    const allArgs = (nodeData?.args && typeof nodeData.args === 'object') ? nodeData.args : {};
+    const { description, ...rest } = allArgs as any;
+
+    // Default behavior: identity mapping of schema fields (excluding description)
+    if (!mapping || typeof mapping !== 'object') {
+      return { intent, description: String(description || ''), payload: rest };
+    }
+
+    const payload: any = {};
+    for (const [payloadKey, mapValue] of Object.entries(mapping)) {
+      if (typeof mapValue === 'string' && Object.prototype.hasOwnProperty.call(rest, mapValue)) {
+        setDeepValue(payload, payloadKey, (rest as any)[mapValue]);
+      } else {
+        setDeepValue(payload, payloadKey, mapValue);
+      }
+    }
+
+    // If mapping is provided but empty, fall back to schema-driven identity.
+    if (Object.keys(payload).length === 0 && Array.isArray(schema) && schema.length > 0) {
+      for (const f of schema) {
+        const name = String((f as any)?.name || '').trim();
+        if (!name) continue;
+        if (Object.prototype.hasOwnProperty.call(rest, name)) {
+          payload[name] = (rest as any)[name];
+        }
+      }
+    }
+
+    return { intent, description: String(description || ''), payload };
+  };
 
   const buildPipeline = useCallback(
     (opts?: { allowedNodeIds?: Set<string> }) => {
@@ -665,6 +997,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
       // 5. Map Sorted Nodes to Steps
       const steps: any[] = [];
+      let stepBuildError: string | null = null;
       sortedIds.forEach(id => {
         const node = nodeMap.get(id);
         if (!node) return;
@@ -680,6 +1013,79 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
         if (node.type === 'promptNode') {
           intent = 'system.setVar';
           payload = { name: data.name, value: data.value };
+        } else if (node.type === 'formNode') {
+          intent = 'system.form';
+          payload = { fields: Array.isArray(data.fields) ? data.fields : [] };
+        } else if (node.type === 'switchNode') {
+          intent = 'system.switch';
+          description = String(data.label || '');
+
+          const outgoing = effectiveEdges.filter((e: any) => e.source === node.id);
+          const routes = Array.isArray(data.routes) ? data.routes : [];
+          const routePayload = routes.map((r: any, i: number) => {
+            const handleId = `route_${i}`;
+            const edge = outgoing.find((e: any) => String(e.sourceHandle || '') === handleId);
+            const condition = String(r?.condition || 'equals').trim().toLowerCase();
+            const value = String(r?.value ?? r?.equalsValue ?? '');
+            return {
+              label: String(r?.label || handleId),
+              condition,
+              value,
+              equalsValue: condition === 'equals' ? value : '',
+              targetStepId: edge?.target
+            };
+          });
+
+          const invalidRoute = routePayload.find((route: any) => {
+            const condition = String(route?.condition || 'equals').toLowerCase();
+            if (condition === 'exists') {
+              return false;
+            }
+            return String(route?.value || '').trim().length === 0;
+          });
+          if (invalidRoute) {
+            stepBuildError = `Switch node "${String(data.label || node.id)}" has a route without required value (${String(invalidRoute.condition || 'equals')}).`;
+            return;
+          }
+
+          const defaultEdge = outgoing.find((e: any) => String(e.sourceHandle || '') === 'default');
+          const defaultStepId = defaultEdge?.target;
+          if (!defaultStepId) {
+            stepBuildError = 'Switch node must have a connected "default" output.';
+            return;
+          }
+
+          payload = {
+            variableKey: String(data.variableKey || '').trim(),
+            routes: routePayload,
+            defaultStepId
+          };
+        } else if (node.type === 'scriptNode') {
+          intent = 'terminal.run';
+          const scriptPath = String(data.scriptPath || '').trim();
+          if (!scriptPath) {
+            stepBuildError = 'Script node must define "scriptPath".';
+            return;
+          }
+          const args = String(data.args || '');
+          const interpreter = String(data.interpreter || '').trim();
+          const inferred = inferScriptInterpreter(scriptPath);
+          const effectiveInterpreter = interpreter || inferred;
+          if (!effectiveInterpreter) {
+            stepBuildError = `Script node "${node.id}" has unsupported extension. Set interpreter override.`;
+            return;
+          }
+          const command = buildScriptCommand(scriptPath, args, effectiveInterpreter);
+          const cwd = String(data.cwd || '').trim();
+          payload = {
+            command,
+            ...(cwd ? { cwd } : {}),
+            scriptPath,
+            args,
+            interpreter: interpreter || undefined,
+            __kind: 'script'
+          };
+          description = String(data.description || '');
         } else if (node.type === 'repoNode') {
           intent = 'system.setCwd';
           payload = { path: data.path };
@@ -688,10 +1094,33 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
           payload = { commandId: data.commandId, argsJson: data.argsJson };
         } else if (node.type === 'actionNode') {
           const normalized = canonicalizeIntent(String(data.provider || ''), String(data.capability || ''));
+          const providerGroup = (commandGroups || []).find((group: any) => String(group?.provider || '') === normalized.provider);
+          const capabilityConfig = (providerGroup?.commands || []).find((command: any) => {
+            const cap = String(command?.capability || '').trim();
+            return cap === normalized.intent || cap.endsWith(`.${String(data.capability || '').trim()}`);
+          });
+          const missingRequiredArg = firstMissingRequiredField(Array.isArray(capabilityConfig?.args) ? capabilityConfig.args : [], (data.args || {}) as any);
+          if (missingRequiredArg) {
+            stepBuildError = `Node "${String(data.label || node.id)}" is missing required field "${missingRequiredArg}".`;
+            return;
+          }
           intent = normalized.intent;
           const { description: desc, ...rest } = data.args || {};
           description = desc;
           payload = rest;
+        } else if (node.type === 'customNode') {
+          const cnid = String(data.customNodeId || '').trim();
+          const def = cnid ? customNodesById.get(cnid) : undefined;
+          const schemaFields = Array.isArray(def?.schema) ? def?.schema : (Array.isArray(data?.schema) ? data.schema : []);
+          const missingRequiredArg = firstMissingRequiredField(schemaFields, (data.args || {}) as any);
+          if (missingRequiredArg) {
+            stepBuildError = `Node "${String(data.label || data.title || node.id)}" is missing required field "${missingRequiredArg}".`;
+            return;
+          }
+          const built = buildCustomPayload(def || data, data);
+          intent = built.intent;
+          description = built.description;
+          payload = built.payload;
         }
 
         if (intent) {
@@ -709,6 +1138,12 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
           steps.push(stepObj);
         }
       });
+
+      if (stepBuildError) {
+        if (vscode) vscode.postMessage({ type: 'error', message: stepBuildError });
+        else alert(stepBuildError);
+        return null;
+      }
 
       const start = nodes.find((n: any) => n.id === 'start');
       const pipelineName = (start?.data?.label as string) || 'My Pipeline';
@@ -744,7 +1179,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
       return pipeline;
     },
-    [edges, nodes]
+    [edges, nodes, commandGroups, customNodesById]
   );
 
   // Helper to load pipeline data into graph
@@ -818,6 +1253,30 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
                   data.name = step.payload?.name;
                   data.value = step.payload?.value;
                   data.kind = 'prompt';
+              } else if (intent === 'system.switch') {
+                  type = 'switchNode';
+                  data.label = String(step.description || 'Switch');
+                  data.variableKey = step.payload?.variableKey || '';
+                  data.routes = Array.isArray(step.payload?.routes) ? step.payload.routes.map((r: any) => ({
+                      label: String(r?.label || ''),
+                      condition: String(r?.condition || 'equals'),
+                      value: String(r?.value ?? r?.equalsValue ?? '')
+                  })) : [];
+                  data.kind = 'switch';
+              } else if (intent === 'system.form') {
+                  type = 'formNode';
+                  data.fields = Array.isArray(step.payload?.fields) ? step.payload.fields : [];
+                  data.kind = 'form';
+              } else if (intent === 'terminal.run' && String(step.payload?.__kind || '') === 'script') {
+                  type = 'scriptNode';
+                  data.scriptPath = String(step.payload?.scriptPath || '');
+                  data.args = Array.isArray(step.payload?.args)
+                    ? (step.payload.args as any[]).map((arg: any) => String(arg)).join(' ')
+                    : String(step.payload?.args || '');
+                  data.cwd = String(step.payload?.cwd || '');
+                  data.interpreter = String(step.payload?.interpreter || '');
+                  data.description = String(step.description || '');
+                  data.kind = 'script';
               } else if (intent === 'system.setCwd') {
                   type = 'repoNode';
                   data.path = step.payload?.path;
@@ -853,6 +1312,8 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
                   id: `e-start-${firstStepNodeId}`,
                   source: 'start',
                   target: firstStepNodeId,
+                  sourceHandle: 'success',
+                  targetHandle: 'in',
                   markerEnd: { type: MarkerType.ArrowClosed }
               });
           }
@@ -864,12 +1325,44 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
              // Success Edge (to next step)
              // We assume linear succession unless specified otherwise?
              // "Si Success: next step séquentiel". So we MUST connect to next step in array.
-             if (index < pipeline.steps.length - 1) {
+             if (step.intent === 'system.switch') {
+                 const routes = Array.isArray(step.payload?.routes) ? step.payload.routes : [];
+                 routes.forEach((r: any, i: number) => {
+                     const target = String(r?.targetStepId || '').trim();
+                     if (!target) return;
+                     const targetNodeId = stepIdToNodeId.get(target) || target;
+                     newEdges.push({
+                         id: `e-${currentNodeId}-route_${i}-${targetNodeId}`,
+                         source: currentNodeId,
+                         target: targetNodeId,
+                         sourceHandle: `route_${i}`,
+                         targetHandle: 'in',
+                         markerEnd: { type: MarkerType.ArrowClosed },
+                         data: { label: String(r?.label || `route_${i}`) }
+                     } as any);
+                 });
+
+                 const defTarget = String(step.payload?.defaultStepId || '').trim();
+                 if (defTarget) {
+                     const targetNodeId = stepIdToNodeId.get(defTarget) || defTarget;
+                     newEdges.push({
+                         id: `e-${currentNodeId}-default-${targetNodeId}`,
+                         source: currentNodeId,
+                         target: targetNodeId,
+                         sourceHandle: 'default',
+                         targetHandle: 'in',
+                         markerEnd: { type: MarkerType.ArrowClosed },
+                         data: { label: 'default' }
+                     } as any);
+                 }
+             } else if (index < pipeline.steps.length - 1) {
                  const nextNodeId = nodeIds[index + 2];
                  newEdges.push({
                      id: `e-${currentNodeId}-${nextNodeId}`,
                      source: currentNodeId,
                      target: nextNodeId,
+                     sourceHandle: 'success',
+                     targetHandle: 'in',
                      markerEnd: { type: MarkerType.ArrowClosed }
                  });
              }
@@ -878,13 +1371,15 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
              if (step.onFailure) {
                  const targetNodeId = stepIdToNodeId.get(step.onFailure);
                  if (targetNodeId) {
+                    const failureColor = getComputedStyle(document.documentElement).getPropertyValue('--ir-edge-error').trim() || '#f44336';
                      newEdges.push({
                          id: `e-${currentNodeId}-${targetNodeId}-fail`,
                          source: currentNodeId,
                          target: targetNodeId,
                          sourceHandle: 'failure',
+                         targetHandle: 'in',
                          markerEnd: { type: MarkerType.ArrowClosed },
-                         style: { stroke: '#f44336' }, // Optional: visual cue
+                         style: { stroke: failureColor },
                          animated: true
                      });
                  }
@@ -925,12 +1420,32 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 	       }
 	       const typed = message as WebviewInboundMessage;
 	       switch (typed.type) {
-	         case 'environmentUpdate':
-	           setEnvironment((typed.environment as Record<string, string>) || {});
-	           break;
+         case 'environmentUpdate':
+           setEnvironment((typed.environment as Record<string, string>) || {});
+           break;
 
-	         case 'executionStatus':
-	           setNodes((nds) => {
+           case 'customNodesUpdate':
+             setCustomNodes((typed as any).nodes || []);
+             break;
+
+           case 'loadPipeline':
+             try {
+               loadPipeline((typed as any).pipeline);
+             } catch (e) {
+               console.warn('[IntentRouter] loadPipeline failed', e);
+             }
+             break;
+
+         case 'executionStatus':
+          const normalizedStatus = typed.status === 'failure' ? 'error' : typed.status;
+          if (normalizedStatus === 'running') {
+            setRunPillStatus('running');
+          } else if (normalizedStatus === 'failure' || normalizedStatus === 'error') {
+            setRunPillStatus('error');
+          } else if (normalizedStatus === 'success' && runPillStatus !== 'error') {
+            setRunPillStatus('success');
+          }
+          setNodes((nds) => {
 		             if (typed.stepId) {
 		               return nds.map((node) => (
 		                 node.id === typed.stepId
@@ -938,9 +1453,9 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 		                       ...node,
 		                       data: {
 		                         ...node.data,
-		                         status: typed.status,
+		                         status: normalizedStatus,
 		                         intentId: typed.intentId,
-		                         logs: typed.status === 'running' ? [] : (node.data as any).logs
+		                         logs: normalizedStatus === 'running' ? [] : (node.data as any).logs
 		                       }
 		                     }
 		                   : node
@@ -958,9 +1473,9 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 		                       ...node,
 		                       data: {
 		                         ...node.data,
-		                         status: typed.status,
+		                         status: normalizedStatus,
 		                         intentId: typed.intentId,
-		                         logs: typed.status === 'running' ? [] : (node.data as any).logs
+		                         logs: normalizedStatus === 'running' ? [] : (node.data as any).logs
 		                       }
 		                     }
 		                   : node
@@ -1001,7 +1516,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [reactFlowInstance, drawerNodeId]); // Dependency on reactFlowInstance for fitView
+  }, [reactFlowInstance, drawerNodeId, runPillStatus]); // Dependency on reactFlowInstance for fitView
 
   // Persist current graph in webview state to survive reloads.
   useEffect(() => {
@@ -1015,11 +1530,62 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
         const { style, animated, ...rest } = e as any;
         return rest;
       });
-      vscode?.setState?.({ ...prev, graph: { nodes: safeNodes, edges: safeEdges } });
+      vscode?.setState?.({
+        ...prev,
+        graph: { nodes: safeNodes, edges: safeEdges },
+        chrome: {
+          opacity: chromeOpacity,
+          showMiniMap,
+          showControls,
+          focusGraph,
+          collapsed: chromeCollapsed,
+          position: chromePanelPos
+        }
+      });
     } catch {
       // ignore
     }
-  }, [nodes, edges]);
+  }, [nodes, edges, chromeOpacity, showMiniMap, showControls, focusGraph, chromeCollapsed, chromePanelPos]);
+
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      const drag = chromePanelDragRef.current;
+      if (!drag) return;
+      const panelWidth = chromeCollapsed ? 230 : 760;
+      const panelHeight = chromeCollapsed ? 38 : 84;
+      const maxX = Math.max(8, window.innerWidth - panelWidth - 8);
+      const maxY = Math.max(8, window.innerHeight - panelHeight - 8);
+      const nextX = Math.max(8, Math.min(maxX, event.clientX - drag.dx));
+      const nextY = Math.max(8, Math.min(maxY, event.clientY - drag.dy));
+      setChromePanelPos({ x: nextX, y: nextY });
+    };
+    const onMouseUp = () => {
+      chromePanelDragRef.current = null;
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [chromeCollapsed]);
+
+  useEffect(() => {
+    const onResize = () => {
+      const panelWidth = chromeCollapsed ? 230 : 760;
+      const panelHeight = chromeCollapsed ? 38 : 84;
+      const maxX = Math.max(8, window.innerWidth - panelWidth - 8);
+      const maxY = Math.max(8, window.innerHeight - panelHeight - 8);
+      setChromePanelPos((prev) => ({
+        x: Math.max(8, Math.min(maxX, prev.x)),
+        y: Math.max(8, Math.min(maxY, prev.y))
+      }));
+    };
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [chromeCollapsed]);
 
 	  // Handle Explicit Restore (Rollback)
 	  useEffect(() => {
@@ -1059,23 +1625,36 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
   // Reactive Connectors (Update Edge Colors based on Source Status)
   useEffect(() => {
+    const readColor = (name: string, fallback: string) => {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    };
+    const edgeIdle = readColor('--ir-edge-idle', 'var(--vscode-editor-foreground)');
+    const edgeRunning = readColor('--ir-edge-running', '#007acc');
+    const edgeSuccess = readColor('--ir-edge-success', '#4caf50');
+    const edgeFailure = readColor('--ir-edge-error', '#f44336');
+
     setEdges((eds) =>
       eds.map((edge) => {
         const sourceNode = nodes.find((n) => n.id === edge.source);
         if (!sourceNode) return edge;
 
         const status = (sourceNode.data?.status as string) || 'idle';
-        let stroke = 'var(--vscode-editor-foreground)'; // Idle
-        if (status === 'running') stroke = '#007acc';
-        else if (status === 'success') stroke = '#4caf50';
-        else if (status === 'failure') stroke = '#f44336';
+        let stroke = edgeIdle;
+        if (status === 'running') stroke = edgeRunning;
+        else if (status === 'success') stroke = edgeSuccess;
+        else if (status === 'failure' || status === 'error') stroke = edgeFailure;
+
+        const nextAnimated = status === 'running';
+        const nextDash = status === 'running' ? '7 5' : undefined;
+        const currentDash = (edge.style as any)?.strokeDasharray;
 
         // Update if changed
-        if (edge.style?.stroke !== stroke) {
+        if (edge.style?.stroke !== stroke || edge.animated !== nextAnimated || currentDash !== nextDash) {
           return {
             ...edge,
-            style: { ...edge.style, stroke, strokeWidth: 2 },
-            animated: status === 'running',
+            style: { ...edge.style, stroke, strokeWidth: 2, strokeDasharray: nextDash },
+            animated: nextAnimated,
             markerEnd: { type: MarkerType.ArrowClosed, color: stroke }
           };
         }
@@ -1084,13 +1663,135 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     );
   }, [nodes, setEdges]);
 
+  const mapSchemaToSocketType = (schemaType: string): string => {
+    const normalized = String(schemaType || 'string').toLowerCase();
+    if (normalized === 'boolean' || normalized === 'checkbox') return 'bool';
+    if (normalized === 'path') return 'path';
+    if (normalized === 'json' || normalized === 'object') return 'json';
+    return 'text';
+  };
+
+  const getActionArgType = (node: any, argName: string): string => {
+    const provider = String(node?.data?.provider || '').trim();
+    const capability = String(node?.data?.capability || '').trim();
+    const group = (commandGroups || []).find((entry: any) => String(entry?.provider || '').trim() === provider);
+    const commands = Array.isArray(group?.commands) ? group.commands : [];
+    const cap = commands.find((entry: any) => {
+      const id = String(entry?.capability || '').trim();
+      return id === capability || id.endsWith(`.${capability}`);
+    });
+    const args = Array.isArray(cap?.args) ? cap.args : [];
+    const arg = args.find((entry: any) => String(entry?.name || '').trim() === argName);
+    return mapSchemaToSocketType(String(arg?.type || 'string'));
+  };
+
+  const getCustomArgType = (node: any, argName: string): string => {
+    const customNodeId = String(node?.data?.customNodeId || '').trim();
+    const customDef = customNodeId ? customNodesById.get(customNodeId) : undefined;
+    const schema = Array.isArray(customDef?.schema) ? customDef.schema : (Array.isArray(node?.data?.schema) ? node.data.schema : []);
+    const arg = schema.find((entry: any) => String(entry?.name || '').trim() === argName);
+    return mapSchemaToSocketType(String(arg?.type || 'string'));
+  };
+
+  const getFormArgType = (node: any, argName: string): string => {
+    const fields = Array.isArray(node?.data?.fields) ? node.data.fields : [];
+    const field = fields.find((entry: any) => String(entry?.key || entry?.label || '').trim() === argName);
+    const fieldType = String(field?.type || 'text').toLowerCase();
+    if (fieldType === 'checkbox') return 'bool';
+    return 'text';
+  };
+
+  const getSourceSocketType = (node: any, handleId: string): string => {
+    if (!node) return 'flow';
+    const hid = String(handleId || 'success');
+    if (hid === 'success' || hid === 'failure' || hid === 'default' || hid.startsWith('route_')) return 'flow';
+    if (hid === 'out_value') return 'text';
+    if (hid === 'out_path') return 'path';
+    if (hid === 'out_values') return 'json';
+    return 'flow';
+  };
+
+  const getTargetSocketType = (node: any, handleId: string): string => {
+    if (!node) return 'flow';
+    const hid = String(handleId || 'in');
+    if (hid === 'in') return 'flow';
+    if (!hid.startsWith('in_')) return 'flow';
+    const field = hid.slice(3);
+
+    if (node.type === 'actionNode') return getActionArgType(node, field);
+    if (node.type === 'customNode') return getCustomArgType(node, field);
+    if (node.type === 'formNode') return getFormArgType(node, field);
+    if (node.type === 'promptNode') return 'text';
+    if (node.type === 'repoNode') return 'path';
+    if (node.type === 'scriptNode') {
+      if (field === 'scriptPath' || field === 'cwd') return 'path';
+      return 'text';
+    }
+    if (node.type === 'vscodeCommandNode') {
+      if (field === 'argsJson') return 'json';
+      return 'text';
+    }
+    return 'text';
+  };
+
+  const areSocketTypesCompatible = (sourceType: string, targetType: string): boolean => {
+    if (sourceType === targetType) return true;
+    if (targetType === 'text' && (sourceType === 'path' || sourceType === 'json' || sourceType === 'bool')) return true;
+    return false;
+  };
+
   const onConnect = useCallback(
     (params: Connection) => {
       // Prevent self-loops
       if (params.source === params.target) return;
-      setEdges((eds) => addEdge({ ...params, markerEnd: { type: MarkerType.ArrowClosed } }, eds));
+      setEdges((eds) => {
+        const normalizedSourceHandle = String(params.sourceHandle || 'success');
+        const normalizedTargetHandle = String(params.targetHandle || 'in');
+        const sourceNode = nodes.find((n: any) => n.id === params.source);
+        const targetNode = nodes.find((n: any) => n.id === params.target);
+        const sourceType = getSourceSocketType(sourceNode, normalizedSourceHandle);
+        const targetType = getTargetSocketType(targetNode, normalizedTargetHandle);
+
+        if (!areSocketTypesCompatible(sourceType, targetType)) {
+          setConnectionError(`Incompatible sockets: ${sourceType} -> ${targetType}`);
+          return eds;
+        }
+
+        let label: string | undefined = undefined;
+        try {
+          if (sourceNode?.type === 'switchNode' && normalizedSourceHandle) {
+            const handle = String(normalizedSourceHandle);
+            if (handle === 'default') {
+              label = 'default';
+            } else if (handle.startsWith('route_')) {
+              const idx = Number(handle.slice('route_'.length));
+              const routes = Array.isArray((sourceNode.data as any)?.routes) ? (sourceNode.data as any).routes : [];
+              const routeLabel = routes?.[idx]?.label;
+              label = String(routeLabel || handle);
+            }
+          } else if (normalizedSourceHandle !== 'success') {
+            label = normalizedSourceHandle;
+          }
+        } catch {
+          // best-effort
+        }
+
+        const withoutPreviousOnTargetHandle = eds.filter((edge: any) => !(
+          edge?.target === params.target &&
+          String(edge?.targetHandle || 'in') === normalizedTargetHandle
+        ));
+
+        const edge: any = {
+          ...params,
+          sourceHandle: normalizedSourceHandle,
+          targetHandle: normalizedTargetHandle,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          data: label ? { label } : undefined
+        };
+        return addEdge(edge, withoutPreviousOnTargetHandle);
+      });
     },
-    [setEdges],
+    [setEdges, nodes, commandGroups, customNodesById],
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -1104,6 +1805,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
       const type = event.dataTransfer.getData('application/reactflow/type');
       const provider = event.dataTransfer.getData('application/reactflow/provider');
+      const customNodeId = event.dataTransfer.getData('application/reactflow/customNodeId');
 
       if (typeof type === 'undefined' || !type) {
         return;
@@ -1121,9 +1823,30 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
         data:
           type === 'actionNode'
             ? { provider: provider, capability: '', args: {}, status: 'idle', kind: 'action' }
+            : type === 'customNode'
+              ? (() => {
+                  const cnid = String(customNodeId || '').trim();
+                  const def = cnid ? customNodesById.get(cnid) : undefined;
+                  return {
+                    customNodeId: cnid,
+                    title: def?.title || '',
+                    intent: def?.intent || '',
+                    schema: def?.schema || [],
+                    mapping: def?.mapping,
+                    args: {},
+                    status: 'idle',
+                    kind: 'custom'
+                  };
+                })()
+            : type === 'formNode'
+              ? { fields: [], status: 'idle', kind: 'form' }
+            : type === 'switchNode'
+              ? { label: 'Switch', variableKey: '', routes: [], status: 'idle', kind: 'switch' }
+            : type === 'scriptNode'
+              ? { scriptPath: '', args: '', cwd: '', interpreter: '', status: 'idle', kind: 'script' }
             : type === 'promptNode'
               ? { name: '', value: '', kind: 'prompt' }
-              : type === 'repoNode'
+            : type === 'repoNode'
                 ? { path: '${workspaceRoot}', kind: 'repo' }
                 : type === 'vscodeCommandNode'
                   ? { commandId: '', argsJson: '', kind: 'vscodeCommand' }
@@ -1132,7 +1855,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
       setNodes((nds) => nds.concat(newNode));
     },
-    [reactFlowInstance],
+    [reactFlowInstance, customNodesById],
   );
 
   const savePipeline = () => {
@@ -1184,35 +1907,86 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     return () => clearTimeout(t);
   }, [nodes, edges, pipelineUri]);
 
-  const runPipeline = () => {
+  const runPipeline = (dryRun = false) => {
     const pipeline = buildPipeline();
     if (!pipeline) return;
+    setRunPillStatus('running');
+    setRunMenuOpen(false);
 
     if (vscode) {
       vscode.postMessage({
         type: 'runPipeline',
-        pipeline
+        pipeline,
+        dryRun
       });
     } else {
       console.log('Run Pipeline (Mock):', pipeline);
     }
   };
 
-  const runPipelineFromHere = (nodeId: string) => {
+  const runPipelineFromHere = (nodeId: string, dryRun = false) => {
     const { allowed, preview } = computeRunSubset(nodeId);
     setRunPreviewIds(preview);
     const pipeline = buildPipeline({ allowedNodeIds: allowed });
     if (!pipeline) return;
+    setRunPillStatus('running');
+    setRunMenuOpen(false);
 
     if (vscode) {
       vscode.postMessage({
         type: 'runPipeline',
-        pipeline
+        pipeline,
+        dryRun
       });
     } else {
       console.log('Run Pipeline From Here (Mock):', pipeline);
     }
   };
+
+  const toggleFocusGraph = () => {
+    const next = !focusGraph;
+    setFocusGraph(next);
+    if (next) {
+      previousSidebarCollapsedRef.current = sidebarCollapsed;
+      onSetSidebarCollapsed(true);
+      setShowMiniMap(false);
+    } else {
+      onSetSidebarCollapsed(previousSidebarCollapsedRef.current);
+      setShowMiniMap(true);
+    }
+  };
+
+  useEffect(() => {
+    const onGlobalClick = () => {
+      if (runMenuOpen) setRunMenuOpen(false);
+    };
+    window.addEventListener('click', onGlobalClick);
+    return () => window.removeEventListener('click', onGlobalClick);
+  }, [runMenuOpen]);
+
+  useEffect(() => {
+    if (!connectionError) return;
+    const t = window.setTimeout(() => setConnectionError(null), 1800);
+    return () => window.clearTimeout(t);
+  }, [connectionError]);
+
+  useEffect(() => {
+    if (runPillResetTimerRef.current) {
+      window.clearTimeout(runPillResetTimerRef.current);
+      runPillResetTimerRef.current = null;
+    }
+    if (runPillStatus === 'success' || runPillStatus === 'error') {
+      runPillResetTimerRef.current = window.setTimeout(() => {
+        setRunPillStatus('idle');
+      }, 1800);
+    }
+    return () => {
+      if (runPillResetTimerRef.current) {
+        window.clearTimeout(runPillResetTimerRef.current);
+        runPillResetTimerRef.current = null;
+      }
+    };
+  }, [runPillStatus]);
 
   const autoLayout = useCallback(() => {
     const ids = nodes.map((n) => n.id);
@@ -1287,9 +2061,10 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
 
  	  return (
  	    <div className="dndflow">
- 	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
+  	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
   	        <FlowRuntimeContext.Provider value={flowRuntime}>
               <FlowEditorContext.Provider value={{ updateNodeData }}>
+              <CustomNodesContext.Provider value={customNodesContextValue}>
               <ReactFlow
                 nodes={nodes}
                 edges={edgesWithHandlers}
@@ -1324,13 +2099,36 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
                 setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id });
               }}
               >
-                <Controls />
+                {showControls && <Controls style={{ opacity: chromeOpacity }} />}
                 <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
-                <MiniMap />
+                {showMiniMap && <MiniMap style={{ opacity: chromeOpacity }} />}
               </ReactFlow>
+              </CustomNodesContext.Provider>
               </FlowEditorContext.Provider>
   	        </FlowRuntimeContext.Provider>
- 	      </div>
+  	      </div>
+
+        {connectionError && (
+          <div
+            className="nodrag"
+            style={{
+              position: 'absolute',
+              top: '12px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 1300,
+              padding: '8px 12px',
+              borderRadius: '6px',
+              border: '1px solid var(--vscode-errorForeground)',
+              background: 'var(--vscode-editorWidget-background)',
+              color: 'var(--vscode-errorForeground)',
+              fontSize: '12px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.35)'
+            }}
+          >
+            {connectionError}
+          </div>
+        )}
 
         {contextMenu && (
           <div
@@ -1373,6 +2171,98 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
             <button
               className="nodrag"
               onClick={() => {
+                copyNodeById(contextMenu.nodeId);
+                setContextMenu(null);
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'transparent',
+                color: 'var(--vscode-foreground)',
+                border: 'none',
+                padding: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              Copy node
+            </button>
+            <button
+              className="nodrag"
+              onClick={() => {
+                if (copiedNodeRef.current) {
+                  const pos = reactFlowInstance?.screenToFlowPosition
+                    ? reactFlowInstance.screenToFlowPosition({ x: contextMenu.x + 18, y: contextMenu.y + 18 })
+                    : undefined;
+                  const cloneId = getId();
+                  const source = copiedNodeRef.current as any;
+                  const nextNode: any = {
+                    ...source,
+                    id: cloneId,
+                    position: pos || { x: (source?.position?.x || 100) + 26, y: (source?.position?.y || 100) + 26 },
+                    selected: false,
+                    dragging: false,
+                    data: JSON.parse(JSON.stringify(source?.data || {}))
+                  };
+                  setNodes((prev) => [...prev, nextNode]);
+                  setSelectedNodeId(cloneId);
+                }
+                setContextMenu(null);
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'transparent',
+                color: copiedNodeRef.current ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
+                border: 'none',
+                padding: '8px',
+                cursor: copiedNodeRef.current ? 'pointer' : 'not-allowed'
+              }}
+              disabled={!copiedNodeRef.current}
+            >
+              Paste node
+            </button>
+            <button
+              className="nodrag"
+              onClick={() => {
+                duplicateNodeById(contextMenu.nodeId);
+                setContextMenu(null);
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'transparent',
+                color: 'var(--vscode-foreground)',
+                border: 'none',
+                padding: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              Duplicate node
+            </button>
+            <button
+              className="nodrag"
+              onClick={() => {
+                const nodeId = contextMenu.nodeId;
+                setNodes((prev) => prev.map((entry: any) => (
+                  entry.id === nodeId ? { ...entry, data: { ...(entry.data || {}), collapsed: !entry?.data?.collapsed } } : entry
+                )));
+                setContextMenu(null);
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'transparent',
+                color: 'var(--vscode-foreground)',
+                border: 'none',
+                padding: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              Toggle collapse
+            </button>
+            <button
+              className="nodrag"
+              onClick={() => {
                 const id = contextMenu.nodeId;
                 if (id === 'start') {
                   setContextMenu(null);
@@ -1398,6 +2288,25 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
             <button
               className="nodrag"
               onClick={() => {
+                const id = contextMenu.nodeId;
+                setEdges((prev) => prev.filter((edge: any) => edge.source !== id && edge.target !== id));
+                setContextMenu(null);
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'transparent',
+                color: 'var(--vscode-foreground)',
+                border: 'none',
+                padding: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              Disconnect links
+            </button>
+            <button
+              className="nodrag"
+              onClick={() => {
                 runPipelineFromHere(contextMenu.nodeId);
                 setContextMenu(null);
               }}
@@ -1412,6 +2321,24 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
               }}
             >
               Run from here
+            </button>
+            <button
+              className="nodrag"
+              onClick={() => {
+                runPipelineFromHere(contextMenu.nodeId, true);
+                setContextMenu(null);
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                background: 'transparent',
+                color: 'var(--vscode-foreground)',
+                border: 'none',
+                padding: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              Dry run from here
             </button>
             <button
               className="nodrag"
@@ -2033,13 +2960,15 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
           className="nodrag"
           style={{
             position: 'absolute',
-            bottom: '18px',
-            right: '18px',
+            top: '50%',
+            right: '14px',
+            transform: 'translateY(-50%)',
             zIndex: 950,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'flex-end',
-            gap: '8px'
+            gap: '8px',
+            opacity: chromeOpacity
           }}
         >
           {dockOpen && (
@@ -2107,9 +3036,9 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
               width: '34px',
               height: '34px',
               borderRadius: '18px',
-              border: '1px solid var(--vscode-editorWidget-border)',
-              background: 'var(--vscode-button-background)',
-              color: 'var(--vscode-button-foreground)',
+              border: '1px solid var(--ir-add-border)',
+              background: 'var(--ir-add-bg)',
+              color: 'var(--ir-add-fg)',
               cursor: 'pointer',
               fontSize: '18px',
               lineHeight: '30px',
@@ -2120,23 +3049,142 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
           </button>
         </div>
 
-       <button
-         onClick={runPipeline}
+       <div
+         className="nodrag"
          style={{
            position: 'absolute',
-           top: '10px',
-           right: '140px',
-           padding: '10px 20px',
-           background: 'var(--vscode-button-background)',
-           color: 'var(--vscode-button-foreground)',
-           border: 'none',
-           borderRadius: '4px',
-           cursor: 'pointer',
-           zIndex: 5
+           bottom: '14px',
+           left: '50%',
+           transform: 'translateX(-50%)',
+           zIndex: 980,
+           display: 'flex',
+           alignItems: 'center',
+           gap: '2px',
+           opacity: chromeOpacity
          }}
        >
-         Run
-       </button>
+         <button
+           className="nodrag"
+           onClick={() => runPipeline(false)}
+           style={{
+             padding: '10px 22px',
+             background: runPillStatus === 'running'
+               ? 'var(--ir-run-running)'
+               : runPillStatus === 'success'
+                 ? 'var(--ir-run-success)'
+                 : runPillStatus === 'error'
+                   ? 'var(--ir-run-error)'
+                   : 'var(--ir-run-idle)',
+             color: 'var(--ir-run-foreground)',
+             border: 'none',
+             borderTopLeftRadius: '999px',
+             borderBottomLeftRadius: '999px',
+             cursor: 'pointer',
+             fontWeight: 700
+           }}
+         >
+           Run
+         </button>
+         <button
+           className="nodrag"
+           onClick={(e) => {
+             e.stopPropagation();
+             setRunMenuOpen(v => !v);
+           }}
+           style={{
+             width: '34px',
+             height: '38px',
+             background: runPillStatus === 'running'
+               ? 'var(--ir-run-running)'
+               : runPillStatus === 'success'
+                 ? 'var(--ir-run-success)'
+                 : runPillStatus === 'error'
+                   ? 'var(--ir-run-error)'
+                   : 'var(--ir-run-idle)',
+             color: 'var(--ir-run-foreground)',
+             border: 'none',
+             borderTopRightRadius: '999px',
+             borderBottomRightRadius: '999px',
+             cursor: 'pointer',
+             fontSize: '11px'
+           }}
+           title="Run options"
+         >
+           ▼
+         </button>
+         {runMenuOpen && (
+           <div
+             className="nodrag"
+             onClick={(e) => e.stopPropagation()}
+             style={{
+               position: 'absolute',
+               bottom: '46px',
+               left: '50%',
+               transform: 'translateX(-50%)',
+               minWidth: '190px',
+               background: 'var(--vscode-editorWidget-background)',
+               border: '1px solid var(--vscode-editorWidget-border)',
+               borderRadius: '8px',
+               boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+               padding: '6px'
+             }}
+           >
+             <button className="nodrag" onClick={() => runPipeline(false)} style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '8px', cursor: 'pointer', color: 'var(--vscode-foreground)' }}>Run</button>
+             <button className="nodrag" onClick={() => runPipeline(true)} style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '8px', cursor: 'pointer', color: 'var(--vscode-foreground)' }}>Dry run</button>
+             <button
+               className="nodrag"
+               disabled={!selectedNodeId}
+               onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, false)}
+               style={{
+                 width: '100%',
+                 textAlign: 'left',
+                 background: 'transparent',
+                 border: 'none',
+                 padding: '8px',
+                 cursor: selectedNodeId ? 'pointer' : 'not-allowed',
+                 color: selectedNodeId ? 'var(--vscode-foreground)' : 'var(--vscode-disabledForeground)'
+               }}
+             >
+               Run from selection
+             </button>
+             <button
+               className="nodrag"
+               disabled={!selectedNodeId}
+               onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, true)}
+               style={{
+                 width: '100%',
+                 textAlign: 'left',
+                 background: 'transparent',
+                 border: 'none',
+                 padding: '8px',
+                 cursor: selectedNodeId ? 'pointer' : 'not-allowed',
+                 color: selectedNodeId ? 'var(--vscode-foreground)' : 'var(--vscode-disabledForeground)'
+               }}
+             >
+               Dry run from selection
+             </button>
+             <button
+               className="nodrag"
+               onClick={() => {
+                 setRunPreviewIds(null);
+                 setRunMenuOpen(false);
+               }}
+               style={{
+                 width: '100%',
+                 textAlign: 'left',
+                 background: 'transparent',
+                 border: 'none',
+                 padding: '8px',
+                 cursor: 'pointer',
+                 color: 'var(--vscode-foreground)',
+                 opacity: 0.8
+               }}
+             >
+               Clear highlight
+             </button>
+           </div>
+         )}
+       </div>
 
        <button
          onClick={autoLayout}
@@ -2150,11 +3198,108 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
            border: 'none',
            borderRadius: '4px',
            cursor: 'pointer',
-           zIndex: 5
+           zIndex: 5,
+           opacity: chromeOpacity
          }}
        >
          Auto layout
        </button>
+
+       <div
+         className="nodrag"
+         style={{
+           position: 'absolute',
+           top: `${chromePanelPos.y}px`,
+           left: `${chromePanelPos.x}px`,
+           zIndex: 940,
+           display: 'flex',
+           flexDirection: 'column',
+           gap: '6px',
+           padding: '6px 8px',
+           borderRadius: '8px',
+           background: 'var(--vscode-editorWidget-background)',
+           border: '1px solid var(--vscode-editorWidget-border)',
+           opacity: chromeOpacity,
+           width: chromeCollapsed ? '230px' : '760px',
+           maxWidth: 'calc(100vw - 16px)',
+           boxSizing: 'border-box'
+         }}
+       >
+         <div
+           className="nodrag"
+           onMouseDown={(event) => {
+             if ((event.target as HTMLElement)?.closest('button,input,select,textarea')) {
+               return;
+             }
+             const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
+             chromePanelDragRef.current = { dx: event.clientX - rect.left, dy: event.clientY - rect.top };
+           }}
+           onDoubleClick={() => setChromePanelPos({ x: 430, y: 56 })}
+           style={{
+             display: 'flex',
+             alignItems: 'center',
+             justifyContent: 'space-between',
+             gap: '8px',
+             cursor: 'grab',
+             userSelect: 'none'
+           }}
+         >
+           <span style={{ fontSize: '11px', opacity: 0.85 }}>Chrome controls</span>
+           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+             <button
+               className="nodrag"
+               onClick={() => setChromePanelPos({ x: 430, y: 56 })}
+               style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px' }}
+               title="Reset position"
+             >
+               Reset
+             </button>
+             <button
+               className="nodrag"
+               onClick={() => setChromeCollapsed((v) => !v)}
+               style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px' }}
+               title={chromeCollapsed ? 'Expand controls' : 'Collapse controls'}
+             >
+               {chromeCollapsed ? 'Expand' : 'Collapse'}
+             </button>
+           </div>
+         </div>
+
+         {!chromeCollapsed && (
+           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+             <label style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+               Opacity
+               <input className="nodrag" type="range" min={30} max={100} value={Math.round(chromeOpacity * 100)} onChange={(e) => setChromeOpacity(Number(e.target.value) / 100)} />
+             </label>
+             <button className="nodrag" onClick={toggleFocusGraph} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
+               {focusGraph ? 'Unfocus' : 'Focus graph'}
+             </button>
+             <button className="nodrag" onClick={() => setShowMiniMap(v => !v)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
+               {showMiniMap ? 'MiniMap on' : 'MiniMap off'}
+             </button>
+             <button className="nodrag" onClick={() => setShowControls(v => !v)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
+               {showControls ? 'Controls on' : 'Controls off'}
+             </button>
+             <button
+               className="nodrag"
+               onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, false)}
+               disabled={!selectedNodeId}
+               style={{
+                 background: selectedNodeId ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
+                 color: selectedNodeId ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
+                 border: 'none',
+                 borderRadius: '4px',
+                 padding: '6px 8px',
+                 cursor: selectedNodeId ? 'pointer' : 'not-allowed',
+                 fontSize: '11px'
+               }}
+               title={selectedNodeId ? 'Run from selected node' : 'Select a node first'}
+             >
+               Run selected
+             </button>
+           </div>
+         )}
+       </div>
 
        <button
          onClick={savePipeline}
@@ -2168,7 +3313,8 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
            border: 'none',
            borderRadius: '4px',
            cursor: 'pointer',
-           zIndex: 5
+           zIndex: 5,
+           opacity: chromeOpacity
          }}
        >
          Save Pipeline
@@ -2182,15 +3328,17 @@ export default function App() {
   const [history, setHistory] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<any>(null);
   const [restoreRun, setRestoreRun] = useState<any>(null);
+  const [themeTokens, setThemeTokens] = useState(() => tokensFromPreset(window.initialData?.uiPreset || { theme: { tokens: defaultThemeTokens } }));
+  const [adminMode, setAdminMode] = useState<boolean>(!!window.initialData?.adminMode);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [sidebarTab, setSidebarTab] = useState<'providers' | 'history' | 'environment'>('providers');
+  const [sidebarTab, setSidebarTab] = useState<'providers' | 'history' | 'environment' | 'studio'>('providers');
 
   useEffect(() => {
     // Restore ephemeral UI state from VS Code webview state
     try {
       const st = vscode?.getState?.() || {};
       if (typeof st.sidebarCollapsed === 'boolean') setSidebarCollapsed(st.sidebarCollapsed);
-      if (st.sidebarTab === 'providers' || st.sidebarTab === 'history' || st.sidebarTab === 'environment') {
+      if (st.sidebarTab === 'providers' || st.sidebarTab === 'history' || st.sidebarTab === 'environment' || st.sidebarTab === 'studio') {
         setSidebarTab(st.sidebarTab);
       }
     } catch {
@@ -2204,6 +3352,12 @@ export default function App() {
       if (window.initialData.history) {
         setHistory(window.initialData.history);
       }
+      if (window.initialData.uiPreset) {
+        setThemeTokens(tokensFromPreset(window.initialData.uiPreset));
+      }
+      if (typeof window.initialData.adminMode === 'boolean') {
+        setAdminMode(!!window.initialData.adminMode);
+      }
     }
 
     const handleMessage = (event: MessageEvent) => {
@@ -2214,6 +3368,10 @@ export default function App() {
            if (event.data.history.length === 0) {
                setSelectedRun(null);
            }
+       } else if (event.data?.type === 'uiPresetUpdate') {
+           setThemeTokens(tokensFromPreset(event.data.uiPreset));
+       } else if (event.data?.type === 'adminModeUpdate') {
+           setAdminMode(!!event.data.adminMode);
        }
     };
     window.addEventListener('message', handleMessage);
@@ -2240,6 +3398,10 @@ export default function App() {
     }
   }, [sidebarCollapsed, sidebarTab]);
 
+  useEffect(() => {
+    applyThemeTokensToRoot(themeTokens);
+  }, [themeTokens]);
+
   // When clicking an active run again or clicking clear, we might want to toggle?
   // For now, let's allow re-selection to replay.
   // Sidebar handles the click.
@@ -2252,6 +3414,7 @@ export default function App() {
               tab={sidebarTab}
               onTabChange={setSidebarTab}
               history={history}
+              adminMode={adminMode}
               onSelectHistory={setSelectedRun}
               onRestoreHistory={(run) => {
                   setRestoreRun(run);
@@ -2279,10 +3442,12 @@ export default function App() {
             >
               {sidebarCollapsed ? '≡' : '⟨'}
             </button>
- 	           <ReactFlowProvider>
+	           <ReactFlowProvider>
 	             <Flow
 	                selectedRun={selectedRun}
 	                restoreRun={restoreRun}
+                  sidebarCollapsed={sidebarCollapsed}
+                  onSetSidebarCollapsed={setSidebarCollapsed}
 	                onRestoreHandled={() => {
 	                    setRestoreRun(null);
 	                }}
