@@ -1,6 +1,7 @@
 import { memo, useContext, useEffect, useRef, useState } from 'react';
 import { Handle, NodeProps, Position } from '@xyflow/react';
 import { FlowEditorContext } from '../App';
+import IoSpec from '../components/IoSpec';
 
 type FieldType = 'text' | 'textarea' | 'select' | 'checkbox';
 
@@ -47,6 +48,14 @@ const FormNode = ({ data, id }: NodeProps) => {
   }, [logs, isConsoleOpen]);
 
   const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
+  const inputHandles = ['in', ...fields.map((field) => String(field.key || field.label || 'field').trim()).filter((name) => name.length > 0)];
+  const handleTop = (index: number, total: number) => {
+    if (total <= 1) return '50%';
+    const min = 22;
+    const max = 84;
+    const value = min + ((max - min) * index) / (total - 1);
+    return `${value}%`;
+  };
 
   const updateField = (index: number, patch: Partial<FormField>) => {
     const next = [...fields];
@@ -70,6 +79,7 @@ const FormNode = ({ data, id }: NodeProps) => {
   return (
     <div
       style={{
+        position: 'relative',
         padding: '10px',
         borderRadius: '5px',
         background: 'var(--vscode-editor-background)',
@@ -79,8 +89,33 @@ const FormNode = ({ data, id }: NodeProps) => {
         fontFamily: 'var(--vscode-font-family)'
       }}
     >
-      <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} />
+      {inputHandles.map((inputName, index) => (
+        <div key={`in-${inputName}-${index}`}>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id={inputName === 'in' ? 'in' : `in_${inputName}`}
+            style={{ top: handleTop(index, inputHandles.length) }}
+          />
+          <span
+            style={{
+              position: 'absolute',
+              left: '-2px',
+              top: handleTop(index, inputHandles.length),
+              transform: 'translate(-100%, -50%)',
+              fontSize: '10px',
+              opacity: inputName === 'in' ? 0.8 : 0.65,
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {inputName}
+          </span>
+        </div>
+      ))}
+      <Handle type="source" position={Position.Right} id="success" />
+      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
+      <Handle type="source" position={Position.Right} id="out_values" style={{ top: '76%', background: '#ff9800' }} />
+      <span style={{ position: 'absolute', right: '-2px', top: '76%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.75, whiteSpace: 'nowrap' }}>values</span>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
@@ -109,6 +144,10 @@ const FormNode = ({ data, id }: NodeProps) => {
 
       {!collapsed && (
         <>
+          <IoSpec
+            inputs={fields.length ? fields.map((field) => `${String(field.key || field.label || 'field')}${field.required ? '*' : ''}`) : ['form values']}
+            outputs={fields.length ? fields.map((field) => String(field.key || field.label || 'field')) : ['vars']}
+          />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {fields.length === 0 && (
               <div style={{ fontSize: '11px', opacity: 0.7 }}>No fields yet. Add one below.</div>

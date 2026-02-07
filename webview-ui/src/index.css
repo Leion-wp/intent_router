@@ -20,7 +20,7 @@ html, body, #root {
   --ir-node-border: var(--vscode-editorWidget-border);
   --ir-node-text: var(--vscode-editor-foreground);
 
-  --ir-status-running: #007acc;
+  --ir-status-running: #f2c94c;
   --ir-status-success: #4caf50;
   --ir-status-error: #f44336;
 

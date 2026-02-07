@@ -2,6 +2,7 @@ import { memo, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeProps, Position } from '@xyflow/react';
 import { CustomNodesContext, FlowEditorContext, FlowRuntimeContext, RegistryContext } from '../App';
 import SchemaArgsForm, { SchemaField } from '../components/SchemaArgsForm';
+import IoSpec from '../components/IoSpec';
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
@@ -84,10 +85,35 @@ const CustomNode = ({ data, id }: NodeProps) => {
     const base = Array.isArray(schema) ? schema : [];
     return [...base, { name: 'description', type: 'string', description: 'Step description for logs' }];
   }, [schema]);
+  const ioInputs = useMemo(() => {
+    const fields = Array.isArray(schema) ? schema : [];
+    const names = fields.map((field: any) => {
+      const name = String(field?.name || '').trim();
+      if (!name) return '';
+      return field?.required ? `${name}*` : name;
+    }).filter(Boolean);
+    return names.length ? names : ['payload'];
+  }, [schema]);
+  const ioOutputs = ['success', 'error'];
+  const inputHandles = useMemo(() => {
+    const names = (Array.isArray(schema) ? schema : [])
+      .map((field: any) => String(field?.name || '').trim())
+      .filter((name: string) => name.length > 0);
+    return ['in', ...names];
+  }, [schema]);
+
+  const handleTop = (index: number, total: number) => {
+    if (total <= 1) return '50%';
+    const min = 24;
+    const max = 82;
+    const value = min + ((max - min) * index) / (total - 1);
+    return `${value}%`;
+  };
 
   return (
     <div
       style={{
+        position: 'relative',
         padding: '10px',
         borderRadius: '5px',
         background: 'var(--vscode-editor-background)',
@@ -98,7 +124,29 @@ const CustomNode = ({ data, id }: NodeProps) => {
         fontFamily: 'var(--vscode-font-family)'
       }}
     >
-      <Handle type="target" position={Position.Left} />
+      {inputHandles.map((inputName, index) => (
+        <div key={`in-${inputName}`}>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id={inputName === 'in' ? 'in' : `in_${inputName}`}
+            style={{ top: handleTop(index, inputHandles.length) }}
+          />
+          <span
+            style={{
+              position: 'absolute',
+              left: '-2px',
+              top: handleTop(index, inputHandles.length),
+              transform: 'translate(-100%, -50%)',
+              fontSize: '10px',
+              opacity: inputName === 'in' ? 0.8 : 0.65,
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {inputName}
+          </span>
+        </div>
+      ))}
       <Handle
         type="source"
         position={Position.Right}
@@ -106,6 +154,7 @@ const CustomNode = ({ data, id }: NodeProps) => {
         title="On Failure"
         style={{ top: '30%', background: 'var(--ir-status-error)' }}
       />
+      <span style={{ position: 'absolute', right: '-2px', top: '30%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>error</span>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', alignItems: 'center', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
@@ -155,15 +204,33 @@ const CustomNode = ({ data, id }: NodeProps) => {
             {intent}
           </div>
         )}
+        <button
+          className="nodrag"
+          onClick={() => updateNodeData(id, { collapsed: !collapsed })}
+          title={collapsed ? 'Expand' : 'Collapse'}
+          style={{
+            background: 'transparent',
+            color: 'var(--vscode-foreground)',
+            border: '1px solid var(--vscode-editorWidget-border)',
+            borderRadius: '4px',
+            width: '20px',
+            height: '20px',
+            cursor: 'pointer'
+          }}
+        >
+          {collapsed ? '▸' : '▾'}
+        </button>
       </div>
 
       {!collapsed && (
         <>
+          <IoSpec inputs={ioInputs} outputs={ioOutputs} />
           <SchemaArgsForm nodeId={id} fields={displayFields} values={args} onChange={handleArgChange} availableVars={availableVars} />
         </>
       )}
 
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={Position.Right} id="success" />
+      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
 
       {!collapsed && logs.length > 0 && (
         <div className="nodrag" style={{ marginTop: '8px', borderTop: '1px solid var(--vscode-widget-border)' }}>

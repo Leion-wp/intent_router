@@ -10,7 +10,7 @@ import { Capability, CompositeCapability } from './types';
 import { historyManager } from './historyManager';
 import * as path from 'path';
 import { deleteCustomNodeInWorkspace, exportCustomNodes, importCustomNodesJson, readCustomNodesFromWorkspace, upsertCustomNodeInWorkspace, writeCustomNodesToWorkspace } from './customNodesStore';
-import { deleteUiDraftFromWorkspace, resolveUiPreset, writeUiDraftToWorkspace } from './uiPresetStore';
+import { deleteUiDraftFromWorkspace, getDefaultUiPreset, resolveUiPreset, writeUiDraftToWorkspace } from './uiPresetStore';
 
 type CommandGroup = {
     provider: string;
@@ -353,7 +353,22 @@ export class PipelineBuilder {
             }
             if (message?.type === 'uiPreset.importDraft') {
                 try {
-                    const text = String(message.jsonText || '').trim();
+                    let text = String(message.jsonText || '').trim();
+                    const source = String(message.source || 'paste');
+                    if (source === 'file') {
+                        const uris = await vscode.window.showOpenDialog({
+                            canSelectFiles: true,
+                            canSelectFolders: false,
+                            canSelectMany: false,
+                            openLabel: 'Import Theme Preset',
+                            filters: { JSON: ['json'] }
+                        });
+                        if (!uris || uris.length === 0) {
+                            return;
+                        }
+                        const bytes = await vscode.workspace.fs.readFile(uris[0]);
+                        text = Buffer.from(bytes).toString('utf8').trim();
+                    }
                     if (!text) throw new Error('Empty JSON');
                     const parsed = JSON.parse(text);
                     await writeUiDraftToWorkspace(parsed);
@@ -361,6 +376,16 @@ export class PipelineBuilder {
                 } catch (e: any) {
                     const err = String(e?.message || e);
                     this.panel?.webview.postMessage({ type: 'error', message: `Failed to import UI preset: ${err}` });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.resetToDefaults') {
+                try {
+                    await writeUiDraftToWorkspace(getDefaultUiPreset());
+                    await pushUiPreset();
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    this.panel?.webview.postMessage({ type: 'error', message: `Failed to reset UI preset to defaults: ${err}` });
                 }
                 return;
             }

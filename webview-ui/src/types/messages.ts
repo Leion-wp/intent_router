@@ -40,7 +40,8 @@ export type WebviewOutboundMessage =
   | { type: 'uiPreset.saveDraft'; uiPreset: any }
   | { type: 'uiPreset.resetDraft' }
   | { type: 'uiPreset.exportCurrent' }
-  | { type: 'uiPreset.importDraft'; jsonText: string }
+  | { type: 'uiPreset.importDraft'; source: 'paste' | 'file'; jsonText?: string }
+  | { type: 'uiPreset.resetToDefaults' }
   | { type: 'devPackager.loadPreset' }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };

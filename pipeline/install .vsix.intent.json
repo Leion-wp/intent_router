@@ -25,16 +25,7 @@
       "payload": {
         "cwd": ".",
         "command": "vsce package"
-      },
-      "onFailure": "node_6"
-    },
-    {
-      "id": "node_6",
-      "intent": "system.pause",
-      "payload": {
-        "message": "check the vsix path and go install"
-      },
-      "onFailure": "node_7"
+      }
     },
     {
       "id": "node_7",
@@ -67,14 +58,14 @@
             "status": "idle"
           },
           "position": {
-            "x": 250,
-            "y": 50
+            "x": 0,
+            "y": -60
           },
           "sourcePosition": "right",
           "deletable": false,
           "measured": {
             "width": 283,
-            "height": 174
+            "height": 238
           },
           "selected": false,
           "dragging": false
@@ -83,8 +74,8 @@
           "id": "node_1",
           "type": "actionNode",
           "position": {
-            "x": 570,
-            "y": 45
+            "x": 375,
+            "y": -60
           },
           "data": {
             "provider": "terminal",
@@ -102,15 +93,15 @@
             "width": 273,
             "height": 51
           },
-          "selected": false,
+          "selected": true,
           "dragging": false
         },
         {
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 570,
-            "y": 120
+            "x": 705,
+            "y": -60
           },
           "data": {
             "provider": "terminal",
@@ -135,8 +126,8 @@
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 570,
-            "y": 210
+            "x": 1050,
+            "y": -45
           },
           "data": {
             "provider": "terminal",
@@ -154,31 +145,6 @@
             "width": 273,
             "height": 51
           },
-          "selected": true,
-          "dragging": false
-        },
-        {
-          "id": "node_6",
-          "type": "actionNode",
-          "position": {
-            "x": 915,
-            "y": 30
-          },
-          "data": {
-            "provider": "system",
-            "capability": "system.pause",
-            "args": {
-              "message": "check the vsix path and go install"
-            },
-            "kind": "action",
-            "label": "vérif humaine",
-            "collapsed": true,
-            "status": "idle"
-          },
-          "measured": {
-            "width": 273,
-            "height": 51
-          },
           "selected": false,
           "dragging": false
         },
@@ -186,8 +152,8 @@
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 915,
-            "y": 120
+            "x": 1365,
+            "y": 0
           },
           "data": {
             "commandId": "workbench.extensions.action.installVSIX",
@@ -208,8 +174,8 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 915,
-            "y": 210
+            "x": 1710,
+            "y": 45
           },
           "data": {
             "commandId": "workbench.action.reloadWindow",
@@ -262,46 +228,20 @@
           }
         },
         {
-          "id": "e-node_5-node_6",
-          "source": "node_5",
-          "target": "node_6",
-          "markerEnd": {
-            "type": "arrowclosed"
-          }
-        },
-        {
-          "id": "e-node_5-node_6-fail",
-          "source": "node_5",
-          "target": "node_6",
-          "sourceHandle": "failure",
-          "markerEnd": {
-            "type": "arrowclosed"
-          }
-        },
-        {
-          "id": "e-node_6-node_7",
-          "source": "node_6",
-          "target": "node_7",
-          "markerEnd": {
-            "type": "arrowclosed"
-          }
-        },
-        {
-          "id": "e-node_6-node_7-fail",
-          "source": "node_6",
-          "target": "node_7",
-          "sourceHandle": "failure",
-          "markerEnd": {
-            "type": "arrowclosed"
-          }
-        },
-        {
           "id": "e-node_7-node_9",
           "source": "node_7",
           "target": "node_9",
           "markerEnd": {
             "type": "arrowclosed"
           }
+        },
+        {
+          "source": "node_5",
+          "target": "node_7",
+          "markerEnd": {
+            "type": "arrowclosed"
+          },
+          "id": "xy-edge__node_5-node_7"
         }
       ]
     }

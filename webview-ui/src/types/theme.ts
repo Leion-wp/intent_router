@@ -17,7 +17,7 @@ export const defaultThemeTokens: ThemeTokens = {
   runButton: { idle: '#0e639c', running: '#007acc', success: '#4caf50', error: '#f44336', foreground: '#ffffff' },
   addButton: { background: '#0e639c', foreground: '#ffffff', border: '#3c3c3c' },
   node: { background: '#1e1e1e', border: '#3c3c3c', text: '#cccccc' },
-  status: { running: '#007acc', success: '#4caf50', error: '#f44336' },
+  status: { running: '#f2c94c', success: '#4caf50', error: '#f44336' },
   edges: { idle: '#8a8a8a', running: '#007acc', success: '#4caf50', error: '#f44336' },
   minimap: { background: '#1e1e1e', node: '#cccccc', mask: 'rgba(0,0,0,0.35)', viewportBorder: '#3c3c3c' },
   controls: {

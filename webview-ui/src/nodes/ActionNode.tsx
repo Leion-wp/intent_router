@@ -3,6 +3,7 @@ import { Handle, Position, NodeProps } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext, RegistryContext } from '../App';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
 import SchemaArgsForm from '../components/SchemaArgsForm';
+import IoSpec from '../components/IoSpec';
 
 const STATUS_COLORS = {
   idle: 'var(--vscode-editor-foreground)',
@@ -150,6 +151,21 @@ const ActionNode = ({ data, id }: NodeProps) => {
      { name: 'description', type: 'string', description: 'Step description for logs' }
   ];
   const useSharedForm = true;
+  const inputHandles = useMemo(() => {
+    const argsList = Array.isArray(schemaArgs) ? schemaArgs : [];
+    const names = argsList
+      .map((arg: any) => String(arg?.name || '').trim())
+      .filter((name: string) => name.length > 0);
+    return ['in', ...names];
+  }, [schemaArgs]);
+
+  const handleTop = (index: number, total: number) => {
+    if (total <= 1) return '50%';
+    const min = 24;
+    const max = 82;
+    const value = min + ((max - min) * index) / (total - 1);
+    return `${value}%`;
+  };
 
   // Initialize Defaults & Validate & Fetch Dynamic Options
   useEffect(() => {
@@ -223,9 +239,20 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const determinismBadge = determinism === 'interactive' ? '👤' : '⚙';
 
   const fallbackTitle = `${provider} · ${selectedCapConfig?.capability || capability}`.trim();
+  const ioInputs = useMemo(() => {
+    const argsList = Array.isArray(schemaArgs) ? schemaArgs : [];
+    const names = argsList.map((arg: any) => {
+      const name = String(arg?.name || '').trim();
+      if (!name) return '';
+      return arg?.required ? `${name}*` : name;
+    }).filter(Boolean);
+    return names.length ? names : ['payload'];
+  }, [schemaArgs]);
+  const ioOutputs = ['success', 'error'];
 
   return (
     <div style={{
+      position: 'relative',
       padding: '10px',
       borderRadius: '5px',
       background: 'var(--vscode-editor-background)',
@@ -235,7 +262,29 @@ const ActionNode = ({ data, id }: NodeProps) => {
       color: 'var(--vscode-editor-foreground)',
       fontFamily: 'var(--vscode-font-family)'
     }}>
-      <Handle type="target" position={Position.Left} />
+      {inputHandles.map((inputName, index) => (
+        <div key={`in-${inputName}`}>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id={inputName === 'in' ? 'in' : `in_${inputName}`}
+            style={{ top: handleTop(index, inputHandles.length) }}
+          />
+          <span
+            style={{
+              position: 'absolute',
+              left: '-2px',
+              top: handleTop(index, inputHandles.length),
+              transform: 'translate(-100%, -50%)',
+              fontSize: '10px',
+              opacity: inputName === 'in' ? 0.8 : 0.65,
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {inputName}
+          </span>
+        </div>
+      ))}
 
       <Handle
         type="source"
@@ -244,6 +293,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
         title="On Failure"
         style={{ top: '30%', background: 'var(--ir-status-error)' }}
       />
+      <span style={{ position: 'absolute', right: '-2px', top: '30%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>error</span>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', alignItems: 'center', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
@@ -308,6 +358,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
       {!collapsed && (
       <>
+      <IoSpec inputs={ioInputs} outputs={ioOutputs} />
       <div style={{ marginBottom: '8px' }}>
         <select
           aria-label="Select capability"
@@ -577,7 +628,8 @@ const ActionNode = ({ data, id }: NodeProps) => {
       </>
       )}
 
-      <Handle type="source" position={Position.Right} />
+      <Handle type="source" position={Position.Right} id="success" />
+      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
 
       {/* Mini-Console */}
       {!collapsed && logs.length > 0 && (

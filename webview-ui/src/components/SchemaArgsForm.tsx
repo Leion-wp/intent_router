@@ -121,7 +121,7 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
                 htmlFor={inputId}
                 style={{
                   fontSize: '0.75em',
-                  opacity: 0.9,
+                  opacity: field.required ? 0.95 : 0.65,
                   display: 'flex',
                   alignItems: 'center',
                   color: hasError ? 'var(--vscode-inputValidation-errorForeground)' : 'inherit'
@@ -129,6 +129,7 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
               >
                 {field.name}
                 {field.required && <span style={{ color: 'var(--ir-status-error)', marginLeft: '2px' }}>*</span>}
+                {!field.required && <span style={{ marginLeft: '4px', fontSize: '0.9em' }}>(optional)</span>}
               </label>
               {field.description && (
                 <button

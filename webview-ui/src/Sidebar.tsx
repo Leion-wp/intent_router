@@ -328,10 +328,17 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     window.vscode.postMessage(msg);
   };
 
-  const importTheme = () => {
+  const importTheme = (source: 'paste' | 'file') => {
     if (!window.vscode) return;
     setThemeError('');
-    const msg: WebviewOutboundMessage = { type: 'uiPreset.importDraft', jsonText: themeImportJson };
+    const msg: WebviewOutboundMessage = { type: 'uiPreset.importDraft', source, jsonText: source === 'paste' ? themeImportJson : undefined };
+    window.vscode.postMessage(msg);
+  };
+
+  const resetThemeDefaults = () => {
+    if (!window.vscode) return;
+    setThemeError('');
+    const msg: WebviewOutboundMessage = { type: 'uiPreset.resetToDefaults' };
     window.vscode.postMessage(msg);
   };
 
@@ -542,44 +549,74 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
             {adminMode && (
               <div style={{ border: '1px solid var(--vscode-panel-border)', borderRadius: '6px', padding: '10px', marginBottom: '12px' }}>
                 <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px' }}>Theme Studio (Admin)</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 92px', gap: '6px', alignItems: 'center' }}>
-                  {[
-                    ['runButton.idle', 'Run idle'],
-                    ['runButton.running', 'Run running'],
-                    ['runButton.success', 'Run success'],
-                    ['runButton.error', 'Run error'],
-                    ['runButton.foreground', 'Run fg'],
-                    ['addButton.background', 'Add bg'],
-                    ['addButton.foreground', 'Add fg'],
-                    ['addButton.border', 'Add border'],
-                    ['node.background', 'Node bg'],
-                    ['node.border', 'Node border'],
-                    ['node.text', 'Node text'],
-                    ['status.running', 'Status running'],
-                    ['status.success', 'Status success'],
-                    ['status.error', 'Status error'],
-                    ['edges.idle', 'Edge idle'],
-                    ['edges.running', 'Edge running'],
-                    ['edges.success', 'Edge success'],
-                    ['edges.error', 'Edge error']
-                  ].map(([path, label]) => {
-                    const [group, key] = path.split('.');
-                    const value = String(((themePreset.theme.tokens as any)[group] || {})[key] || '#000000');
-                    return (
-                      <React.Fragment key={path}>
-                        <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}</label>
-                        <input
-                          className="nodrag"
-                          type="color"
-                          value={value}
-                          onChange={(e) => setThemeToken(path, e.target.value)}
-                          style={{ width: '100%', height: '24px', border: '1px solid var(--vscode-panel-border)', background: 'transparent' }}
-                        />
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                {[
+                  {
+                    title: 'Run + Add',
+                    fields: [
+                      ['runButton.idle', 'Run idle'],
+                      ['runButton.running', 'Run running'],
+                      ['runButton.success', 'Run success'],
+                      ['runButton.error', 'Run error'],
+                      ['runButton.foreground', 'Run fg'],
+                      ['addButton.background', 'Add bg'],
+                      ['addButton.foreground', 'Add fg'],
+                      ['addButton.border', 'Add border']
+                    ]
+                  },
+                  {
+                    title: 'Node + Status',
+                    fields: [
+                      ['node.background', 'Node bg'],
+                      ['node.border', 'Node border'],
+                      ['node.text', 'Node text'],
+                      ['status.running', 'Status running'],
+                      ['status.success', 'Status success'],
+                      ['status.error', 'Status error']
+                    ]
+                  },
+                  {
+                    title: 'Edges + Minimap + Controls',
+                    fields: [
+                      ['edges.idle', 'Edge idle'],
+                      ['edges.running', 'Edge running'],
+                      ['edges.success', 'Edge success'],
+                      ['edges.error', 'Edge error'],
+                      ['minimap.background', 'MiniMap bg'],
+                      ['minimap.node', 'MiniMap node'],
+                      ['minimap.mask', 'MiniMap mask'],
+                      ['minimap.viewportBorder', 'MiniMap border'],
+                      ['controls.background', 'Controls bg'],
+                      ['controls.buttonBackground', 'Controls btn bg'],
+                      ['controls.buttonForeground', 'Controls btn fg'],
+                      ['controls.buttonHoverBackground', 'Controls hover bg'],
+                      ['controls.buttonHoverForeground', 'Controls hover fg']
+                    ]
+                  }
+                ].map((section) => (
+                  <div key={section.title} style={{ marginBottom: '10px' }}>
+                    <div style={{ fontSize: '11px', opacity: 0.85, marginBottom: '6px' }}>{section.title}</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 92px', gap: '6px', alignItems: 'center' }}>
+                      {section.fields.map(([path, label]) => {
+                        const [group, key] = path.split('.');
+                        const value = String(((themePreset.theme.tokens as any)[group] || {})[key] || '#000000');
+                        return (
+                          <React.Fragment key={path}>
+                            <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}</label>
+                            <input
+                              className="nodrag"
+                              type="color"
+                              value={value}
+                              onChange={(e) => setThemeToken(path, e.target.value)}
+                              style={{ width: '100%', height: '24px', border: '1px solid var(--vscode-panel-border)', background: 'transparent' }}
+                            />
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+
+                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
                   <button className="nodrag" onClick={saveThemeDraft} style={{ flex: 1, padding: '6px', background: 'var(--vscode-button-background)', color: 'var(--vscode-button-foreground)', border: 'none', cursor: 'pointer', fontSize: '11px' }}>
                     Save Draft
                   </button>
@@ -591,8 +628,16 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                   <button className="nodrag" onClick={exportTheme} style={{ flex: 1, padding: '6px', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', cursor: 'pointer', fontSize: '11px' }}>
                     Export
                   </button>
-                  <button className="nodrag" onClick={importTheme} style={{ flex: 1, padding: '6px', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', cursor: 'pointer', fontSize: '11px' }}>
-                    Import
+                  <button className="nodrag" onClick={resetThemeDefaults} style={{ flex: 1, padding: '6px', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', cursor: 'pointer', fontSize: '11px' }}>
+                    Defaults
+                  </button>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                  <button className="nodrag" onClick={() => importTheme('paste')} style={{ flex: 1, padding: '6px', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', cursor: 'pointer', fontSize: '11px' }}>
+                    Import Paste
+                  </button>
+                  <button className="nodrag" onClick={() => importTheme('file')} style={{ flex: 1, padding: '6px', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', cursor: 'pointer', fontSize: '11px' }}>
+                    Import File
                   </button>
                 </div>
                 <textarea

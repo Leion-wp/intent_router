@@ -1,6 +1,7 @@
 import { memo, useContext, useEffect, useMemo, useState } from 'react';
 import { Handle, NodeProps, Position } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext } from '../App';
+import IoSpec from '../components/IoSpec';
 
 type SwitchCondition = 'equals' | 'exists' | 'contains' | 'regex';
 
@@ -120,7 +121,8 @@ const SwitchNode = ({ data, id }: NodeProps) => {
         fontFamily: 'var(--vscode-font-family)'
       }}
     >
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={Position.Left} id="in" />
+      <span style={{ position: 'absolute', left: '-2px', top: '50%', transform: 'translate(-100%, -50%)', fontSize: '10px', opacity: 0.75 }}>in</span>
 
       {/* Dynamic route outputs */}
       {routes.map((r, i) => (
@@ -232,6 +234,10 @@ const SwitchNode = ({ data, id }: NodeProps) => {
 
       {!collapsed && (
         <>
+          <IoSpec
+            inputs={[variableKey ? `${variableKey}*` : 'variableKey*']}
+            outputs={[...routes.map((route) => String(route.label || 'route')), 'default']}
+          />
           <div style={{ marginBottom: '8px' }}>
             <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '4px' }}>Variable key</div>
             <input
