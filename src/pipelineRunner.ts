@@ -3,7 +3,7 @@ import * as path from 'path';
 import { Intent } from './types';
 import { routeIntent } from './router';
 import { pipelineEventBus } from './eventBus';
-import { generateSecureToken, validateStrictShellArg, sanitizeShellArg } from './security';
+import { generateSecureToken, validateStrictShellArg, sanitizeShellArg, validateSafeRelativePath } from './security';
 import { listPublicCapabilities } from './registry';
 import { Determinism } from './types';
 
@@ -307,7 +307,6 @@ function buildStepAdjacency(pipeline: PipelineFile): Map<string, Set<string>> {
         const target = String(e?.target || '').trim();
         if (!source || !target) continue;
         if (!stepIds.has(source) || !stepIds.has(target)) continue;
-        if (String(e?.sourceHandle || '') === 'failure') continue;
         if (!adj.has(source)) adj.set(source, new Set<string>());
         adj.get(source)!.add(target);
     }
@@ -457,13 +456,16 @@ async function runFormStep(
 
 type SwitchRoute = {
     label?: string;
+    condition?: string;
+    value?: string;
     equalsValue?: string;
     targetStepId?: string;
 };
 
 type ResolvedSwitchRoute = {
     label: string;
-    equalsValue: string;
+    condition: 'equals' | 'exists' | 'contains' | 'regex';
+    value: string;
     targetStepId: string;
 };
 
@@ -492,6 +494,35 @@ function normalizeSwitchEqualsValue(raw: unknown): string {
     return String(match?.[1] ?? trimmed).trim();
 }
 
+function normalizeSwitchCondition(raw: unknown): 'equals' | 'exists' | 'contains' | 'regex' {
+    const value = String(raw ?? '').trim().toLowerCase();
+    if (value === 'exists' || value === 'contains' || value === 'regex') {
+        return value;
+    }
+    return 'equals';
+}
+
+function matchesSwitchRoute(currentValue: string, route: ResolvedSwitchRoute): boolean {
+    const probe = String(currentValue ?? '');
+    const routeValue = String(route.value ?? '');
+    switch (route.condition) {
+        case 'exists':
+            return probe.trim().length > 0;
+        case 'contains':
+            return routeValue.length > 0 && probe.includes(routeValue);
+        case 'regex':
+            if (!routeValue) return false;
+            try {
+                return new RegExp(routeValue).test(probe);
+            } catch {
+                return false;
+            }
+        case 'equals':
+        default:
+            return probe === routeValue;
+    }
+}
+
 function resolveSwitchRoutesFromMeta(
     pipeline: PipelineFile,
     switchStepId: string,
@@ -513,7 +544,8 @@ function resolveSwitchRoutesFromMeta(
 
         return {
             label: String(r?.label || `route_${i}`),
-            equalsValue: normalizeSwitchEqualsValue(r?.equalsValue),
+            condition: normalizeSwitchCondition(r?.condition),
+            value: normalizeSwitchEqualsValue(r?.value ?? r?.equalsValue),
             targetStepId: target
         };
     });
@@ -784,12 +816,11 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                  let targetStepId: string | undefined = undefined;
                  let chosenLabel = 'default';
                  for (const r of routes) {
-                     const equalsValue = String(r.equalsValue || '').trim();
                      const target = String(r.targetStepId || '').trim();
                      if (!target) continue;
-                     if (currentValue === equalsValue) {
+                     if (matchesSwitchRoute(currentValue, r)) {
                          targetStepId = target;
-                         chosenLabel = String(r.label || equalsValue || 'route');
+                         chosenLabel = String(r.label || 'route');
                          break;
                      }
                  }

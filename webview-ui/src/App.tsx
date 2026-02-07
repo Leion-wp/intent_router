@@ -31,6 +31,7 @@ import StartNode from './nodes/StartNode';
 import CustomNode from './nodes/CustomNode';
 import FormNode from './nodes/FormNode';
 import SwitchNode from './nodes/SwitchNode';
+import ScriptNode from './nodes/ScriptNode';
 import { isInboundMessage, WebviewInboundMessage } from './types/messages';
 
 // Context for Registry
@@ -69,7 +70,8 @@ const nodeTypes = {
   vscodeCommandNode: VSCodeCommandNode,
   customNode: CustomNode,
   formNode: FormNode,
-  switchNode: SwitchNode
+  switchNode: SwitchNode,
+  scriptNode: ScriptNode
 };
 
 const InsertableEdge = (props: EdgeProps) => {
@@ -215,6 +217,39 @@ function canonicalizeIntent(provider: string, capability: string): { provider: s
   return { provider: finalProvider, intent: cap, capability: cap };
 }
 
+function inferScriptInterpreter(scriptPath: string): string {
+  const lower = String(scriptPath || '').trim().toLowerCase();
+  if (lower.endsWith('.ps1')) return 'pwsh -File';
+  if (lower.endsWith('.py')) return 'python';
+  if (lower.endsWith('.js')) return 'node';
+  if (lower.endsWith('.sh')) return 'bash';
+  return '';
+}
+
+function quoteShell(value: string): string {
+  const input = String(value || '');
+  if (!input) return '""';
+  if (!/[\s"]/g.test(input)) return input;
+  return `"${input.replace(/"/g, '\\"')}"`;
+}
+
+function buildScriptCommand(scriptPath: string, args: string, interpreter?: string): string {
+  const script = String(scriptPath || '').trim();
+  const argsString = String(args || '').trim();
+  const runtimeOverride = String(interpreter || '').trim();
+  const runtime = runtimeOverride || inferScriptInterpreter(script);
+  const lower = script.toLowerCase();
+
+  if (!runtimeOverride && lower.endsWith('.ps1')) {
+    const baseArg = `${quoteShell(script)}${argsString ? ` ${argsString}` : ''}`;
+    return `if (Get-Command pwsh -ErrorAction SilentlyContinue) { pwsh -File ${baseArg} } else { powershell -File ${baseArg} }`;
+  }
+
+  const prefix = runtime ? `${runtime} ` : '';
+  const base = `${prefix}${quoteShell(script)}`;
+  return argsString ? `${base} ${argsString}` : base;
+}
+
 function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any, restoreRun: any, onRestoreHandled: () => void }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState(initialNodes);
@@ -314,7 +349,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
   type QuickAddItem = {
     id: string;
     label: string;
-    nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode' | 'customNode' | 'formNode' | 'switchNode';
+    nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode' | 'customNode' | 'formNode' | 'switchNode' | 'scriptNode';
     provider?: string;
     capability?: string;
     customNodeId?: string;
@@ -331,6 +366,7 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
     { id: 'preset-prompt', label: 'Prompt', nodeType: 'promptNode' },
     { id: 'preset-form', label: 'Form', nodeType: 'formNode' },
     { id: 'preset-switch', label: 'Switch', nodeType: 'switchNode' },
+    { id: 'preset-script', label: 'Script', nodeType: 'scriptNode' },
     { id: 'preset-repo', label: 'Repo', nodeType: 'repoNode' },
     { id: 'preset-terminal', label: 'Terminal', nodeType: 'actionNode', provider: 'terminal', capability: getDefaultCapability('terminal') },
     { id: 'preset-system', label: 'System', nodeType: 'actionNode', provider: 'system', capability: getDefaultCapability('system') },
@@ -386,9 +422,16 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
       data.fields = [];
       data.kind = 'form';
     } else if (item.nodeType === 'switchNode') {
+      data.label = 'Switch';
       data.variableKey = '';
       data.routes = [];
       data.kind = 'switch';
+    } else if (item.nodeType === 'scriptNode') {
+      data.scriptPath = '';
+      data.args = '';
+      data.cwd = '';
+      data.interpreter = '';
+      data.kind = 'script';
     } else if (item.nodeType === 'promptNode') {
       data.name = '';
       data.value = '';
@@ -828,15 +871,20 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
           payload = { fields: Array.isArray(data.fields) ? data.fields : [] };
         } else if (node.type === 'switchNode') {
           intent = 'system.switch';
+          description = String(data.label || '');
 
           const outgoing = effectiveEdges.filter((e: any) => e.source === node.id);
           const routes = Array.isArray(data.routes) ? data.routes : [];
           const routePayload = routes.map((r: any, i: number) => {
             const handleId = `route_${i}`;
             const edge = outgoing.find((e: any) => String(e.sourceHandle || '') === handleId);
+            const condition = String(r?.condition || 'equals').trim().toLowerCase();
+            const value = String(r?.value ?? r?.equalsValue ?? '');
             return {
               label: String(r?.label || handleId),
-              equalsValue: String(r?.equalsValue || ''),
+              condition,
+              value,
+              equalsValue: condition === 'equals' ? value : '',
               targetStepId: edge?.target
             };
           });
@@ -853,6 +901,32 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
             routes: routePayload,
             defaultStepId
           };
+        } else if (node.type === 'scriptNode') {
+          intent = 'terminal.run';
+          const scriptPath = String(data.scriptPath || '').trim();
+          if (!scriptPath) {
+            stepBuildError = 'Script node must define "scriptPath".';
+            return;
+          }
+          const args = String(data.args || '');
+          const interpreter = String(data.interpreter || '').trim();
+          const inferred = inferScriptInterpreter(scriptPath);
+          const effectiveInterpreter = interpreter || inferred;
+          if (!effectiveInterpreter) {
+            stepBuildError = `Script node "${node.id}" has unsupported extension. Set interpreter override.`;
+            return;
+          }
+          const command = buildScriptCommand(scriptPath, args, effectiveInterpreter);
+          const cwd = String(data.cwd || '').trim();
+          payload = {
+            command,
+            ...(cwd ? { cwd } : {}),
+            scriptPath,
+            args,
+            interpreter: interpreter || undefined,
+            __kind: 'script'
+          };
+          description = String(data.description || '');
         } else if (node.type === 'repoNode') {
           intent = 'system.setCwd';
           payload = { path: data.path };
@@ -1006,16 +1080,28 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
                   data.kind = 'prompt';
               } else if (intent === 'system.switch') {
                   type = 'switchNode';
+                  data.label = String(step.description || 'Switch');
                   data.variableKey = step.payload?.variableKey || '';
                   data.routes = Array.isArray(step.payload?.routes) ? step.payload.routes.map((r: any) => ({
                       label: String(r?.label || ''),
-                      equalsValue: String(r?.equalsValue || '')
+                      condition: String(r?.condition || 'equals'),
+                      value: String(r?.value ?? r?.equalsValue ?? '')
                   })) : [];
                   data.kind = 'switch';
               } else if (intent === 'system.form') {
                   type = 'formNode';
                   data.fields = Array.isArray(step.payload?.fields) ? step.payload.fields : [];
                   data.kind = 'form';
+              } else if (intent === 'terminal.run' && String(step.payload?.__kind || '') === 'script') {
+                  type = 'scriptNode';
+                  data.scriptPath = String(step.payload?.scriptPath || '');
+                  data.args = Array.isArray(step.payload?.args)
+                    ? (step.payload.args as any[]).map((arg: any) => String(arg)).join(' ')
+                    : String(step.payload?.args || '');
+                  data.cwd = String(step.payload?.cwd || '');
+                  data.interpreter = String(step.payload?.interpreter || '');
+                  data.description = String(step.description || '');
+                  data.kind = 'script';
               } else if (intent === 'system.setCwd') {
                   type = 'repoNode';
                   data.path = step.payload?.path;
@@ -1403,7 +1489,9 @@ function Flow({ selectedRun, restoreRun, onRestoreHandled }: { selectedRun: any,
             : type === 'formNode'
               ? { fields: [], status: 'idle', kind: 'form' }
             : type === 'switchNode'
-              ? { variableKey: '', routes: [], status: 'idle', kind: 'switch' }
+              ? { label: 'Switch', variableKey: '', routes: [], status: 'idle', kind: 'switch' }
+            : type === 'scriptNode'
+              ? { scriptPath: '', args: '', cwd: '', interpreter: '', status: 'idle', kind: 'script' }
             : type === 'promptNode'
               ? { name: '', value: '', kind: 'prompt' }
             : type === 'repoNode'

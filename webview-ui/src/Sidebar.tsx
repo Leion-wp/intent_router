@@ -163,6 +163,7 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     { type: 'promptNode', label: 'Prompt', icon: 'codicon-symbol-string', desc: 'Set variable' },
     { type: 'formNode', label: 'Form', icon: 'codicon-list-selection', desc: 'Collect inputs (HITL)' },
     { type: 'switchNode', label: 'Switch', icon: 'codicon-filter', desc: 'Route by variable' },
+    { type: 'scriptNode', label: 'Script', icon: 'codicon-file-code', desc: 'Run versioned script file' },
     { type: 'repoNode', label: 'Repo', icon: 'codicon-repo', desc: 'Set workspace path' },
     { type: 'vscodeCommandNode', label: 'VS Code', icon: 'codicon-vscode', desc: 'Run an arbitrary VS Code command' },
     // Providers

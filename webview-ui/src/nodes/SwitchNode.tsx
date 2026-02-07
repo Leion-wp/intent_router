@@ -2,9 +2,12 @@ import { memo, useContext, useEffect, useMemo, useState } from 'react';
 import { Handle, NodeProps, Position } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext } from '../App';
 
+type SwitchCondition = 'equals' | 'exists' | 'contains' | 'regex';
+
 type SwitchRoute = {
   label: string;
-  equalsValue: string;
+  condition: SwitchCondition;
+  value: string;
 };
 
 const STATUS_COLORS = {
@@ -14,19 +17,45 @@ const STATUS_COLORS = {
   failure: '#f44336'
 };
 
+const normalizeCondition = (value: unknown): SwitchCondition => {
+  const candidate = String(value || '').trim().toLowerCase();
+  if (candidate === 'exists' || candidate === 'contains' || candidate === 'regex') {
+    return candidate;
+  }
+  return 'equals';
+};
+
+const normalizeRoutes = (raw: any): SwitchRoute[] => {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.map((entry: any, index: number) => {
+    const condition = normalizeCondition(entry?.condition);
+    const fallbackValue = String(entry?.value ?? entry?.equalsValue ?? '').trim();
+    return {
+      label: String(entry?.label || `route_${index}`),
+      condition,
+      value: fallbackValue
+    };
+  });
+};
+
 const SwitchNode = ({ data, id }: NodeProps) => {
   const { updateNodeData } = useContext(FlowEditorContext);
   const { getAvailableVars } = useContext(FlowRuntimeContext);
 
   const [variableKey, setVariableKey] = useState<string>(String((data as any)?.variableKey || ''));
-  const [routes, setRoutes] = useState<SwitchRoute[]>(Array.isArray((data as any)?.routes) ? ((data as any).routes as any[]) : []);
+  const [routes, setRoutes] = useState<SwitchRoute[]>(normalizeRoutes((data as any)?.routes));
   const [status, setStatus] = useState<string>(String((data as any)?.status || 'idle'));
+  const [label, setLabel] = useState<string>(String((data as any)?.label || 'Switch'));
+  const [editingLabel, setEditingLabel] = useState<boolean>(false);
   const collapsed = !!(data as any)?.collapsed;
 
   useEffect(() => {
     if ((data as any)?.variableKey !== undefined) setVariableKey(String((data as any).variableKey || ''));
-    if (Array.isArray((data as any)?.routes)) setRoutes((data as any).routes as any[]);
+    if (Array.isArray((data as any)?.routes)) setRoutes(normalizeRoutes((data as any).routes));
     if ((data as any)?.status) setStatus(String((data as any).status));
+    if ((data as any)?.label !== undefined) setLabel(String((data as any).label || 'Switch'));
   }, [data]);
 
   const availableVars = useMemo(() => {
@@ -47,7 +76,7 @@ const SwitchNode = ({ data, id }: NodeProps) => {
   };
 
   const addRoute = () => {
-    const next = [...routes, { label: `route ${routes.length + 1}`, equalsValue: '' }];
+    const next = [...routes, { label: `route ${routes.length + 1}`, condition: 'equals', value: '' }];
     setRoutes(next);
     updateNodeData(id, { routes: next });
   };
@@ -133,9 +162,60 @@ const SwitchNode = ({ data, id }: NodeProps) => {
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontWeight: 'bold' }}>
-        <span className="codicon codicon-filter"></span>
-        <span>Switch</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px', fontWeight: 'bold' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+          <span className="codicon codicon-filter"></span>
+          {editingLabel ? (
+            <input
+              className="nodrag"
+              value={label}
+              autoFocus
+              onChange={(e) => {
+                const next = e.target.value;
+                setLabel(next);
+                updateNodeData(id, { label: next });
+              }}
+              onBlur={() => setEditingLabel(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setEditingLabel(false);
+                }
+              }}
+              style={{
+                flex: 1,
+                background: 'var(--vscode-input-background)',
+                color: 'var(--vscode-input-foreground)',
+                border: '1px solid var(--vscode-input-border)',
+                padding: '2px 4px',
+                borderRadius: '4px'
+              }}
+            />
+          ) : (
+            <span
+              title="Click to rename"
+              onClick={() => setEditingLabel(true)}
+              style={{ cursor: 'text', userSelect: 'none' }}
+            >
+              {label || 'Switch'}
+            </span>
+          )}
+        </div>
+        <button
+          className="nodrag"
+          onClick={() => updateNodeData(id, { collapsed: !collapsed })}
+          title={collapsed ? 'Expand' : 'Collapse'}
+          style={{
+            background: 'transparent',
+            color: 'var(--vscode-foreground)',
+            border: '1px solid var(--vscode-editorWidget-border)',
+            borderRadius: '4px',
+            width: '20px',
+            height: '20px',
+            cursor: 'pointer'
+          }}
+        >
+          {collapsed ? '▸' : '▾'}
+        </button>
       </div>
 
       {!collapsed && (
@@ -167,7 +247,7 @@ const SwitchNode = ({ data, id }: NodeProps) => {
               ))}
             </datalist>
             <div style={{ fontSize: '10px', opacity: 0.65, marginTop: '4px' }}>
-              Uses the variable store (from Form/Prompt/env) for exact match routing.
+              Uses the variable store (from Form/Prompt/env) for condition-based routing.
             </div>
           </div>
 
@@ -195,7 +275,7 @@ const SwitchNode = ({ data, id }: NodeProps) => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {routes.map((r, i) => (
               <div key={i} style={{ border: '1px solid var(--vscode-widget-border)', borderRadius: '4px', padding: '8px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 24px', gap: '6px', alignItems: 'center' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 92px 1fr 24px', gap: '6px', alignItems: 'center' }}>
                   <input
                     className="nodrag"
                     value={String(r.label || '')}
@@ -209,17 +289,36 @@ const SwitchNode = ({ data, id }: NodeProps) => {
                       fontSize: '11px'
                     }}
                   />
-                  <input
+                  <select
                     className="nodrag"
-                    value={String(r.equalsValue || '')}
-                    onChange={(e) => setRoute(i, { equalsValue: e.target.value })}
-                    placeholder="equals value (e.g. docker)"
+                    value={String(r.condition || 'equals')}
+                    onChange={(e) => setRoute(i, { condition: normalizeCondition(e.target.value) })}
                     style={{
                       background: 'var(--vscode-input-background)',
                       color: 'var(--vscode-input-foreground)',
                       border: '1px solid var(--vscode-input-border)',
                       padding: '4px',
                       fontSize: '11px'
+                    }}
+                  >
+                    <option value="equals">equals</option>
+                    <option value="exists">exists</option>
+                    <option value="contains">contains</option>
+                    <option value="regex">regex</option>
+                  </select>
+                  <input
+                    className="nodrag"
+                    value={String(r.value || '')}
+                    onChange={(e) => setRoute(i, { value: e.target.value })}
+                    placeholder={r.condition === 'regex' ? 'regex pattern' : (r.condition === 'contains' ? 'substring' : 'value')}
+                    disabled={r.condition === 'exists'}
+                    style={{
+                      background: 'var(--vscode-input-background)',
+                      color: 'var(--vscode-input-foreground)',
+                      border: '1px solid var(--vscode-input-border)',
+                      padding: '4px',
+                      fontSize: '11px',
+                      opacity: r.condition === 'exists' ? 0.6 : 1
                     }}
                   />
                   <button
