@@ -3,11 +3,20 @@ import { Handle, Position, NodeProps } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext } from '../App';
 import IoSpec from '../components/IoSpec';
 
+const STATUS_COLORS = {
+  idle: 'var(--vscode-charts-yellow)',
+  running: 'var(--ir-status-running)',
+  success: 'var(--ir-status-success)',
+  failure: 'var(--ir-status-error)',
+  error: 'var(--ir-status-error)'
+} as const;
+
 const RepoNode = ({ data, id }: NodeProps) => {
   const { isRunPreviewNode } = useContext(FlowRuntimeContext);
   const { updateNodeData } = useContext(FlowEditorContext);
   const [path, setPath] = useState<string>((data.path as string) || '');
   const [label, setLabel] = useState<string>((data.label as string) || '');
+  const [status, setStatus] = useState<string>(String((data.status as string) || 'idle'));
   const [editingLabel, setEditingLabel] = useState(false);
   const collapsed = !!data.collapsed;
   const inputHandles = ['in', 'path'];
@@ -24,7 +33,8 @@ const RepoNode = ({ data, id }: NodeProps) => {
     const nextPath = (data.path as string) || '';
     if (nextPath !== path) setPath(nextPath);
     if (data.label !== undefined) setLabel((data.label as string) || '');
-  }, [data.path]);
+    setStatus(String((data.status as string) || 'idle'));
+  }, [data.path, data.label, data.status]);
 
   // Ensure kind is set
   useEffect(() => {
@@ -57,14 +67,19 @@ const RepoNode = ({ data, id }: NodeProps) => {
       }
   };
 
+  const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
+  const runningGlow = status === 'running' ? `0 0 10px ${borderColor}` : '';
+  const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : '';
+  const boxShadow = [runningGlow, previewGlow].filter(Boolean).join(', ') || 'none';
+
   return (
     <div style={{
       position: 'relative',
       padding: '10px',
       borderRadius: '5px',
       background: 'var(--vscode-editor-background)',
-      border: '2px solid var(--vscode-charts-yellow)',
-      boxShadow: isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none',
+      border: `2px solid ${borderColor}`,
+      boxShadow,
       minWidth: '200px',
       color: 'var(--vscode-editor-foreground)',
       fontFamily: 'var(--vscode-font-family)'
@@ -128,6 +143,7 @@ const RepoNode = ({ data, id }: NodeProps) => {
               {label || 'Repository'}
             </span>
           )}
+          {status !== 'idle' && <span className={`status-badge ${status}`}>{status}</span>}
         </div>
         <button
           className="nodrag"

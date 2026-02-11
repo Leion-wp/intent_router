@@ -33,7 +33,7 @@ import FormNode from './nodes/FormNode';
 import SwitchNode from './nodes/SwitchNode';
 import ScriptNode from './nodes/ScriptNode';
 import { isInboundMessage, WebviewInboundMessage } from './types/messages';
-import { applyThemeTokensToRoot, defaultThemeTokens, tokensFromPreset } from './types/theme';
+import { applyThemeTokensToRoot, defaultThemeTokens, normalizeUiPreset, UiPreset } from './types/theme';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
@@ -290,13 +290,15 @@ function Flow({
   restoreRun,
   onRestoreHandled,
   sidebarCollapsed,
-  onSetSidebarCollapsed
+  onSetSidebarCollapsed,
+  uiPreset
 }: {
   selectedRun: any,
   restoreRun: any,
   onRestoreHandled: () => void,
   sidebarCollapsed: boolean,
-  onSetSidebarCollapsed: (next: boolean) => void
+  onSetSidebarCollapsed: (next: boolean) => void,
+  uiPreset: UiPreset
 }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState(initialNodes);
@@ -336,6 +338,13 @@ function Flow({
   const runPillResetTimerRef = useRef<number | null>(null);
   const chromePanelDragRef = useRef<{ dx: number; dy: number } | null>(null);
   const copiedNodeRef = useRef<Node | null>(null);
+  const graphHistoryRef = useRef<Array<{ nodes: any[]; edges: any[]; signature: string }>>([]);
+  const graphHistoryIndexRef = useRef<number>(-1);
+  const graphHistorySuppressRef = useRef<number>(0);
+  const graphToastTimerRef = useRef<number | null>(null);
+  const [canUndo, setCanUndo] = useState<boolean>(false);
+  const [canRedo, setCanRedo] = useState<boolean>(false);
+  const [graphToast, setGraphToast] = useState<string>('');
 
   const [environment, setEnvironment] = useState<Record<string, string>>(
     (window.initialData?.environment as Record<string, string>) || {}
@@ -353,6 +362,73 @@ function Flow({
   useEffect(() => {
     envRef.current = environment;
   }, [environment]);
+
+  const updateUndoRedoFlags = useCallback(() => {
+    const index = graphHistoryIndexRef.current;
+    const length = graphHistoryRef.current.length;
+    setCanUndo(index > 0);
+    setCanRedo(index >= 0 && index < length - 1);
+  }, []);
+
+  const pushGraphSnapshot = useCallback((nextNodes: any[], nextEdges: any[]) => {
+    const snapshot = {
+      nodes: JSON.parse(JSON.stringify(nextNodes || [])),
+      edges: JSON.parse(JSON.stringify(nextEdges || [])),
+      signature: JSON.stringify({ nodes: nextNodes || [], edges: nextEdges || [] })
+    };
+
+    const current = graphHistoryRef.current;
+    const currentIndex = graphHistoryIndexRef.current;
+    const currentSignature = current[currentIndex]?.signature;
+    if (snapshot.signature === currentSignature) {
+      updateUndoRedoFlags();
+      return;
+    }
+
+    const head = currentIndex >= 0 ? current.slice(0, currentIndex + 1) : [];
+    const trimmed = [...head, snapshot];
+    const bounded = trimmed.length > 80 ? trimmed.slice(trimmed.length - 80) : trimmed;
+    graphHistoryRef.current = bounded;
+    graphHistoryIndexRef.current = bounded.length - 1;
+    updateUndoRedoFlags();
+  }, [updateUndoRedoFlags]);
+
+  const showGraphToast = useCallback((text: string) => {
+    setGraphToast(text);
+    if (graphToastTimerRef.current) {
+      window.clearTimeout(graphToastTimerRef.current);
+    }
+    graphToastTimerRef.current = window.setTimeout(() => {
+      setGraphToast('');
+      graphToastTimerRef.current = null;
+    }, 1200);
+  }, []);
+
+  const applyGraphHistorySnapshot = useCallback((snapshot: { nodes: any[]; edges: any[] }) => {
+    graphHistorySuppressRef.current = 2;
+    setNodes(JSON.parse(JSON.stringify(snapshot.nodes || [])));
+    setEdges(JSON.parse(JSON.stringify(snapshot.edges || [])));
+  }, [setNodes, setEdges]);
+
+  const undoGraph = useCallback(() => {
+    if (graphHistoryIndexRef.current <= 0) return;
+    graphHistoryIndexRef.current -= 1;
+    const snapshot = graphHistoryRef.current[graphHistoryIndexRef.current];
+    if (!snapshot) return;
+    applyGraphHistorySnapshot(snapshot);
+    updateUndoRedoFlags();
+    showGraphToast(`Undo (${graphHistoryIndexRef.current + 1}/${graphHistoryRef.current.length})`);
+  }, [applyGraphHistorySnapshot, updateUndoRedoFlags, showGraphToast]);
+
+  const redoGraph = useCallback(() => {
+    if (graphHistoryIndexRef.current < 0 || graphHistoryIndexRef.current >= graphHistoryRef.current.length - 1) return;
+    graphHistoryIndexRef.current += 1;
+    const snapshot = graphHistoryRef.current[graphHistoryIndexRef.current];
+    if (!snapshot) return;
+    applyGraphHistorySnapshot(snapshot);
+    updateUndoRedoFlags();
+    showGraphToast(`Redo (${graphHistoryIndexRef.current + 1}/${graphHistoryRef.current.length})`);
+  }, [applyGraphHistorySnapshot, updateUndoRedoFlags, showGraphToast]);
 
   useEffect(() => {
     try {
@@ -429,6 +505,7 @@ function Flow({
     id: string;
     label: string;
     nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode' | 'customNode' | 'formNode' | 'switchNode' | 'scriptNode';
+    category: 'context' | 'providers' | 'custom';
     provider?: string;
     capability?: string;
     customNodeId?: string;
@@ -442,16 +519,16 @@ function Flow({
   }, [commandGroups]);
 
   const presetItems: QuickAddItem[] = useMemo(() => ([
-    { id: 'preset-prompt', label: 'Prompt', nodeType: 'promptNode' },
-    { id: 'preset-form', label: 'Form', nodeType: 'formNode' },
-    { id: 'preset-switch', label: 'Switch', nodeType: 'switchNode' },
-    { id: 'preset-script', label: 'Script', nodeType: 'scriptNode' },
-    { id: 'preset-repo', label: 'Repo', nodeType: 'repoNode' },
-    { id: 'preset-terminal', label: 'Terminal', nodeType: 'actionNode', provider: 'terminal', capability: getDefaultCapability('terminal') },
-    { id: 'preset-system', label: 'System', nodeType: 'actionNode', provider: 'system', capability: getDefaultCapability('system') },
-    { id: 'preset-git', label: 'Git', nodeType: 'actionNode', provider: 'git', capability: getDefaultCapability('git') },
-    { id: 'preset-docker', label: 'Docker', nodeType: 'actionNode', provider: 'docker', capability: getDefaultCapability('docker') },
-    { id: 'preset-vscode', label: 'VS Code', nodeType: 'vscodeCommandNode' }
+    { id: 'preset-prompt', label: 'Prompt', nodeType: 'promptNode', category: 'context' },
+    { id: 'preset-form', label: 'Form', nodeType: 'formNode', category: 'context' },
+    { id: 'preset-switch', label: 'Switch', nodeType: 'switchNode', category: 'context' },
+    { id: 'preset-script', label: 'Script', nodeType: 'scriptNode', category: 'context' },
+    { id: 'preset-repo', label: 'Repo', nodeType: 'repoNode', category: 'context' },
+    { id: 'preset-terminal', label: 'Terminal', nodeType: 'actionNode', category: 'providers', provider: 'terminal', capability: getDefaultCapability('terminal') },
+    { id: 'preset-system', label: 'System', nodeType: 'actionNode', category: 'providers', provider: 'system', capability: getDefaultCapability('system') },
+    { id: 'preset-git', label: 'Git', nodeType: 'actionNode', category: 'providers', provider: 'git', capability: getDefaultCapability('git') },
+    { id: 'preset-docker', label: 'Docker', nodeType: 'actionNode', category: 'providers', provider: 'docker', capability: getDefaultCapability('docker') },
+    { id: 'preset-vscode', label: 'VS Code', nodeType: 'vscodeCommandNode', category: 'context' }
   ]), [getDefaultCapability]);
 
   const commandItems: QuickAddItem[] = useMemo(() => {
@@ -464,6 +541,7 @@ function Flow({
           id: `cmd-${g.provider}-${cap}`,
           label: `${g.provider} · ${cap}`,
           nodeType: 'actionNode',
+          category: 'providers',
           provider: g.provider,
           capability: cap
         });
@@ -590,12 +668,54 @@ function Flow({
         id: `custom-${id}`,
         label: `Custom · ${title}`,
         nodeType: 'customNode',
+        category: 'custom',
         customNodeId: id
       };
     }).filter((i: any) => !!i.customNodeId);
   }, [customNodes]);
 
-  const allQuickAddItems = useMemo(() => [...presetItems, ...customNodeItems, ...commandItems], [presetItems, customNodeItems, commandItems]);
+  const paletteCategories = useMemo(() => {
+    const categories = Array.isArray(uiPreset?.palette?.categories) ? uiPreset.palette.categories : [];
+    return categories
+      .filter((entry: any) => entry?.visible !== false)
+      .sort((a: any, b: any) => Number(a?.order || 0) - Number(b?.order || 0));
+  }, [uiPreset]);
+
+  const visibleCategoryIds = useMemo(
+    () => new Set(paletteCategories.map((entry: any) => String(entry?.id || '').trim()).filter(Boolean)),
+    [paletteCategories]
+  );
+
+  const categoryOrderMap = useMemo(() => {
+    const map = new Map<string, number>();
+    paletteCategories.forEach((entry: any, index: number) => {
+      const id = String(entry?.id || '').trim();
+      if (!id) return;
+      map.set(id, Number(entry?.order ?? index));
+    });
+    return map;
+  }, [paletteCategories]);
+
+  const pinnedQuickAddIds = useMemo(
+    () => new Set((Array.isArray(uiPreset?.palette?.pinned) ? uiPreset.palette.pinned : []).map((value: any) => String(value || '').trim()).filter(Boolean)),
+    [uiPreset]
+  );
+
+  const allQuickAddItems = useMemo(() => {
+    const merged = [...presetItems, ...customNodeItems, ...commandItems]
+      .filter(item => visibleCategoryIds.has(item.category))
+      .sort((a, b) => {
+        const aPinned = pinnedQuickAddIds.has(a.id);
+        const bPinned = pinnedQuickAddIds.has(b.id);
+        if (aPinned !== bPinned) return aPinned ? -1 : 1;
+        const aOrder = categoryOrderMap.get(a.category) ?? Number.MAX_SAFE_INTEGER;
+        const bOrder = categoryOrderMap.get(b.category) ?? Number.MAX_SAFE_INTEGER;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return a.label.localeCompare(b.label);
+      });
+    return merged;
+  }, [presetItems, customNodeItems, commandItems, visibleCategoryIds, categoryOrderMap, pinnedQuickAddIds]);
+
   const filteredQuickAddItems = useMemo(
     () => filterQuickAdd(allQuickAddItems, quickAddQuery),
     [allQuickAddItems, quickAddQuery, filterQuickAdd]
@@ -607,6 +727,49 @@ function Flow({
 
   const paletteLeft = quickAddAnchor ? Math.min(quickAddAnchor.x, window.innerWidth - 280) : 0;
   const paletteTop = quickAddAnchor ? Math.min(quickAddAnchor.y, window.innerHeight - 320) : 0;
+
+  const openQuickAddPalette = useCallback(() => {
+    const anchor = { x: Math.round(window.innerWidth * 0.52), y: Math.round(window.innerHeight * 0.42) };
+    const pos = reactFlowInstance?.screenToFlowPosition
+      ? reactFlowInstance.screenToFlowPosition(anchor)
+      : null;
+    setQuickAddEdge(null);
+    setQuickAddPos(pos);
+    setQuickAddAnchor(anchor);
+    setQuickAddQuery('');
+    setQuickAddOpen(true);
+  }, [reactFlowInstance]);
+
+  const categoryTitleMap = useMemo(() => {
+    const map = new Map<string, string>();
+    (paletteCategories || []).forEach((entry: any) => {
+      const id = String(entry?.id || '').trim();
+      if (!id) return;
+      const title = String(entry?.title || id).trim();
+      map.set(id, title || id);
+    });
+    return map;
+  }, [paletteCategories]);
+
+  const quickAddGroupedItems = useMemo(() => {
+    const groups = new Map<string, QuickAddItem[]>();
+    for (const item of filteredQuickAddItems) {
+      const key = item.category;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(item);
+    }
+    return groups;
+  }, [filteredQuickAddItems]);
+
+  const dockGroupedItems = useMemo(() => {
+    const groups = new Map<string, QuickAddItem[]>();
+    for (const item of filteredDockItems) {
+      const key = item.category;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(item);
+    }
+    return groups;
+  }, [filteredDockItems]);
 
   const onNodesChange = useCallback(
     (changes: any) => {
@@ -620,6 +783,23 @@ function Flow({
     },
     [onNodesChangeInternal]
   );
+
+  useEffect(() => {
+    if (graphHistorySuppressRef.current > 0) {
+      graphHistorySuppressRef.current -= 1;
+      updateUndoRedoFlags();
+      return;
+    }
+    pushGraphSnapshot(nodes, edges);
+  }, [nodes, edges, pushGraphSnapshot, updateUndoRedoFlags]);
+
+  useEffect(() => {
+    return () => {
+      if (graphToastTimerRef.current) {
+        window.clearTimeout(graphToastTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleEdgeInsert = useCallback((edgeProps: any, clientX: number, clientY: number) => {
     const pos = reactFlowInstance?.screenToFlowPosition
@@ -718,6 +898,16 @@ function Flow({
         e.preventDefault();
         duplicateNodeById(selectedNodeId);
       }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undoGraph();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+        e.preventDefault();
+        redoGraph();
+        return;
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId && selectedNodeId !== 'start') {
         e.preventDefault();
         const nodeId = selectedNodeId;
@@ -742,13 +932,19 @@ function Flow({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [quickAddOpen, dockOpen, reactFlowInstance, selectedNodeId, copyNodeById, pasteCopiedNode, duplicateNodeById, setNodes, setEdges]);
+  }, [quickAddOpen, dockOpen, reactFlowInstance, selectedNodeId, copyNodeById, pasteCopiedNode, duplicateNodeById, setNodes, setEdges, undoGraph, redoGraph]);
 
   useEffect(() => {
     const onDocClick = () => setContextMenu(null);
     document.addEventListener('click', onDocClick);
     return () => document.removeEventListener('click', onDocClick);
   }, []);
+
+  useEffect(() => {
+    const onOpenQuickAdd = () => openQuickAddPalette();
+    window.addEventListener('intentRouter.openQuickAdd', onOpenQuickAdd as EventListener);
+    return () => window.removeEventListener('intentRouter.openQuickAdd', onOpenQuickAdd as EventListener);
+  }, [openQuickAddPalette]);
 
   const computeRunSubset = useCallback(
     (startNodeId: string) => {
@@ -1395,6 +1591,7 @@ function Flow({
 
   // Load initial data if any (prefer persisted webview state to avoid losing unsaved nodes)
   useEffect(() => {
+    let restoredFromState = false;
     try {
       const st = vscode?.getState?.() || {};
       if (st.graph?.nodes && st.graph?.edges) {
@@ -1402,13 +1599,13 @@ function Flow({
         setEdges(st.graph.edges);
         syncIdCounterFromNodes(st.graph.nodes);
         setTimeout(() => reactFlowInstance?.fitView(), 100);
-        return;
+        restoredFromState = true;
       }
     } catch {
       // ignore
     }
 
-    if (window.initialData && window.initialData.pipeline) {
+    if (!restoredFromState && window.initialData && window.initialData.pipeline) {
       loadPipeline(window.initialData.pipeline);
     }
 
@@ -1437,49 +1634,46 @@ function Flow({
              break;
 
          case 'executionStatus':
-          const normalizedStatus = typed.status === 'failure' ? 'error' : typed.status;
-          if (normalizedStatus === 'running') {
-            setRunPillStatus('running');
-          } else if (normalizedStatus === 'failure' || normalizedStatus === 'error') {
-            setRunPillStatus('error');
-          } else if (normalizedStatus === 'success' && runPillStatus !== 'error') {
-            setRunPillStatus('success');
-          }
+         const normalizedStatus = typed.status === 'failure' ? 'error' : typed.status;
+          setRunPillStatus((prev) => {
+            if (normalizedStatus === 'running') return 'running';
+            if (normalizedStatus === 'failure' || normalizedStatus === 'error') return 'error';
+            if (normalizedStatus === 'success') return prev === 'error' ? prev : 'success';
+            return prev;
+          });
           setNodes((nds) => {
-		             if (typed.stepId) {
-		               return nds.map((node) => (
-		                 node.id === typed.stepId
-		                   ? {
-		                       ...node,
-		                       data: {
-		                         ...node.data,
-		                         status: normalizedStatus,
-		                         intentId: typed.intentId,
-		                         logs: normalizedStatus === 'running' ? [] : (node.data as any).logs
-		                       }
-		                     }
-		                   : node
-		               ));
+               const stepId = String(typed.stepId || '').trim();
+               const hasIndex = typeof typed.index === 'number' && Number.isFinite(typed.index);
+               const applyStatus = (node: any) => ({
+                 ...node,
+                 data: {
+                   ...node.data,
+                   status: normalizedStatus,
+                   intentId: typed.intentId,
+                   logs: normalizedStatus === 'running' ? [] : (node.data as any).logs
+                 }
+               });
+
+		             if (stepId) {
+                   let matched = false;
+		               const byStepId = nds.map((node) => {
+                     if (String(node.id) === stepId) {
+                       matched = true;
+                       return applyStatus(node);
+                     }
+                     return node;
+                   });
+                   if (matched) {
+                     return byStepId;
+                   }
 		             }
 
 		             // Fallback: map by linear index (older engine events)
-		             if (typed.index !== undefined) {
+		             if (hasIndex) {
 		               const actionNodes = nds.filter(n => n.id !== 'start');
-		               const targetNode = actionNodes[typed.index];
+		               const targetNode = actionNodes[typed.index as number];
 		               if (!targetNode) return nds;
-		               return nds.map((node) => (
-		                 node.id === targetNode.id
-		                   ? {
-		                       ...node,
-		                       data: {
-		                         ...node.data,
-		                         status: normalizedStatus,
-		                         intentId: typed.intentId,
-		                         logs: normalizedStatus === 'running' ? [] : (node.data as any).logs
-		                       }
-		                     }
-		                   : node
-		               ));
+		               return nds.map((node) => (node.id === targetNode.id ? applyStatus(node) : node));
 		             }
 
 	             return nds;
@@ -1516,7 +1710,7 @@ function Flow({
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [reactFlowInstance, drawerNodeId, runPillStatus]); // Dependency on reactFlowInstance for fitView
+  }, [reactFlowInstance]); // Keep message listener stable to avoid missing fast execution events.
 
   // Persist current graph in webview state to survive reloads.
   useEffect(() => {
@@ -1607,13 +1801,29 @@ function Flow({
 	          selectedRun.steps.forEach((step: any, i: number) => {
 	            const t = setTimeout(() => {
 	              setNodes((nds) => {
-	                const targetNodeId = step.stepId
-	                  ? String(step.stepId)
-	                  : (typeof step.index === 'number' ? nds.filter(n => n.id !== 'start')[step.index]?.id : undefined);
+	                const stepId = String(step.stepId || '').trim();
+	                let targetNodeId: string | undefined;
+	                if (stepId) {
+	                  const byId = nds.find((n) => String(n.id) === stepId);
+	                  if (byId) {
+	                    targetNodeId = byId.id;
+	                  }
+	                }
+	                if (!targetNodeId && typeof step.index === 'number') {
+	                  targetNodeId = nds.filter(n => n.id !== 'start')[step.index]?.id;
+	                }
 	                if (!targetNodeId) return nds;
 
 	                return nds.map(n => (
-	                  n.id === targetNodeId ? { ...n, data: { ...n.data, status: step.status } } : n
+	                  n.id === targetNodeId
+	                    ? {
+	                        ...n,
+	                        data: {
+	                          ...n.data,
+	                          status: String(step.status) === 'failure' ? 'error' : step.status
+	                        }
+	                      }
+	                    : n
 	                ));
 	              });
 	            }, (i + 1) * 600);
@@ -1629,6 +1839,25 @@ function Flow({
       const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
       return v || fallback;
     };
+    const normalizeStatus = (raw: unknown): 'idle' | 'running' | 'success' | 'error' => {
+      const value = String(raw || 'idle').toLowerCase();
+      if (value === 'running') return 'running';
+      if (value === 'success') return 'success';
+      if (value === 'failure' || value === 'error') return 'error';
+      return 'idle';
+    };
+    const pickEdgeStatus = (
+      sourceStatus: 'idle' | 'running' | 'success' | 'error',
+      targetStatus: 'idle' | 'running' | 'success' | 'error'
+    ): 'idle' | 'running' | 'success' | 'error' => {
+      if (targetStatus === 'running' || sourceStatus === 'running') return 'running';
+      if (targetStatus === 'error') return 'error';
+      if (targetStatus === 'success') return 'success';
+      if (sourceStatus === 'error') return 'error';
+      if (sourceStatus === 'success') return 'success';
+      return 'idle';
+    };
+
     const edgeIdle = readColor('--ir-edge-idle', 'var(--vscode-editor-foreground)');
     const edgeRunning = readColor('--ir-edge-running', '#007acc');
     const edgeSuccess = readColor('--ir-edge-success', '#4caf50');
@@ -1637,23 +1866,39 @@ function Flow({
     setEdges((eds) =>
       eds.map((edge) => {
         const sourceNode = nodes.find((n) => n.id === edge.source);
+        const targetNode = nodes.find((n) => n.id === edge.target);
         if (!sourceNode) return edge;
 
-        const status = (sourceNode.data?.status as string) || 'idle';
+        const sourceStatus = normalizeStatus(sourceNode.data?.status);
+        const targetStatus = normalizeStatus(targetNode?.data?.status);
+        const status = pickEdgeStatus(sourceStatus, targetStatus);
         let stroke = edgeIdle;
         if (status === 'running') stroke = edgeRunning;
         else if (status === 'success') stroke = edgeSuccess;
-        else if (status === 'failure' || status === 'error') stroke = edgeFailure;
+        else if (status === 'error') stroke = edgeFailure;
 
         const nextAnimated = status === 'running';
-        const nextDash = status === 'running' ? '7 5' : undefined;
+        const nextDash = status === 'running' ? '6 6' : undefined;
+        const nextStrokeWidth = status === 'running' ? 2.5 : 2;
         const currentDash = (edge.style as any)?.strokeDasharray;
+        const currentStrokeWidth = Number((edge.style as any)?.strokeWidth || 0);
+        const baseClassName = String(edge.className || '').replace(/\bir-edge-running\b/g, '').trim();
+        const nextClassName = status === 'running'
+          ? [baseClassName, 'ir-edge-running'].filter(Boolean).join(' ')
+          : baseClassName;
 
         // Update if changed
-        if (edge.style?.stroke !== stroke || edge.animated !== nextAnimated || currentDash !== nextDash) {
+        if (
+          edge.style?.stroke !== stroke
+          || edge.animated !== nextAnimated
+          || currentDash !== nextDash
+          || currentStrokeWidth !== nextStrokeWidth
+          || String(edge.className || '') !== nextClassName
+        ) {
           return {
             ...edge,
-            style: { ...edge.style, stroke, strokeWidth: 2, strokeDasharray: nextDash },
+            className: nextClassName || undefined,
+            style: { ...edge.style, stroke, strokeWidth: nextStrokeWidth, strokeDasharray: nextDash },
             animated: nextAnimated,
             markerEnd: { type: MarkerType.ArrowClosed, color: stroke }
           };
@@ -1941,6 +2186,20 @@ function Flow({
     } else {
       console.log('Run Pipeline From Here (Mock):', pipeline);
     }
+  };
+
+  const resetRuntimeUiState = () => {
+    setRunPreviewIds([]);
+    setRunPillStatus('idle');
+    setNodes((nds) =>
+      nds.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          status: 'idle'
+        }
+      }))
+    );
   };
 
   const toggleFocusGraph = () => {
@@ -2411,23 +2670,30 @@ function Flow({
               {filteredQuickAddItems.length === 0 && (
                 <div style={{ fontSize: '12px', opacity: 0.7, padding: '6px' }}>No results</div>
               )}
-              {filteredQuickAddItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="quick-add-item"
-                  style={{
-                    padding: '6px 8px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '12px'
-                  }}
-                  onClick={() => {
-                    addNodeFromItem(item, quickAddPos || undefined, quickAddEdge);
-                    setQuickAddOpen(false);
-                    setQuickAddEdge(null);
-                  }}
-                >
-                  {item.label}
+              {Array.from(quickAddGroupedItems.entries()).map(([category, items]) => (
+                <div key={category} style={{ marginBottom: '6px' }}>
+                  <div style={{ fontSize: '10px', opacity: 0.65, padding: '4px 6px' }}>
+                    {categoryTitleMap.get(category) || category}
+                  </div>
+                  {items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="quick-add-item"
+                      style={{
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '12px'
+                      }}
+                      onClick={() => {
+                        addNodeFromItem(item, quickAddPos || undefined, quickAddEdge);
+                        setQuickAddOpen(false);
+                        setQuickAddEdge(null);
+                      }}
+                    >
+                      {item.label}
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -3010,19 +3276,26 @@ function Flow({
                 {filteredDockItems.length === 0 && (
                   <div style={{ fontSize: '12px', opacity: 0.7, padding: '6px' }}>No results</div>
                 )}
-                {filteredDockItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="quick-add-item"
-                    style={{
-                      padding: '6px 8px',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '12px'
-                    }}
-                    onClick={() => addNodeFromItem(item, lastCanvasPos || undefined, null)}
-                  >
-                    {item.label}
+                {Array.from(dockGroupedItems.entries()).map(([category, items]) => (
+                  <div key={category} style={{ marginBottom: '6px' }}>
+                    <div style={{ fontSize: '10px', opacity: 0.65, padding: '4px 6px' }}>
+                      {categoryTitleMap.get(category) || category}
+                    </div>
+                    {items.map((item) => (
+                      <div
+                        key={item.id}
+                        className="quick-add-item"
+                        style={{
+                          padding: '6px 8px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '12px'
+                        }}
+                        onClick={() => addNodeFromItem(item, lastCanvasPos || undefined, null)}
+                      >
+                        {item.label}
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
@@ -3184,11 +3457,33 @@ function Flow({
              </button>
            </div>
          )}
-       </div>
+        </div>
 
-       <button
-         onClick={autoLayout}
-         style={{
+        {graphToast && (
+          <div
+            className="nodrag"
+            style={{
+              position: 'absolute',
+              bottom: '68px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 995,
+              background: 'var(--vscode-editorWidget-background)',
+              border: '1px solid var(--vscode-editorWidget-border)',
+              borderRadius: '999px',
+              padding: '6px 12px',
+              fontSize: '11px',
+              color: 'var(--vscode-foreground)',
+              boxShadow: '0 4px 14px rgba(0,0,0,0.32)'
+            }}
+          >
+            {graphToast}
+          </div>
+        )}
+
+        <button
+          onClick={autoLayout}
+          style={{
            position: 'absolute',
            top: '10px',
            right: '260px',
@@ -3277,12 +3572,46 @@ function Flow({
              <button className="nodrag" onClick={() => setShowMiniMap(v => !v)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
                {showMiniMap ? 'MiniMap on' : 'MiniMap off'}
              </button>
-             <button className="nodrag" onClick={() => setShowControls(v => !v)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
-               {showControls ? 'Controls on' : 'Controls off'}
-             </button>
-             <button
-               className="nodrag"
-               onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, false)}
+              <button className="nodrag" onClick={() => setShowControls(v => !v)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
+                {showControls ? 'Controls on' : 'Controls off'}
+              </button>
+              <button
+                className="nodrag"
+                onClick={undoGraph}
+                disabled={!canUndo}
+                style={{
+                  background: canUndo ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
+                  color: canUndo ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
+                  border: 'none',
+                  borderRadius: '4px',
+                  padding: '6px 8px',
+                  cursor: canUndo ? 'pointer' : 'not-allowed',
+                  fontSize: '11px'
+                }}
+                title="Undo graph change (Ctrl+Z)"
+              >
+                Undo
+              </button>
+              <button
+                className="nodrag"
+                onClick={redoGraph}
+                disabled={!canRedo}
+                style={{
+                  background: canRedo ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
+                  color: canRedo ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
+                  border: 'none',
+                  borderRadius: '4px',
+                  padding: '6px 8px',
+                  cursor: canRedo ? 'pointer' : 'not-allowed',
+                  fontSize: '11px'
+                }}
+                title="Redo graph change (Ctrl+Y / Ctrl+Shift+Z)"
+              >
+                Redo
+              </button>
+              <button
+                className="nodrag"
+                onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, false)}
                disabled={!selectedNodeId}
                style={{
                  background: selectedNodeId ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
@@ -3296,6 +3625,22 @@ function Flow({
                title={selectedNodeId ? 'Run from selected node' : 'Select a node first'}
              >
                Run selected
+             </button>
+             <button
+               className="nodrag"
+               onClick={resetRuntimeUiState}
+               style={{
+                 background: 'var(--vscode-button-secondaryBackground)',
+                 color: 'var(--vscode-button-secondaryForeground)',
+                 border: 'none',
+                 borderRadius: '4px',
+                 padding: '6px 8px',
+                 cursor: 'pointer',
+                 fontSize: '11px'
+               }}
+               title="Reset runtime visual statuses"
+             >
+               Reset state
              </button>
            </div>
          )}
@@ -3324,22 +3669,40 @@ function Flow({
  }
 
 export default function App() {
+  const initialPreset = normalizeUiPreset(window.initialData?.uiPreset || { theme: { tokens: defaultThemeTokens } });
+  const DEFAULT_SIDEBAR_WIDTH = 300;
+  const MIN_SIDEBAR_WIDTH = 220;
+  const MAX_SIDEBAR_WIDTH = 520;
   const [commandGroups, setCommandGroups] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<any>(null);
   const [restoreRun, setRestoreRun] = useState<any>(null);
-  const [themeTokens, setThemeTokens] = useState(() => tokensFromPreset(window.initialData?.uiPreset || { theme: { tokens: defaultThemeTokens } }));
+  const [uiPreset, setUiPreset] = useState<UiPreset>(() => initialPreset);
+  const [uiPresetRelease, setUiPresetRelease] = useState<UiPreset>(() => normalizeUiPreset(window.initialData?.uiPresetRelease || initialPreset));
   const [adminMode, setAdminMode] = useState<boolean>(!!window.initialData?.adminMode);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [sidebarTab, setSidebarTab] = useState<'providers' | 'history' | 'environment' | 'studio'>('providers');
+  const [sidebarWidth, setSidebarWidth] = useState<number>(DEFAULT_SIDEBAR_WIDTH);
+  const [sidebarTab, setSidebarTab] = useState<string>(() => {
+    const firstVisible = initialPreset.sidebar.tabs.find(tab => tab.visible);
+    return firstVisible?.id || initialPreset.sidebar.tabs[0]?.id || 'nodes';
+  });
+  const sidebarResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  const visibleSidebarTabs = useMemo(
+    () => (uiPreset.sidebar.tabs || []).filter(tab => tab.visible !== false),
+    [uiPreset]
+  );
 
   useEffect(() => {
     // Restore ephemeral UI state from VS Code webview state
     try {
       const st = vscode?.getState?.() || {};
       if (typeof st.sidebarCollapsed === 'boolean') setSidebarCollapsed(st.sidebarCollapsed);
-      if (st.sidebarTab === 'providers' || st.sidebarTab === 'history' || st.sidebarTab === 'environment' || st.sidebarTab === 'studio') {
-        setSidebarTab(st.sidebarTab);
+      if (typeof st.sidebarTab === 'string' && st.sidebarTab.trim()) {
+        setSidebarTab(st.sidebarTab.trim());
+      }
+      if (typeof st.sidebarWidth === 'number' && Number.isFinite(st.sidebarWidth)) {
+        setSidebarWidth(Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, st.sidebarWidth)));
       }
     } catch {
       // ignore
@@ -3353,7 +3716,10 @@ export default function App() {
         setHistory(window.initialData.history);
       }
       if (window.initialData.uiPreset) {
-        setThemeTokens(tokensFromPreset(window.initialData.uiPreset));
+        setUiPreset(normalizeUiPreset(window.initialData.uiPreset));
+      }
+      if (window.initialData.uiPresetRelease) {
+        setUiPresetRelease(normalizeUiPreset(window.initialData.uiPresetRelease));
       }
       if (typeof window.initialData.adminMode === 'boolean') {
         setAdminMode(!!window.initialData.adminMode);
@@ -3362,14 +3728,15 @@ export default function App() {
 
     const handleMessage = (event: MessageEvent) => {
        if (event.data?.type === 'historyUpdate') {
-           console.log('History updated:', event.data.history);
            setHistory(event.data.history);
            // If history is cleared, clear selected run
            if (event.data.history.length === 0) {
                setSelectedRun(null);
            }
        } else if (event.data?.type === 'uiPresetUpdate') {
-           setThemeTokens(tokensFromPreset(event.data.uiPreset));
+           setUiPreset(normalizeUiPreset(event.data.uiPreset));
+       } else if (event.data?.type === 'uiPresetReleaseUpdate') {
+           setUiPresetRelease(normalizeUiPreset(event.data.uiPreset));
        } else if (event.data?.type === 'adminModeUpdate') {
            setAdminMode(!!event.data.adminMode);
        }
@@ -3383,24 +3750,74 @@ export default function App() {
       if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         setSidebarCollapsed((v) => !v);
+        return;
+      }
+      if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('intentRouter.focusSidebarSearch'));
+        return;
+      }
+      if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('intentRouter.openQuickAdd'));
+        return;
+      }
+      if (e.ctrlKey && !e.altKey && !e.metaKey) {
+        const digit = Number.parseInt(e.key, 10);
+        if (Number.isInteger(digit) && digit >= 1 && digit <= 9) {
+          const targetTab = visibleSidebarTabs[digit - 1];
+          if (targetTab) {
+            e.preventDefault();
+            setSidebarTab(targetTab.id);
+          }
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [visibleSidebarTabs]);
+
+  useEffect(() => {
+    if (visibleSidebarTabs.length === 0) {
+      return;
+    }
+    const stillExists = visibleSidebarTabs.some(tab => tab.id === sidebarTab);
+    if (!stillExists) {
+      setSidebarTab(visibleSidebarTabs[0].id);
+    }
+  }, [visibleSidebarTabs, sidebarTab]);
 
   useEffect(() => {
     try {
       const prev = vscode?.getState?.() || {};
-      vscode?.setState?.({ ...prev, sidebarCollapsed, sidebarTab });
+      vscode?.setState?.({ ...prev, sidebarCollapsed, sidebarTab, sidebarWidth });
     } catch {
       // ignore
     }
-  }, [sidebarCollapsed, sidebarTab]);
+  }, [sidebarCollapsed, sidebarTab, sidebarWidth]);
 
   useEffect(() => {
-    applyThemeTokensToRoot(themeTokens);
-  }, [themeTokens]);
+    const onMouseMove = (event: MouseEvent) => {
+      const drag = sidebarResizeRef.current;
+      if (!drag || sidebarCollapsed) return;
+      const delta = event.clientX - drag.startX;
+      const next = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, drag.startWidth + delta));
+      setSidebarWidth(next);
+    };
+    const onMouseUp = () => {
+      sidebarResizeRef.current = null;
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    applyThemeTokensToRoot(uiPreset.theme.tokens);
+  }, [uiPreset.theme.tokens]);
 
   // When clicking an active run again or clicking clear, we might want to toggle?
   // For now, let's allow re-selection to replay.
@@ -3410,17 +3827,42 @@ export default function App() {
     <RegistryContext.Provider value={{ commandGroups }}>
       <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row', position: 'relative' }}>
          {!sidebarCollapsed && (
-           <Sidebar
-              tab={sidebarTab}
-              onTabChange={setSidebarTab}
-              history={history}
-              adminMode={adminMode}
-              onSelectHistory={setSelectedRun}
-              onRestoreHistory={(run) => {
-                  setRestoreRun(run);
-                  setSelectedRun(null); // Stop playback/clear selection
-              }}
-           />
+           <>
+             <div
+               style={{
+                 width: `${sidebarWidth}px`,
+                 minWidth: `${MIN_SIDEBAR_WIDTH}px`,
+                 maxWidth: `${MAX_SIDEBAR_WIDTH}px`,
+                 height: '100%',
+                 display: 'flex'
+               }}
+             >
+               <Sidebar
+                   tab={sidebarTab}
+                   onTabChange={setSidebarTab}
+                   tabs={visibleSidebarTabs}
+                   uiPreset={uiPreset}
+                   uiPresetRelease={uiPresetRelease}
+                   history={history}
+                   adminMode={adminMode}
+                   onSelectHistory={setSelectedRun}
+                  onRestoreHistory={(run) => {
+                      setRestoreRun(run);
+                      setSelectedRun(null); // Stop playback/clear selection
+                  }}
+               />
+             </div>
+             <div
+               className="sidebar-resizer"
+               onMouseDown={(event) => {
+                 sidebarResizeRef.current = { startX: event.clientX, startWidth: sidebarWidth };
+               }}
+               onDoubleClick={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
+               title="Drag to resize sidebar (double-click to reset)"
+               aria-label="Resize sidebar"
+               role="separator"
+             />
+           </>
          )}
          <div style={{ flex: 1, position: 'relative' }}>
             <button
@@ -3446,6 +3888,7 @@ export default function App() {
 	             <Flow
 	                selectedRun={selectedRun}
 	                restoreRun={restoreRun}
+                  uiPreset={uiPreset}
                   sidebarCollapsed={sidebarCollapsed}
                   onSetSidebarCollapsed={setSidebarCollapsed}
 	                onRestoreHandled={() => {

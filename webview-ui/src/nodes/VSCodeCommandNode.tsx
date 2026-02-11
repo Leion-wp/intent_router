@@ -3,11 +3,20 @@ import { Handle, Position, NodeProps } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext } from '../App';
 import IoSpec from '../components/IoSpec';
 
+const STATUS_COLORS = {
+  idle: 'var(--vscode-charts-blue)',
+  running: 'var(--ir-status-running)',
+  success: 'var(--ir-status-success)',
+  failure: 'var(--ir-status-error)',
+  error: 'var(--ir-status-error)'
+} as const;
+
 const VSCodeCommandNode = ({ data, id }: NodeProps) => {
   const { isRunPreviewNode } = useContext(FlowRuntimeContext);
   const { updateNodeData } = useContext(FlowEditorContext);
   const [commandId, setCommandId] = useState<string>((data.commandId as string) || '');
   const [argsJson, setArgsJson] = useState<string>((data.argsJson as string) || '');
+  const [status, setStatus] = useState<string>(String((data.status as string) || 'idle'));
   const [error, setError] = useState<string>('');
   const [label, setLabel] = useState<string>((data.label as string) || '');
   const [editingLabel, setEditingLabel] = useState(false);
@@ -28,7 +37,8 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
     if (nextCommandId !== commandId) setCommandId(nextCommandId);
     if (nextArgsJson !== argsJson) setArgsJson(nextArgsJson);
     if (data.label !== undefined) setLabel((data.label as string) || '');
-  }, [data.commandId, data.argsJson]);
+    setStatus(String((data.status as string) || 'idle'));
+  }, [data.commandId, data.argsJson, data.label, data.status]);
 
   useEffect(() => {
     if (data.kind !== 'vscodeCommand') {
@@ -48,6 +58,11 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
     }
   }, [commandId, argsJson]);
 
+  const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
+  const runningGlow = status === 'running' ? `0 0 10px ${borderColor}` : '';
+  const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : '';
+  const boxShadow = [runningGlow, previewGlow].filter(Boolean).join(', ') || 'none';
+
   return (
     <div
       style={{
@@ -55,8 +70,8 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
         padding: '10px',
         borderRadius: '5px',
         background: 'var(--vscode-editor-background)',
-        border: '2px solid var(--vscode-charts-blue)',
-        boxShadow: isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none',
+        border: `2px solid ${borderColor}`,
+        boxShadow,
         minWidth: '260px',
         color: 'var(--vscode-editor-foreground)',
         fontFamily: 'var(--vscode-font-family)'
@@ -124,6 +139,7 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
               {label || 'VS Code Command'}
             </span>
           )}
+          {status !== 'idle' && <span className={`status-badge ${status}`}>{status}</span>}
         </div>
         <button
           className="nodrag"

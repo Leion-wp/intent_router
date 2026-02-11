@@ -6,7 +6,7 @@ html, body, #root {
 }
 
 :root {
-  --ir-run-idle: #0e639c;
+  --ir-run-idle: #717171;
   --ir-run-running: #007acc;
   --ir-run-success: #4caf50;
   --ir-run-error: #f44336;
@@ -78,9 +78,9 @@ html, body, #root {
 }
 
 .sidebar {
-  width: 280px;
-  min-width: 240px;
-  max-width: 360px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
   flex-shrink: 0;
   border-right: 1px solid var(--vscode-panel-border);
   padding: 16px;
@@ -91,6 +91,19 @@ html, body, #root {
   gap: 16px;
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
+}
+
+.sidebar-resizer {
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  border-right: 1px solid transparent;
+}
+
+.sidebar-resizer:hover {
+  background: rgba(0, 122, 204, 0.2);
+  border-right-color: var(--vscode-focusBorder);
 }
 
 .sidebar-header {
@@ -191,6 +204,20 @@ html, body, #root {
 .react-flow__controls-button:hover {
   background: var(--ir-controls-btn-hover-bg);
   color: var(--ir-controls-btn-hover-fg);
+}
+
+.react-flow__edge-path {
+  transition: stroke 0.14s ease, stroke-width 0.14s ease, stroke-dasharray 0.14s ease;
+}
+
+.react-flow__edge.ir-edge-running .react-flow__edge-path {
+  stroke-linecap: round;
+  animation: irEdgeDash 0.75s linear infinite;
+}
+
+@keyframes irEdgeDash {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -24; }
 }
 
 .status-badge {

@@ -44,5 +44,21 @@
         "buttonHoverForeground": "#ffffff"
       }
     }
+  },
+  "sidebar": {
+    "tabs": [
+      { "id": "nodes", "title": "NODES", "icon": "codicon-symbol-misc", "type": "pipelines", "visible": true },
+      { "id": "history", "title": "HISTORY", "icon": "codicon-history", "type": "history", "visible": true },
+      { "id": "env", "title": "ENV", "icon": "codicon-symbol-constant", "type": "settings", "visible": true },
+      { "id": "studio", "title": "STUDIO", "icon": "codicon-tools", "type": "studio", "visible": true }
+    ]
+  },
+  "palette": {
+    "categories": [
+      { "id": "context", "title": "Context", "visible": true, "order": 0 },
+      { "id": "providers", "title": "Providers", "visible": true, "order": 1 },
+      { "id": "custom", "title": "Custom", "visible": true, "order": 2 }
+    ],
+    "pinned": ["preset-terminal", "preset-form", "preset-switch"]
   }
 }

@@ -3,8 +3,8 @@
   "theme": {
     "tokens": {
       "runButton": {
-        "idle": "#4d5356",
-        "running": "#0068ad",
+        "idle": "#0e639c",
+        "running": "#007acc",
         "success": "#4caf50",
         "error": "#f44336",
         "foreground": "#ffffff"
@@ -12,11 +12,11 @@
       "addButton": {
         "background": "#0e639c",
         "foreground": "#ffffff",
-        "border": "#000000"
+        "border": "#3c3c3c"
       },
       "node": {
-        "background": "#000000",
-        "border": "#b0a0a0",
+        "background": "#1e1e1e",
+        "border": "#3c3c3c",
         "text": "#cccccc"
       },
       "status": {
@@ -44,5 +44,71 @@
         "buttonHoverForeground": "#ffffff"
       }
     }
+  },
+  "sidebar": {
+    "tabs": [
+      {
+        "id": "nodes",
+        "title": "NODES",
+        "icon": "codicon-symbol-misc",
+        "type": "pipelines",
+        "visible": true
+      },
+      {
+        "id": "history",
+        "title": "HISTORY",
+        "icon": "codicon-history",
+        "type": "history",
+        "visible": true
+      },
+      {
+        "id": "env",
+        "title": "ENV",
+        "icon": "codicon-symbol-constant",
+        "type": "settings",
+        "visible": true
+      },
+      {
+        "id": "studio",
+        "title": "STUDIO",
+        "icon": "codicon-tools",
+        "type": "studio",
+        "visible": true
+      },
+      {
+        "id": "test",
+        "title": "test",
+        "icon": "codicon-symbol-misc",
+        "type": "catalog",
+        "visible": true
+      }
+    ]
+  },
+  "palette": {
+    "categories": [
+      {
+        "id": "context",
+        "title": "Context",
+        "visible": true,
+        "order": 0
+      },
+      {
+        "id": "providers",
+        "title": "Providers",
+        "visible": true,
+        "order": 1
+      },
+      {
+        "id": "custom",
+        "title": "Custom",
+        "visible": true,
+        "order": 2
+      }
+    ],
+    "pinned": [
+      "preset-terminal",
+      "preset-form",
+      "preset-switch"
+    ]
   }
 }
