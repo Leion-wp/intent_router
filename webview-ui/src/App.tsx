@@ -6,18 +6,11 @@ import {
   BackgroundVariant,
   useNodesState,
   useEdgesState,
-  addEdge,
   MiniMap,
   ReactFlowProvider,
   Edge,
-  EdgeProps,
   Node,
-  Connection,
-  MarkerType,
-  Position,
-  BaseEdge,
-  EdgeLabelRenderer,
-  getBezierPath
+  Position
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import './index.css';
@@ -32,8 +25,49 @@ import CustomNode from './nodes/CustomNode';
 import FormNode from './nodes/FormNode';
 import SwitchNode from './nodes/SwitchNode';
 import ScriptNode from './nodes/ScriptNode';
-import { isInboundMessage, WebviewInboundMessage } from './types/messages';
-import { applyThemeTokensToRoot, defaultThemeTokens, tokensFromPreset } from './types/theme';
+import AppLayoutShell from './components/AppLayoutShell';
+import ChromeControlsPanel from './components/ChromeControlsPanel';
+import { edgeTypes } from './components/InsertableEdge';
+import FlowToasts from './components/FlowToasts';
+import NodeContextMenu from './components/NodeContextMenu';
+import NodeInspectorDrawer from './components/NodeInspectorDrawer';
+import QuickAddDock from './components/QuickAddDock';
+import QuickAddPalette from './components/QuickAddPalette';
+import RunControlBar from './components/RunControlBar';
+import { UiPreset } from './types/theme';
+import { useGraphHistory } from './hooks/useGraphHistory';
+import { useFlowKeyboardShortcuts } from './hooks/useFlowKeyboardShortcuts';
+import { useAppShellState } from './hooks/useAppShellState';
+import { useFlowChromePanel } from './hooks/useFlowChromePanel';
+import { useFlowCanvasInteractions } from './hooks/useFlowCanvasInteractions';
+import { useFlowConnectionHandlers } from './hooks/useFlowConnectionHandlers';
+import { useFlowDropHandlers } from './hooks/useFlowDropHandlers';
+import { useFlowHydrationMessages } from './hooks/useFlowHydrationMessages';
+import { useFocusGraphMode } from './hooks/useFocusGraphMode';
+import { useDrawerAutoPan } from './hooks/useDrawerAutoPan';
+import { usePipelineRunActions } from './hooks/usePipelineRunActions';
+import { usePipelineAutosave } from './hooks/usePipelineAutosave';
+import { usePersistedFlowGraphState } from './hooks/usePersistedFlowGraphState';
+import { useQuickAddActions } from './hooks/useQuickAddActions';
+import { useQuickAddCatalog } from './hooks/useQuickAddCatalog';
+import { useReactiveEdgeStyles } from './hooks/useReactiveEdgeStyles';
+import { useRunPlaybackEffects } from './hooks/useRunPlaybackEffects';
+import { useRunUiEffects } from './hooks/useRunUiEffects';
+import {
+  buildScriptCommand,
+  canonicalizeIntent,
+  firstMissingRequiredField,
+  inferScriptInterpreter
+} from './utils/pipelineUtils';
+import { computeHorizontalAutoLayout } from './utils/autoLayoutUtils';
+import {
+  buildGraphAdjacency,
+  buildPipelineUiSnapshot,
+  computeRunSubsetFromGraph,
+  topologicalSortWithSuccessPreference,
+  validateDisconnectedNodes
+} from './utils/flowGraphUtils';
+import { buildGraphFromPipeline, restoreGraphFromPipelineSnapshot } from './utils/pipelineLoadUtils';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
@@ -75,98 +109,6 @@ const nodeTypes = {
   scriptNode: ScriptNode
 };
 
-const InsertableEdge = (props: EdgeProps) => {
-  const {
-    id,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    markerEnd,
-    style,
-    data
-  } = props;
-
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition
-  });
-
-  return (
-    <>
-      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
-      <EdgeLabelRenderer>
-        <div
-          className="edge-insert-btn"
-          style={{
-            position: 'absolute',
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            pointerEvents: 'all',
-            zIndex: 5
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {(data as any)?.label && (
-            <div
-              style={{
-                position: 'absolute',
-                bottom: '24px',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                background: 'var(--vscode-editorWidget-background)',
-                border: '1px solid var(--vscode-editorWidget-border)',
-                color: 'var(--vscode-foreground)',
-                fontSize: '10px',
-                padding: '2px 6px',
-                borderRadius: '10px',
-                whiteSpace: 'nowrap',
-                opacity: 0.9
-              }}
-            >
-              {(data as any).label}
-            </div>
-          )}
-          <button
-            className="nodrag"
-            onClick={(e) => {
-              e.stopPropagation();
-              const onInsert = (data as any)?.onInsert;
-              if (typeof onInsert === 'function') {
-                onInsert(props, e.clientX, e.clientY);
-              }
-            }}
-            title="Insert node"
-            style={{
-              width: '20px',
-              height: '20px',
-              borderRadius: '10px',
-              border: '1px solid var(--vscode-editorWidget-border)',
-              background: 'var(--vscode-button-secondaryBackground)',
-              color: 'var(--vscode-button-secondaryForeground)',
-              cursor: 'pointer',
-              fontSize: '12px',
-              lineHeight: '18px',
-              padding: 0
-            }}
-          >
-            +
-          </button>
-        </div>
-      </EdgeLabelRenderer>
-    </>
-  );
-};
-
-const edgeTypes = {
-  insertable: InsertableEdge
-};
-
 declare global {
   interface Window {
     vscode: any;
@@ -191,96 +133,11 @@ const initialNodes: Node[] = [
 let idCounter = 0;
 const getId = () => `node_${idCounter++}`;
 
-function canonicalizeIntent(provider: string, capability: string): { provider: string; intent: string; capability: string } {
-  const fallbackProvider = (provider || '').trim() || 'terminal';
-  let cap = (capability || '').trim();
-
-  if (!cap) {
-    const intent = `${fallbackProvider}.run`;
-    return { provider: fallbackProvider, intent, capability: intent };
-  }
-
-  // If the capability already looks like a full id (e.g. "system.pause"), infer provider from it.
-  const inferredProvider = cap.includes('.') ? cap.split('.')[0] : fallbackProvider;
-  const finalProvider = (inferredProvider || '').trim() || fallbackProvider;
-
-  // If capability is a suffix (legacy), prefix it with provider.
-  if (!cap.includes('.')) {
-    cap = `${finalProvider}.${cap}`;
-  }
-
-  // Defensive: collapse repeated provider prefixes produced by older UI versions (e.g. "system.system.pause").
-  const dupPrefix = `${finalProvider}.${finalProvider}.`;
-  while (cap.startsWith(dupPrefix)) {
-    cap = `${finalProvider}.` + cap.slice(dupPrefix.length);
-  }
-
-  return { provider: finalProvider, intent: cap, capability: cap };
-}
-
-function inferScriptInterpreter(scriptPath: string): string {
-  const lower = String(scriptPath || '').trim().toLowerCase();
-  if (lower.endsWith('.ps1')) return 'pwsh -File';
-  if (lower.endsWith('.py')) return 'python';
-  if (lower.endsWith('.js')) return 'node';
-  if (lower.endsWith('.sh')) return 'bash';
-  return '';
-}
-
-function quoteShell(value: string): string {
-  const input = String(value || '');
-  if (!input) return '""';
-  if (!/[\s"]/g.test(input)) return input;
-  return `"${input.replace(/"/g, '\\"')}"`;
-}
-
-function buildScriptCommand(scriptPath: string, args: string, interpreter?: string): string {
-  const script = String(scriptPath || '').trim();
-  const argsString = String(args || '').trim();
-  const runtimeOverride = String(interpreter || '').trim();
-  const runtime = runtimeOverride || inferScriptInterpreter(script);
-  const lower = script.toLowerCase();
-
-  if (!runtimeOverride && lower.endsWith('.ps1')) {
-    const baseArg = `${quoteShell(script)}${argsString ? ` ${argsString}` : ''}`;
-    return `if (Get-Command pwsh -ErrorAction SilentlyContinue) { pwsh -File ${baseArg} } else { powershell -File ${baseArg} }`;
-  }
-
-  const prefix = runtime ? `${runtime} ` : '';
-  const base = `${prefix}${quoteShell(script)}`;
-  return argsString ? `${base} ${argsString}` : base;
-}
-
-function isRequiredValueMissing(value: any, type: string): boolean {
-  if (type === 'boolean') {
-    return value === undefined || value === null;
-  }
-  if (value === undefined || value === null) {
-    return true;
-  }
-  if (Array.isArray(value)) {
-    return value.length === 0;
-  }
-  if (typeof value === 'string') {
-    return value.trim().length === 0;
-  }
-  return false;
-}
-
-function firstMissingRequiredField(fields: any[], args: Record<string, any>): string | null {
-  for (const rawField of fields || []) {
-    const field = rawField || {};
-    if (!field.required) {
-      continue;
-    }
-    const name = String(field.name || '').trim();
-    if (!name) {
-      continue;
-    }
-    const type = String(field.type || 'string');
-    if (isRequiredValueMissing(args?.[name], type)) {
-      return name;
-    }
+function emitPipelineBuildError(message: string): null {
+  if (vscode) {
+    vscode.postMessage({ type: 'error', message });
+  } else {
+    alert(message);
   }
   return null;
 }
@@ -290,13 +147,15 @@ function Flow({
   restoreRun,
   onRestoreHandled,
   sidebarCollapsed,
-  onSetSidebarCollapsed
+  onSetSidebarCollapsed,
+  uiPreset
 }: {
   selectedRun: any,
   restoreRun: any,
   onRestoreHandled: () => void,
   sidebarCollapsed: boolean,
-  onSetSidebarCollapsed: (next: boolean) => void
+  onSetSidebarCollapsed: (next: boolean) => void,
+  uiPreset: UiPreset
 }) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChangeInternal] = useNodesState(initialNodes);
@@ -332,8 +191,6 @@ function Flow({
   const [runMenuOpen, setRunMenuOpen] = useState<boolean>(false);
   const [runPillStatus, setRunPillStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const previousSidebarCollapsedRef = useRef<boolean>(false);
-  const runPillResetTimerRef = useRef<number | null>(null);
   const chromePanelDragRef = useRef<{ dx: number; dy: number } | null>(null);
   const copiedNodeRef = useRef<Node | null>(null);
 
@@ -341,7 +198,6 @@ function Flow({
     (window.initialData?.environment as Record<string, string>) || {}
   );
   const pipelineUri = window.initialData?.pipelineUri as string | null | undefined;
-  const lastAutosavedRef = useRef<string>('');
 
   const nodesRef = useRef<any[]>(nodes);
   const envRef = useRef<Record<string, string>>(environment);
@@ -353,6 +209,19 @@ function Flow({
   useEffect(() => {
     envRef.current = environment;
   }, [environment]);
+
+  const {
+    canUndo,
+    canRedo,
+    graphToast,
+    undoGraph,
+    redoGraph
+  } = useGraphHistory({
+    nodes,
+    edges,
+    setNodes,
+    setEdges
+  });
 
   useEffect(() => {
     try {
@@ -425,15 +294,6 @@ function Flow({
     };
   }, [customNodes, customNodesById]);
 
-  type QuickAddItem = {
-    id: string;
-    label: string;
-    nodeType: 'promptNode' | 'repoNode' | 'actionNode' | 'vscodeCommandNode' | 'customNode' | 'formNode' | 'switchNode' | 'scriptNode';
-    provider?: string;
-    capability?: string;
-    customNodeId?: string;
-  };
-
   const getDefaultCapability = useCallback((providerName: string) => {
     const group = (commandGroups || []).find((g: any) => g.provider === providerName);
     const caps = group?.commands || [];
@@ -441,172 +301,38 @@ function Flow({
     return caps.find((c: any) => String(c.capability || '').endsWith('.run'))?.capability || caps[0].capability || '';
   }, [commandGroups]);
 
-  const presetItems: QuickAddItem[] = useMemo(() => ([
-    { id: 'preset-prompt', label: 'Prompt', nodeType: 'promptNode' },
-    { id: 'preset-form', label: 'Form', nodeType: 'formNode' },
-    { id: 'preset-switch', label: 'Switch', nodeType: 'switchNode' },
-    { id: 'preset-script', label: 'Script', nodeType: 'scriptNode' },
-    { id: 'preset-repo', label: 'Repo', nodeType: 'repoNode' },
-    { id: 'preset-terminal', label: 'Terminal', nodeType: 'actionNode', provider: 'terminal', capability: getDefaultCapability('terminal') },
-    { id: 'preset-system', label: 'System', nodeType: 'actionNode', provider: 'system', capability: getDefaultCapability('system') },
-    { id: 'preset-git', label: 'Git', nodeType: 'actionNode', provider: 'git', capability: getDefaultCapability('git') },
-    { id: 'preset-docker', label: 'Docker', nodeType: 'actionNode', provider: 'docker', capability: getDefaultCapability('docker') },
-    { id: 'preset-vscode', label: 'VS Code', nodeType: 'vscodeCommandNode' }
-  ]), [getDefaultCapability]);
+  const {
+    filteredQuickAddItems,
+    filteredDockItems,
+    categoryTitleMap,
+    quickAddGroupedItems,
+    dockGroupedItems,
+    paletteLeft,
+    paletteTop
+  } = useQuickAddCatalog({
+    commandGroups: commandGroups || [],
+    customNodes,
+    uiPreset,
+    quickAddQuery,
+    dockQuery,
+    quickAddAnchor,
+    getDefaultCapability
+  });
+  const { addNodeFromItem, openQuickAddPalette } = useQuickAddActions({
+    getId,
+    getDefaultCapability,
+    lastCanvasPos,
+    reactFlowInstance,
+    customNodesById,
+    setNodes,
+    setEdges,
+    setQuickAddEdge,
+    setQuickAddPos,
+    setQuickAddAnchor,
+    setQuickAddQuery,
+    setQuickAddOpen
+  });
 
-  const commandItems: QuickAddItem[] = useMemo(() => {
-    const items: QuickAddItem[] = [];
-    (commandGroups || []).forEach((g: any) => {
-      (g.commands || []).forEach((c: any) => {
-        const cap = String(c.capability || '');
-        if (!cap) return;
-        items.push({
-          id: `cmd-${g.provider}-${cap}`,
-          label: `${g.provider} · ${cap}`,
-          nodeType: 'actionNode',
-          provider: g.provider,
-          capability: cap
-        });
-      });
-    });
-    return items;
-  }, [commandGroups]);
-
-  const filterQuickAdd = useCallback((items: QuickAddItem[], query: string) => {
-    const q = (query || '').trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(i => i.label.toLowerCase().includes(q));
-  }, []);
-
-  const addNodeFromItem = useCallback((item: QuickAddItem, pos?: { x: number; y: number }, edge?: Edge | null) => {
-    const newId = getId();
-    const data: any = { status: 'idle' };
-    let type: any = item.nodeType;
-
-    if (item.nodeType === 'actionNode') {
-      data.provider = item.provider || 'terminal';
-      data.capability = item.capability || getDefaultCapability(item.provider || 'terminal');
-      data.args = {};
-    } else if (item.nodeType === 'customNode') {
-      const cnid = String(item.customNodeId || '').trim();
-      const def = cnid ? customNodesById.get(cnid) : undefined;
-      data.customNodeId = cnid;
-      data.title = def?.title || '';
-      data.intent = def?.intent || '';
-      data.schema = def?.schema || [];
-      data.mapping = def?.mapping;
-      data.args = {};
-      data.kind = 'custom';
-    } else if (item.nodeType === 'formNode') {
-      data.fields = [];
-      data.kind = 'form';
-    } else if (item.nodeType === 'switchNode') {
-      data.label = 'Switch';
-      data.variableKey = '';
-      data.routes = [];
-      data.kind = 'switch';
-    } else if (item.nodeType === 'scriptNode') {
-      data.scriptPath = '';
-      data.args = '';
-      data.cwd = '';
-      data.interpreter = '';
-      data.kind = 'script';
-    } else if (item.nodeType === 'promptNode') {
-      data.name = '';
-      data.value = '';
-      data.kind = 'prompt';
-    } else if (item.nodeType === 'repoNode') {
-      data.path = '';
-      data.kind = 'repo';
-    } else if (item.nodeType === 'vscodeCommandNode') {
-      data.commandId = '';
-      data.argsJson = '';
-    }
-
-    let position = pos;
-    if (!position) {
-      if (lastCanvasPos) position = lastCanvasPos;
-      else if (reactFlowInstance?.screenToFlowPosition) {
-        position = reactFlowInstance.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-      } else {
-        position = { x: 300, y: 200 };
-      }
-    }
-
-    if (edge && reactFlowInstance?.getNode) {
-      const sourceNode = reactFlowInstance.getNode(edge.source);
-      const targetNode = reactFlowInstance.getNode(edge.target);
-      if (sourceNode && targetNode) {
-        const sx = (sourceNode.positionAbsolute?.x ?? sourceNode.position.x) + (sourceNode.width || 0) / 2;
-        const sy = (sourceNode.positionAbsolute?.y ?? sourceNode.position.y) + (sourceNode.height || 0) / 2;
-        const tx = (targetNode.positionAbsolute?.x ?? targetNode.position.x) + (targetNode.width || 0) / 2;
-        const ty = (targetNode.positionAbsolute?.y ?? targetNode.position.y) + (targetNode.height || 0) / 2;
-        position = { x: (sx + tx) / 2, y: (sy + ty) / 2 };
-      }
-    }
-
-    const newNode: any = {
-      id: newId,
-      type,
-      data,
-      position
-    };
-
-    setNodes((nds) => nds.concat(newNode));
-
-    if (edge) {
-      setEdges((eds) => {
-        const remaining = eds.filter((e) => e.id !== edge.id);
-        const e1: any = {
-          id: `e-${edge.source}-${newId}-${Date.now()}`,
-          source: edge.source,
-          target: newId,
-          sourceHandle: edge.sourceHandle,
-          targetHandle: edge.targetHandle,
-          markerEnd: edge.markerEnd,
-          style: edge.style,
-          animated: edge.animated,
-          type: 'insertable'
-        };
-        const e2: any = {
-          id: `e-${newId}-${edge.target}-${Date.now() + 1}`,
-          source: newId,
-          target: edge.target,
-          markerEnd: edge.markerEnd,
-          style: edge.style,
-          animated: edge.animated,
-          type: 'insertable'
-        };
-        return remaining.concat([e1, e2]);
-      });
-    }
-  }, [getDefaultCapability, lastCanvasPos, reactFlowInstance, customNodesById]);
-
-  const customNodeItems: QuickAddItem[] = useMemo(() => {
-    return (customNodes || []).map((n: any) => {
-      const id = String(n?.id || '').trim();
-      const title = String(n?.title || id || 'Custom').trim();
-      return {
-        id: `custom-${id}`,
-        label: `Custom · ${title}`,
-        nodeType: 'customNode',
-        customNodeId: id
-      };
-    }).filter((i: any) => !!i.customNodeId);
-  }, [customNodes]);
-
-  const allQuickAddItems = useMemo(() => [...presetItems, ...customNodeItems, ...commandItems], [presetItems, customNodeItems, commandItems]);
-  const filteredQuickAddItems = useMemo(
-    () => filterQuickAdd(allQuickAddItems, quickAddQuery),
-    [allQuickAddItems, quickAddQuery, filterQuickAdd]
-  );
-  const filteredDockItems = useMemo(
-    () => filterQuickAdd(allQuickAddItems, dockQuery),
-    [allQuickAddItems, dockQuery, filterQuickAdd]
-  );
-
-  const paletteLeft = quickAddAnchor ? Math.min(quickAddAnchor.x, window.innerWidth - 280) : 0;
-  const paletteTop = quickAddAnchor ? Math.min(quickAddAnchor.y, window.innerHeight - 320) : 0;
 
   const onNodesChange = useCallback(
     (changes: any) => {
@@ -691,58 +417,29 @@ function Flow({
     setSelectedNodeId(cloneId);
   }, [lastCanvasPos, setNodes]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target) {
-        const tag = target.tagName?.toLowerCase();
-        const isEditable =
-          tag === 'input' ||
-          tag === 'textarea' ||
-          (target as any).isContentEditable === true;
-        if (isEditable) return;
-      }
-      if (e.key === 'Escape') {
-        if (quickAddOpen) setQuickAddOpen(false);
-        if (dockOpen) setDockOpen(false);
-      }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'c' && selectedNodeId && selectedNodeId !== 'start') {
-        e.preventDefault();
-        copyNodeById(selectedNodeId);
-      }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'v') {
-        e.preventDefault();
-        pasteCopiedNode();
-      }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'd' && selectedNodeId && selectedNodeId !== 'start') {
-        e.preventDefault();
-        duplicateNodeById(selectedNodeId);
-      }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId && selectedNodeId !== 'start') {
-        e.preventDefault();
-        const nodeId = selectedNodeId;
-        setNodes((prev) => prev.filter((entry: any) => entry.id !== nodeId));
-        setEdges((prev) => prev.filter((edge: any) => edge.source !== nodeId && edge.target !== nodeId));
-        setDrawerNodeId((entry) => (entry === nodeId ? null : entry));
-        setSelectedNodeId(null);
-      }
-      if (e.key.toLowerCase() === 'f') {
-        reactFlowInstance?.fitView?.({ duration: 200, padding: 0.2 });
-      }
-      if (e.key.toLowerCase() === 'z' && selectedNodeId && reactFlowInstance?.getNode) {
-        const node = reactFlowInstance.getNode(selectedNodeId);
-        if (node) {
-          const zoom = reactFlowInstance.getZoom?.() || 1;
-          const pos = node.positionAbsolute || node.position;
-          const cx = pos.x + (node.width || 0) / 2;
-          const cy = pos.y + (node.height || 0) / 2;
-          reactFlowInstance.setCenter?.(cx, cy, { zoom, duration: 200 });
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [quickAddOpen, dockOpen, reactFlowInstance, selectedNodeId, copyNodeById, pasteCopiedNode, duplicateNodeById, setNodes, setEdges]);
+  const deleteSelectedNode = useCallback(() => {
+    if (!selectedNodeId || selectedNodeId === 'start') return;
+    const nodeId = selectedNodeId;
+    setNodes((prev) => prev.filter((entry: any) => entry.id !== nodeId));
+    setEdges((prev) => prev.filter((edge: any) => edge.source !== nodeId && edge.target !== nodeId));
+    setDrawerNodeId((entry) => (entry === nodeId ? null : entry));
+    setSelectedNodeId(null);
+  }, [selectedNodeId, setNodes, setEdges]);
+
+  useFlowKeyboardShortcuts({
+    quickAddOpen,
+    dockOpen,
+    setQuickAddOpen,
+    setDockOpen,
+    selectedNodeId,
+    copyNodeById,
+    pasteCopiedNode,
+    duplicateNodeById,
+    deleteSelectedNode,
+    undoGraph,
+    redoGraph,
+    reactFlowInstance
+  });
 
   useEffect(() => {
     const onDocClick = () => setContextMenu(null);
@@ -750,88 +447,17 @@ function Flow({
     return () => document.removeEventListener('click', onDocClick);
   }, []);
 
+  useEffect(() => {
+    const onOpenQuickAdd = () => openQuickAddPalette();
+    window.addEventListener('intentRouter.openQuickAdd', onOpenQuickAdd as EventListener);
+    return () => window.removeEventListener('intentRouter.openQuickAdd', onOpenQuickAdd as EventListener);
+  }, [openQuickAddPalette]);
+
   const computeRunSubset = useCallback(
     (startNodeId: string) => {
-      const successEdges = edges.filter((e: any) => e.sourceHandle !== 'failure');
-      const failureEdges = edges.filter((e: any) => e.sourceHandle === 'failure');
-
-      const successAdj = new Map<string, string[]>();
-      const allAdj = new Map<string, string[]>();
-      const reverseSuccessAdj = new Map<string, string[]>();
-
-      for (const n of nodes) {
-        successAdj.set(n.id, []);
-        allAdj.set(n.id, []);
-        reverseSuccessAdj.set(n.id, []);
-      }
-
-      for (const e of successEdges) {
-        if (successAdj.has(e.source) && successAdj.has(e.target)) {
-          successAdj.get(e.source)!.push(e.target);
-          allAdj.get(e.source)!.push(e.target);
-          reverseSuccessAdj.get(e.target)!.push(e.source);
-        }
-      }
-
-      for (const e of failureEdges) {
-        if (allAdj.has(e.source) && allAdj.has(e.target)) {
-          allAdj.get(e.source)!.push(e.target);
-        }
-      }
-
-      // 1) Success closure (preview set)
-      const preview = new Set<string>();
-      const q1: string[] = [startNodeId];
-      while (q1.length) {
-        const u = q1.shift()!;
-        if (preview.has(u)) continue;
-        preview.add(u);
-        for (const v of successAdj.get(u) || []) {
-          q1.push(v);
-        }
-      }
-
-      // 2) Failure closure (allowed but not previewed)
-      const failureAllowed = new Set<string>();
-      const q2: string[] = Array.from(preview);
-      while (q2.length) {
-        const u = q2.shift()!;
-        for (const e of failureEdges.filter((x: any) => x.source === u)) {
-          const v = e.target;
-          if (!failureAllowed.has(v)) {
-            failureAllowed.add(v);
-            q2.push(v);
-          }
-        }
-      }
-
-      // 3) Context closure: upstream success ancestors, but only keep Prompt/Repo nodes as prerequisites
-      const upstream = new Set<string>();
-      const q3: string[] = [startNodeId];
-      while (q3.length) {
-        const u = q3.shift()!;
-        for (const v of reverseSuccessAdj.get(u) || []) {
-          if (!upstream.has(v)) {
-            upstream.add(v);
-            q3.push(v);
-          }
-        }
-      }
-
-      const nodeById = new Map(nodes.map((n: any) => [n.id, n]));
-      const context = new Set<string>();
-      for (const id of upstream) {
-        const n = nodeById.get(id);
-        if (!n) continue;
-        if (n.type === 'promptNode' || n.type === 'repoNode') {
-          context.add(id);
-        }
-      }
-
-      const allowed = new Set<string>([...preview, ...failureAllowed, ...context]);
-      return { allowed, preview };
+      return computeRunSubsetFromGraph(startNodeId, nodes, edges);
     },
-    [edges, nodes, customNodesById]
+    [edges, nodes]
   );
 
   const syncIdCounterFromNodes = useCallback((list: Array<any>) => {
@@ -905,94 +531,16 @@ function Flow({
         ? edges.filter((e: any) => allowedNodeIds.has(e.source) && allowedNodeIds.has(e.target))
         : edges;
 
-      // 1. Build Graph Adjacency List
-      const nodeMap = new Map(effectiveNodes.map(n => [n.id, n]));
-      const adj = new Map<string, string[]>();
-      const inDegree = new Map<string, number>();
-      const failureMap = new Map<string, string>(); // Source -> Target
-      const successEdgePref = new Map<string, string>(); // Source -> Target
+      const { nodeMap, adj, inDegree, failureMap, successEdgePref } = buildGraphAdjacency(effectiveNodes, effectiveEdges);
 
-      effectiveNodes.forEach(n => {
-        adj.set(n.id, []);
-        inDegree.set(n.id, 0);
-      });
-
-      effectiveEdges.forEach(e => {
-        if (adj.has(e.source) && adj.has(e.target)) {
-          adj.get(e.source)?.push(e.target);
-          inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
-        }
-
-        if (e.sourceHandle === 'failure') {
-          failureMap.set(e.source, e.target);
-        } else {
-          successEdgePref.set(e.source, e.target);
-        }
-      });
-
-      // 2. Check for Disconnected Nodes (Hard Error)
-      if (effectiveNodes.length > 1) {
-        const hasStart = effectiveNodes.some((n: any) => n?.id === 'start');
-        const hasExecutable = effectiveNodes.some((n: any) => n?.type !== 'startNode' && n?.type !== 'input');
-        if (hasStart && hasExecutable && (adj.get('start')?.length || 0) === 0) {
-          const msg = 'Start node must be connected.';
-          if (vscode) vscode.postMessage({ type: 'error', message: msg });
-          else alert(msg);
-          return null;
-        }
-
-        const isolated = effectiveNodes.find(
-          n => n.type !== 'startNode' && n.type !== 'input' && (inDegree.get(n.id) === 0) && (adj.get(n.id)?.length === 0)
-        );
-        if (isolated) {
-          const msg = `Node '${(isolated as any).data?.label || isolated.type}' is not connected.`;
-          if (vscode) vscode.postMessage({ type: 'error', message: msg });
-          else alert(msg);
-          return null;
-        }
+      const disconnectedError = validateDisconnectedNodes(effectiveNodes, adj, inDegree);
+      if (disconnectedError) {
+        return emitPipelineBuildError(disconnectedError);
       }
 
-      // 3. Topological Sort (Kahn's Algorithm with Success Priority)
-      const queue: string[] = [];
-      inDegree.forEach((degree, id) => {
-        if (degree === 0) queue.push(id);
-      });
-
-      const sortedIds: string[] = [];
-      let lastProcessedId: string | null = null;
-
-      while (queue.length > 0) {
-        let u: string;
-        let index = 0;
-
-        // Try to pick the "success" successor of the last processed node
-        if (lastProcessedId && successEdgePref.has(lastProcessedId)) {
-          const preferredNext = successEdgePref.get(lastProcessedId)!;
-          const preferredIndex = queue.indexOf(preferredNext);
-          if (preferredIndex !== -1) {
-            index = preferredIndex;
-          }
-        }
-
-        u = queue.splice(index, 1)[0];
-        sortedIds.push(u);
-        lastProcessedId = u;
-
-        const neighbors = adj.get(u) || [];
-        neighbors.forEach(v => {
-          inDegree.set(v, (inDegree.get(v)! - 1));
-          if (inDegree.get(v) === 0) {
-            queue.push(v);
-          }
-        });
-      }
-
-      // 4. Cycle Detection
+      const sortedIds = topologicalSortWithSuccessPreference(adj, inDegree, successEdgePref);
       if (sortedIds.length !== effectiveNodes.length) {
-        const msg = 'Cycle detected in pipeline graph.';
-        if (vscode) vscode.postMessage({ type: 'error', message: msg });
-        else alert(msg);
-        return null;
+        return emitPipelineBuildError('Cycle detected in pipeline graph.');
       }
 
       // 5. Map Sorted Nodes to Steps
@@ -1140,9 +688,7 @@ function Flow({
       });
 
       if (stepBuildError) {
-        if (vscode) vscode.postMessage({ type: 'error', message: stepBuildError });
-        else alert(stepBuildError);
-        return null;
+        return emitPipelineBuildError(stepBuildError);
       }
 
       const start = nodes.find((n: any) => n.id === 'start');
@@ -1155,25 +701,7 @@ function Flow({
         intent: 'pipeline.run',
         steps,
         meta: {
-          ui: {
-            // Avoid persisting runtime-only UI state (status/logs/edge coloring) into the pipeline file.
-            nodes: nodes.map((n: any) => {
-              const { status, logs, intentId, ...rest } = (n.data || {}) as any;
-              return {
-                ...n,
-                data: { ...rest, status: 'idle' }
-              };
-            }),
-            edges: edges.map((e: any) => {
-              const { style, animated, ...rest } = e;
-              if (rest.markerEnd && typeof rest.markerEnd === 'object') {
-                const markerEnd = { ...(rest.markerEnd as any) };
-                delete markerEnd.color;
-                return { ...rest, markerEnd };
-              }
-              return rest;
-            })
-          }
+          ui: buildPipelineUiSnapshot(nodes, edges)
         }
       };
 
@@ -1182,848 +710,144 @@ function Flow({
     [edges, nodes, commandGroups, customNodesById]
   );
 
-  // Helper to load pipeline data into graph
-  const loadPipeline = (pipeline: any) => {
-      console.log('Loading pipeline:', pipeline);
+  const loadPipeline = useCallback((pipeline: any) => {
+    console.log('Loading pipeline:', pipeline);
 
-      // 1. Snapshot Restoration (Priority)
-      if (pipeline.meta?.ui?.nodes && pipeline.meta?.ui?.edges) {
-          console.log('Restoring from snapshot');
-          // Validate nodes/edges simply? Or just trust them?
-          // We might want to ensure they are arrays
-          if (Array.isArray(pipeline.meta.ui.nodes) && Array.isArray(pipeline.meta.ui.edges)) {
-              const restoredNodes = pipeline.meta.ui.nodes.map((n: any) => {
-                  if (n?.id === 'start') {
-                      const next = { ...n, type: 'startNode' };
-                      next.data = { ...(next.data || {}) };
-                      if (pipeline?.name) next.data.label = pipeline.name;
-                      if (pipeline?.description !== undefined) next.data.description = pipeline.description;
-                      return next;
-                  }
-                  if (n?.type === 'input') {
-                      return { ...n, type: 'startNode' };
-                  }
-                  return n;
-              });
-              syncIdCounterFromNodes(restoredNodes);
-              setNodes(restoredNodes);
-              setEdges(pipeline.meta.ui.edges);
-              setTimeout(() => reactFlowInstance?.fitView(), 100);
-              return;
-          }
-      }
-
-      const newNodes: Node[] = [];
-      const newEdges: Edge[] = [];
-
-      // Start Node
-      newNodes.push({
-         id: 'start',
-         type: 'startNode',
-         data: { label: pipeline.name || 'My Pipeline', description: pipeline.description || '' },
-         position: { x: 250, y: 50 },
-         sourcePosition: Position.Right,
-         deletable: false
-      });
-
-      const baseX = 450;
-      const baseY = 50;
-      const xSpacing = 320;
-      const stepIdToNodeId = new Map<string, string>();
-      const nodeIds: string[] = ['start'];
-
-      if (Array.isArray(pipeline.steps)) {
-          // 1. Create Nodes
-          pipeline.steps.forEach((step: any, index: number) => {
-              const nodeId = step.id || getId();
-              const intent = step.intent || '';
-
-             // Store ID mapping
-             if (step.id) {
-                 stepIdToNodeId.set(step.id, nodeId);
-             }
-             // Implicit mapping by order for non-ID usage
-
-             let type = 'actionNode';
-             let data: any = { status: 'idle' };
-
-             // Infer type from intent
-              if (intent === 'system.setVar') {
-                  type = 'promptNode';
-                  data.name = step.payload?.name;
-                  data.value = step.payload?.value;
-                  data.kind = 'prompt';
-              } else if (intent === 'system.switch') {
-                  type = 'switchNode';
-                  data.label = String(step.description || 'Switch');
-                  data.variableKey = step.payload?.variableKey || '';
-                  data.routes = Array.isArray(step.payload?.routes) ? step.payload.routes.map((r: any) => ({
-                      label: String(r?.label || ''),
-                      condition: String(r?.condition || 'equals'),
-                      value: String(r?.value ?? r?.equalsValue ?? '')
-                  })) : [];
-                  data.kind = 'switch';
-              } else if (intent === 'system.form') {
-                  type = 'formNode';
-                  data.fields = Array.isArray(step.payload?.fields) ? step.payload.fields : [];
-                  data.kind = 'form';
-              } else if (intent === 'terminal.run' && String(step.payload?.__kind || '') === 'script') {
-                  type = 'scriptNode';
-                  data.scriptPath = String(step.payload?.scriptPath || '');
-                  data.args = Array.isArray(step.payload?.args)
-                    ? (step.payload.args as any[]).map((arg: any) => String(arg)).join(' ')
-                    : String(step.payload?.args || '');
-                  data.cwd = String(step.payload?.cwd || '');
-                  data.interpreter = String(step.payload?.interpreter || '');
-                  data.description = String(step.description || '');
-                  data.kind = 'script';
-              } else if (intent === 'system.setCwd') {
-                  type = 'repoNode';
-                  data.path = step.payload?.path;
-                  data.kind = 'repo';
-              } else if (intent === 'vscode.runCommand') {
-                  type = 'vscodeCommandNode';
-                  data.commandId = step.payload?.commandId;
-                  data.argsJson = typeof step.payload?.argsJson === 'string' ? step.payload.argsJson : '';
-                  data.kind = 'vscodeCommand';
-              } else {
-                  type = 'actionNode';
-                  const normalized = canonicalizeIntent('', intent);
-                  data.provider = normalized.provider;
-                  data.capability = normalized.capability;
-                 data.args = { ...step.payload, description: step.description };
-                 data.kind = 'action';
-             }
-
-              newNodes.push({
-                  id: nodeId,
-                  type,
-                  position: { x: baseX + index * xSpacing, y: baseY },
-                  data
-              });
-              nodeIds.push(nodeId);
-          });
-
-          // 2. Create Edges
-          // Connect Start -> First Step
-          if (pipeline.steps.length > 0) {
-              const firstStepNodeId = nodeIds[1];
-              newEdges.push({
-                  id: `e-start-${firstStepNodeId}`,
-                  source: 'start',
-                  target: firstStepNodeId,
-                  sourceHandle: 'success',
-                  targetHandle: 'in',
-                  markerEnd: { type: MarkerType.ArrowClosed }
-              });
-          }
-
-          // Connect sequential steps (Success Path) and Failures
-          pipeline.steps.forEach((step: any, index: number) => {
-             const currentNodeId = nodeIds[index + 1]; // +1 because index 0 is Start
-
-             // Success Edge (to next step)
-             // We assume linear succession unless specified otherwise?
-             // "Si Success: next step séquentiel". So we MUST connect to next step in array.
-             if (step.intent === 'system.switch') {
-                 const routes = Array.isArray(step.payload?.routes) ? step.payload.routes : [];
-                 routes.forEach((r: any, i: number) => {
-                     const target = String(r?.targetStepId || '').trim();
-                     if (!target) return;
-                     const targetNodeId = stepIdToNodeId.get(target) || target;
-                     newEdges.push({
-                         id: `e-${currentNodeId}-route_${i}-${targetNodeId}`,
-                         source: currentNodeId,
-                         target: targetNodeId,
-                         sourceHandle: `route_${i}`,
-                         targetHandle: 'in',
-                         markerEnd: { type: MarkerType.ArrowClosed },
-                         data: { label: String(r?.label || `route_${i}`) }
-                     } as any);
-                 });
-
-                 const defTarget = String(step.payload?.defaultStepId || '').trim();
-                 if (defTarget) {
-                     const targetNodeId = stepIdToNodeId.get(defTarget) || defTarget;
-                     newEdges.push({
-                         id: `e-${currentNodeId}-default-${targetNodeId}`,
-                         source: currentNodeId,
-                         target: targetNodeId,
-                         sourceHandle: 'default',
-                         targetHandle: 'in',
-                         markerEnd: { type: MarkerType.ArrowClosed },
-                         data: { label: 'default' }
-                     } as any);
-                 }
-             } else if (index < pipeline.steps.length - 1) {
-                 const nextNodeId = nodeIds[index + 2];
-                 newEdges.push({
-                     id: `e-${currentNodeId}-${nextNodeId}`,
-                     source: currentNodeId,
-                     target: nextNodeId,
-                     sourceHandle: 'success',
-                     targetHandle: 'in',
-                     markerEnd: { type: MarkerType.ArrowClosed }
-                 });
-             }
-
-             // Failure Edge
-             if (step.onFailure) {
-                 const targetNodeId = stepIdToNodeId.get(step.onFailure);
-                 if (targetNodeId) {
-                    const failureColor = getComputedStyle(document.documentElement).getPropertyValue('--ir-edge-error').trim() || '#f44336';
-                     newEdges.push({
-                         id: `e-${currentNodeId}-${targetNodeId}-fail`,
-                         source: currentNodeId,
-                         target: targetNodeId,
-                         sourceHandle: 'failure',
-                         targetHandle: 'in',
-                         markerEnd: { type: MarkerType.ArrowClosed },
-                         style: { stroke: failureColor },
-                         animated: true
-                     });
-                 }
-             }
-          });
-      }
-
-      setNodes(newNodes);
-      setEdges(newEdges);
-      syncIdCounterFromNodes(newNodes);
+    const restored = restoreGraphFromPipelineSnapshot(pipeline);
+    if (restored) {
+      console.log('Restoring from snapshot');
+      syncIdCounterFromNodes(restored.nodes);
+      setNodes(restored.nodes);
+      setEdges(restored.edges);
       setTimeout(() => reactFlowInstance?.fitView(), 100);
-  };
-
-  // Load initial data if any (prefer persisted webview state to avoid losing unsaved nodes)
-  useEffect(() => {
-    try {
-      const st = vscode?.getState?.() || {};
-      if (st.graph?.nodes && st.graph?.edges) {
-        setNodes(st.graph.nodes);
-        setEdges(st.graph.edges);
-        syncIdCounterFromNodes(st.graph.nodes);
-        setTimeout(() => reactFlowInstance?.fitView(), 100);
-        return;
-      }
-    } catch {
-      // ignore
+      return;
     }
 
-    if (window.initialData && window.initialData.pipeline) {
-      loadPipeline(window.initialData.pipeline);
-    }
-
-    // Listen for messages from extension
-	    const handleMessage = (event: MessageEvent) => {
-	       const message = event.data as unknown;
-	       if (!isInboundMessage(message)) {
-	         return;
-	       }
-	       const typed = message as WebviewInboundMessage;
-	       switch (typed.type) {
-         case 'environmentUpdate':
-           setEnvironment((typed.environment as Record<string, string>) || {});
-           break;
-
-           case 'customNodesUpdate':
-             setCustomNodes((typed as any).nodes || []);
-             break;
-
-           case 'loadPipeline':
-             try {
-               loadPipeline((typed as any).pipeline);
-             } catch (e) {
-               console.warn('[IntentRouter] loadPipeline failed', e);
-             }
-             break;
-
-         case 'executionStatus':
-          const normalizedStatus = typed.status === 'failure' ? 'error' : typed.status;
-          if (normalizedStatus === 'running') {
-            setRunPillStatus('running');
-          } else if (normalizedStatus === 'failure' || normalizedStatus === 'error') {
-            setRunPillStatus('error');
-          } else if (normalizedStatus === 'success' && runPillStatus !== 'error') {
-            setRunPillStatus('success');
-          }
-          setNodes((nds) => {
-		             if (typed.stepId) {
-		               return nds.map((node) => (
-		                 node.id === typed.stepId
-		                   ? {
-		                       ...node,
-		                       data: {
-		                         ...node.data,
-		                         status: normalizedStatus,
-		                         intentId: typed.intentId,
-		                         logs: normalizedStatus === 'running' ? [] : (node.data as any).logs
-		                       }
-		                     }
-		                   : node
-		               ));
-		             }
-
-		             // Fallback: map by linear index (older engine events)
-		             if (typed.index !== undefined) {
-		               const actionNodes = nds.filter(n => n.id !== 'start');
-		               const targetNode = actionNodes[typed.index];
-		               if (!targetNode) return nds;
-		               return nds.map((node) => (
-		                 node.id === targetNode.id
-		                   ? {
-		                       ...node,
-		                       data: {
-		                         ...node.data,
-		                         status: normalizedStatus,
-		                         intentId: typed.intentId,
-		                         logs: normalizedStatus === 'running' ? [] : (node.data as any).logs
-		                       }
-		                     }
-		                   : node
-		               ));
-		             }
-
-	             return nds;
-	           });
-	           break;
-
-	         case 'stepLog':
-	           setNodes((nds) => nds.map((node) => {
-	             const matchesNode = typed.stepId ? node.id === typed.stepId : node.data.intentId === typed.intentId;
-	             if (!matchesNode) return node;
-
-	             const currentLogs = (node.data.logs as Array<any>) || [];
-
-	             // `stepLog.text` can arrive in chunks containing multiple lines.
-	             // We split so the UI counter and trimming are based on actual lines.
-	             const rawText = typeof typed.text === 'string' ? typed.text : String(typed.text ?? '');
-	             const incomingLines = rawText.split(/\r?\n/).filter((l: string) => l.length > 0);
-	             const nextLogs = [
-	               ...currentLogs,
-	               ...incomingLines.map((line: string) => ({ text: line, stream: typed.stream }))
-	             ];
-	             const trimmed = nextLogs.length > MAX_LOG_LINES ? nextLogs.slice(-MAX_LOG_LINES) : nextLogs;
-	             return {
-	               ...node,
-	               data: {
-	                 ...node.data,
-	                 logs: trimmed
-	               }
-	             };
-	           }));
-	           break;
-	       }
-	    };
-
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [reactFlowInstance, drawerNodeId, runPillStatus]); // Dependency on reactFlowInstance for fitView
-
-  // Persist current graph in webview state to survive reloads.
-  useEffect(() => {
-    try {
-      const prev = vscode?.getState?.() || {};
-      const safeNodes = nodes.map((n: any) => {
-        const { status, logs, intentId, ...rest } = (n.data || {}) as any;
-        return { ...n, data: { ...rest, status: 'idle' } };
-      });
-      const safeEdges = edges.map((e: any) => {
-        const { style, animated, ...rest } = e as any;
-        return rest;
-      });
-      vscode?.setState?.({
-        ...prev,
-        graph: { nodes: safeNodes, edges: safeEdges },
-        chrome: {
-          opacity: chromeOpacity,
-          showMiniMap,
-          showControls,
-          focusGraph,
-          collapsed: chromeCollapsed,
-          position: chromePanelPos
-        }
-      });
-    } catch {
-      // ignore
-    }
-  }, [nodes, edges, chromeOpacity, showMiniMap, showControls, focusGraph, chromeCollapsed, chromePanelPos]);
-
-  useEffect(() => {
-    const onMouseMove = (event: MouseEvent) => {
-      const drag = chromePanelDragRef.current;
-      if (!drag) return;
-      const panelWidth = chromeCollapsed ? 230 : 760;
-      const panelHeight = chromeCollapsed ? 38 : 84;
-      const maxX = Math.max(8, window.innerWidth - panelWidth - 8);
-      const maxY = Math.max(8, window.innerHeight - panelHeight - 8);
-      const nextX = Math.max(8, Math.min(maxX, event.clientX - drag.dx));
-      const nextY = Math.max(8, Math.min(maxY, event.clientY - drag.dy));
-      setChromePanelPos({ x: nextX, y: nextY });
-    };
-    const onMouseUp = () => {
-      chromePanelDragRef.current = null;
-    };
-
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, [chromeCollapsed]);
-
-  useEffect(() => {
-    const onResize = () => {
-      const panelWidth = chromeCollapsed ? 230 : 760;
-      const panelHeight = chromeCollapsed ? 38 : 84;
-      const maxX = Math.max(8, window.innerWidth - panelWidth - 8);
-      const maxY = Math.max(8, window.innerHeight - panelHeight - 8);
-      setChromePanelPos((prev) => ({
-        x: Math.max(8, Math.min(maxX, prev.x)),
-        y: Math.max(8, Math.min(maxY, prev.y))
-      }));
-    };
-    onResize();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, [chromeCollapsed]);
-
-	  // Handle Explicit Restore (Rollback)
-	  useEffect(() => {
-	      if (restoreRun && restoreRun.pipelineSnapshot) {
-	          console.log('Restoring run:', restoreRun.name);
-	          loadPipeline(restoreRun.pipelineSnapshot);
-          onRestoreHandled(); // Reset state to allow restoring the same run again
-      }
-  }, [restoreRun]);
-
-	  // Separate Effect for Playback (triggered when nodes are ready/stable?)
-	  useEffect(() => {
-	      const timeouts: any[] = [];
-	      if (selectedRun) {
-	          // 1. Reset all nodes to idle (in case we re-used existing)
-	          setNodes((nds) => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle' } })));
-
-	          // 2. Playback steps (prefer stepId, fallback to linear index)
-	          selectedRun.steps.forEach((step: any, i: number) => {
-	            const t = setTimeout(() => {
-	              setNodes((nds) => {
-	                const targetNodeId = step.stepId
-	                  ? String(step.stepId)
-	                  : (typeof step.index === 'number' ? nds.filter(n => n.id !== 'start')[step.index]?.id : undefined);
-	                if (!targetNodeId) return nds;
-
-	                return nds.map(n => (
-	                  n.id === targetNodeId ? { ...n, data: { ...n.data, status: step.status } } : n
-	                ));
-	              });
-	            }, (i + 1) * 600);
-	            timeouts.push(t);
-	          });
-	      }
-	      return () => timeouts.forEach(clearTimeout);
-	  }, [selectedRun]);
-
-  // Reactive Connectors (Update Edge Colors based on Source Status)
-  useEffect(() => {
-    const readColor = (name: string, fallback: string) => {
-      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-      return v || fallback;
-    };
-    const edgeIdle = readColor('--ir-edge-idle', 'var(--vscode-editor-foreground)');
-    const edgeRunning = readColor('--ir-edge-running', '#007acc');
-    const edgeSuccess = readColor('--ir-edge-success', '#4caf50');
-    const edgeFailure = readColor('--ir-edge-error', '#f44336');
-
-    setEdges((eds) =>
-      eds.map((edge) => {
-        const sourceNode = nodes.find((n) => n.id === edge.source);
-        if (!sourceNode) return edge;
-
-        const status = (sourceNode.data?.status as string) || 'idle';
-        let stroke = edgeIdle;
-        if (status === 'running') stroke = edgeRunning;
-        else if (status === 'success') stroke = edgeSuccess;
-        else if (status === 'failure' || status === 'error') stroke = edgeFailure;
-
-        const nextAnimated = status === 'running';
-        const nextDash = status === 'running' ? '7 5' : undefined;
-        const currentDash = (edge.style as any)?.strokeDasharray;
-
-        // Update if changed
-        if (edge.style?.stroke !== stroke || edge.animated !== nextAnimated || currentDash !== nextDash) {
-          return {
-            ...edge,
-            style: { ...edge.style, stroke, strokeWidth: 2, strokeDasharray: nextDash },
-            animated: nextAnimated,
-            markerEnd: { type: MarkerType.ArrowClosed, color: stroke }
-          };
-        }
-        return edge;
-      })
-    );
-  }, [nodes, setEdges]);
-
-  const mapSchemaToSocketType = (schemaType: string): string => {
-    const normalized = String(schemaType || 'string').toLowerCase();
-    if (normalized === 'boolean' || normalized === 'checkbox') return 'bool';
-    if (normalized === 'path') return 'path';
-    if (normalized === 'json' || normalized === 'object') return 'json';
-    return 'text';
-  };
-
-  const getActionArgType = (node: any, argName: string): string => {
-    const provider = String(node?.data?.provider || '').trim();
-    const capability = String(node?.data?.capability || '').trim();
-    const group = (commandGroups || []).find((entry: any) => String(entry?.provider || '').trim() === provider);
-    const commands = Array.isArray(group?.commands) ? group.commands : [];
-    const cap = commands.find((entry: any) => {
-      const id = String(entry?.capability || '').trim();
-      return id === capability || id.endsWith(`.${capability}`);
+    const failureColor = getComputedStyle(document.documentElement).getPropertyValue('--ir-edge-error').trim() || '#f44336';
+    const graph = buildGraphFromPipeline(pipeline, {
+      getNextNodeId: getId,
+      failureColor
     });
-    const args = Array.isArray(cap?.args) ? cap.args : [];
-    const arg = args.find((entry: any) => String(entry?.name || '').trim() === argName);
-    return mapSchemaToSocketType(String(arg?.type || 'string'));
-  };
 
-  const getCustomArgType = (node: any, argName: string): string => {
-    const customNodeId = String(node?.data?.customNodeId || '').trim();
-    const customDef = customNodeId ? customNodesById.get(customNodeId) : undefined;
-    const schema = Array.isArray(customDef?.schema) ? customDef.schema : (Array.isArray(node?.data?.schema) ? node.data.schema : []);
-    const arg = schema.find((entry: any) => String(entry?.name || '').trim() === argName);
-    return mapSchemaToSocketType(String(arg?.type || 'string'));
-  };
+    setNodes(graph.nodes);
+    setEdges(graph.edges);
+    syncIdCounterFromNodes(graph.nodes);
+    setTimeout(() => reactFlowInstance?.fitView(), 100);
+  }, [reactFlowInstance, setEdges, setNodes, syncIdCounterFromNodes]);
 
-  const getFormArgType = (node: any, argName: string): string => {
-    const fields = Array.isArray(node?.data?.fields) ? node.data.fields : [];
-    const field = fields.find((entry: any) => String(entry?.key || entry?.label || '').trim() === argName);
-    const fieldType = String(field?.type || 'text').toLowerCase();
-    if (fieldType === 'checkbox') return 'bool';
-    return 'text';
-  };
+  useFlowHydrationMessages({
+    vscode,
+    reactFlowInstance,
+    initialPipeline: window.initialData?.pipeline,
+    maxLogLines: MAX_LOG_LINES,
+    loadPipeline,
+    syncIdCounterFromNodes,
+    setNodes,
+    setEdges,
+    setEnvironment,
+    setCustomNodes,
+    setRunPillStatus
+  });
 
-  const getSourceSocketType = (node: any, handleId: string): string => {
-    if (!node) return 'flow';
-    const hid = String(handleId || 'success');
-    if (hid === 'success' || hid === 'failure' || hid === 'default' || hid.startsWith('route_')) return 'flow';
-    if (hid === 'out_value') return 'text';
-    if (hid === 'out_path') return 'path';
-    if (hid === 'out_values') return 'json';
-    return 'flow';
-  };
-
-  const getTargetSocketType = (node: any, handleId: string): string => {
-    if (!node) return 'flow';
-    const hid = String(handleId || 'in');
-    if (hid === 'in') return 'flow';
-    if (!hid.startsWith('in_')) return 'flow';
-    const field = hid.slice(3);
-
-    if (node.type === 'actionNode') return getActionArgType(node, field);
-    if (node.type === 'customNode') return getCustomArgType(node, field);
-    if (node.type === 'formNode') return getFormArgType(node, field);
-    if (node.type === 'promptNode') return 'text';
-    if (node.type === 'repoNode') return 'path';
-    if (node.type === 'scriptNode') {
-      if (field === 'scriptPath' || field === 'cwd') return 'path';
-      return 'text';
+  usePersistedFlowGraphState({
+    vscode,
+    nodes,
+    edges,
+    chrome: {
+      opacity: chromeOpacity,
+      showMiniMap,
+      showControls,
+      focusGraph,
+      collapsed: chromeCollapsed,
+      position: chromePanelPos
     }
-    if (node.type === 'vscodeCommandNode') {
-      if (field === 'argsJson') return 'json';
-      return 'text';
-    }
-    return 'text';
-  };
+  });
 
-  const areSocketTypesCompatible = (sourceType: string, targetType: string): boolean => {
-    if (sourceType === targetType) return true;
-    if (targetType === 'text' && (sourceType === 'path' || sourceType === 'json' || sourceType === 'bool')) return true;
-    return false;
-  };
+  useFlowChromePanel({
+    chromeCollapsed,
+    chromePanelDragRef,
+    setChromePanelPos
+  });
 
-  const onConnect = useCallback(
-    (params: Connection) => {
-      // Prevent self-loops
-      if (params.source === params.target) return;
-      setEdges((eds) => {
-        const normalizedSourceHandle = String(params.sourceHandle || 'success');
-        const normalizedTargetHandle = String(params.targetHandle || 'in');
-        const sourceNode = nodes.find((n: any) => n.id === params.source);
-        const targetNode = nodes.find((n: any) => n.id === params.target);
-        const sourceType = getSourceSocketType(sourceNode, normalizedSourceHandle);
-        const targetType = getTargetSocketType(targetNode, normalizedTargetHandle);
+  useRunPlaybackEffects({
+    restoreRun,
+    selectedRun,
+    loadPipeline,
+    onRestoreHandled,
+    setNodes
+  });
 
-        if (!areSocketTypesCompatible(sourceType, targetType)) {
-          setConnectionError(`Incompatible sockets: ${sourceType} -> ${targetType}`);
-          return eds;
-        }
+  useReactiveEdgeStyles({
+    nodes,
+    setEdges
+  });
 
-        let label: string | undefined = undefined;
-        try {
-          if (sourceNode?.type === 'switchNode' && normalizedSourceHandle) {
-            const handle = String(normalizedSourceHandle);
-            if (handle === 'default') {
-              label = 'default';
-            } else if (handle.startsWith('route_')) {
-              const idx = Number(handle.slice('route_'.length));
-              const routes = Array.isArray((sourceNode.data as any)?.routes) ? (sourceNode.data as any).routes : [];
-              const routeLabel = routes?.[idx]?.label;
-              label = String(routeLabel || handle);
-            }
-          } else if (normalizedSourceHandle !== 'success') {
-            label = normalizedSourceHandle;
-          }
-        } catch {
-          // best-effort
-        }
+  const { onConnect } = useFlowConnectionHandlers({
+    commandGroups: commandGroups || [],
+    customNodesById,
+    nodes,
+    setEdges,
+    setConnectionError
+  });
 
-        const withoutPreviousOnTargetHandle = eds.filter((edge: any) => !(
-          edge?.target === params.target &&
-          String(edge?.targetHandle || 'in') === normalizedTargetHandle
-        ));
+  const { onDragOver, onDrop } = useFlowDropHandlers({
+    reactFlowInstance,
+    customNodesById,
+    getId,
+    setNodes
+  });
 
-        const edge: any = {
-          ...params,
-          sourceHandle: normalizedSourceHandle,
-          targetHandle: normalizedTargetHandle,
-          markerEnd: { type: MarkerType.ArrowClosed },
-          data: label ? { label } : undefined
-        };
-        return addEdge(edge, withoutPreviousOnTargetHandle);
-      });
-    },
-    [setEdges, nodes, commandGroups, customNodesById],
-  );
+  const {
+    savePipeline,
+    runPipeline,
+    runPipelineFromHere,
+    resetRuntimeUiState
+  } = usePipelineRunActions({
+    vscode,
+    buildPipeline,
+    computeRunSubset,
+    setRunPreviewIds,
+    setRunPillStatus,
+    setRunMenuOpen,
+    setNodes
+  });
 
-  const onDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  }, []);
+  usePipelineAutosave({
+    vscode,
+    pipelineUri,
+    buildPipeline,
+    nodes,
+    edges
+  });
 
-  const onDrop = useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault();
+  const { toggleFocusGraph } = useFocusGraphMode({
+    focusGraph,
+    sidebarCollapsed,
+    setFocusGraph,
+    onSetSidebarCollapsed,
+    setShowMiniMap
+  });
 
-      const type = event.dataTransfer.getData('application/reactflow/type');
-      const provider = event.dataTransfer.getData('application/reactflow/provider');
-      const customNodeId = event.dataTransfer.getData('application/reactflow/customNodeId');
-
-      if (typeof type === 'undefined' || !type) {
-        return;
-      }
-
-      const position = reactFlowInstance.screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
-
-      const newNode: Node = {
-        id: getId(),
-        type,
-        position,
-        data:
-          type === 'actionNode'
-            ? { provider: provider, capability: '', args: {}, status: 'idle', kind: 'action' }
-            : type === 'customNode'
-              ? (() => {
-                  const cnid = String(customNodeId || '').trim();
-                  const def = cnid ? customNodesById.get(cnid) : undefined;
-                  return {
-                    customNodeId: cnid,
-                    title: def?.title || '',
-                    intent: def?.intent || '',
-                    schema: def?.schema || [],
-                    mapping: def?.mapping,
-                    args: {},
-                    status: 'idle',
-                    kind: 'custom'
-                  };
-                })()
-            : type === 'formNode'
-              ? { fields: [], status: 'idle', kind: 'form' }
-            : type === 'switchNode'
-              ? { label: 'Switch', variableKey: '', routes: [], status: 'idle', kind: 'switch' }
-            : type === 'scriptNode'
-              ? { scriptPath: '', args: '', cwd: '', interpreter: '', status: 'idle', kind: 'script' }
-            : type === 'promptNode'
-              ? { name: '', value: '', kind: 'prompt' }
-            : type === 'repoNode'
-                ? { path: '${workspaceRoot}', kind: 'repo' }
-                : type === 'vscodeCommandNode'
-                  ? { commandId: '', argsJson: '', kind: 'vscodeCommand' }
-                  : { status: 'idle' },
-      };
-
-      setNodes((nds) => nds.concat(newNode));
-    },
-    [reactFlowInstance, customNodesById],
-  );
-
-  const savePipeline = () => {
-    const pipeline = buildPipeline();
-    if (!pipeline) return;
-
-    if (vscode) {
-      vscode.postMessage({
-        type: 'savePipeline',
-        pipeline
-      });
-    } else {
-      console.log('Saved Pipeline (Mock):', pipeline);
-    }
-  };
-
-  // Auto-save (silent) to the existing pipeline file so the JSON remains the source of truth.
-  // Only active when this builder was opened on an existing URI (prevents creating files on first edit).
-  useEffect(() => {
-    if (!pipelineUri || !vscode) {
-      return;
-    }
-
-    const pipeline = buildPipeline();
-    if (!pipeline) {
-      return;
-    }
-
-    const serialized = JSON.stringify(pipeline);
-    if (serialized === lastAutosavedRef.current) {
-      return;
-    }
-
-    const t = setTimeout(() => {
-      // Recompute at send-time to avoid writing half-typed transient states.
-      const p = buildPipeline();
-      if (!p) return;
-      const s = JSON.stringify(p);
-      if (s === lastAutosavedRef.current) return;
-      lastAutosavedRef.current = s;
-
-      vscode.postMessage({
-        type: 'savePipeline',
-        pipeline: p,
-        silent: true
-      });
-    }, 450);
-
-    return () => clearTimeout(t);
-  }, [nodes, edges, pipelineUri]);
-
-  const runPipeline = (dryRun = false) => {
-    const pipeline = buildPipeline();
-    if (!pipeline) return;
-    setRunPillStatus('running');
-    setRunMenuOpen(false);
-
-    if (vscode) {
-      vscode.postMessage({
-        type: 'runPipeline',
-        pipeline,
-        dryRun
-      });
-    } else {
-      console.log('Run Pipeline (Mock):', pipeline);
-    }
-  };
-
-  const runPipelineFromHere = (nodeId: string, dryRun = false) => {
-    const { allowed, preview } = computeRunSubset(nodeId);
-    setRunPreviewIds(preview);
-    const pipeline = buildPipeline({ allowedNodeIds: allowed });
-    if (!pipeline) return;
-    setRunPillStatus('running');
-    setRunMenuOpen(false);
-
-    if (vscode) {
-      vscode.postMessage({
-        type: 'runPipeline',
-        pipeline,
-        dryRun
-      });
-    } else {
-      console.log('Run Pipeline From Here (Mock):', pipeline);
-    }
-  };
-
-  const toggleFocusGraph = () => {
-    const next = !focusGraph;
-    setFocusGraph(next);
-    if (next) {
-      previousSidebarCollapsedRef.current = sidebarCollapsed;
-      onSetSidebarCollapsed(true);
-      setShowMiniMap(false);
-    } else {
-      onSetSidebarCollapsed(previousSidebarCollapsedRef.current);
-      setShowMiniMap(true);
-    }
-  };
-
-  useEffect(() => {
-    const onGlobalClick = () => {
-      if (runMenuOpen) setRunMenuOpen(false);
-    };
-    window.addEventListener('click', onGlobalClick);
-    return () => window.removeEventListener('click', onGlobalClick);
-  }, [runMenuOpen]);
-
-  useEffect(() => {
-    if (!connectionError) return;
-    const t = window.setTimeout(() => setConnectionError(null), 1800);
-    return () => window.clearTimeout(t);
-  }, [connectionError]);
-
-  useEffect(() => {
-    if (runPillResetTimerRef.current) {
-      window.clearTimeout(runPillResetTimerRef.current);
-      runPillResetTimerRef.current = null;
-    }
-    if (runPillStatus === 'success' || runPillStatus === 'error') {
-      runPillResetTimerRef.current = window.setTimeout(() => {
-        setRunPillStatus('idle');
-      }, 1800);
-    }
-    return () => {
-      if (runPillResetTimerRef.current) {
-        window.clearTimeout(runPillResetTimerRef.current);
-        runPillResetTimerRef.current = null;
-      }
-    };
-  }, [runPillStatus]);
+  useRunUiEffects({
+    runMenuOpen,
+    setRunMenuOpen,
+    connectionError,
+    setConnectionError,
+    runPillStatus,
+    setRunPillStatus
+  });
 
   const autoLayout = useCallback(() => {
-    const ids = nodes.map((n) => n.id);
-    const adj = new Map<string, string[]>();
-    const inDegree = new Map<string, number>();
-    ids.forEach((id) => {
-      adj.set(id, []);
-      inDegree.set(id, 0);
+    const positions = computeHorizontalAutoLayout(nodes, edges, {
+      baseX: 250,
+      baseY: 50,
+      xSpacing: 320
     });
-    edges.forEach((e) => {
-      if (!adj.has(e.source) || !adj.has(e.target)) return;
-      adj.get(e.source)!.push(e.target);
-      inDegree.set(e.target, (inDegree.get(e.target) || 0) + 1);
-    });
-    const queue: string[] = [];
-    inDegree.forEach((deg, id) => {
-      if (deg === 0) queue.push(id);
-    });
-    const order: string[] = [];
-    while (queue.length) {
-      const u = queue.shift()!;
-      order.push(u);
-      (adj.get(u) || []).forEach((v) => {
-        inDegree.set(v, (inDegree.get(v)! - 1));
-        if (inDegree.get(v) === 0) queue.push(v);
-      });
-    }
-    const sorted = order.length === ids.length ? order : ids;
-    const baseX = 250;
-    const baseY = 50;
-    const xSpacing = 320;
     setNodes((nds) =>
       nds.map((n) => {
-        const index = sorted.indexOf(n.id);
-        if (index === -1) return n;
-        const y = n.id === 'start' ? baseY : (n.position?.y ?? baseY);
-        return { ...n, position: { x: baseX + index * xSpacing, y } };
+        const next = positions.get(n.id);
+        if (!next) return n;
+        return { ...n, position: next };
       })
     );
     setTimeout(() => reactFlowInstance?.fitView(), 50);
@@ -2031,33 +855,72 @@ function Flow({
 
   const drawerNode = useMemo(() => nodes.find((n: any) => n.id === drawerNodeId) ?? null, [nodes, drawerNodeId]);
 
-  // When opening the drawer, the drawer overlays the right side of the canvas.
-  // Auto-pan so the selected node stays visible and doesn't look like it "disappeared".
-  useEffect(() => {
-    if (!drawerNodeId || !reactFlowInstance) return;
-    const api: any = reactFlowInstance;
-    const getNode = api.getNode?.bind(api);
-    const node = getNode ? getNode(drawerNodeId) : nodes.find((n: any) => n.id === drawerNodeId);
-    if (!node) return;
+  useDrawerAutoPan({
+    drawerNodeId,
+    reactFlowInstance,
+    nodes,
+    drawerWidthPx: 360,
+    marginPx: 24
+  });
 
-    const zoom = typeof api.getZoom === 'function' ? api.getZoom() : 1;
-    const pos = (node.positionAbsolute || node.position || { x: 0, y: 0 }) as any;
-    const w = Number(node.measured?.width ?? node.width ?? 0);
-    const h = Number(node.measured?.height ?? node.height ?? 0);
-    const cx = pos.x + (w ? w / 2 : 0);
-    const cy = pos.y + (h ? h / 2 : 0);
+  const { onPaneClick, onNodeContextMenu } = useFlowCanvasInteractions({
+    reactFlowInstance,
+    quickAddOpen,
+    setQuickAddOpen,
+    setLastCanvasPos,
+    setQuickAddPos,
+    setQuickAddAnchor,
+    setQuickAddEdge,
+    setQuickAddQuery,
+    setContextMenu
+  });
 
-    // Drawer is 360px wide; shift center left by ~half the drawer so the node sits in view.
-    const drawerWidthPx = 360;
-    const marginPx = 24;
-    const offsetX = (drawerWidthPx / 2 + marginPx) / (zoom || 1);
+  const openNodeFromContextMenu = useCallback((nodeId: string) => {
+    suppressRemoveUntilRef.current = Date.now() + 800;
+    lastOpenNodeIdRef.current = nodeId;
+    lastOpenNodeAtRef.current = Date.now();
+    setDrawerNodeId(nodeId);
+  }, []);
 
-    if (typeof api.setCenter === 'function') {
-      api.setCenter(cx - offsetX, cy, { zoom, duration: 200 });
-    } else if (typeof api.fitView === 'function') {
-      api.fitView({ nodes: [{ id: drawerNodeId }], padding: 0.2, duration: 200 });
+  const pasteNodeFromContextMenu = useCallback((anchor: { x: number; y: number }) => {
+    if (!copiedNodeRef.current) {
+      return;
     }
-  }, [drawerNodeId, reactFlowInstance, nodes]);
+    const position = reactFlowInstance?.screenToFlowPosition
+      ? reactFlowInstance.screenToFlowPosition({ x: anchor.x + 18, y: anchor.y + 18 })
+      : undefined;
+    const cloneId = getId();
+    const source = copiedNodeRef.current as any;
+    const nextNode: any = {
+      ...source,
+      id: cloneId,
+      position: position || { x: (source?.position?.x || 100) + 26, y: (source?.position?.y || 100) + 26 },
+      selected: false,
+      dragging: false,
+      data: JSON.parse(JSON.stringify(source?.data || {}))
+    };
+    setNodes((nodes) => [...nodes, nextNode]);
+    setSelectedNodeId(cloneId);
+  }, [reactFlowInstance, setNodes]);
+
+  const toggleContextNodeCollapse = useCallback((nodeId: string) => {
+    setNodes((nodes) => nodes.map((entry: any) => (
+      entry.id === nodeId ? { ...entry, data: { ...(entry.data || {}), collapsed: !entry?.data?.collapsed } } : entry
+    )));
+  }, []);
+
+  const disconnectContextNodeLinks = useCallback((nodeId: string) => {
+    setEdges((edges) => edges.filter((edge: any) => edge.source !== nodeId && edge.target !== nodeId));
+  }, []);
+
+  const deleteNodeFromContextMenu = useCallback((nodeId: string) => {
+    if (nodeId === 'start') {
+      return;
+    }
+    setNodes((nodes) => nodes.filter((node: any) => node.id !== nodeId));
+    setEdges((edges) => edges.filter((edge: any) => edge.source !== nodeId && edge.target !== nodeId));
+    setDrawerNodeId((value) => (value === nodeId ? null : value));
+  }, []);
 
  	  return (
  	    <div className="dndflow">
@@ -2075,29 +938,12 @@ function Flow({
                 onDrop={onDrop}
                 onDragOver={onDragOver}
                 onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-                onPaneClick={(event: any) => {
-                  if (quickAddOpen) setQuickAddOpen(false);
-                  if (reactFlowInstance?.screenToFlowPosition) {
-                    const pos = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-                    setLastCanvasPos(pos);
-                  }
-                  if (event?.detail === 2 && reactFlowInstance?.screenToFlowPosition) {
-                    const pos = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-                    setQuickAddPos(pos);
-                    setQuickAddAnchor({ x: event.clientX, y: event.clientY });
-                    setQuickAddEdge(null);
-                    setQuickAddQuery('');
-                    setQuickAddOpen(true);
-                  }
-                }}
+                onPaneClick={onPaneClick}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
                 snapToGrid={true}
                 fitView
-              onNodeContextMenu={(event, node) => {
-                event.preventDefault();
-                setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id });
-              }}
+              onNodeContextMenu={onNodeContextMenu}
               >
                 {showControls && <Controls style={{ opacity: chromeOpacity }} />}
                 <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
@@ -2108,1087 +954,72 @@ function Flow({
   	        </FlowRuntimeContext.Provider>
   	      </div>
 
-        {connectionError && (
-          <div
-            className="nodrag"
-            style={{
-              position: 'absolute',
-              top: '12px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              zIndex: 1300,
-              padding: '8px 12px',
-              borderRadius: '6px',
-              border: '1px solid var(--vscode-errorForeground)',
-              background: 'var(--vscode-editorWidget-background)',
-              color: 'var(--vscode-errorForeground)',
-              fontSize: '12px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.35)'
-            }}
-          >
-            {connectionError}
-          </div>
-        )}
+        <FlowToasts connectionError={connectionError} graphToast={graphToast} />
 
-        {contextMenu && (
-          <div
-            className="nodrag"
-            style={{
-              position: 'fixed',
-              left: contextMenu.x,
-              top: contextMenu.y,
-              zIndex: 1000,
-              background: 'var(--vscode-editorWidget-background)',
-              border: '1px solid var(--vscode-editorWidget-border)',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
-              padding: '6px',
-              borderRadius: '6px',
-              minWidth: '160px'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="nodrag"
-              onClick={() => {
-                suppressRemoveUntilRef.current = Date.now() + 800;
-                lastOpenNodeIdRef.current = contextMenu.nodeId;
-                lastOpenNodeAtRef.current = Date.now();
-                setDrawerNodeId(contextMenu.nodeId);
-                setContextMenu(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                color: 'var(--vscode-foreground)',
-                border: 'none',
-                padding: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              Open node
-            </button>
-            <button
-              className="nodrag"
-              onClick={() => {
-                copyNodeById(contextMenu.nodeId);
-                setContextMenu(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                color: 'var(--vscode-foreground)',
-                border: 'none',
-                padding: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              Copy node
-            </button>
-            <button
-              className="nodrag"
-              onClick={() => {
-                if (copiedNodeRef.current) {
-                  const pos = reactFlowInstance?.screenToFlowPosition
-                    ? reactFlowInstance.screenToFlowPosition({ x: contextMenu.x + 18, y: contextMenu.y + 18 })
-                    : undefined;
-                  const cloneId = getId();
-                  const source = copiedNodeRef.current as any;
-                  const nextNode: any = {
-                    ...source,
-                    id: cloneId,
-                    position: pos || { x: (source?.position?.x || 100) + 26, y: (source?.position?.y || 100) + 26 },
-                    selected: false,
-                    dragging: false,
-                    data: JSON.parse(JSON.stringify(source?.data || {}))
-                  };
-                  setNodes((prev) => [...prev, nextNode]);
-                  setSelectedNodeId(cloneId);
-                }
-                setContextMenu(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                color: copiedNodeRef.current ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
-                border: 'none',
-                padding: '8px',
-                cursor: copiedNodeRef.current ? 'pointer' : 'not-allowed'
-              }}
-              disabled={!copiedNodeRef.current}
-            >
-              Paste node
-            </button>
-            <button
-              className="nodrag"
-              onClick={() => {
-                duplicateNodeById(contextMenu.nodeId);
-                setContextMenu(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                color: 'var(--vscode-foreground)',
-                border: 'none',
-                padding: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              Duplicate node
-            </button>
-            <button
-              className="nodrag"
-              onClick={() => {
-                const nodeId = contextMenu.nodeId;
-                setNodes((prev) => prev.map((entry: any) => (
-                  entry.id === nodeId ? { ...entry, data: { ...(entry.data || {}), collapsed: !entry?.data?.collapsed } } : entry
-                )));
-                setContextMenu(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                color: 'var(--vscode-foreground)',
-                border: 'none',
-                padding: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              Toggle collapse
-            </button>
-            <button
-              className="nodrag"
-              onClick={() => {
-                const id = contextMenu.nodeId;
-                if (id === 'start') {
-                  setContextMenu(null);
-                  return;
-                }
-                setNodes((nds) => nds.filter((n: any) => n.id !== id));
-                setEdges((eds) => eds.filter((e: any) => e.source !== id && e.target !== id));
-                setDrawerNodeId((v) => (v === id ? null : v));
-                setContextMenu(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                color: 'var(--vscode-errorForeground)',
-                border: 'none',
-                padding: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              Delete node
-            </button>
-            <button
-              className="nodrag"
-              onClick={() => {
-                const id = contextMenu.nodeId;
-                setEdges((prev) => prev.filter((edge: any) => edge.source !== id && edge.target !== id));
-                setContextMenu(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                color: 'var(--vscode-foreground)',
-                border: 'none',
-                padding: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              Disconnect links
-            </button>
-            <button
-              className="nodrag"
-              onClick={() => {
-                runPipelineFromHere(contextMenu.nodeId);
-                setContextMenu(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                color: 'var(--vscode-foreground)',
-                border: 'none',
-                padding: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              Run from here
-            </button>
-            <button
-              className="nodrag"
-              onClick={() => {
-                runPipelineFromHere(contextMenu.nodeId, true);
-                setContextMenu(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                color: 'var(--vscode-foreground)',
-                border: 'none',
-                padding: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              Dry run from here
-            </button>
-            <button
-              className="nodrag"
-              onClick={() => {
-                setRunPreviewIds(null);
-                setContextMenu(null);
-              }}
-              style={{
-                width: '100%',
-                textAlign: 'left',
-                background: 'transparent',
-                color: 'var(--vscode-foreground)',
-                border: 'none',
-                padding: '8px',
-                cursor: 'pointer',
-                opacity: 0.8
-              }}
-            >
-              Clear highlight
-            </button>
-          </div>
-        )}
+        <NodeContextMenu
+          contextMenu={contextMenu}
+          canPaste={!!copiedNodeRef.current}
+          onOpenNode={openNodeFromContextMenu}
+          onCopyNode={copyNodeById}
+          onPasteNode={pasteNodeFromContextMenu}
+          onDuplicateNode={duplicateNodeById}
+          onToggleCollapse={toggleContextNodeCollapse}
+          onDisconnectNodeLinks={disconnectContextNodeLinks}
+          onClearHighlight={() => setRunPreviewIds(null)}
+          onRunFromNode={runPipelineFromHere}
+          onDeleteNode={deleteNodeFromContextMenu}
+          onClose={() => setContextMenu(null)}
+        />
 
-        {quickAddOpen && quickAddAnchor && (
-          <div
-            className="nodrag quick-add-palette"
-            style={{
-              position: 'fixed',
-              left: paletteLeft,
-              top: paletteTop,
-              zIndex: 1200,
-              width: '260px',
-              background: 'var(--vscode-editorWidget-background)',
-              border: '1px solid var(--vscode-editorWidget-border)',
-              boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
-              borderRadius: '8px',
-              padding: '8px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <input
-              className="nodrag"
-              autoFocus
-              placeholder="Search nodes…"
-              value={quickAddQuery}
-              onChange={(e) => setQuickAddQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && filteredQuickAddItems.length > 0) {
-                  addNodeFromItem(filteredQuickAddItems[0], quickAddPos || undefined, quickAddEdge);
-                  setQuickAddOpen(false);
-                  setQuickAddEdge(null);
-                }
-                if (e.key === 'Escape') {
-                  setQuickAddOpen(false);
-                }
-              }}
-              style={{
-                width: '100%',
-                padding: '6px 8px',
-                borderRadius: '6px',
-                border: '1px solid var(--vscode-input-border)',
-                background: 'var(--vscode-input-background)',
-                color: 'var(--vscode-input-foreground)'
-              }}
-            />
-            <div style={{ maxHeight: '220px', overflow: 'auto' }}>
-              {filteredQuickAddItems.length === 0 && (
-                <div style={{ fontSize: '12px', opacity: 0.7, padding: '6px' }}>No results</div>
-              )}
-              {filteredQuickAddItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="quick-add-item"
-                  style={{
-                    padding: '6px 8px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '12px'
-                  }}
-                  onClick={() => {
-                    addNodeFromItem(item, quickAddPos || undefined, quickAddEdge);
-                    setQuickAddOpen(false);
-                    setQuickAddEdge(null);
-                  }}
-                >
-                  {item.label}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <QuickAddPalette
+          quickAddOpen={quickAddOpen}
+          quickAddAnchor={quickAddAnchor}
+          paletteLeft={paletteLeft}
+          paletteTop={paletteTop}
+          quickAddQuery={quickAddQuery}
+          setQuickAddQuery={setQuickAddQuery}
+          filteredQuickAddItems={filteredQuickAddItems}
+          quickAddGroupedItems={quickAddGroupedItems}
+          categoryTitleMap={categoryTitleMap}
+          addNodeFromItem={addNodeFromItem}
+          quickAddPos={quickAddPos}
+          quickAddEdge={quickAddEdge}
+          setQuickAddOpen={setQuickAddOpen}
+          setQuickAddEdge={setQuickAddEdge}
+        />
 
-        {drawerNode && (
-          <div
-            className="nodrag"
-            style={{
-              position: 'absolute',
-              top: 0,
-              right: 0,
-              height: '100%',
-              width: '360px',
-              background: 'var(--vscode-sideBar-background)',
-              borderLeft: '1px solid var(--vscode-sideBar-border)',
-              zIndex: 900,
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              style={{
-                padding: '10px',
-                borderBottom: '1px solid var(--vscode-sideBar-border)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '8px',
-              }}
-            >
-              <div style={{ fontWeight: 700, fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {drawerNode.id === 'start'
-                  ? 'Start'
-                  : drawerNode.type === 'actionNode'
-                    ? `${drawerNode.data?.provider || 'action'} · ${drawerNode.data?.capability || ''}`
-                    : drawerNode.type}
-              </div>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                  className="nodrag"
-                  onClick={async () => {
-                    const inspector = {
-                      id: drawerNode.id,
-                      type: drawerNode.type,
-                      position: (drawerNode as any).position,
-                      data: drawerNode.data,
-                    };
-                    const inspectorJson = JSON.stringify(inspector, null, 2);
-                    try {
-                      await navigator.clipboard.writeText(inspectorJson);
-                    } catch (e) {
-                      console.warn('Failed to copy to clipboard', e);
-                    }
-                  }}
-                  title="Copy node JSON"
-                  style={{
-                    background: 'var(--vscode-button-secondaryBackground)',
-                    color: 'var(--vscode-button-secondaryForeground)',
-                    border: 'none',
-                    borderRadius: '4px',
-                    padding: '6px 8px',
-                    cursor: 'pointer',
-                    fontSize: '11px',
-                  }}
-                >
-                  Copy JSON
-                </button>
-                <button
-                  className="nodrag"
-                  onClick={() => setDrawerNodeId(null)}
-                  title="Close"
-                  style={{
-                    background: 'transparent',
-                    color: 'var(--vscode-foreground)',
-                    border: '1px solid var(--vscode-sideBar-border)',
-                    borderRadius: '4px',
-                    padding: '6px 8px',
-                    cursor: 'pointer',
-                    fontSize: '11px',
-                  }}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
+        <NodeInspectorDrawer
+          drawerNode={drawerNode}
+          setDrawerNodeId={setDrawerNodeId}
+        />
 
-            <div style={{ padding: '10px', overflow: 'auto' }}>
-              {(() => {
-                const inspector = {
-                  id: drawerNode.id,
-                  type: drawerNode.type,
-                  position: (drawerNode as any).position,
-                  data: drawerNode.data,
-                };
-                const inspectorJson = JSON.stringify(inspector, null, 2);
-                const logs = Array.isArray((drawerNode.data as any)?.logs)
-                  ? (drawerNode.data as any).logs.map((l: any) => String(l?.text ?? l)).join('\n')
-                  : '';
+        <QuickAddDock
+          dockOpen={dockOpen}
+          setDockOpen={setDockOpen}
+          dockQuery={dockQuery}
+          setDockQuery={setDockQuery}
+          filteredDockItems={filteredDockItems}
+          dockGroupedItems={dockGroupedItems}
+          categoryTitleMap={categoryTitleMap}
+          addNodeFromItem={addNodeFromItem}
+          lastCanvasPos={lastCanvasPos}
+          chromeOpacity={chromeOpacity}
+        />
 
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <div style={{ fontSize: '11px', opacity: 0.8 }}>
-                      <div><b>ID:</b> {drawerNode.id}</div>
-                      <div><b>Type:</b> {String(drawerNode.type)}</div>
-                      {drawerNode.data?.status && <div><b>Status:</b> {String(drawerNode.data.status)}</div>}
-                      {(drawerNode.data as any)?.intentId && <div><b>Intent:</b> {String((drawerNode.data as any).intentId)}</div>}
-                    </div>
+        <RunControlBar
+          chromeOpacity={chromeOpacity}
+          runPillStatus={runPillStatus}
+          runMenuOpen={runMenuOpen}
+          setRunMenuOpen={setRunMenuOpen}
+          selectedNodeId={selectedNodeId}
+          runPipeline={runPipeline}
+          runPipelineFromHere={runPipelineFromHere}
+          setRunPreviewIds={setRunPreviewIds}
+        />
 
-                    {logs && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <div style={{ fontSize: '11px', opacity: 0.85 }}>Logs</div>
-                        <pre
-                          style={{
-                            margin: 0,
-                            padding: '8px',
-                            borderRadius: '4px',
-                            border: '1px solid var(--vscode-input-border)',
-                            background: 'var(--vscode-editor-background)',
-                            color: 'var(--vscode-editor-foreground)',
-                            fontSize: '11px',
-                            maxHeight: '160px',
-                            overflow: 'auto',
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-word',
-                          }}
-                        >
-                          {logs}
-                        </pre>
-                      </div>
-                    )}
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <div style={{ fontSize: '11px', opacity: 0.85 }}>Node JSON</div>
-                      <pre
-                        style={{
-                          margin: 0,
-                          padding: '8px',
-                          borderRadius: '4px',
-                          border: '1px solid var(--vscode-input-border)',
-                          background: 'var(--vscode-editor-background)',
-                          color: 'var(--vscode-editor-foreground)',
-                          fontSize: '11px',
-                          overflow: 'auto',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                        }}
-                      >
-                        {inspectorJson}
-                      </pre>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/*
-              {drawerNode.id === 'start' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', opacity: 0.9 }}>Pipeline name</label>
-                    <input
-                      className="nodrag"
-                      value={String(drawerNode.data?.label ?? '')}
-                      onChange={(e) => updateNodeData('start', { label: e.target.value })}
-                      style={{
-                        background: 'var(--vscode-input-background)',
-                        color: 'var(--vscode-input-foreground)',
-                        border: '1px solid var(--vscode-input-border)',
-                        padding: '6px',
-                      }}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', opacity: 0.9 }}>Description</label>
-                    <textarea
-                      className="nodrag"
-                      value={String(drawerNode.data?.description ?? '')}
-                      onChange={(e) => updateNodeData('start', { description: e.target.value })}
-                      rows={4}
-                      style={{
-                        background: 'var(--vscode-input-background)',
-                        color: 'var(--vscode-input-foreground)',
-                        border: '1px solid var(--vscode-input-border)',
-                        padding: '6px',
-                        resize: 'vertical',
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {drawerNode.type === 'promptNode' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', opacity: 0.9 }}>Variable name</label>
-                    <input
-                      className="nodrag"
-                      value={String(drawerNode.data?.name ?? '')}
-                      onChange={(e) => updateNodeData(drawerNode.id, { name: e.target.value })}
-                      style={{
-                        background: 'var(--vscode-input-background)',
-                        color: 'var(--vscode-input-foreground)',
-                        border: '1px solid var(--vscode-input-border)',
-                        padding: '6px',
-                      }}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', opacity: 0.9 }}>Default value</label>
-                    <input
-                      className="nodrag"
-                      value={String(drawerNode.data?.value ?? '')}
-                      onChange={(e) => updateNodeData(drawerNode.id, { value: e.target.value })}
-                      style={{
-                        background: 'var(--vscode-input-background)',
-                        color: 'var(--vscode-input-foreground)',
-                        border: '1px solid var(--vscode-input-border)',
-                        padding: '6px',
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {drawerNode.type === 'repoNode' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', opacity: 0.9 }}>Path</label>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <input
-                        className="nodrag"
-                        value={String(drawerNode.data?.path ?? '')}
-                        onChange={(e) => updateNodeData(drawerNode.id, { path: e.target.value })}
-                        style={{
-                          flex: 1,
-                          background: 'var(--vscode-input-background)',
-                          color: 'var(--vscode-input-foreground)',
-                          border: '1px solid var(--vscode-input-border)',
-                          padding: '6px',
-                        }}
-                      />
-                      <button
-                        className="nodrag"
-                        onClick={() => {
-                          if (!vscode) return;
-                          vscode.postMessage({ type: 'selectPath', id: drawerNode.id, argName: 'path' });
-                        }}
-                        style={{
-                          background: 'var(--vscode-button-secondaryBackground)',
-                          color: 'var(--vscode-button-secondaryForeground)',
-                          border: 'none',
-                          borderRadius: '4px',
-                          padding: '6px 10px',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Browse
-                      </button>
-                    </div>
-                    <div style={{ fontSize: '11px', opacity: 0.7 }}>
-                      Tip: use <code>${'{workspaceRoot}'}</code> to target the current workspace.
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {drawerNode.type === 'vscodeCommandNode' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', opacity: 0.9 }}>commandId</label>
-                    <input
-                      className="nodrag"
-                      value={String(drawerNode.data?.commandId ?? '')}
-                      onChange={(e) => updateNodeData(drawerNode.id, { commandId: e.target.value })}
-                      style={{
-                        background: 'var(--vscode-input-background)',
-                        color: 'var(--vscode-input-foreground)',
-                        border: '1px solid var(--vscode-input-border)',
-                        padding: '6px',
-                      }}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                      <label style={{ fontSize: '11px', opacity: 0.9 }}>args (JSON)</label>
-                      {drawerArgsJsonError && (
-                        <span style={{ fontSize: '10px', color: 'var(--vscode-inputValidation-errorForeground)' }}>
-                          {drawerArgsJsonError}
-                        </span>
-                      )}
-                    </div>
-                    <textarea
-                      className="nodrag"
-                      value={String(drawerNode.data?.argsJson ?? '')}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        updateNodeData(drawerNode.id, { argsJson: v });
-                        if (!v.trim()) {
-                          setDrawerArgsJsonError('');
-                          return;
-                        }
-                        try {
-                          JSON.parse(v);
-                          setDrawerArgsJsonError('');
-                        } catch {
-                          setDrawerArgsJsonError('Invalid JSON');
-                        }
-                      }}
-                      rows={6}
-                      style={{
-                        width: '100%',
-                        resize: 'vertical',
-                        background: 'var(--vscode-input-background)',
-                        color: 'var(--vscode-input-foreground)',
-                        border: `1px solid ${drawerArgsJsonError ? 'var(--vscode-inputValidation-errorBorder)' : 'var(--vscode-input-border)'}`,
-                        padding: '6px',
-                        fontFamily: 'var(--vscode-editor-font-family, Consolas, monospace)',
-                        fontSize: '12px',
-                      }}
-                    />
-                    <div style={{ fontSize: '11px', opacity: 0.7 }}>
-                      This node can be interactive/non-deterministic depending on the command.
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {drawerNode.type === 'actionNode' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', opacity: 0.9 }}>Provider</label>
-                      <select
-                        className="nodrag"
-                        value={String(drawerNode.data?.provider ?? 'terminal')}
-                        onChange={(e) => {
-                          const provider = e.target.value;
-                          const group = (commandGroups || []).find((g: any) => g.provider === provider);
-                          const caps = group?.commands || [];
-                          const defaultCap = caps.find((c: any) => String(c.capability).endsWith('.run'))?.capability || caps[0]?.capability || '';
-                          updateNodeData(drawerNode.id, { provider, capability: defaultCap, args: {} });
-                        }}
-                        style={{
-                          background: 'var(--vscode-input-background)',
-                          color: 'var(--vscode-input-foreground)',
-                          border: '1px solid var(--vscode-input-border)',
-                          padding: '6px',
-                        }}
-                      >
-                        {(commandGroups || []).map((g: any) => (
-                          <option key={g.provider} value={g.provider}>{g.provider}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', opacity: 0.9 }}>Capability</label>
-                      <select
-                        className="nodrag"
-                        value={String(drawerNode.data?.capability ?? '')}
-                        onChange={(e) => updateNodeData(drawerNode.id, { capability: e.target.value })}
-                        style={{
-                          background: 'var(--vscode-input-background)',
-                          color: 'var(--vscode-input-foreground)',
-                          border: '1px solid var(--vscode-input-border)',
-                          padding: '6px',
-                        }}
-                      >
-                        {(() => {
-                          const provider = String(drawerNode.data?.provider ?? 'terminal');
-                          const group = (commandGroups || []).find((g: any) => g.provider === provider);
-                          const caps = group?.commands || [];
-                          return caps.map((c: any) => (
-                            <option key={c.capability} value={c.capability}>{c.capability}</option>
-                          ));
-                        })()}
-                      </select>
-                    </div>
-                  </div>
-
-                  {(() => {
-                    const provider = String(drawerNode.data?.provider ?? 'terminal');
-                    const capId = String(drawerNode.data?.capability ?? '');
-                    const group = (commandGroups || []).find((g: any) => g.provider === provider);
-                    const caps = group?.commands || [];
-                    const capConfig = caps.find((c: any) => c.capability === capId);
-                    const argsConfig = capConfig?.args || [];
-                    const currentArgs = (drawerNode.data?.args || {}) as any;
-
-                    const baseInputStyle: any = {
-                      background: 'var(--vscode-input-background)',
-                      color: 'var(--vscode-input-foreground)',
-                      border: '1px solid var(--vscode-input-border)',
-                      padding: '6px',
-                    };
-
-                    return (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          <label style={{ fontSize: '11px', opacity: 0.9 }}>Description</label>
-                          <input
-                            className="nodrag"
-                            value={String(currentArgs.description ?? '')}
-                            onChange={(e) => updateActionArgs(drawerNode.id, { description: e.target.value })}
-                            style={baseInputStyle}
-                          />
-                        </div>
-
-                        {argsConfig.map((a: any) => {
-                          const name = String(a.name);
-                          const required = !!a.required;
-                          const label = a.description ? `${name} — ${a.description}` : name;
-                          const value = currentArgs[name];
-
-                          const renderField = () => {
-                            if (a.type === 'boolean') {
-                              return (
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <input
-                                    className="nodrag"
-                                    type="checkbox"
-                                    checked={!!value}
-                                    onChange={(e) => updateActionArgs(drawerNode.id, { [name]: e.target.checked })}
-                                  />
-                                  <span style={{ fontSize: '11px', opacity: 0.9 }}>{label}{required ? ' *' : ''}</span>
-                                </label>
-                              );
-                            }
-
-                            if (a.type === 'enum' && Array.isArray(a.options)) {
-                              return (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}{required ? ' *' : ''}</label>
-                                  <select
-                                    className="nodrag"
-                                    value={value ?? ''}
-                                    onChange={(e) => updateActionArgs(drawerNode.id, { [name]: e.target.value })}
-                                    style={baseInputStyle}
-                                  >
-                                    <option value="">(Select)</option>
-                                    {a.options.map((o: any) => (
-                                      <option key={String(o)} value={String(o)}>{String(o)}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              );
-                            }
-
-                            if (a.type === 'enum' && typeof a.options === 'string') {
-                              const dyn = drawerDynamicOptions[name] || [];
-                              return (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}{required ? ' *' : ''}</label>
-                                  <select
-                                    className="nodrag"
-                                    value={value ?? ''}
-                                    onChange={(e) => updateActionArgs(drawerNode.id, { [name]: e.target.value })}
-                                    style={baseInputStyle}
-                                  >
-                                    <option value="">(Select)</option>
-                                    {dyn.map((o: any) => (
-                                      <option key={String(o)} value={String(o)}>{String(o)}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              );
-                            }
-
-                            if (a.type === 'path') {
-                              return (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}{required ? ' *' : ''}</label>
-                                  <div style={{ display: 'flex', gap: '6px' }}>
-                                    <input
-                                      className="nodrag"
-                                      value={value ?? ''}
-                                      onChange={(e) => updateActionArgs(drawerNode.id, { [name]: e.target.value })}
-                                      style={{ ...baseInputStyle, flex: 1 }}
-                                    />
-                                    <button
-                                      className="nodrag"
-                                      onClick={() => {
-                                        if (!vscode) return;
-                                        vscode.postMessage({ type: 'selectPath', id: drawerNode.id, argName: name });
-                                      }}
-                                      style={{
-                                        background: 'var(--vscode-button-secondaryBackground)',
-                                        color: 'var(--vscode-button-secondaryForeground)',
-                                        border: 'none',
-                                        borderRadius: '4px',
-                                        padding: '6px 10px',
-                                        cursor: 'pointer',
-                                      }}
-                                    >
-                                      Browse
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            }
-
-                            return (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                <label style={{ fontSize: '11px', opacity: 0.9 }}>{label}{required ? ' *' : ''}</label>
-                                <input
-                                  className="nodrag"
-                                  value={value ?? ''}
-                                  onChange={(e) => updateActionArgs(drawerNode.id, { [name]: e.target.value })}
-                                  style={baseInputStyle}
-                                />
-                              </div>
-                            );
-                          };
-
-                          return <div key={name}>{renderField()}</div>;
-                        })}
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
-              */}
-            </div>
-          </div>
-        )}
-
-        <div
-          className="nodrag"
+        <button
+          onClick={autoLayout}
           style={{
-            position: 'absolute',
-            top: '50%',
-            right: '14px',
-            transform: 'translateY(-50%)',
-            zIndex: 950,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            gap: '8px',
-            opacity: chromeOpacity
-          }}
-        >
-          {dockOpen && (
-            <div
-              className="nodrag quick-add-dock"
-              style={{
-                width: '240px',
-                background: 'var(--vscode-editorWidget-background)',
-                border: '1px solid var(--vscode-editorWidget-border)',
-                boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
-                borderRadius: '8px',
-                padding: '8px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px'
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <input
-                className="nodrag"
-                placeholder="Search nodes…"
-                value={dockQuery}
-                onChange={(e) => setDockQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && filteredDockItems.length > 0) {
-                    addNodeFromItem(filteredDockItems[0], lastCanvasPos || undefined, null);
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  padding: '6px 8px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--vscode-input-border)',
-                  background: 'var(--vscode-input-background)',
-                  color: 'var(--vscode-input-foreground)'
-                }}
-              />
-              <div style={{ maxHeight: '200px', overflow: 'auto' }}>
-                {filteredDockItems.length === 0 && (
-                  <div style={{ fontSize: '12px', opacity: 0.7, padding: '6px' }}>No results</div>
-                )}
-                {filteredDockItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="quick-add-item"
-                    style={{
-                      padding: '6px 8px',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '12px'
-                    }}
-                    onClick={() => addNodeFromItem(item, lastCanvasPos || undefined, null)}
-                  >
-                    {item.label}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          <button
-            className="nodrag"
-            onClick={() => setDockOpen((v) => !v)}
-            title="Quick Add"
-            style={{
-              width: '34px',
-              height: '34px',
-              borderRadius: '18px',
-              border: '1px solid var(--ir-add-border)',
-              background: 'var(--ir-add-bg)',
-              color: 'var(--ir-add-fg)',
-              cursor: 'pointer',
-              fontSize: '18px',
-              lineHeight: '30px',
-              padding: 0
-            }}
-          >
-            +
-          </button>
-        </div>
-
-       <div
-         className="nodrag"
-         style={{
-           position: 'absolute',
-           bottom: '14px',
-           left: '50%',
-           transform: 'translateX(-50%)',
-           zIndex: 980,
-           display: 'flex',
-           alignItems: 'center',
-           gap: '2px',
-           opacity: chromeOpacity
-         }}
-       >
-         <button
-           className="nodrag"
-           onClick={() => runPipeline(false)}
-           style={{
-             padding: '10px 22px',
-             background: runPillStatus === 'running'
-               ? 'var(--ir-run-running)'
-               : runPillStatus === 'success'
-                 ? 'var(--ir-run-success)'
-                 : runPillStatus === 'error'
-                   ? 'var(--ir-run-error)'
-                   : 'var(--ir-run-idle)',
-             color: 'var(--ir-run-foreground)',
-             border: 'none',
-             borderTopLeftRadius: '999px',
-             borderBottomLeftRadius: '999px',
-             cursor: 'pointer',
-             fontWeight: 700
-           }}
-         >
-           Run
-         </button>
-         <button
-           className="nodrag"
-           onClick={(e) => {
-             e.stopPropagation();
-             setRunMenuOpen(v => !v);
-           }}
-           style={{
-             width: '34px',
-             height: '38px',
-             background: runPillStatus === 'running'
-               ? 'var(--ir-run-running)'
-               : runPillStatus === 'success'
-                 ? 'var(--ir-run-success)'
-                 : runPillStatus === 'error'
-                   ? 'var(--ir-run-error)'
-                   : 'var(--ir-run-idle)',
-             color: 'var(--ir-run-foreground)',
-             border: 'none',
-             borderTopRightRadius: '999px',
-             borderBottomRightRadius: '999px',
-             cursor: 'pointer',
-             fontSize: '11px'
-           }}
-           title="Run options"
-         >
-           ▼
-         </button>
-         {runMenuOpen && (
-           <div
-             className="nodrag"
-             onClick={(e) => e.stopPropagation()}
-             style={{
-               position: 'absolute',
-               bottom: '46px',
-               left: '50%',
-               transform: 'translateX(-50%)',
-               minWidth: '190px',
-               background: 'var(--vscode-editorWidget-background)',
-               border: '1px solid var(--vscode-editorWidget-border)',
-               borderRadius: '8px',
-               boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
-               padding: '6px'
-             }}
-           >
-             <button className="nodrag" onClick={() => runPipeline(false)} style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '8px', cursor: 'pointer', color: 'var(--vscode-foreground)' }}>Run</button>
-             <button className="nodrag" onClick={() => runPipeline(true)} style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '8px', cursor: 'pointer', color: 'var(--vscode-foreground)' }}>Dry run</button>
-             <button
-               className="nodrag"
-               disabled={!selectedNodeId}
-               onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, false)}
-               style={{
-                 width: '100%',
-                 textAlign: 'left',
-                 background: 'transparent',
-                 border: 'none',
-                 padding: '8px',
-                 cursor: selectedNodeId ? 'pointer' : 'not-allowed',
-                 color: selectedNodeId ? 'var(--vscode-foreground)' : 'var(--vscode-disabledForeground)'
-               }}
-             >
-               Run from selection
-             </button>
-             <button
-               className="nodrag"
-               disabled={!selectedNodeId}
-               onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, true)}
-               style={{
-                 width: '100%',
-                 textAlign: 'left',
-                 background: 'transparent',
-                 border: 'none',
-                 padding: '8px',
-                 cursor: selectedNodeId ? 'pointer' : 'not-allowed',
-                 color: selectedNodeId ? 'var(--vscode-foreground)' : 'var(--vscode-disabledForeground)'
-               }}
-             >
-               Dry run from selection
-             </button>
-             <button
-               className="nodrag"
-               onClick={() => {
-                 setRunPreviewIds(null);
-                 setRunMenuOpen(false);
-               }}
-               style={{
-                 width: '100%',
-                 textAlign: 'left',
-                 background: 'transparent',
-                 border: 'none',
-                 padding: '8px',
-                 cursor: 'pointer',
-                 color: 'var(--vscode-foreground)',
-                 opacity: 0.8
-               }}
-             >
-               Clear highlight
-             </button>
-           </div>
-         )}
-       </div>
-
-       <button
-         onClick={autoLayout}
-         style={{
            position: 'absolute',
            top: '10px',
            right: '260px',
@@ -3205,101 +1036,28 @@ function Flow({
          Auto layout
        </button>
 
-       <div
-         className="nodrag"
-         style={{
-           position: 'absolute',
-           top: `${chromePanelPos.y}px`,
-           left: `${chromePanelPos.x}px`,
-           zIndex: 940,
-           display: 'flex',
-           flexDirection: 'column',
-           gap: '6px',
-           padding: '6px 8px',
-           borderRadius: '8px',
-           background: 'var(--vscode-editorWidget-background)',
-           border: '1px solid var(--vscode-editorWidget-border)',
-           opacity: chromeOpacity,
-           width: chromeCollapsed ? '230px' : '760px',
-           maxWidth: 'calc(100vw - 16px)',
-           boxSizing: 'border-box'
-         }}
-       >
-         <div
-           className="nodrag"
-           onMouseDown={(event) => {
-             if ((event.target as HTMLElement)?.closest('button,input,select,textarea')) {
-               return;
-             }
-             const rect = (event.currentTarget as HTMLDivElement).getBoundingClientRect();
-             chromePanelDragRef.current = { dx: event.clientX - rect.left, dy: event.clientY - rect.top };
-           }}
-           onDoubleClick={() => setChromePanelPos({ x: 430, y: 56 })}
-           style={{
-             display: 'flex',
-             alignItems: 'center',
-             justifyContent: 'space-between',
-             gap: '8px',
-             cursor: 'grab',
-             userSelect: 'none'
-           }}
-         >
-           <span style={{ fontSize: '11px', opacity: 0.85 }}>Chrome controls</span>
-           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-             <button
-               className="nodrag"
-               onClick={() => setChromePanelPos({ x: 430, y: 56 })}
-               style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px' }}
-               title="Reset position"
-             >
-               Reset
-             </button>
-             <button
-               className="nodrag"
-               onClick={() => setChromeCollapsed((v) => !v)}
-               style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px' }}
-               title={chromeCollapsed ? 'Expand controls' : 'Collapse controls'}
-             >
-               {chromeCollapsed ? 'Expand' : 'Collapse'}
-             </button>
-           </div>
-         </div>
-
-         {!chromeCollapsed && (
-           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-             <label style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-               Opacity
-               <input className="nodrag" type="range" min={30} max={100} value={Math.round(chromeOpacity * 100)} onChange={(e) => setChromeOpacity(Number(e.target.value) / 100)} />
-             </label>
-             <button className="nodrag" onClick={toggleFocusGraph} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
-               {focusGraph ? 'Unfocus' : 'Focus graph'}
-             </button>
-             <button className="nodrag" onClick={() => setShowMiniMap(v => !v)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
-               {showMiniMap ? 'MiniMap on' : 'MiniMap off'}
-             </button>
-             <button className="nodrag" onClick={() => setShowControls(v => !v)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
-               {showControls ? 'Controls on' : 'Controls off'}
-             </button>
-             <button
-               className="nodrag"
-               onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, false)}
-               disabled={!selectedNodeId}
-               style={{
-                 background: selectedNodeId ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
-                 color: selectedNodeId ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
-                 border: 'none',
-                 borderRadius: '4px',
-                 padding: '6px 8px',
-                 cursor: selectedNodeId ? 'pointer' : 'not-allowed',
-                 fontSize: '11px'
-               }}
-               title={selectedNodeId ? 'Run from selected node' : 'Select a node first'}
-             >
-               Run selected
-             </button>
-           </div>
-         )}
-       </div>
+        <ChromeControlsPanel
+          chromePanelPos={chromePanelPos}
+          chromeCollapsed={chromeCollapsed}
+          setChromeCollapsed={setChromeCollapsed}
+          setChromePanelPos={setChromePanelPos}
+          chromePanelDragRef={chromePanelDragRef}
+          chromeOpacity={chromeOpacity}
+          focusGraph={focusGraph}
+          toggleFocusGraph={toggleFocusGraph}
+          showMiniMap={showMiniMap}
+          setShowMiniMap={setShowMiniMap}
+          showControls={showControls}
+          setShowControls={setShowControls}
+          canUndo={canUndo}
+          undoGraph={undoGraph}
+          canRedo={canRedo}
+          redoGraph={redoGraph}
+          selectedNodeId={selectedNodeId}
+          runPipelineFromHere={runPipelineFromHere}
+          resetRuntimeUiState={resetRuntimeUiState}
+          setChromeOpacity={setChromeOpacity}
+        />
 
        <button
          onClick={savePipeline}
@@ -3324,137 +1082,69 @@ function Flow({
  }
 
 export default function App() {
-  const [commandGroups, setCommandGroups] = useState<any[]>([]);
-  const [history, setHistory] = useState<any[]>([]);
-  const [selectedRun, setSelectedRun] = useState<any>(null);
-  const [restoreRun, setRestoreRun] = useState<any>(null);
-  const [themeTokens, setThemeTokens] = useState(() => tokensFromPreset(window.initialData?.uiPreset || { theme: { tokens: defaultThemeTokens } }));
-  const [adminMode, setAdminMode] = useState<boolean>(!!window.initialData?.adminMode);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [sidebarTab, setSidebarTab] = useState<'providers' | 'history' | 'environment' | 'studio'>('providers');
-
-  useEffect(() => {
-    // Restore ephemeral UI state from VS Code webview state
-    try {
-      const st = vscode?.getState?.() || {};
-      if (typeof st.sidebarCollapsed === 'boolean') setSidebarCollapsed(st.sidebarCollapsed);
-      if (st.sidebarTab === 'providers' || st.sidebarTab === 'history' || st.sidebarTab === 'environment' || st.sidebarTab === 'studio') {
-        setSidebarTab(st.sidebarTab);
-      }
-    } catch {
-      // ignore
-    }
-
-    if (window.initialData) {
-      if (window.initialData.commandGroups) {
-        setCommandGroups(window.initialData.commandGroups);
-      }
-      if (window.initialData.history) {
-        setHistory(window.initialData.history);
-      }
-      if (window.initialData.uiPreset) {
-        setThemeTokens(tokensFromPreset(window.initialData.uiPreset));
-      }
-      if (typeof window.initialData.adminMode === 'boolean') {
-        setAdminMode(!!window.initialData.adminMode);
-      }
-    }
-
-    const handleMessage = (event: MessageEvent) => {
-       if (event.data?.type === 'historyUpdate') {
-           console.log('History updated:', event.data.history);
-           setHistory(event.data.history);
-           // If history is cleared, clear selected run
-           if (event.data.history.length === 0) {
-               setSelectedRun(null);
-           }
-       } else if (event.data?.type === 'uiPresetUpdate') {
-           setThemeTokens(tokensFromPreset(event.data.uiPreset));
-       } else if (event.data?.type === 'adminModeUpdate') {
-           setAdminMode(!!event.data.adminMode);
-       }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'b') {
-        e.preventDefault();
-        setSidebarCollapsed((v) => !v);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  useEffect(() => {
-    try {
-      const prev = vscode?.getState?.() || {};
-      vscode?.setState?.({ ...prev, sidebarCollapsed, sidebarTab });
-    } catch {
-      // ignore
-    }
-  }, [sidebarCollapsed, sidebarTab]);
-
-  useEffect(() => {
-    applyThemeTokensToRoot(themeTokens);
-  }, [themeTokens]);
-
-  // When clicking an active run again or clicking clear, we might want to toggle?
-  // For now, let's allow re-selection to replay.
-  // Sidebar handles the click.
+  const {
+    commandGroups,
+    history,
+    selectedRun,
+    setSelectedRun,
+    restoreRun,
+    uiPreset,
+    uiPresetRelease,
+    adminMode,
+    sidebarCollapsed,
+    setSidebarCollapsed,
+    sidebarWidth,
+    setSidebarWidth,
+    sidebarTab,
+    setSidebarTab,
+    visibleSidebarTabs,
+    onRestoreHistory,
+    onRestoreHandled,
+    sidebarResizeRef,
+    defaultSidebarWidth,
+    minSidebarWidth,
+    maxSidebarWidth
+  } = useAppShellState();
 
   return (
     <RegistryContext.Provider value={{ commandGroups }}>
-      <div style={{ display: 'flex', width: '100vw', height: '100vh', flexDirection: 'row', position: 'relative' }}>
-         {!sidebarCollapsed && (
-           <Sidebar
-              tab={sidebarTab}
-              onTabChange={setSidebarTab}
-              history={history}
-              adminMode={adminMode}
-              onSelectHistory={setSelectedRun}
-              onRestoreHistory={(run) => {
-                  setRestoreRun(run);
-                  setSelectedRun(null); // Stop playback/clear selection
-              }}
-           />
-         )}
-         <div style={{ flex: 1, position: 'relative' }}>
-            <button
-              className="nodrag"
-              onClick={() => setSidebarCollapsed((v) => !v)}
-              title={sidebarCollapsed ? 'Show sidebar (Ctrl+B)' : 'Hide sidebar (Ctrl+B)'}
-              style={{
-                position: 'absolute',
-                top: '10px',
-                left: '10px',
-                zIndex: 950,
-                background: 'var(--vscode-button-secondaryBackground)',
-                color: 'var(--vscode-button-secondaryForeground)',
-                border: 'none',
-                borderRadius: '4px',
-                padding: '8px 10px',
-                cursor: 'pointer',
-              }}
-            >
-              {sidebarCollapsed ? '≡' : '⟨'}
-            </button>
-	           <ReactFlowProvider>
-	             <Flow
-	                selectedRun={selectedRun}
-	                restoreRun={restoreRun}
-                  sidebarCollapsed={sidebarCollapsed}
-                  onSetSidebarCollapsed={setSidebarCollapsed}
-	                onRestoreHandled={() => {
-	                    setRestoreRun(null);
-	                }}
-	             />
-	           </ReactFlowProvider>
-         </div>
-      </div>
+      <AppLayoutShell
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
+        sidebarWidth={sidebarWidth}
+        minSidebarWidth={minSidebarWidth}
+        maxSidebarWidth={maxSidebarWidth}
+        defaultSidebarWidth={defaultSidebarWidth}
+        onSidebarResizerMouseDown={(event) => {
+          sidebarResizeRef.current = { startX: event.clientX, startWidth: sidebarWidth };
+        }}
+        onSidebarResizerDoubleClick={() => setSidebarWidth(defaultSidebarWidth)}
+        sidebar={
+          <Sidebar
+            tab={sidebarTab}
+            onTabChange={setSidebarTab}
+            tabs={visibleSidebarTabs}
+            uiPreset={uiPreset}
+            uiPresetRelease={uiPresetRelease}
+            history={history}
+            adminMode={adminMode}
+            onSelectHistory={setSelectedRun}
+            onRestoreHistory={onRestoreHistory}
+          />
+        }
+        canvas={(
+          <ReactFlowProvider>
+            <Flow
+              selectedRun={selectedRun}
+              restoreRun={restoreRun}
+              uiPreset={uiPreset}
+              sidebarCollapsed={sidebarCollapsed}
+              onSetSidebarCollapsed={setSidebarCollapsed}
+              onRestoreHandled={onRestoreHandled}
+            />
+          </ReactFlowProvider>
+        )}
+      />
     </RegistryContext.Provider>
   );
 }

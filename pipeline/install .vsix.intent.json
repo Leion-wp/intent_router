@@ -58,14 +58,14 @@
             "status": "idle"
           },
           "position": {
-            "x": 0,
-            "y": -60
+            "x": 250,
+            "y": 50
           },
           "sourcePosition": "right",
           "deletable": false,
           "measured": {
             "width": 283,
-            "height": 238
+            "height": 234
           },
           "selected": false,
           "dragging": false
@@ -74,8 +74,8 @@
           "id": "node_1",
           "type": "actionNode",
           "position": {
-            "x": 345,
-            "y": -60
+            "x": 540,
+            "y": -30
           },
           "data": {
             "provider": "terminal",
@@ -100,8 +100,8 @@
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 675,
-            "y": -60
+            "x": 810,
+            "y": -30
           },
           "data": {
             "provider": "terminal",
@@ -119,15 +119,15 @@
             "width": 273,
             "height": 319
           },
-          "selected": true,
+          "selected": false,
           "dragging": false
         },
         {
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 1050,
-            "y": -45
+            "x": 1080,
+            "y": -30
           },
           "data": {
             "provider": "terminal",
@@ -152,8 +152,8 @@
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1365,
-            "y": 0
+            "x": 1350,
+            "y": 30
           },
           "data": {
             "commandId": "workbench.extensions.action.installVSIX",
@@ -174,8 +174,8 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1710,
-            "y": 45
+            "x": 1350,
+            "y": 75
           },
           "data": {
             "commandId": "workbench.action.reloadWindow",
@@ -189,7 +189,7 @@
             "width": 283,
             "height": 51
           },
-          "selected": false,
+          "selected": true,
           "dragging": false
         }
       ],

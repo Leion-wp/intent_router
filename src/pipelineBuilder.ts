@@ -10,12 +10,77 @@ import { Capability, CompositeCapability } from './types';
 import { historyManager } from './historyManager';
 import * as path from 'path';
 import { deleteCustomNodeInWorkspace, exportCustomNodes, importCustomNodesJson, readCustomNodesFromWorkspace, upsertCustomNodeInWorkspace, writeCustomNodesToWorkspace } from './customNodesStore';
-import { deleteUiDraftFromWorkspace, getDefaultUiPreset, resolveUiPreset, writeUiDraftToWorkspace } from './uiPresetStore';
+import {
+    deleteUiDraftFromWorkspace,
+    getDefaultUiPreset,
+    getEmbeddedUiPresetUri,
+    readEmbeddedUiPreset,
+    readUiDraftFromWorkspace,
+    resolveUiPreset,
+    writeEmbeddedUiPreset,
+    writeUiDraftToWorkspace
+} from './uiPresetStore';
 
 type CommandGroup = {
     provider: string;
     commands: (Capability | CompositeCapability)[];
 };
+
+function summarizeUiPresetDiff(releasePreset: any, draftPreset: any): string {
+    const releaseTabs = Array.isArray(releasePreset?.sidebar?.tabs) ? releasePreset.sidebar.tabs : [];
+    const draftTabs = Array.isArray(draftPreset?.sidebar?.tabs) ? draftPreset.sidebar.tabs : [];
+    const releaseCategories = Array.isArray(releasePreset?.palette?.categories) ? releasePreset.palette.categories : [];
+    const draftCategories = Array.isArray(draftPreset?.palette?.categories) ? draftPreset.palette.categories : [];
+    const releasePinned = Array.isArray(releasePreset?.palette?.pinned) ? releasePreset.palette.pinned : [];
+    const draftPinned = Array.isArray(draftPreset?.palette?.pinned) ? draftPreset.palette.pinned : [];
+    const releaseTheme = releasePreset?.theme?.tokens || {};
+    const draftTheme = draftPreset?.theme?.tokens || {};
+
+    const changedTabs = JSON.stringify(releaseTabs) !== JSON.stringify(draftTabs);
+    const changedCategories = JSON.stringify(releaseCategories) !== JSON.stringify(draftCategories);
+    const changedPinned = JSON.stringify(releasePinned) !== JSON.stringify(draftPinned);
+    const changedTheme = JSON.stringify(releaseTheme) !== JSON.stringify(draftTheme);
+
+    return [
+        changedTheme ? 'theme: changed' : 'theme: unchanged',
+        changedTabs ? `sidebar tabs: ${releaseTabs.length} -> ${draftTabs.length}` : `sidebar tabs: unchanged (${draftTabs.length})`,
+        changedCategories ? 'palette categories: changed' : `palette categories: unchanged (${draftCategories.length})`,
+        changedPinned ? `palette pinned: ${releasePinned.length} -> ${draftPinned.length}` : `palette pinned: unchanged (${draftPinned.length})`
+    ].join(' | ');
+}
+
+function validateUiPresetForPropagation(preset: any): string[] {
+    const errors: string[] = [];
+    const tabs = Array.isArray(preset?.sidebar?.tabs) ? preset.sidebar.tabs : [];
+    if (!tabs.length) {
+        errors.push('sidebar.tabs must contain at least one tab.');
+    } else {
+        const seen = new Set<string>();
+        for (const tab of tabs) {
+            const id = String(tab?.id || '').trim();
+            if (!id) {
+                errors.push('sidebar.tabs contains an empty id.');
+                continue;
+            }
+            if (seen.has(id)) {
+                errors.push(`sidebar.tabs contains duplicate id: ${id}.`);
+            }
+            seen.add(id);
+        }
+        if (!tabs.some((tab: any) => tab?.visible !== false)) {
+            errors.push('At least one sidebar tab must be visible.');
+        }
+    }
+
+    const categories = Array.isArray(preset?.palette?.categories) ? preset.palette.categories : [];
+    const requiredCategories = ['context', 'providers', 'custom'];
+    for (const required of requiredCategories) {
+        if (!categories.some((entry: any) => String(entry?.id || '').trim() === required)) {
+            errors.push(`palette.categories is missing "${required}".`);
+        }
+    }
+    return errors;
+}
 
 export class PipelineBuilder {
     private panel: vscode.WebviewPanel | undefined;
@@ -56,7 +121,7 @@ export class PipelineBuilder {
 
         // Listen to pipeline events to forward to webview
         const eventSub = pipelineEventBus.on(e => {
-            if (this.panel && this.panel.visible) {
+            if (this.panel) {
 	               if (e.type === 'stepStart' || e.type === 'stepEnd') {
 	                   this.panel.webview.postMessage({
 	                       type: 'executionStatus',
@@ -91,8 +156,10 @@ export class PipelineBuilder {
         const pushUiPreset = async () => {
             const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
             const uiPreset = await resolveUiPreset(this.extensionUri, adminMode);
+            const uiPresetRelease = await readEmbeddedUiPreset(this.extensionUri);
             this.panel?.webview.postMessage({ type: 'adminModeUpdate', adminMode });
             this.panel?.webview.postMessage({ type: 'uiPresetUpdate', uiPreset });
+            this.panel?.webview.postMessage({ type: 'uiPresetReleaseUpdate', uiPreset: uiPresetRelease });
         };
 
         // Keep ENV panel and admin flags in sync if settings change while builder is open.
@@ -131,6 +198,7 @@ export class PipelineBuilder {
             const devMode = vscode.workspace.getConfiguration('intentRouter').get<boolean>('devMode', false);
             const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
             const uiPreset = await resolveUiPreset(this.extensionUri, adminMode);
+            const uiPresetRelease = await readEmbeddedUiPreset(this.extensionUri);
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
@@ -153,7 +221,8 @@ export class PipelineBuilder {
             customNodes,
             devMode,
             adminMode,
-            uiPreset
+            uiPreset,
+            uiPresetRelease
         });
 
         // Keep custom nodes in sync while builder is open
@@ -386,6 +455,65 @@ export class PipelineBuilder {
                 } catch (e: any) {
                     const err = String(e?.message || e);
                     this.panel?.webview.postMessage({ type: 'error', message: `Failed to reset UI preset to defaults: ${err}` });
+                }
+                return;
+            }
+            if (message?.type === 'uiPreset.propagateDraft') {
+                try {
+                    const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
+                    if (!adminMode) {
+                        this.panel?.webview.postMessage({ type: 'error', message: 'UI propagate is available only in admin mode.' });
+                        return;
+                    }
+
+                    const draft = await readUiDraftFromWorkspace();
+                    if (!draft) {
+                        this.panel?.webview.postMessage({ type: 'error', message: 'No UI draft found. Save a draft first.' });
+                        return;
+                    }
+
+                    const validationErrors = validateUiPresetForPropagation(draft);
+                    if (validationErrors.length > 0) {
+                        this.panel?.webview.postMessage({
+                            type: 'error',
+                            message: `UI draft is invalid for propagation: ${validationErrors.join(' ')}`
+                        });
+                        return;
+                    }
+
+                    const releasePreset = await readEmbeddedUiPreset(this.extensionUri);
+                    const summary = summarizeUiPresetDiff(releasePreset, draft);
+                    if (JSON.stringify(releasePreset) === JSON.stringify(draft)) {
+                        this.panel?.webview.postMessage({
+                            type: 'error',
+                            message: 'Draft and release presets are identical. Nothing to propagate.'
+                        });
+                        return;
+                    }
+                    const decision = await vscode.window.showWarningMessage(
+                        `Propagate UI draft to release preset?\n${summary}`,
+                        { modal: true },
+                        'Propagate'
+                    );
+                    if (decision !== 'Propagate') {
+                        return;
+                    }
+
+                    const releaseUri = await writeEmbeddedUiPreset(this.extensionUri, draft);
+                    await pushUiPreset();
+                    this.panel?.webview.postMessage({
+                        type: 'uiPresetPropagated',
+                        summary,
+                        releasePath: releaseUri.fsPath
+                    });
+                    vscode.window.showInformationMessage(`UI preset propagated to release: ${releaseUri.fsPath}`);
+                } catch (e: any) {
+                    const err = String(e?.message || e);
+                    const releasePath = getEmbeddedUiPresetUri(this.extensionUri).fsPath;
+                    this.panel?.webview.postMessage({
+                        type: 'error',
+                        message: `Failed to propagate UI preset to ${releasePath}: ${err}`
+                    });
                 }
                 return;
             }
