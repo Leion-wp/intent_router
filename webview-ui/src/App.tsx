@@ -26,6 +26,7 @@ import FormNode from './nodes/FormNode';
 import SwitchNode from './nodes/SwitchNode';
 import ScriptNode from './nodes/ScriptNode';
 import AgentNode from './nodes/AgentNode';
+import HttpNode from './nodes/HttpNode';
 import AppLayoutShell from './components/AppLayoutShell';
 import ChromeControlsPanel from './components/ChromeControlsPanel';
 import { edgeTypes } from './components/InsertableEdge';
@@ -115,7 +116,8 @@ const nodeTypes = {
   formNode: FormNode,
   switchNode: SwitchNode,
   scriptNode: ScriptNode,
-  agentNode: AgentNode
+  agentNode: AgentNode,
+  httpNode: HttpNode
 };
 
 declare global {
@@ -660,6 +662,16 @@ function Flow({
             outputVar: data.outputVar
           };
           description = String(data.label || 'AI Task');
+        } else if (node.type === 'httpNode') {
+          intent = 'http.request';
+          payload = {
+            url: data.url,
+            method: data.method,
+            headers: data.headers,
+            body: data.body,
+            outputVar: data.outputVar
+          };
+          description = String(data.label || 'HTTP Request');
         } else if (node.type === 'vscodeCommandNode') {
           intent = 'vscode.runCommand';
           payload = { commandId: data.commandId, argsJson: data.argsJson };

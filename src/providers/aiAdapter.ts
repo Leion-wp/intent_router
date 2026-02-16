@@ -28,7 +28,7 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
     });
 }
 
-export async function executeAiCommand(args: any): Promise<void> {
+export async function executeAiCommand(args: any): Promise<any> {
     const instruction = args?.instruction;
     const contextFiles = args?.contextFiles || [];
     const agent = args?.agent || 'gemini';
@@ -111,23 +111,17 @@ Do not ask for confirmation or further instructions.
         const envOverrides = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
         const env = { ...process.env, ...envOverrides };
         
-        // ULTIMATE WINDOWS FIX: Use array spawn and pass prompt via STDIN
-        // We use 'gemini.cmd' on windows to ensure it finds the npm shim
         const geminiExecutable = process.platform === 'win32' ? 'gemini.cmd' : 'gemini';
-        
-        // Flags: 
-        // -m: model
-        // -y: yolo mode
-        // -p -: Read prompt from stdin
         const geminiArgs = ['-m', modelName, '-y', '-p', '-'];
 
         const child = cp.spawn(geminiExecutable, geminiArgs, { 
             cwd: workspaceRoot, 
             env,
-            shell: process.platform === 'win32' // Still helpful for .cmd
+            shell: process.platform === 'win32'
         });
 
-        // Write prompt to stdin then close it to signal end of input
+        let fullResponse = '';
+
         if (child.stdin) {
             child.stdin.write(fullPrompt);
             child.stdin.end();
@@ -135,12 +129,12 @@ Do not ask for confirmation or further instructions.
         
         child.stdout.on('data', (d) => {
             const text = d.toString();
+            fullResponse += text;
             log(text);
         });
 
         child.stderr.on('data', (d) => {
             const text = d.toString();
-            // Filter noise
             if (!text.includes('AttachConsole failed') && !text.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
                 log(text, 'stderr');
             }
@@ -149,7 +143,7 @@ Do not ask for confirmation or further instructions.
         child.on('close', (code) => {
             if (code === 0) {
                 log(`\n[AI Agent] Task completed successfully.\n`);
-                resolve();
+                resolve(fullResponse.trim());
             } else {
                 log(`\n[AI Agent] Failed with exit code ${code}\n`, 'stderr');
                 reject(new Error(`Agent exited with code ${code}`));

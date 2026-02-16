@@ -41,6 +41,7 @@ export function useQuickAddCatalog(options: UseQuickAddCatalogOptions) {
 
   const presetItems: QuickAddItem[] = useMemo(() => ([
     { id: 'preset-agent', label: 'AI Agent', nodeType: 'agentNode', category: 'ai' },
+    { id: 'preset-http', label: 'HTTP Request', nodeType: 'httpNode', category: 'providers' },
     { id: 'preset-prompt', label: 'Prompt', nodeType: 'promptNode', category: 'context' },
     { id: 'preset-form', label: 'Form', nodeType: 'formNode', category: 'context' },
     { id: 'preset-switch', label: 'Switch', nodeType: 'switchNode', category: 'context' },

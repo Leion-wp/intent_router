@@ -58,8 +58,8 @@
             "status": "idle"
           },
           "position": {
-            "x": 250,
-            "y": 50
+            "x": 105,
+            "y": -30
           },
           "sourcePosition": "right",
           "deletable": false,
@@ -74,7 +74,7 @@
           "id": "node_1",
           "type": "actionNode",
           "position": {
-            "x": 540,
+            "x": 465,
             "y": -30
           },
           "data": {
@@ -90,8 +90,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 989,
-            "height": 477
+            "width": 984,
+            "height": 464
           },
           "selected": false,
           "dragging": false
@@ -100,8 +100,8 @@
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 810,
-            "y": -30
+            "x": 780,
+            "y": -15
           },
           "data": {
             "provider": "terminal",
@@ -116,8 +116,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 741,
-            "height": 504
+            "width": 769,
+            "height": 464
           },
           "selected": false,
           "dragging": false
@@ -126,8 +126,8 @@
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 1080,
-            "y": -30
+            "x": 1095,
+            "y": -15
           },
           "data": {
             "provider": "terminal",
@@ -142,8 +142,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 741,
-            "height": 504
+            "width": 769,
+            "height": 464
           },
           "selected": false,
           "dragging": false
@@ -152,8 +152,8 @@
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1350,
-            "y": 30
+            "x": 1515,
+            "y": -45
           },
           "data": {
             "commandId": "workbench.extensions.action.installVSIX",
@@ -164,8 +164,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 283,
-            "height": 51
+            "width": 282,
+            "height": 46
           },
           "selected": false,
           "dragging": false
@@ -174,8 +174,8 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1350,
-            "y": 75
+            "x": 1755,
+            "y": 120
           },
           "data": {
             "commandId": "workbench.action.reloadWindow",
@@ -186,10 +186,10 @@
             "status": "idle"
           },
           "measured": {
-            "width": 283,
-            "height": 51
+            "width": 282,
+            "height": 46
           },
-          "selected": true,
+          "selected": false,
           "dragging": false
         }
       ],

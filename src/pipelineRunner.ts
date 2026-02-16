@@ -897,7 +897,15 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             };
 
             // Route the compiled intent
-            const ok = await routeIntent(compiledStep, variableCache);
+            // We now capture the result from routeIntent
+            const result = await routeIntent(compiledStep, variableCache);
+            const ok = typeof result === 'boolean' ? result : (result !== undefined && result !== null);
+
+            // If the step has an outputVar, store the result in the cache
+            const outputVar = compiledStep.payload?.outputVar;
+            if (ok && outputVar && typeof outputVar === 'string') {
+                variableCache.set(outputVar, String(result));
+            }
 
             pipelineEventBus.emit({
                 type: 'stepEnd',

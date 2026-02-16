@@ -12,6 +12,7 @@ import { cancelTerminalRun, executeTerminalCommand, registerTerminalProvider } f
 import { registerSystemProvider } from './providers/systemAdapter';
 import { registerVSCodeProvider } from './providers/vscodeAdapter';
 import { registerAiProvider, executeAiCommand } from './providers/aiAdapter';
+import { registerHttpProvider, executeHttpCommand } from './providers/httpAdapter';
 import { StatusBarManager } from './statusBar';
 import { historyManager } from './historyManager';
 
@@ -26,6 +27,7 @@ export function activate(context: vscode.ExtensionContext) {
     registerSystemProvider(context);
     registerVSCodeProvider(context);
     registerAiProvider(context);
+    registerHttpProvider(context);
 
     const pipelineBuilder = new PipelineBuilder(context.extensionUri);
     const pipelinesProvider = new PipelinesTreeDataProvider();
@@ -61,7 +63,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
 	    let internalTerminalDisposable = vscode.commands.registerCommand('intentRouter.internal.terminalRun', async (args: any) => {
-	        await executeTerminalCommand(args);
+	        return await executeTerminalCommand(args);
 	    });
 
 	    let internalTerminalCancelDisposable = vscode.commands.registerCommand('intentRouter.internal.terminalCancel', async (args: any) => {
@@ -69,7 +71,11 @@ export function activate(context: vscode.ExtensionContext) {
 	    });
 
         let aiGenerateDisposable = vscode.commands.registerCommand('intentRouter.internal.aiGenerate', async (args: any) => {
-            await executeAiCommand(args);
+            return await executeAiCommand(args);
+        });
+
+        let httpRequestDisposable = vscode.commands.registerCommand('intentRouter.internal.httpRequest', async (args: any) => {
+            return await executeHttpCommand(args);
         });
 
     let promptDisposable = vscode.commands.registerCommand('intentRouter.routeFromJson', async () => {
@@ -276,6 +282,7 @@ export function activate(context: vscode.ExtensionContext) {
 	    context.subscriptions.push(internalTerminalDisposable);
 	    context.subscriptions.push(internalTerminalCancelDisposable);
         context.subscriptions.push(aiGenerateDisposable);
+        context.subscriptions.push(httpRequestDisposable);
 	    context.subscriptions.push(promptDisposable);
 	    context.subscriptions.push(createPipelineDisposable);
 	    context.subscriptions.push(runPipelineDisposable);
