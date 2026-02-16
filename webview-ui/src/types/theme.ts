@@ -18,7 +18,7 @@ export type SidebarTabPreset = {
   visible: boolean;
 };
 
-export type PaletteCategoryId = 'context' | 'providers' | 'custom';
+export type PaletteCategoryId = 'context' | 'providers' | 'custom' | 'ai';
 
 export type PaletteCategoryPreset = {
   id: PaletteCategoryId;
@@ -64,15 +64,16 @@ export const defaultSidebarTabs: SidebarTabPreset[] = [
 
 export const defaultPalette: PalettePreset = {
   categories: [
-    { id: 'context', title: 'Context', visible: true, order: 0 },
-    { id: 'providers', title: 'Providers', visible: true, order: 1 },
-    { id: 'custom', title: 'Custom', visible: true, order: 2 }
+    { id: 'ai', title: 'AI Agents', visible: true, order: 0 },
+    { id: 'context', title: 'Context', visible: true, order: 1 },
+    { id: 'providers', title: 'Providers', visible: true, order: 2 },
+    { id: 'custom', title: 'Custom', visible: true, order: 3 }
   ],
-  pinned: ['preset-terminal', 'preset-form', 'preset-switch']
+  pinned: ['preset-agent', 'preset-terminal', 'preset-form', 'preset-switch']
 };
 
 const validTabTypes: SidebarTabType[] = ['pipelines', 'history', 'settings', 'catalog', 'importExport', 'studio'];
-const validCategoryIds: PaletteCategoryId[] = ['context', 'providers', 'custom'];
+const validCategoryIds: PaletteCategoryId[] = ['context', 'providers', 'custom', 'ai'];
 
 export function normalizeThemeTokens(raw: any): ThemeTokens {
   const incoming = raw && typeof raw === 'object' ? raw : {};

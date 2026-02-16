@@ -227,17 +227,29 @@ html, body, #root {
 }
 
 .react-flow__edge-path {
-  transition: stroke 0.14s ease, stroke-width 0.14s ease, stroke-dasharray 0.14s ease;
+  transition: stroke 0.14s ease, stroke-width 0.14s ease;
 }
 
-.react-flow__edge.ir-edge-running .react-flow__edge-path {
-  stroke-linecap: round;
-  animation: irEdgeDash 0.75s linear infinite;
+.react-flow__edge.ir-edge-flow .react-flow__edge-path {
+  stroke-dasharray: 5;
+  animation: irEdgeFlow 1s linear infinite;
 }
 
-@keyframes irEdgeDash {
-  from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: -24; }
+@keyframes irEdgeFlow {
+  from { stroke-dashoffset: 10; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* Cyber Flow Dots */
+.edge-dot {
+  animation: edgeDot 2s linear infinite;
+}
+
+@keyframes edgeDot {
+  0% { offset-distance: 0%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
 }
 
 .status-badge {

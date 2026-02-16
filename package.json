@@ -113,7 +113,7 @@
             }
         ],
         "viewsContainers": {
-        "activitybar": [
+            "activitybar": [
                 {
                     "id": "intentRouter",
                     "title": "Leion Roots",
@@ -409,5 +409,8 @@
         "mocha": "^11.7.5",
         "ts-node": "^10.9.2",
         "typescript": "^4.9.5"
+    },
+    "dependencies": {
+        "zod": "^3.25.76"
     }
 }

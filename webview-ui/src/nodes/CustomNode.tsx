@@ -1,5 +1,5 @@
 import { memo, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Handle, NodeProps, Position } from '@xyflow/react';
+import { Handle, Position, NodeProps } from '@xyflow/react';
 import { CustomNodesContext, FlowEditorContext, FlowRuntimeContext, RegistryContext } from '../App';
 import SchemaArgsForm, { SchemaField } from '../components/SchemaArgsForm';
 import IoSpec from '../components/IoSpec';
@@ -75,10 +75,6 @@ const CustomNode = ({ data, id }: NodeProps) => {
     return undefined;
   }, [commandGroups, intent]);
 
-  const determinism: 'deterministic' | 'interactive' =
-    capabilityConfig?.determinism === 'interactive' ? 'interactive' : 'deterministic';
-  const determinismBadge = determinism === 'interactive' ? '👤' : '⚙';
-
   const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
   const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none';
 
@@ -111,18 +107,28 @@ const CustomNode = ({ data, id }: NodeProps) => {
     return `${value}%`;
   };
 
+  const handleStyle = {
+    width: '10px',
+    height: '10px',
+    border: '2px solid rgba(30, 30, 35, 0.85)',
+    boxShadow: '0 0 5px rgba(0,0,0,0.4)',
+    zIndex: 10
+  };
+
   return (
     <div
       style={{
         position: 'relative',
-        padding: '10px',
-        borderRadius: '5px',
-        background: 'var(--vscode-editor-background)',
-        border: `2px solid ${borderColor}`,
-        boxShadow: status === 'running' ? `0 0 10px ${borderColor}, ${previewGlow}` : previewGlow,
-        minWidth: '250px',
-        color: 'var(--vscode-editor-foreground)',
-        fontFamily: 'var(--vscode-font-family)'
+        padding: '0px',
+        borderRadius: '12px',
+        background: 'rgba(30, 30, 35, 0.85)',
+        backdropFilter: 'blur(12px)',
+        border: `1.5px solid ${status === 'running' ? '#d4d4d4' : 'rgba(255, 255, 255, 0.2)'}`,
+        boxShadow: status === 'running' ? `0 0 20px rgba(255, 255, 255, 0.2)` : `0 8px 32px rgba(0, 0, 0, 0.45)`,
+        minWidth: '280px',
+        color: '#e0e0e0',
+        fontFamily: 'var(--vscode-font-family)',
+        transition: 'all 0.3s ease'
       }}
     >
       {inputHandles.map((inputName, index) => (
@@ -131,21 +137,8 @@ const CustomNode = ({ data, id }: NodeProps) => {
             type="target"
             position={Position.Left}
             id={inputName === 'in' ? 'in' : `in_${inputName}`}
-            style={{ top: handleTop(index, inputHandles.length) }}
+            style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-5px', background: '#d4d4d4' }}
           />
-          <span
-            style={{
-              position: 'absolute',
-              left: '-2px',
-              top: handleTop(index, inputHandles.length),
-              transform: 'translate(-100%, -50%)',
-              fontSize: '10px',
-              opacity: inputName === 'in' ? 0.8 : 0.65,
-              whiteSpace: 'nowrap'
-            }}
-          >
-            {inputName}
-          </span>
         </div>
       ))}
       <Handle
@@ -153,85 +146,72 @@ const CustomNode = ({ data, id }: NodeProps) => {
         position={Position.Right}
         id="failure"
         title="On Failure"
-        style={{ top: '30%', background: 'var(--ir-status-error)' }}
+        style={{ ...handleStyle, top: '30%', right: '-5px', background: 'var(--ir-status-error)' }}
       />
-      <span style={{ position: 'absolute', right: '-2px', top: '30%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>error</span>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', alignItems: 'center', gap: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-          <span className="codicon codicon-symbol-structure"></span>
-          <span
-            title={determinism === 'interactive' ? 'Interactive (requires human / UI)' : 'Deterministic'}
-            style={{ fontSize: '12px', opacity: determinism === 'interactive' ? 1 : 0.85 }}
-          >
-            {determinismBadge}
-          </span>
-          {editingTitle ? (
-            <input
-              className="nodrag"
-              value={label}
-              autoFocus
-              placeholder={title}
-              onChange={(e) => {
-                const v = e.target.value;
-                setLabel(v);
-                updateNodeData(id, { label: v });
-              }}
-              onBlur={() => setEditingTitle(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') setEditingTitle(false);
-              }}
-              style={{
-                flex: 1,
-                background: 'var(--vscode-input-background)',
-                color: 'var(--vscode-input-foreground)',
-                border: '1px solid var(--vscode-input-border)',
-                padding: '2px 4px',
-                fontSize: '0.9em'
-              }}
-            />
-          ) : (
-            <div
-              onDoubleClick={() => setEditingTitle(true)}
-              title="Double-click to rename"
-              style={{ flex: 1, cursor: 'text', userSelect: 'none' }}
-            >
-              {label || title}
+      <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
+        <div style={{ 
+          padding: '10px 12px', 
+          background: 'rgba(255, 255, 255, 0.1)', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, fontWeight: 'bold' }}>
+            <div style={{ 
+              width: '24px', height: '24px', borderRadius: '50%', 
+              background: '#666',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              <span className="codicon codicon-symbol-structure" style={{ color: '#fff', fontSize: '14px' }}></span>
             </div>
-          )}
+            {editingTitle ? (
+              <input
+                className="nodrag"
+                value={label}
+                autoFocus
+                placeholder={title}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setLabel(v);
+                  updateNodeData(id, { label: v });
+                }}
+                onBlur={() => setEditingTitle(false)}
+                onKeyDown={(e) => { if (e.key === 'Enter') setEditingTitle(false); }}
+                style={{
+                  background: 'rgba(0,0,0,0.3)',
+                  color: '#fff',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '4px',
+                  padding: '2px 6px',
+                  fontSize: '13px'
+                }}
+              />
+            ) : (
+              <span onClick={() => setEditingTitle(true)} style={{ fontSize: '13px', letterSpacing: '0.4px', cursor: 'pointer' }}>
+                {label || title}
+              </span>
+            )}
+          </div>
+          <button
+            className="nodrag"
+            onClick={() => updateNodeData(id, { collapsed: !collapsed })}
+            style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}
+          >
+            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`}></span>
+          </button>
         </div>
-        {intent && (
-          <div style={{ fontSize: '11px', opacity: 0.75, whiteSpace: 'nowrap' }} title={intent}>
-            {intent}
+
+        {!collapsed && (
+          <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <IoSpec inputs={ioInputs} outputs={ioOutputs} />
+            <SchemaArgsForm nodeId={id} fields={displayFields} values={args} onChange={handleArgChange} availableVars={availableVars} />
           </div>
         )}
-        <button
-          className="nodrag"
-          onClick={() => updateNodeData(id, { collapsed: !collapsed })}
-          title={collapsed ? 'Expand' : 'Collapse'}
-          style={{
-            background: 'transparent',
-            color: 'var(--vscode-foreground)',
-            border: '1px solid var(--vscode-editorWidget-border)',
-            borderRadius: '4px',
-            width: '20px',
-            height: '20px',
-            cursor: 'pointer'
-          }}
-        >
-          {collapsed ? '▸' : '▾'}
-        </button>
       </div>
 
-      {!collapsed && (
-        <>
-          <IoSpec inputs={ioInputs} outputs={ioOutputs} />
-          <SchemaArgsForm nodeId={id} fields={displayFields} values={args} onChange={handleArgChange} availableVars={availableVars} />
-        </>
-      )}
-
-      <Handle type="source" position={Position.Right} id="success" />
-      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-5px', background: '#d4d4d4' }} />
 
       {!collapsed && logs.length > 0 && (
         <div className="nodrag" style={{ marginTop: '8px', borderTop: '1px solid var(--vscode-widget-border)' }}>
@@ -244,7 +224,7 @@ const CustomNode = ({ data, id }: NodeProps) => {
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              background: 'var(--vscode-editor-background)',
+              background: 'rgba(0,0,0,0.2)',
               opacity: 0.8
             }}
           >
@@ -268,9 +248,9 @@ const CustomNode = ({ data, id }: NodeProps) => {
               }}
             >
               {logs.map((log: any, i: number) => (
-                <span key={i} style={{ color: log.stream === 'stderr' ? 'var(--ir-status-error)' : 'inherit', display: 'block' }}>
+                <div key={i} style={{ color: log.stream === 'stderr' ? 'var(--ir-status-error)' : 'inherit', display: 'block' }}>
                   {log.text}
-                </span>
+                </div>
               ))}
             </div>
           )}

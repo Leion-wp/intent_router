@@ -1,5 +1,5 @@
 {
     "intentRouter.environment": {},
-    "leionRoots.adminMode": true
-
+    "leionRoots.adminMode": true,
+    "gemini-cli.debug.logging.enabled": true
 }

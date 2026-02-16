@@ -64,8 +64,8 @@
           "sourcePosition": "right",
           "deletable": false,
           "measured": {
-            "width": 283,
-            "height": 234
+            "width": 282,
+            "height": 194
           },
           "selected": false,
           "dragging": false
@@ -90,8 +90,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 273,
-            "height": 319
+            "width": 989,
+            "height": 477
           },
           "selected": false,
           "dragging": false
@@ -116,8 +116,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 273,
-            "height": 319
+            "width": 741,
+            "height": 504
           },
           "selected": false,
           "dragging": false
@@ -142,8 +142,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 273,
-            "height": 319
+            "width": 741,
+            "height": 504
           },
           "selected": false,
           "dragging": false

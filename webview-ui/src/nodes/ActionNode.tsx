@@ -255,13 +255,15 @@ const ActionNode = ({ data, id }: NodeProps) => {
     <div style={{
       position: 'relative',
       padding: '10px',
-      borderRadius: '5px',
-      background: 'var(--vscode-editor-background)',
-      border: `2px solid ${isPause ? '#e6c300' : borderColor}`, // Gold for pause
-      boxShadow: status === 'running' ? `0 0 10px ${borderColor}, ${previewGlow}` : previewGlow,
+      borderRadius: '10px',
+      background: 'rgba(30, 30, 35, 0.8)',
+      backdropFilter: 'blur(8px)',
+      border: `1.5px solid ${isPause ? '#e6c300' : borderColor}`, // Gold for pause
+      boxShadow: status === 'running' ? `0 0 15px ${borderColor}, ${previewGlow}` : previewGlow,
       minWidth: '250px',
-      color: 'var(--vscode-editor-foreground)',
-      fontFamily: 'var(--vscode-font-family)'
+      color: '#d4d4d4',
+      fontFamily: 'var(--vscode-font-family)',
+      transition: 'all 0.3s ease'
     }}>
       {inputHandles.map((inputName, index) => (
         <div key={`in-${inputName}`}>
@@ -269,7 +271,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
             type="target"
             position={Position.Left}
             id={inputName === 'in' ? 'in' : `in_${inputName}`}
-            style={{ top: handleTop(index, inputHandles.length) }}
+            style={{ top: handleTop(index, inputHandles.length), width: '8px', height: '8px' }}
           />
           <span
             style={{

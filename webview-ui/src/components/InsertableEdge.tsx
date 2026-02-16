@@ -27,6 +27,18 @@ const InsertableEdge = (props: EdgeProps) => {
   return (
     <>
       <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+      
+      {/* Cyber Flow Dot (Animated) */}
+      <circle
+        r="3"
+        fill="#bb86fc"
+        className="edge-dot"
+        style={{
+          offsetPath: `path('${edgePath}')`,
+          filter: 'drop-shadow(0 0 5px #bb86fc)'
+        }}
+      />
+
       <EdgeLabelRenderer>
         <div
           className="edge-insert-btn"

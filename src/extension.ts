@@ -11,6 +11,7 @@ import { registerDockerProvider } from './providers/dockerAdapter';
 import { cancelTerminalRun, executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
 import { registerSystemProvider } from './providers/systemAdapter';
 import { registerVSCodeProvider } from './providers/vscodeAdapter';
+import { registerAiProvider, executeAiCommand } from './providers/aiAdapter';
 import { StatusBarManager } from './statusBar';
 import { historyManager } from './historyManager';
 
@@ -24,6 +25,7 @@ export function activate(context: vscode.ExtensionContext) {
     registerTerminalProvider(context);
     registerSystemProvider(context);
     registerVSCodeProvider(context);
+    registerAiProvider(context);
 
     const pipelineBuilder = new PipelineBuilder(context.extensionUri);
     const pipelinesProvider = new PipelinesTreeDataProvider();
@@ -65,6 +67,10 @@ export function activate(context: vscode.ExtensionContext) {
 	    let internalTerminalCancelDisposable = vscode.commands.registerCommand('intentRouter.internal.terminalCancel', async (args: any) => {
 	        cancelTerminalRun(args?.runId);
 	    });
+
+        let aiGenerateDisposable = vscode.commands.registerCommand('intentRouter.internal.aiGenerate', async (args: any) => {
+            await executeAiCommand(args);
+        });
 
     let promptDisposable = vscode.commands.registerCommand('intentRouter.routeFromJson', async () => {
         const input = await vscode.window.showInputBox({
@@ -269,6 +275,7 @@ export function activate(context: vscode.ExtensionContext) {
 	    context.subscriptions.push(registerDisposable);
 	    context.subscriptions.push(internalTerminalDisposable);
 	    context.subscriptions.push(internalTerminalCancelDisposable);
+        context.subscriptions.push(aiGenerateDisposable);
 	    context.subscriptions.push(promptDisposable);
 	    context.subscriptions.push(createPipelineDisposable);
 	    context.subscriptions.push(runPipelineDisposable);

@@ -25,6 +25,7 @@ import CustomNode from './nodes/CustomNode';
 import FormNode from './nodes/FormNode';
 import SwitchNode from './nodes/SwitchNode';
 import ScriptNode from './nodes/ScriptNode';
+import AgentNode from './nodes/AgentNode';
 import AppLayoutShell from './components/AppLayoutShell';
 import ChromeControlsPanel from './components/ChromeControlsPanel';
 import { edgeTypes } from './components/InsertableEdge';
@@ -113,7 +114,8 @@ const nodeTypes = {
   customNode: CustomNode,
   formNode: FormNode,
   switchNode: SwitchNode,
-  scriptNode: ScriptNode
+  scriptNode: ScriptNode,
+  agentNode: AgentNode
 };
 
 declare global {
@@ -648,6 +650,16 @@ function Flow({
         } else if (node.type === 'repoNode') {
           intent = 'system.setCwd';
           payload = { path: data.path };
+        } else if (node.type === 'agentNode') {
+          intent = 'ai.generate';
+          payload = {
+            agent: data.agent,
+            model: data.model,
+            instruction: data.instruction,
+            contextFiles: data.contextFiles,
+            outputVar: data.outputVar
+          };
+          description = String(data.label || 'AI Task');
         } else if (node.type === 'vscodeCommandNode') {
           intent = 'vscode.runCommand';
           payload = { commandId: data.commandId, argsJson: data.argsJson };
