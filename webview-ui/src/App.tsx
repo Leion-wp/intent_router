@@ -68,6 +68,13 @@ import {
   validateDisconnectedNodes
 } from './utils/flowGraphUtils';
 import { buildGraphFromPipeline, restoreGraphFromPipelineSnapshot } from './utils/pipelineLoadUtils';
+import { formatUiError } from './utils/uiMessageUtils';
+import { computeSidebarWidthFromKey } from './utils/sidebarResizeUtils';
+import {
+  canDeleteContextNode,
+  canDisconnectContextNode,
+  canToggleCollapseContextNode
+} from './utils/nodeContextMenuUtils';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
@@ -134,10 +141,14 @@ let idCounter = 0;
 const getId = () => `node_${idCounter++}`;
 
 function emitPipelineBuildError(message: string): null {
+  const userMessage = formatUiError(message, {
+    context: 'Pipeline build',
+    action: 'Fix the graph configuration then retry.'
+  });
   if (vscode) {
-    vscode.postMessage({ type: 'error', message });
+    vscode.postMessage({ type: 'error', message: userMessage });
   } else {
-    alert(message);
+    alert(userMessage);
   }
   return null;
 }
@@ -904,17 +915,23 @@ function Flow({
   }, [reactFlowInstance, setNodes]);
 
   const toggleContextNodeCollapse = useCallback((nodeId: string) => {
+    if (!canToggleCollapseContextNode(nodeId)) {
+      return;
+    }
     setNodes((nodes) => nodes.map((entry: any) => (
       entry.id === nodeId ? { ...entry, data: { ...(entry.data || {}), collapsed: !entry?.data?.collapsed } } : entry
     )));
   }, []);
 
   const disconnectContextNodeLinks = useCallback((nodeId: string) => {
+    if (!canDisconnectContextNode(nodeId)) {
+      return;
+    }
     setEdges((edges) => edges.filter((edge: any) => edge.source !== nodeId && edge.target !== nodeId));
   }, []);
 
   const deleteNodeFromContextMenu = useCallback((nodeId: string) => {
-    if (nodeId === 'start') {
+    if (!canDeleteContextNode(nodeId)) {
       return;
     }
     setNodes((nodes) => nodes.filter((node: any) => node.id !== nodeId));
@@ -1018,7 +1035,9 @@ function Flow({
         />
 
         <button
+          type="button"
           onClick={autoLayout}
+          aria-label="Auto layout graph"
           style={{
            position: 'absolute',
            top: '10px',
@@ -1060,7 +1079,9 @@ function Flow({
         />
 
        <button
+         type="button"
          onClick={savePipeline}
+         aria-label="Save pipeline"
          style={{
            position: 'absolute',
            top: '10px',
@@ -1119,6 +1140,19 @@ export default function App() {
           sidebarResizeRef.current = { startX: event.clientX, startWidth: sidebarWidth };
         }}
         onSidebarResizerDoubleClick={() => setSidebarWidth(defaultSidebarWidth)}
+        onSidebarResizerKeyDown={(event) => {
+          const next = computeSidebarWidthFromKey({
+            currentWidth: sidebarWidth,
+            key: event.key,
+            minWidth: minSidebarWidth,
+            maxWidth: maxSidebarWidth,
+            defaultWidth: defaultSidebarWidth
+          });
+          if (next !== null) {
+            event.preventDefault();
+            setSidebarWidth(next);
+          }
+        }}
         sidebar={
           <Sidebar
             tab={sidebarTab}

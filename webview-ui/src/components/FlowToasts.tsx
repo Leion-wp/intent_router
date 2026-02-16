@@ -5,7 +5,7 @@ type FlowToastsProps = {
   graphToast: string | null;
 };
 
-export default function FlowToasts(props: FlowToastsProps) {
+function FlowToasts(props: FlowToastsProps) {
   const { connectionError, graphToast } = props;
 
   return (
@@ -13,6 +13,8 @@ export default function FlowToasts(props: FlowToastsProps) {
       {connectionError && (
         <div
           className="nodrag"
+          role="alert"
+          aria-live="assertive"
           style={{
             position: 'absolute',
             top: '12px',
@@ -35,6 +37,8 @@ export default function FlowToasts(props: FlowToastsProps) {
       {graphToast && (
         <div
           className="nodrag"
+          role="status"
+          aria-live="polite"
           style={{
             position: 'absolute',
             bottom: '68px',
@@ -56,3 +60,5 @@ export default function FlowToasts(props: FlowToastsProps) {
     </>
   );
 }
+
+export default React.memo(FlowToasts);

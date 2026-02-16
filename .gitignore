@@ -26,5 +26,5 @@ Thumbs.db
 !.vscode/settings.json
 !.vscode/extensions.json
 history.json
-PR_PROMPT.md
+PR*.md
 *.intent.json

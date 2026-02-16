@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 
 type CatalogFilter = 'all' | 'context' | 'providers' | 'custom' | 'favorites';
 type CatalogSectionKey = 'favorites' | 'context' | 'providers' | 'custom';
@@ -68,6 +68,7 @@ export function useProvidersCatalogState({
   });
   const [favoriteNodeIds, setFavoriteNodeIds] = useState<string[]>([]);
   const providersSearchRef = useRef<HTMLInputElement | null>(null);
+  const persistStateTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     try {
@@ -102,17 +103,29 @@ export function useProvidersCatalogState({
 
   useEffect(() => {
     try {
-      const prev = window.vscode?.getState?.() || {};
-      window.vscode?.setState?.({
-        ...prev,
-        providersSearch,
-        providersFilter,
-        favoriteNodeIds,
-        sectionCollapsed
-      });
+      if (persistStateTimerRef.current !== null) {
+        clearTimeout(persistStateTimerRef.current);
+      }
+      persistStateTimerRef.current = window.setTimeout(() => {
+        const prev = window.vscode?.getState?.() || {};
+        window.vscode?.setState?.({
+          ...prev,
+          providersSearch,
+          providersFilter,
+          favoriteNodeIds,
+          sectionCollapsed
+        });
+        persistStateTimerRef.current = null;
+      }, 120);
     } catch {
       // ignore
     }
+    return () => {
+      if (persistStateTimerRef.current !== null) {
+        clearTimeout(persistStateTimerRef.current);
+        persistStateTimerRef.current = null;
+      }
+    };
   }, [providersSearch, providersFilter, favoriteNodeIds, sectionCollapsed]);
 
   useEffect(() => {
@@ -124,7 +137,8 @@ export function useProvidersCatalogState({
     return () => window.removeEventListener('intentRouter.focusSidebarSearch', onFocusSidebarSearch as EventListener);
   }, []);
 
-  const normalizedProvidersQuery = providersSearch.trim().toLowerCase();
+  const deferredProvidersSearch = useDeferredValue(providersSearch);
+  const normalizedProvidersQuery = deferredProvidersSearch.trim().toLowerCase();
 
   const customCatalogItems = useMemo(() => {
     return customNodes.map((entry) => {
@@ -177,11 +191,11 @@ export function useProvidersCatalogState({
     return section;
   }, [allCatalogItems, normalizedProvidersQuery, providersFilter, favoriteNodeIds]);
 
-  const toggleSection = (key: CatalogSectionKey) => {
+  const toggleSection = useCallback((key: CatalogSectionKey) => {
     setSectionCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
+  }, []);
 
-  const toggleFavorite = (id: string) => {
+  const toggleFavorite = useCallback((id: string) => {
     const key = String(id || '').trim();
     if (!key) return;
     setFavoriteNodeIds((prev) => {
@@ -190,11 +204,11 @@ export function useProvidersCatalogState({
       else set.add(key);
       return Array.from(set);
     });
-  };
+  }, []);
 
-  const isFavorite = (id: string) => favoriteNodeIds.includes(String(id || '').trim());
+  const isFavorite = useCallback((id: string) => favoriteNodeIds.includes(String(id || '').trim()), [favoriteNodeIds]);
 
-  const renderCatalogItem = (item: CatalogItem) => {
+  const renderCatalogItem = useCallback((item: CatalogItem) => {
     const isCustom = item.type === 'customNode';
     return (
       <div
@@ -237,9 +251,9 @@ export function useProvidersCatalogState({
         </button>
       </div>
     );
-  };
+  }, [isFavorite, onDragStart, onDragStartCustomNode, toggleFavorite]);
 
-  const renderCatalogSection = (
+  const renderCatalogSection = useCallback((
     key: CatalogSectionKey,
     title: string,
     sectionItems: CatalogItem[],
@@ -271,7 +285,7 @@ export function useProvidersCatalogState({
         )}
       </div>
     );
-  };
+  }, [renderCatalogItem, sectionCollapsed, toggleSection]);
 
   return {
     providersSearchRef,

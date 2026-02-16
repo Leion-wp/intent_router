@@ -9,11 +9,12 @@ type AppLayoutShellProps = {
   defaultSidebarWidth: number;
   onSidebarResizerMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   onSidebarResizerDoubleClick: () => void;
+  onSidebarResizerKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
   sidebar: React.ReactNode;
   canvas: React.ReactNode;
 };
 
-export default function AppLayoutShell({
+function AppLayoutShell({
   sidebarCollapsed,
   onToggleSidebar,
   sidebarWidth,
@@ -22,6 +23,7 @@ export default function AppLayoutShell({
   defaultSidebarWidth,
   onSidebarResizerMouseDown,
   onSidebarResizerDoubleClick,
+  onSidebarResizerKeyDown,
   sidebar,
   canvas
 }: AppLayoutShellProps) {
@@ -44,16 +46,25 @@ export default function AppLayoutShell({
             className="sidebar-resizer"
             onMouseDown={onSidebarResizerMouseDown}
             onDoubleClick={onSidebarResizerDoubleClick}
+            onKeyDown={onSidebarResizerKeyDown}
             title={`Drag to resize sidebar (double-click to reset: ${defaultSidebarWidth}px)`}
             aria-label="Resize sidebar"
             role="separator"
+            aria-orientation="vertical"
+            aria-valuemin={minSidebarWidth}
+            aria-valuemax={maxSidebarWidth}
+            aria-valuenow={sidebarWidth}
+            tabIndex={0}
           />
         </>
       )}
       <div style={{ flex: 1, position: 'relative' }}>
         <button
+          type="button"
           className="nodrag"
           onClick={onToggleSidebar}
+          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          aria-expanded={!sidebarCollapsed}
           title={sidebarCollapsed ? 'Show sidebar (Ctrl+B)' : 'Hide sidebar (Ctrl+B)'}
           style={{
             position: 'absolute',
@@ -75,3 +86,5 @@ export default function AppLayoutShell({
     </div>
   );
 }
+
+export default React.memo(AppLayoutShell);

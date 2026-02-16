@@ -15,7 +15,7 @@ type HistoryPanelProps = {
   onRestoreHistory?: (run: any) => void;
 };
 
-export default function HistoryPanel({
+function HistoryPanel({
   historySearch,
   onHistorySearchChange,
   filteredHistory,
@@ -36,6 +36,7 @@ export default function HistoryPanel({
         value={historySearch}
         onChange={(event) => onHistorySearchChange(event.target.value)}
         placeholder="Search history..."
+        aria-label="Search run history"
         style={{
           width: '100%',
           background: 'var(--vscode-input-background)',
@@ -53,6 +54,8 @@ export default function HistoryPanel({
             historyContainerRef.current = el;
             onHistoryViewportUpdate(el);
           }}
+          role="list"
+          aria-label="Pipeline run history"
           style={{ height: 'calc(100vh - 280px)', minHeight: '220px', maxHeight: '60vh', overflowY: 'auto', position: 'relative' }}
           onScroll={(event) => onHistoryScroll((event.currentTarget as HTMLDivElement).scrollTop)}
         >
@@ -62,7 +65,16 @@ export default function HistoryPanel({
               return (
                 <div
                   key={String(run.id || absoluteIndex)}
+                  role="button"
+                  tabIndex={0}
+                  className="history-row"
                   onClick={() => onSelectHistory?.({ ...run })}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelectHistory?.({ ...run });
+                    }
+                  }}
                   style={{
                     position: 'absolute',
                     top: `${absoluteIndex * historyRowHeight}px`,
@@ -77,12 +89,11 @@ export default function HistoryPanel({
                     minHeight: `${historyRowHeight - 8}px`,
                     boxSizing: 'border-box'
                   }}
-                  onMouseOver={(e) => { e.currentTarget.style.border = '1px solid var(--vscode-focusBorder)'; }}
-                  onMouseOut={(e) => { e.currentTarget.style.border = '1px solid transparent'; }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
                     <div style={{ fontWeight: 'bold', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{run.name}</div>
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         if (run.pipelineSnapshot) {
@@ -125,3 +136,5 @@ export default function HistoryPanel({
     </div>
   );
 }
+
+export default React.memo(HistoryPanel);

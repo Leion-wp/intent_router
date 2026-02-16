@@ -33,6 +33,9 @@ type StudioAdminPanelProps = {
   themeExportJson: string;
   themeError: string;
   uiPropagateSummary: string;
+  retryLastAction: () => void;
+  clearFeedback: () => void;
+  canRetryLastAction: boolean;
 };
 
 const tokenSections: Array<{ title: string; fields: Array<[string, string]> }> = [
@@ -103,7 +106,10 @@ export default function StudioAdminPanel({
   setThemeImportJson,
   themeExportJson,
   themeError,
-  uiPropagateSummary
+  uiPropagateSummary,
+  retryLastAction,
+  clearFeedback,
+  canRetryLastAction
 }: StudioAdminPanelProps) {
   return (
     <div style={{ border: '1px solid var(--vscode-panel-border)', borderRadius: '6px', padding: '10px', marginBottom: '12px' }}>
@@ -124,6 +130,7 @@ export default function StudioAdminPanel({
                     type="color"
                     value={value}
                     onChange={(event) => setThemeToken(path, event.target.value)}
+                    aria-label={`${label} color token`}
                     style={{ width: '100%', height: '24px', border: '1px solid var(--vscode-panel-border)', background: 'transparent' }}
                   />
                 </React.Fragment>
@@ -143,12 +150,14 @@ export default function StudioAdminPanel({
                 value={entry.title}
                 onChange={(event) => updateSidebarTabField(entry.id, { title: event.target.value })}
                 placeholder="Title"
+                aria-label={`Sidebar tab title for ${entry.id}`}
                 style={{ background: 'var(--vscode-input-background)', color: 'var(--vscode-input-foreground)', border: '1px solid var(--vscode-input-border)', padding: '4px', fontSize: '11px' }}
               />
               <select
                 className="nodrag"
                 value={entry.type}
                 onChange={(event) => updateSidebarTabField(entry.id, { type: event.target.value as SidebarTabType })}
+                aria-label={`Sidebar tab type for ${entry.id}`}
                 style={{ background: 'var(--vscode-input-background)', color: 'var(--vscode-input-foreground)', border: '1px solid var(--vscode-input-border)', padding: '4px', fontSize: '11px' }}
               >
                 <option value="pipelines">pipelines</option>
@@ -163,6 +172,7 @@ export default function StudioAdminPanel({
                 value={entry.icon}
                 onChange={(event) => updateSidebarTabField(entry.id, { icon: event.target.value })}
                 placeholder="codicon-*"
+                aria-label={`Sidebar tab icon for ${entry.id}`}
                 style={{ background: 'var(--vscode-input-background)', color: 'var(--vscode-input-foreground)', border: '1px solid var(--vscode-input-border)', padding: '4px', fontSize: '11px' }}
               />
               <input
@@ -170,6 +180,7 @@ export default function StudioAdminPanel({
                 value={entry.id}
                 onChange={(event) => updateSidebarTabField(entry.id, { id: event.target.value })}
                 placeholder="id"
+                aria-label={`Sidebar tab id field ${index + 1}`}
                 style={{ background: 'var(--vscode-input-background)', color: 'var(--vscode-input-foreground)', border: '1px solid var(--vscode-input-border)', padding: '4px', fontSize: '11px' }}
               />
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', opacity: 0.9 }}>
@@ -182,9 +193,9 @@ export default function StudioAdminPanel({
                 visible
               </label>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '4px' }}>
-                <button className="nodrag" onClick={() => moveSidebarTab(entry.id, -1)} disabled={index === 0} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: index === 0 ? 'not-allowed' : 'pointer', fontSize: '10px' }}>↑</button>
-                <button className="nodrag" onClick={() => moveSidebarTab(entry.id, 1)} disabled={index === (uiPresetDraft.sidebar.tabs.length - 1)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: index === (uiPresetDraft.sidebar.tabs.length - 1) ? 'not-allowed' : 'pointer', fontSize: '10px' }}>↓</button>
-                <button className="nodrag" onClick={() => removeSidebarTab(entry.id)} disabled={uiPresetDraft.sidebar.tabs.length <= 1} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-errorForeground)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: uiPresetDraft.sidebar.tabs.length <= 1 ? 'not-allowed' : 'pointer', fontSize: '10px' }}>✕</button>
+                <button className="nodrag" onClick={() => moveSidebarTab(entry.id, -1)} disabled={index === 0} aria-label={`Move tab ${entry.id} up`} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: index === 0 ? 'not-allowed' : 'pointer', fontSize: '10px' }}>↑</button>
+                <button className="nodrag" onClick={() => moveSidebarTab(entry.id, 1)} disabled={index === (uiPresetDraft.sidebar.tabs.length - 1)} aria-label={`Move tab ${entry.id} down`} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: index === (uiPresetDraft.sidebar.tabs.length - 1) ? 'not-allowed' : 'pointer', fontSize: '10px' }}>↓</button>
+                <button className="nodrag" onClick={() => removeSidebarTab(entry.id)} disabled={uiPresetDraft.sidebar.tabs.length <= 1} aria-label={`Remove tab ${entry.id}`} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-errorForeground)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: uiPresetDraft.sidebar.tabs.length <= 1 ? 'not-allowed' : 'pointer', fontSize: '10px' }}>✕</button>
               </div>
             </div>
           ))}
@@ -203,6 +214,7 @@ export default function StudioAdminPanel({
                 className="nodrag"
                 value={entry.title}
                 onChange={(event) => updatePaletteCategory(entry.id, { title: event.target.value })}
+                aria-label={`Palette category title for ${entry.id}`}
                 style={{ background: 'var(--vscode-input-background)', color: 'var(--vscode-input-foreground)', border: '1px solid var(--vscode-input-border)', padding: '4px', fontSize: '11px' }}
               />
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
@@ -215,8 +227,8 @@ export default function StudioAdminPanel({
                 visible
               </label>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '4px' }}>
-                <button className="nodrag" onClick={() => movePaletteCategory(entry.id, -1)} disabled={index === 0} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: index === 0 ? 'not-allowed' : 'pointer', fontSize: '10px' }}>↑</button>
-                <button className="nodrag" onClick={() => movePaletteCategory(entry.id, 1)} disabled={index === (list.length - 1)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: index === (list.length - 1) ? 'not-allowed' : 'pointer', fontSize: '10px' }}>↓</button>
+                <button className="nodrag" onClick={() => movePaletteCategory(entry.id, -1)} disabled={index === 0} aria-label={`Move category ${entry.id} up`} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: index === 0 ? 'not-allowed' : 'pointer', fontSize: '10px' }}>↑</button>
+                <button className="nodrag" onClick={() => movePaletteCategory(entry.id, 1)} disabled={index === (list.length - 1)} aria-label={`Move category ${entry.id} down`} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '2px 6px', cursor: index === (list.length - 1) ? 'not-allowed' : 'pointer', fontSize: '10px' }}>↓</button>
               </div>
             </div>
           ))}
@@ -227,6 +239,7 @@ export default function StudioAdminPanel({
           value={(uiPresetDraft.palette.pinned || []).join(', ')}
           onChange={(event) => updatePinnedList(event.target.value)}
           placeholder="preset-terminal, preset-form"
+          aria-label="Pinned quick add ids"
           style={{ width: '100%', background: 'var(--vscode-input-background)', color: 'var(--vscode-input-foreground)', border: '1px solid var(--vscode-input-border)', padding: '6px', fontSize: '11px' }}
         />
       </div>
@@ -303,6 +316,7 @@ export default function StudioAdminPanel({
         value={themeImportJson}
         onChange={(event) => setThemeImportJson(event.target.value)}
         placeholder='{"version":1,"theme":{"tokens":{...}},"sidebar":{"tabs":[...]},"palette":{"categories":[...],"pinned":[...]}}'
+        aria-label="Theme draft import JSON"
         style={{
           marginTop: '8px',
           width: '100%',
@@ -320,6 +334,7 @@ export default function StudioAdminPanel({
           className="nodrag"
           readOnly
           value={themeExportJson}
+          aria-label="Theme export JSON"
           style={{
             marginTop: '8px',
             width: '100%',
@@ -336,6 +351,41 @@ export default function StudioAdminPanel({
       {themeError && (
         <div style={{ marginTop: '8px', color: 'var(--vscode-errorForeground)', fontSize: '11px' }}>
           {themeError}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            <button
+              type="button"
+              className="nodrag"
+              onClick={retryLastAction}
+              disabled={!canRetryLastAction}
+              style={{
+                padding: '4px 8px',
+                background: canRetryLastAction ? 'var(--vscode-button-secondaryBackground)' : 'transparent',
+                color: canRetryLastAction ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
+                border: '1px solid var(--vscode-panel-border)',
+                borderRadius: '4px',
+                cursor: canRetryLastAction ? 'pointer' : 'not-allowed',
+                fontSize: '11px'
+              }}
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              className="nodrag"
+              onClick={clearFeedback}
+              style={{
+                padding: '4px 8px',
+                background: 'transparent',
+                color: 'var(--vscode-foreground)',
+                border: '1px solid var(--vscode-panel-border)',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '11px'
+              }}
+            >
+              Clear
+            </button>
+          </div>
         </div>
       )}
       {uiPropagateSummary && (

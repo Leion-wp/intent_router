@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
 import {
   defaultThemeTokens,
@@ -7,6 +7,7 @@ import {
   SidebarTabPreset,
   UiPreset
 } from '../types/theme';
+import { formatUiError, formatUiInfo } from '../utils/uiMessageUtils';
 
 type UiDraftDiff = {
   themeChanged: boolean;
@@ -48,6 +49,9 @@ type UseUiPresetSidebarStateResult = {
   uiDraftValidationErrors: string[];
   uiDraftDiff: UiDraftDiff;
   canPropagate: boolean;
+  retryLastAction: () => void;
+  clearFeedback: () => void;
+  canRetryLastAction: boolean;
 };
 
 export function useUiPresetSidebarState({
@@ -62,6 +66,12 @@ export function useUiPresetSidebarState({
   const [themeImportJson, setThemeImportJson] = useState<string>('');
   const [themeError, setThemeError] = useState<string>('');
   const [uiPropagateSummary, setUiPropagateSummary] = useState<string>('');
+  const [lastFailedAction, setLastFailedAction] = useState<
+    'saveDraft' | 'resetDraft' | 'export' | 'importPaste' | 'importFile' | 'resetDefaults' | 'propagate' | null
+  >(null);
+  const lastAttemptedActionRef = useRef<
+    'saveDraft' | 'resetDraft' | 'export' | 'importPaste' | 'importFile' | 'resetDefaults' | 'propagate' | null
+  >(null);
   const [releasePreset, setReleasePreset] = useState<UiPreset>(() =>
     normalizeUiPreset(window.initialData?.uiPresetRelease || window.initialData?.uiPreset || { theme: { tokens: defaultThemeTokens } })
   );
@@ -91,10 +101,18 @@ export function useUiPresetSidebarState({
       }
       if (event.data.type === 'uiPresetPropagated') {
         const payload = event.data as any;
-        setUiPropagateSummary(`Propagated: ${String(payload?.summary || '')}`);
+        setLastFailedAction(null);
+        setUiPropagateSummary(formatUiInfo(payload?.summary, {
+          context: 'UI Studio propagate',
+          action: 'Reload builder to verify release preset.'
+        }));
       }
       if (event.data.type === 'error') {
-        setThemeError(String((event.data as any).message || ''));
+        setLastFailedAction(lastAttemptedActionRef.current);
+        setThemeError(formatUiError((event.data as any).message, {
+          context: 'UI Studio',
+          action: 'Check draft payload and retry.'
+        }));
       }
     };
 
@@ -121,27 +139,35 @@ export function useUiPresetSidebarState({
 
   const saveThemeDraft = () => {
     if (!window.vscode) return;
+    lastAttemptedActionRef.current = 'saveDraft';
     setThemeError('');
+    setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'uiPreset.saveDraft', uiPreset: uiPresetDraft };
     window.vscode.postMessage(message);
   };
 
   const resetThemeDraft = () => {
     if (!window.vscode) return;
+    lastAttemptedActionRef.current = 'resetDraft';
     setThemeError('');
+    setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'uiPreset.resetDraft' };
     window.vscode.postMessage(message);
   };
 
   const exportTheme = () => {
     if (!window.vscode) return;
+    lastAttemptedActionRef.current = 'export';
+    setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'uiPreset.exportCurrent' };
     window.vscode.postMessage(message);
   };
 
   const importTheme = (source: 'paste' | 'file') => {
     if (!window.vscode) return;
+    lastAttemptedActionRef.current = source === 'paste' ? 'importPaste' : 'importFile';
     setThemeError('');
+    setLastFailedAction(null);
     const message: WebviewOutboundMessage = {
       type: 'uiPreset.importDraft',
       source,
@@ -152,17 +178,57 @@ export function useUiPresetSidebarState({
 
   const resetThemeDefaults = () => {
     if (!window.vscode) return;
+    lastAttemptedActionRef.current = 'resetDefaults';
     setThemeError('');
+    setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'uiPreset.resetToDefaults' };
     window.vscode.postMessage(message);
   };
 
   const propagateThemeDraft = () => {
     if (!window.vscode) return;
+    lastAttemptedActionRef.current = 'propagate';
     setThemeError('');
     setUiPropagateSummary('');
+    setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'uiPreset.propagateDraft' };
     window.vscode.postMessage(message);
+  };
+
+  const retryLastAction = () => {
+    if (lastFailedAction === 'saveDraft') {
+      saveThemeDraft();
+      return;
+    }
+    if (lastFailedAction === 'resetDraft') {
+      resetThemeDraft();
+      return;
+    }
+    if (lastFailedAction === 'export') {
+      exportTheme();
+      return;
+    }
+    if (lastFailedAction === 'importPaste') {
+      importTheme('paste');
+      return;
+    }
+    if (lastFailedAction === 'importFile') {
+      importTheme('file');
+      return;
+    }
+    if (lastFailedAction === 'resetDefaults') {
+      resetThemeDefaults();
+      return;
+    }
+    if (lastFailedAction === 'propagate') {
+      propagateThemeDraft();
+    }
+  };
+
+  const clearFeedback = () => {
+    setThemeError('');
+    setUiPropagateSummary('');
+    setLastFailedAction(null);
   };
 
   const updateSidebarTabs = (nextTabs: SidebarTabPreset[]) => {
@@ -322,6 +388,9 @@ export function useUiPresetSidebarState({
     updatePinnedList,
     uiDraftValidationErrors,
     uiDraftDiff,
-    canPropagate
+    canPropagate,
+    retryLastAction,
+    clearFeedback,
+    canRetryLastAction: lastFailedAction !== null
   };
 }

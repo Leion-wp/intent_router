@@ -23,7 +23,7 @@ type ChromeControlsPanelProps = {
   setChromeOpacity: (value: number) => void;
 };
 
-export default function ChromeControlsPanel(props: ChromeControlsPanelProps) {
+function ChromeControlsPanel(props: ChromeControlsPanelProps) {
   const {
     chromePanelPos,
     chromeCollapsed,
@@ -90,16 +90,20 @@ export default function ChromeControlsPanel(props: ChromeControlsPanelProps) {
         <span style={{ fontSize: '11px', opacity: 0.85 }}>Chrome controls</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <button
+            type="button"
             className="nodrag"
             onClick={() => setChromePanelPos({ x: 430, y: 56 })}
+            aria-label="Reset controls panel position"
             style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px' }}
             title="Reset position"
           >
             Reset
           </button>
           <button
+            type="button"
             className="nodrag"
             onClick={() => setChromeCollapsed((value: boolean) => !value)}
+            aria-label={chromeCollapsed ? 'Expand controls panel' : 'Collapse controls panel'}
             style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px' }}
             title={chromeCollapsed ? 'Expand controls' : 'Collapse controls'}
           >
@@ -112,21 +116,31 @@ export default function ChromeControlsPanel(props: ChromeControlsPanelProps) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <label style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
             Opacity
-            <input className="nodrag" type="range" min={30} max={100} value={Math.round(chromeOpacity * 100)} onChange={(event) => setChromeOpacity(Number(event.target.value) / 100)} />
+            <input
+              className="nodrag"
+              type="range"
+              min={30}
+              max={100}
+              value={Math.round(chromeOpacity * 100)}
+              onChange={(event) => setChromeOpacity(Number(event.target.value) / 100)}
+              aria-label="Adjust chrome controls opacity"
+            />
           </label>
-          <button className="nodrag" onClick={toggleFocusGraph} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
+          <button type="button" className="nodrag" onClick={toggleFocusGraph} aria-label={focusGraph ? 'Disable focus mode' : 'Enable focus mode'} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
             {focusGraph ? 'Unfocus' : 'Focus graph'}
           </button>
-          <button className="nodrag" onClick={() => setShowMiniMap((value: boolean) => !value)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
+          <button type="button" className="nodrag" onClick={() => setShowMiniMap((value: boolean) => !value)} aria-label={showMiniMap ? 'Hide minimap' : 'Show minimap'} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
             {showMiniMap ? 'MiniMap on' : 'MiniMap off'}
           </button>
-          <button className="nodrag" onClick={() => setShowControls((value: boolean) => !value)} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
+          <button type="button" className="nodrag" onClick={() => setShowControls((value: boolean) => !value)} aria-label={showControls ? 'Hide flow controls' : 'Show flow controls'} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
             {showControls ? 'Controls on' : 'Controls off'}
           </button>
           <button
+            type="button"
             className="nodrag"
             onClick={undoGraph}
             disabled={!canUndo}
+            aria-label="Undo graph change"
             style={{
               background: canUndo ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
               color: canUndo ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
@@ -141,9 +155,11 @@ export default function ChromeControlsPanel(props: ChromeControlsPanelProps) {
             Undo
           </button>
           <button
+            type="button"
             className="nodrag"
             onClick={redoGraph}
             disabled={!canRedo}
+            aria-label="Redo graph change"
             style={{
               background: canRedo ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
               color: canRedo ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
@@ -158,9 +174,11 @@ export default function ChromeControlsPanel(props: ChromeControlsPanelProps) {
             Redo
           </button>
           <button
+            type="button"
             className="nodrag"
             onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, false)}
             disabled={!selectedNodeId}
+            aria-label="Run pipeline from selected node"
             style={{
               background: selectedNodeId ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
               color: selectedNodeId ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
@@ -175,8 +193,10 @@ export default function ChromeControlsPanel(props: ChromeControlsPanelProps) {
             Run selected
           </button>
           <button
+            type="button"
             className="nodrag"
             onClick={resetRuntimeUiState}
+            aria-label="Reset runtime visual state"
             style={{
               background: 'var(--vscode-button-secondaryBackground)',
               color: 'var(--vscode-button-secondaryForeground)',
@@ -195,3 +215,5 @@ export default function ChromeControlsPanel(props: ChromeControlsPanelProps) {
     </div>
   );
 }
+
+export default React.memo(ChromeControlsPanel);

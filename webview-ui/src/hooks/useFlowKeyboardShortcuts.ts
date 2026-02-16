@@ -1,4 +1,9 @@
 import { useEffect } from 'react';
+import {
+  resolveFlowKeyboardShortcutAction,
+  shouldIgnoreFlowKeyboardShortcut,
+  shouldPreventDefaultForFlowAction
+} from '../utils/flowKeyboardShortcutUtils';
 
 type UseFlowKeyboardShortcutsParams = {
   quickAddOpen: boolean;
@@ -31,49 +36,63 @@ export function useFlowKeyboardShortcuts({
 }: UseFlowKeyboardShortcutsParams) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target) {
-        const tag = target.tagName?.toLowerCase();
-        const isEditable =
-          tag === 'input' ||
-          tag === 'textarea' ||
-          (target as any).isContentEditable === true;
-        if (isEditable) return;
+      if (shouldIgnoreFlowKeyboardShortcut(e.target as HTMLElement | null)) return;
+
+      const action = resolveFlowKeyboardShortcutAction({
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        shiftKey: e.shiftKey,
+        selectedNodeId
+      });
+      if (!action) return;
+
+      if (shouldPreventDefaultForFlowAction(action)) {
+        e.preventDefault();
       }
-      if (e.key === 'Escape') {
+
+      if (action === 'closeOverlays') {
         if (quickAddOpen) setQuickAddOpen(false);
         if (dockOpen) setDockOpen(false);
+        return;
       }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'c' && selectedNodeId && selectedNodeId !== 'start') {
-        e.preventDefault();
+
+      if (action === 'copyNode' && selectedNodeId) {
         copyNodeById(selectedNodeId);
+        return;
       }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'v') {
-        e.preventDefault();
+
+      if (action === 'pasteNode') {
         pasteCopiedNode();
+        return;
       }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'd' && selectedNodeId && selectedNodeId !== 'start') {
-        e.preventDefault();
+
+      if (action === 'duplicateNode' && selectedNodeId) {
         duplicateNodeById(selectedNodeId);
+        return;
       }
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
+
+      if (action === 'undo') {
         undoGraph();
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
-        e.preventDefault();
+
+      if (action === 'redo') {
         redoGraph();
         return;
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId && selectedNodeId !== 'start') {
-        e.preventDefault();
+
+      if (action === 'deleteNode') {
         deleteSelectedNode();
+        return;
       }
-      if (e.key.toLowerCase() === 'f') {
+
+      if (action === 'fitView') {
         reactFlowInstance?.fitView?.({ duration: 200, padding: 0.2 });
+        return;
       }
-      if (e.key.toLowerCase() === 'z' && selectedNodeId && reactFlowInstance?.getNode) {
+
+      if (action === 'focusSelectedNode' && selectedNodeId && reactFlowInstance?.getNode) {
         const node = reactFlowInstance.getNode(selectedNodeId);
         if (node) {
           const zoom = reactFlowInstance.getZoom?.() || 1;

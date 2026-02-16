@@ -106,6 +106,13 @@ html, body, #root {
   border-right-color: var(--vscode-focusBorder);
 }
 
+.sidebar-resizer:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+  background: rgba(0, 122, 204, 0.2);
+  border-right-color: var(--vscode-focusBorder);
+}
+
 .sidebar-header {
   font-size: 11px;
   font-weight: bold;
@@ -164,6 +171,19 @@ html, body, #root {
 .quick-add-item:hover {
   background: var(--vscode-list-hoverBackground);
   color: var(--vscode-list-hoverForeground);
+}
+
+.quick-add-item:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-list-hoverForeground);
+}
+
+.history-row:hover,
+.history-row:focus-visible {
+  border: 1px solid var(--vscode-focusBorder) !important;
+  outline: none;
 }
 
 .edge-insert-btn {
@@ -231,7 +251,7 @@ html, body, #root {
 
 .status-badge.running {
   background: var(--ir-status-running);
-  color: #fff;
+  color: #111;
   animation: statusPulse 1.6s ease-in-out infinite;
 }
 
@@ -254,4 +274,16 @@ html, body, #root {
   0% { box-shadow: 0 0 0 0 rgba(0, 122, 204, 0.45); }
   70% { box-shadow: 0 0 0 8px rgba(0, 122, 204, 0); }
   100% { box-shadow: 0 0 0 0 rgba(0, 122, 204, 0); }
+}
+
+.nodrag button:focus-visible,
+.nodrag input:focus-visible,
+.nodrag select:focus-visible,
+.nodrag textarea:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
 }

@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { addEdge, Connection, MarkerType } from '@xyflow/react';
 import { createSocketTypeResolver } from '../utils/socketTypeUtils';
+import { formatUiError } from '../utils/uiMessageUtils';
 
 type UseFlowConnectionHandlersOptions = {
   commandGroups: any[];
@@ -30,7 +31,10 @@ export function useFlowConnectionHandlers(options: UseFlowConnectionHandlersOpti
         const targetType = socketTypeResolver.getTargetSocketType(targetNode, normalizedTargetHandle);
 
         if (!socketTypeResolver.areSocketTypesCompatible(sourceType, targetType)) {
-          setConnectionError(`Incompatible sockets: ${sourceType} -> ${targetType}`);
+          setConnectionError(formatUiError(`Incompatible sockets: ${sourceType} → ${targetType}`, {
+            context: 'Connection blocked',
+            action: 'Connect matching input/output types.'
+          }));
           return edges;
         }
 

@@ -14,7 +14,7 @@ type QuickAddDockProps = {
   chromeOpacity: number;
 };
 
-export default function QuickAddDock(props: QuickAddDockProps) {
+function QuickAddDock(props: QuickAddDockProps) {
   const {
     dockOpen,
     setDockOpen,
@@ -31,6 +31,7 @@ export default function QuickAddDock(props: QuickAddDockProps) {
   return (
     <div
       className="nodrag"
+      aria-label="Quick add dock"
       style={{
         position: 'absolute',
         top: '50%',
@@ -47,6 +48,8 @@ export default function QuickAddDock(props: QuickAddDockProps) {
       {dockOpen && (
         <div
           className="nodrag quick-add-dock"
+          role="region"
+          aria-label="Quick add dock list"
           style={{
             width: '240px',
             background: 'var(--vscode-editorWidget-background)',
@@ -63,11 +66,16 @@ export default function QuickAddDock(props: QuickAddDockProps) {
           <input
             className="nodrag"
             placeholder="Search nodes…"
+            aria-label="Search quick add dock nodes"
             value={dockQuery}
             onChange={(event) => setDockQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && filteredDockItems.length > 0) {
                 addNodeFromItem(filteredDockItems[0], lastCanvasPos || undefined, null);
+                return;
+              }
+              if (event.key === 'Escape') {
+                setDockOpen(false);
               }
             }}
             style={{
@@ -89,19 +97,25 @@ export default function QuickAddDock(props: QuickAddDockProps) {
                   {categoryTitleMap.get(category) || category}
                 </div>
                 {items.map((item) => (
-                  <div
+                  <button
+                    type="button"
                     key={item.id}
                     className="quick-add-item"
                     style={{
                       padding: '6px 8px',
                       borderRadius: '6px',
                       cursor: 'pointer',
-                      fontSize: '12px'
+                      fontSize: '12px',
+                      width: '100%',
+                      textAlign: 'left',
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--vscode-foreground)'
                     }}
                     onClick={() => addNodeFromItem(item, lastCanvasPos || undefined, null)}
                   >
                     {item.label}
-                  </div>
+                  </button>
                 ))}
               </div>
             ))}
@@ -109,8 +123,10 @@ export default function QuickAddDock(props: QuickAddDockProps) {
         </div>
       )}
       <button
+        type="button"
         className="nodrag"
         onClick={() => setDockOpen((value: boolean) => !value)}
+        aria-label={dockOpen ? 'Close quick add dock' : 'Open quick add dock'}
         title="Quick Add"
         style={{
           width: '34px',
@@ -130,3 +146,5 @@ export default function QuickAddDock(props: QuickAddDockProps) {
     </div>
   );
 }
+
+export default React.memo(QuickAddDock);

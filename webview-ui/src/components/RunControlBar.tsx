@@ -1,6 +1,5 @@
 import React from 'react';
-
-type RunPillStatus = 'idle' | 'running' | 'success' | 'error';
+import { canRunFromSelection, getRunPillBackground, RunPillStatus } from '../utils/runMenuUtils';
 
 type RunControlBarProps = {
   chromeOpacity: number;
@@ -13,7 +12,7 @@ type RunControlBarProps = {
   setRunPreviewIds: (value: Set<string> | null) => void;
 };
 
-export default function RunControlBar(props: RunControlBarProps) {
+function RunControlBar(props: RunControlBarProps) {
   const {
     chromeOpacity,
     runPillStatus,
@@ -24,6 +23,8 @@ export default function RunControlBar(props: RunControlBarProps) {
     runPipelineFromHere,
     setRunPreviewIds
   } = props;
+  const runFromSelectionEnabled = canRunFromSelection(selectedNodeId);
+  const pillBackground = getRunPillBackground(runPillStatus);
 
   return (
     <div
@@ -41,17 +42,13 @@ export default function RunControlBar(props: RunControlBarProps) {
       }}
     >
       <button
+        type="button"
         className="nodrag"
         onClick={() => runPipeline(false)}
+        aria-label="Run pipeline"
         style={{
           padding: '10px 22px',
-          background: runPillStatus === 'running'
-            ? 'var(--ir-run-running)'
-            : runPillStatus === 'success'
-              ? 'var(--ir-run-success)'
-              : runPillStatus === 'error'
-                ? 'var(--ir-run-error)'
-                : 'var(--ir-run-idle)',
+          background: pillBackground,
           color: 'var(--ir-run-foreground)',
           border: 'none',
           borderTopLeftRadius: '999px',
@@ -63,21 +60,20 @@ export default function RunControlBar(props: RunControlBarProps) {
         Run
       </button>
       <button
+        type="button"
         className="nodrag"
         onClick={(event) => {
           event.stopPropagation();
           setRunMenuOpen((value: boolean) => !value);
         }}
+        aria-haspopup="menu"
+        aria-expanded={runMenuOpen}
+        aria-controls="intent-router-run-menu"
+        aria-label="Open run options"
         style={{
           width: '34px',
           height: '38px',
-          background: runPillStatus === 'running'
-            ? 'var(--ir-run-running)'
-            : runPillStatus === 'success'
-              ? 'var(--ir-run-success)'
-              : runPillStatus === 'error'
-                ? 'var(--ir-run-error)'
-                : 'var(--ir-run-idle)',
+          background: pillBackground,
           color: 'var(--ir-run-foreground)',
           border: 'none',
           borderTopRightRadius: '999px',
@@ -91,8 +87,16 @@ export default function RunControlBar(props: RunControlBarProps) {
       </button>
       {runMenuOpen && (
         <div
+          id="intent-router-run-menu"
+          role="menu"
           className="nodrag"
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              setRunMenuOpen(false);
+            }
+          }}
           style={{
             position: 'absolute',
             bottom: '46px',
@@ -106,41 +110,47 @@ export default function RunControlBar(props: RunControlBarProps) {
             padding: '6px'
           }}
         >
-          <button className="nodrag" onClick={() => runPipeline(false)} style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '8px', cursor: 'pointer', color: 'var(--vscode-foreground)' }}>Run</button>
-          <button className="nodrag" onClick={() => runPipeline(true)} style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '8px', cursor: 'pointer', color: 'var(--vscode-foreground)' }}>Dry run</button>
+          <button type="button" role="menuitem" className="nodrag" onClick={() => runPipeline(false)} style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '8px', cursor: 'pointer', color: 'var(--vscode-foreground)' }}>Run</button>
+          <button type="button" role="menuitem" className="nodrag" onClick={() => runPipeline(true)} style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', padding: '8px', cursor: 'pointer', color: 'var(--vscode-foreground)' }}>Dry run</button>
           <button
+            type="button"
+            role="menuitem"
             className="nodrag"
-            disabled={!selectedNodeId}
-            onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, false)}
+            disabled={!runFromSelectionEnabled}
+            onClick={() => runFromSelectionEnabled && runPipelineFromHere(String(selectedNodeId), false)}
             style={{
               width: '100%',
               textAlign: 'left',
               background: 'transparent',
               border: 'none',
               padding: '8px',
-              cursor: selectedNodeId ? 'pointer' : 'not-allowed',
-              color: selectedNodeId ? 'var(--vscode-foreground)' : 'var(--vscode-disabledForeground)'
+              cursor: runFromSelectionEnabled ? 'pointer' : 'not-allowed',
+              color: runFromSelectionEnabled ? 'var(--vscode-foreground)' : 'var(--vscode-disabledForeground)'
             }}
           >
             Run from selection
           </button>
           <button
+            type="button"
+            role="menuitem"
             className="nodrag"
-            disabled={!selectedNodeId}
-            onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, true)}
+            disabled={!runFromSelectionEnabled}
+            onClick={() => runFromSelectionEnabled && runPipelineFromHere(String(selectedNodeId), true)}
             style={{
               width: '100%',
               textAlign: 'left',
               background: 'transparent',
               border: 'none',
               padding: '8px',
-              cursor: selectedNodeId ? 'pointer' : 'not-allowed',
-              color: selectedNodeId ? 'var(--vscode-foreground)' : 'var(--vscode-disabledForeground)'
+              cursor: runFromSelectionEnabled ? 'pointer' : 'not-allowed',
+              color: runFromSelectionEnabled ? 'var(--vscode-foreground)' : 'var(--vscode-disabledForeground)'
             }}
           >
             Dry run from selection
           </button>
           <button
+            type="button"
+            role="menuitem"
             className="nodrag"
             onClick={() => {
               setRunPreviewIds(null);
@@ -164,3 +174,5 @@ export default function RunControlBar(props: RunControlBarProps) {
     </div>
   );
 }
+
+export default React.memo(RunControlBar);

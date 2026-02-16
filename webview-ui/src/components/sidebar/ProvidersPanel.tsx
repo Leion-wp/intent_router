@@ -25,7 +25,7 @@ type ProvidersPanelProps = {
   onOpenStudio: () => void;
 };
 
-export default function ProvidersPanel({
+function ProvidersPanel({
   providersSearchRef,
   providersSearch,
   onProvidersSearchChange,
@@ -44,6 +44,7 @@ export default function ProvidersPanel({
         value={providersSearch}
         onChange={(event) => onProvidersSearchChange(event.target.value)}
         placeholder="Search nodes..."
+        aria-label="Search available nodes"
         style={{
           width: '100%',
           background: 'var(--vscode-input-background)',
@@ -63,9 +64,11 @@ export default function ProvidersPanel({
           { key: 'custom', label: 'Custom' }
         ].map((entry) => (
           <button
+            type="button"
             key={entry.key}
             className="nodrag"
             onClick={() => onProvidersFilterChange(entry.key as CatalogFilter)}
+            aria-pressed={providersFilter === entry.key}
             style={{
               padding: '4px 8px',
               border: '1px solid var(--vscode-panel-border)',
@@ -94,6 +97,7 @@ export default function ProvidersPanel({
           'Custom Nodes',
           catalogBySection.custom,
           <button
+            type="button"
             className="nodrag"
             onClick={onOpenStudio}
             style={{
@@ -113,6 +117,7 @@ export default function ProvidersPanel({
         <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--vscode-panel-border)' }}>
           <div style={{ fontSize: '11px', opacity: 0.85, padding: '0 8px 6px 8px' }}>Dev</div>
           <button
+            type="button"
             className="nodrag"
             onClick={() => {
               if (!window.vscode) return;
@@ -137,3 +142,5 @@ export default function ProvidersPanel({
     </div>
   );
 }
+
+export default React.memo(ProvidersPanel);
