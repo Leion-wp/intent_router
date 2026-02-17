@@ -20,6 +20,7 @@ import {
     writeEmbeddedUiPreset,
     writeUiDraftToWorkspace
 } from './uiPresetStore';
+import { clearSessionMemory, exportSessionMemory, importSessionMemory, summarizeSessionMemory } from './sessionMemoryStore';
 
 type CommandGroup = {
     provider: string;
@@ -389,6 +390,60 @@ export class PipelineBuilder {
                     vscode.window.showInformationMessage('Copied to clipboard.');
                 } catch (error: any) {
                     vscode.window.showErrorMessage(`Failed to copy: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'sessionMemory.export') {
+                try {
+                    const sessionId = String(message.sessionId || '').trim() || undefined;
+                    const json = exportSessionMemory(sessionId);
+                    await vscode.env.clipboard.writeText(json);
+                    vscode.window.showInformationMessage(sessionId ? `Session memory "${sessionId}" copied.` : 'All session memory copied.');
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to export session memory: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'sessionMemory.clear') {
+                try {
+                    const sessionId = String(message.sessionId || '').trim() || undefined;
+                    const result = clearSessionMemory(sessionId);
+                    vscode.window.showInformationMessage(
+                        sessionId
+                            ? `Session "${sessionId}" cleared (${result.clearedEntries} entries).`
+                            : `All session memory cleared (${result.clearedSessions} sessions, ${result.clearedEntries} entries).`
+                    );
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to clear session memory: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'sessionMemory.import') {
+                try {
+                    const jsonText = String(message.jsonText || '');
+                    const mode = message.mode === 'replace' ? 'replace' : 'merge';
+                    const result = importSessionMemory(jsonText, mode);
+                    vscode.window.showInformationMessage(`Imported session memory: ${result.sessions} session(s), ${result.entries} entries.`);
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to import session memory: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'sessionMemory.inspect') {
+                try {
+                    const nodeId = String(message.nodeId || '').trim();
+                    const sessionId = String(message.sessionId || '').trim() || undefined;
+                    const summaries = summarizeSessionMemory(sessionId);
+                    const primary = summaries[0];
+                    this.panel?.webview.postMessage({
+                        type: 'sessionMemoryStatus',
+                        nodeId,
+                        sessionId: primary?.sessionId || sessionId || '',
+                        entries: Number(primary?.entries || 0),
+                        lastTimestamp: Number(primary?.lastTimestamp || 0)
+                    });
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to inspect session memory: ${error?.message || error}`);
                 }
                 return;
             }

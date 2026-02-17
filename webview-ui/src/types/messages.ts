@@ -60,6 +60,7 @@ export type WebviewInboundMessage =
   | { type: 'adminModeUpdate'; adminMode: boolean }
   | { type: 'uiPresetExported'; json: string }
   | { type: 'uiPresetPropagated'; summary: string; releasePath: string }
+  | { type: 'sessionMemoryStatus'; nodeId?: string; sessionId?: string; entries: number; lastTimestamp?: number }
   | { type: 'loadPipeline'; pipeline: any }
   | { type: 'pathSelected'; id: string; argName: string; path: string }
   | { type: 'optionsFetched'; argName: string; options: string[] }
@@ -85,6 +86,10 @@ export type WebviewOutboundMessage =
   | { type: 'uiPreset.propagateDraft' }
   | { type: 'openExternal'; url: string }
   | { type: 'copyToClipboard'; text: string }
+  | { type: 'sessionMemory.export'; sessionId?: string }
+  | { type: 'sessionMemory.clear'; sessionId?: string }
+  | { type: 'sessionMemory.import'; jsonText: string; mode?: 'merge' | 'replace' }
+  | { type: 'sessionMemory.inspect'; nodeId?: string; sessionId?: string }
   | { type: 'devPackager.loadPreset' }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };

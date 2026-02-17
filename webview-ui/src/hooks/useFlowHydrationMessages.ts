@@ -151,6 +151,28 @@ export function useFlowHydrationMessages(options: UseFlowHydrationMessagesOption
             };
           }));
           break;
+
+        case 'sessionMemoryStatus':
+          if (!typed.nodeId) {
+            break;
+          }
+          setNodes((nodes: any[]) => nodes.map((node: any) => {
+            if (node.id !== typed.nodeId) {
+              return node;
+            }
+            return {
+              ...node,
+              data: {
+                ...(node.data || {}),
+                sessionMemoryStatus: {
+                  sessionId: typed.sessionId || '',
+                  entries: Number(typed.entries || 0),
+                  lastTimestamp: Number(typed.lastTimestamp || 0)
+                }
+              }
+            };
+          }));
+          break;
       }
     };
 

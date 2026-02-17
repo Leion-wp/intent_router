@@ -48,6 +48,22 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.name = '';
     data.value = '';
     data.kind = 'prompt';
+  } else if (item.nodeType === 'agentNode') {
+    data.label = 'AI Agent';
+    data.agent = 'gemini';
+    data.model = 'gemini-2.5-flash';
+    data.instruction = '';
+    data.contextFiles = ['src/**/*.ts'];
+    data.agentSpecFiles = ['AGENTS.md', '**/SKILL.md'];
+    data.outputContract = 'path_result';
+    data.outputVar = 'ai_result';
+    data.outputVarPath = 'ai_path';
+    data.outputVarChanges = 'ai_changes';
+    data.sessionId = '';
+    data.sessionMode = 'read_write';
+    data.sessionResetBeforeRun = false;
+    data.sessionRecallLimit = 12;
+    data.kind = 'agent';
   } else if (item.nodeType === 'teamNode') {
     data.label = 'AI Team';
     data.strategy = 'sequential';
@@ -61,6 +77,9 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.outputVarPath = 'team_path';
     data.outputVarChanges = 'team_changes';
     data.sessionId = '';
+    data.sessionMode = 'read_write';
+    data.sessionResetBeforeRun = false;
+    data.sessionRecallLimit = 12;
     data.kind = 'team';
   } else if (item.nodeType === 'repoNode') {
     data.path = '';
@@ -103,6 +122,26 @@ export function buildDropNodeData(
   if (type === 'promptNode') {
     return { name: '', value: '', kind: 'prompt' };
   }
+  if (type === 'agentNode') {
+    return {
+      label: 'AI Agent',
+      agent: 'gemini',
+      model: 'gemini-2.5-flash',
+      instruction: '',
+      contextFiles: ['src/**/*.ts'],
+      agentSpecFiles: ['AGENTS.md', '**/SKILL.md'],
+      outputContract: 'path_result',
+      outputVar: 'ai_result',
+      outputVarPath: 'ai_path',
+      outputVarChanges: 'ai_changes',
+      sessionId: '',
+      sessionMode: 'read_write',
+      sessionResetBeforeRun: false,
+      sessionRecallLimit: 12,
+      status: 'idle',
+      kind: 'agent'
+    };
+  }
   if (type === 'teamNode') {
     return {
       label: 'AI Team',
@@ -115,6 +154,9 @@ export function buildDropNodeData(
       outputVarPath: 'team_path',
       outputVarChanges: 'team_changes',
       sessionId: '',
+      sessionMode: 'read_write',
+      sessionResetBeforeRun: false,
+      sessionRecallLimit: 12,
       status: 'idle',
       kind: 'team'
     };

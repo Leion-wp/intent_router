@@ -11,7 +11,7 @@ Module.prototype.require = function (request: string) {
   return originalRequire.apply(this, arguments);
 };
 
-const { normalizeTeamStrategy, normalizeTeamMembers, resolveTeamStrategyResult, pickTeamResultByVote, pickTeamResultByWeightedVote } = require('../../out/providers/aiAdapter');
+const { normalizeTeamStrategy, normalizeTeamMembers, resolveTeamStrategyResult, pickTeamResultByVote, pickTeamResultByWeightedVote, resolveSessionMemoryPolicy } = require('../../out/providers/aiAdapter');
 Module.prototype.require = originalRequire;
 
 suite('AI Team Helpers (Mocked)', () => {
@@ -69,5 +69,13 @@ suite('AI Team Helpers (Mocked)', () => {
     assert.strictEqual(vote.result.changes[0].content, 'y');
     assert.strictEqual(vote.winnerMember, 'writerB');
     assert.ok(String(vote.winnerReason).includes('reviewer weight=3'));
+  });
+
+  test('session memory policy resolves mode flags', () => {
+    assert.deepStrictEqual(resolveSessionMemoryPolicy('runtime_only'), { mode: 'runtime_only', read: false, write: false });
+    assert.deepStrictEqual(resolveSessionMemoryPolicy('read_only'), { mode: 'read_only', read: true, write: false });
+    assert.deepStrictEqual(resolveSessionMemoryPolicy('write_only'), { mode: 'write_only', read: false, write: true });
+    assert.deepStrictEqual(resolveSessionMemoryPolicy('read_write'), { mode: 'read_write', read: true, write: true });
+    assert.deepStrictEqual(resolveSessionMemoryPolicy('invalid'), { mode: 'read_write', read: true, write: true });
   });
 });

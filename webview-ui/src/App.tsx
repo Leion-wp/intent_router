@@ -669,7 +669,11 @@ function Flow({
             outputContract: data.outputContract || 'path_result',
             outputVar: data.outputVar || 'ai_msg',
             outputVarPath: data.outputVarPath || 'ai_path',
-            outputVarChanges: data.outputVarChanges || 'ai_changes'
+            outputVarChanges: data.outputVarChanges || 'ai_changes',
+            sessionId: String(data.sessionId || '').trim() || undefined,
+            sessionMode: String(data.sessionMode || 'read_write'),
+            sessionResetBeforeRun: data.sessionResetBeforeRun === true,
+            sessionRecallLimit: Number(data.sessionRecallLimit || 12)
           };
           description = String(data.label || 'AI Task');
         } else if (node.type === 'teamNode') {
@@ -683,8 +687,11 @@ function Flow({
              outputVar: data.outputVar || 'team_result',
              outputVarPath: data.outputVarPath || 'team_path',
              outputVarChanges: data.outputVarChanges || 'team_changes',
-             sessionId: String(data.sessionId || '').trim() || undefined
-           };
+             sessionId: String(data.sessionId || '').trim() || undefined,
+             sessionMode: String(data.sessionMode || 'read_write'),
+             sessionResetBeforeRun: data.sessionResetBeforeRun === true,
+             sessionRecallLimit: Number(data.sessionRecallLimit || 12)
+            };
           description = String(data.label || 'AI Team');
         } else if (node.type === 'approvalNode') {
           intent = 'vscode.reviewDiff';

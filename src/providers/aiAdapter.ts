@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import { glob } from 'glob';
 import { pipelineEventBus } from '../eventBus';
 import { registerCapabilities } from '../registry';
-import { appendSessionMemory, isSessionMemoryEnabled, loadSessionMemory, SessionMemoryEntry } from '../sessionMemoryStore';
+import { appendSessionMemory, clearSessionMemory, isSessionMemoryEnabled, loadSessionMemory, SessionMemoryEntry } from '../sessionMemoryStore';
 
 type ProposedChange = {
     path: string;
@@ -32,6 +32,8 @@ type TeamMember = {
     outputVarChanges?: string;
 };
 
+type SessionMemoryMode = 'runtime_only' | 'read_only' | 'write_only' | 'read_write';
+
 export function registerAiProvider(context: vscode.ExtensionContext) {
     registerCapabilities({
         provider: 'ai',
@@ -52,7 +54,10 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'outputVar', type: 'string', description: 'Variable to store result content' },
                     { name: 'outputVarPath', type: 'string', description: 'Variable to store result path' },
                     { name: 'outputVarChanges', type: 'string', description: 'Variable to store structured changes list' },
-                    { name: 'sessionId', type: 'string', description: 'Optional persistent memory session id' }
+                    { name: 'sessionId', type: 'string', description: 'Optional persistent memory session id' },
+                    { name: 'sessionMode', type: 'enum', options: ['runtime_only', 'read_only', 'write_only', 'read_write'], description: 'Session memory mode', default: 'read_write' },
+                    { name: 'sessionResetBeforeRun', type: 'boolean', description: 'Reset session memory before running agent', default: false },
+                    { name: 'sessionRecallLimit', type: 'string', description: 'Max session memory entries injected into prompt', default: '12' }
                 ]
             },
             {
@@ -69,7 +74,10 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'outputVar', type: 'string', description: 'Variable to store final result content' },
                     { name: 'outputVarPath', type: 'string', description: 'Variable to store final result path' },
                     { name: 'outputVarChanges', type: 'string', description: 'Variable to store final structured changes list' },
-                    { name: 'sessionId', type: 'string', description: 'Optional persistent memory session id' }
+                    { name: 'sessionId', type: 'string', description: 'Optional persistent memory session id' },
+                    { name: 'sessionMode', type: 'enum', options: ['runtime_only', 'read_only', 'write_only', 'read_write'], description: 'Session memory mode', default: 'read_write' },
+                    { name: 'sessionResetBeforeRun', type: 'boolean', description: 'Reset session memory before running team', default: false },
+                    { name: 'sessionRecallLimit', type: 'string', description: 'Max session memory entries injected into prompt', default: '12' }
                 ]
             }
         ]
@@ -90,6 +98,17 @@ export async function executeAiCommand(args: any): Promise<any> {
     const runId = meta?.runId;
     const stepId = meta?.stepId;
     const intentId = meta?.traceId || 'unknown';
+    const sessionEnabled = isSessionMemoryEnabled();
+    const sessionId = String(args?.sessionId || '').trim();
+    const sessionPolicy = resolveSessionMemoryPolicy(args?.sessionMode);
+    if (sessionEnabled && sessionId && args?.sessionResetBeforeRun === true) {
+        clearSessionMemory(sessionId);
+    }
+    const recallLimitRaw = Number(args?.sessionRecallLimit);
+    const recallLimit = Number.isFinite(recallLimitRaw) ? Math.max(1, Math.floor(recallLimitRaw)) : 12;
+    const persistedSession = sessionEnabled && sessionId && sessionPolicy.read
+        ? loadSessionMemory(sessionId).slice(-recallLimit)
+        : [];
 
     const log = (text: string, stream: 'stdout' | 'stderr' = 'stdout') => {
         if (runId) {
@@ -129,6 +148,8 @@ RULES:
 
 CONTEXT:
 ${contextContent}
+
+${buildPersistedSessionBlock(persistedSession)}
 
 INSTRUCTION:
 ${instruction}
@@ -177,6 +198,16 @@ ${instruction}
                     if (changes.length === 0) {
                         return reject(new Error('Invalid AI output: expected [PATH]...[\\/PATH] + [RESULT]...[\\/RESULT] blocks.'));
                     }
+                    if (sessionEnabled && sessionId && sessionPolicy.write) {
+                        const entries: SessionMemoryEntry[] = changes.map((change) => ({
+                            member: 'agent',
+                            role: 'writer',
+                            path: String(change.path || ''),
+                            contentSnippet: String(change.content || '').slice(0, 1200),
+                            timestamp: Date.now()
+                        }));
+                        appendSessionMemory(sessionId, entries);
+                    }
                 } catch (error: any) {
                     return reject(new Error(String(error?.message || error)));
                 }
@@ -213,6 +244,17 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
     const runId = meta?.runId;
     const stepId = meta?.stepId;
     const intentId = meta?.traceId || 'unknown';
+    const sessionEnabled = isSessionMemoryEnabled();
+    const sessionId = String(args?.sessionId || '').trim();
+    const sessionPolicy = resolveSessionMemoryPolicy(args?.sessionMode);
+    if (sessionEnabled && sessionId && args?.sessionResetBeforeRun === true) {
+        clearSessionMemory(sessionId);
+    }
+    const recallLimitRaw = Number(args?.sessionRecallLimit);
+    const recallLimit = Number.isFinite(recallLimitRaw) ? Math.max(1, Math.floor(recallLimitRaw)) : 12;
+    const persistedSession = sessionEnabled && sessionId && sessionPolicy.read
+        ? loadSessionMemory(sessionId).slice(-recallLimit)
+        : [];
     if (members.length === 0) {
         throw new Error('AI Team: members is required and must contain at least one member.');
     }
@@ -222,9 +264,6 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
     const teamVarStore = new Map<string, string>();
     const runResults: Array<{ member: TeamMember; result: any }> = [];
     const reviewerVoteWeight = resolveReviewerVoteWeight();
-    const sessionEnabled = isSessionMemoryEnabled();
-    const sessionId = String(args?.sessionId || '').trim();
-    const persistedSession = sessionEnabled && sessionId ? loadSessionMemory(sessionId) : [];
 
     for (let index = 0; index < members.length; index += 1) {
         const member = members[index];
@@ -269,7 +308,7 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
 
     const decision = computeTeamDecision(strategy, runResults, reviewerVoteWeight);
     const finalResult = decision.result;
-    if (sessionEnabled && sessionId) {
+    if (sessionEnabled && sessionId && sessionPolicy.write) {
         const entries: SessionMemoryEntry[] = runResults.map(({ member, result }, index) => {
             const memberName = String(member.name || `member_${index + 1}`);
             const role = member.role === 'reviewer' ? 'reviewer' : 'writer';
@@ -335,9 +374,22 @@ function buildPersistedSessionBlock(entries: SessionMemoryEntry[]): string {
         return 'SESSION_MEMORY: none';
     }
     const lines = entries
-        .slice(-12)
         .map((entry) => `- ${entry.member} [${entry.role}] ${entry.path}: ${String(entry.contentSnippet || '').slice(0, 280)}`);
     return ['SESSION_MEMORY:', ...lines].join('\n');
+}
+
+export function resolveSessionMemoryPolicy(modeRaw: any): { mode: SessionMemoryMode; read: boolean; write: boolean } {
+    const mode = String(modeRaw || 'read_write').trim().toLowerCase();
+    if (mode === 'runtime_only') {
+        return { mode: 'runtime_only', read: false, write: false };
+    }
+    if (mode === 'read_only') {
+        return { mode: 'read_only', read: true, write: false };
+    }
+    if (mode === 'write_only') {
+        return { mode: 'write_only', read: false, write: true };
+    }
+    return { mode: 'read_write', read: true, write: true };
 }
 
 export function normalizeTeamStrategy(value: any): TeamStrategy {

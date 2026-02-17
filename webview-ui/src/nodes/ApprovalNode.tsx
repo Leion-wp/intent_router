@@ -25,6 +25,8 @@ const ApprovalNode = ({ data, id }: NodeProps) => {
   const [reviewPolicyViolations, setReviewPolicyViolations] = useState<string[]>(
     Array.isArray(data.reviewPolicyViolations) ? (data.reviewPolicyViolations as string[]) : []
   );
+  const [fileSearch, setFileSearch] = useState<string>('');
+  const [fileSort, setFileSort] = useState<'risk' | 'size' | 'path'>('risk');
   const [reviewTotals, setReviewTotals] = useState<{ added: number; removed: number }>(() => {
     const incoming = (data.reviewTotals as any) || {};
     return {
@@ -115,6 +117,29 @@ const ApprovalNode = ({ data, id }: NodeProps) => {
     .map((entry) => String(entry.path || ''))
     .filter((entryPath) => fileDecisions[entryPath] === 'reject');
   const themeColor = '#ff9800'; // Gold/Orange
+  const viewedCount = Object.values(viewedPaths).filter(Boolean).length;
+  const reviewCoverage = reviewFiles.length > 0 ? Math.round((viewedCount / reviewFiles.length) * 100) : 0;
+  const filteredReviewFiles = reviewFiles
+    .filter((entry) => {
+      const query = String(fileSearch || '').trim().toLowerCase();
+      if (!query) return true;
+      const haystack = `${String(entry.path || '')} +${Number(entry.added || 0)} -${Number(entry.removed || 0)}`.toLowerCase();
+      return haystack.includes(query);
+    })
+    .slice()
+    .sort((a, b) => {
+      if (fileSort === 'path') {
+        return String(a.path || '').localeCompare(String(b.path || ''));
+      }
+      const sizeA = Number(a.added || 0) + Number(a.removed || 0);
+      const sizeB = Number(b.added || 0) + Number(b.removed || 0);
+      if (fileSort === 'size') {
+        return sizeB - sizeA;
+      }
+      const riskA = sizeA + (Number(a.removed || 0) * 2);
+      const riskB = sizeB + (Number(b.removed || 0) * 2);
+      return riskB - riskA;
+    });
 
   const handleStyle = {
     width: '12px',
@@ -233,7 +258,42 @@ const ApprovalNode = ({ data, id }: NodeProps) => {
                         <span style={{ color: '#f44336' }}>-{reviewTotals.removed}</span>
                       </span>
                     </div>
-                    {reviewFiles.map((entry, idx) => {
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        className="nodrag"
+                        value={fileSearch}
+                        onChange={(event) => setFileSearch(event.target.value)}
+                        placeholder="Filter files..."
+                        style={{
+                          flex: 1,
+                          background: 'rgba(0,0,0,0.3)',
+                          color: '#fff',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '6px',
+                          padding: '6px 10px',
+                          fontSize: '11px'
+                        }}
+                      />
+                      <select
+                        className="nodrag"
+                        value={fileSort}
+                        onChange={(event) => setFileSort((event.target.value as 'risk' | 'size' | 'path') || 'risk')}
+                        style={{
+                          width: '110px',
+                          background: 'rgba(0,0,0,0.3)',
+                          color: '#fff',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '6px',
+                          padding: '6px 10px',
+                          fontSize: '11px'
+                        }}
+                      >
+                        <option value="risk">Sort: risk</option>
+                        <option value="size">Sort: size</option>
+                        <option value="path">Sort: path</option>
+                      </select>
+                    </div>
+                    {filteredReviewFiles.map((entry, idx) => {
                       const pathKey = String(entry.path || '');
                       const decision = fileDecisions[pathKey] || 'approve';
                       const viewed = !!viewedPaths[normalizePathKey(pathKey)];
@@ -345,9 +405,10 @@ const ApprovalNode = ({ data, id }: NodeProps) => {
                       Open all diffs
                     </button>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#bdbdbd' }}>
+                      <span>Files shown: {filteredReviewFiles.length}/{reviewFiles.length}</span>
                       <span>Approved: {approvedPaths.length}</span>
                       <span>Rejected: {rejectedPaths.length}</span>
-                      <span>Viewed: {Object.values(viewedPaths).filter(Boolean).length}</span>
+                      <span>Viewed: {viewedCount}/{reviewFiles.length} ({reviewCoverage}%)</span>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
                         <button

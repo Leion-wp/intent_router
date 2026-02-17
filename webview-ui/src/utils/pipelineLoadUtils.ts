@@ -110,6 +110,10 @@ export function buildGraphFromPipeline(
         data.outputVar = String(step.payload?.outputVar || 'ai_result');
         data.outputVarPath = String(step.payload?.outputVarPath || 'ai_path');
         data.outputVarChanges = String(step.payload?.outputVarChanges || 'ai_changes');
+        data.sessionId = String(step.payload?.sessionId || '');
+        data.sessionMode = String(step.payload?.sessionMode || 'read_write');
+        data.sessionResetBeforeRun = step.payload?.sessionResetBeforeRun === true;
+        data.sessionRecallLimit = Number(step.payload?.sessionRecallLimit || 12);
         data.label = String(step.description || 'AI Task');
         data.kind = 'agent';
       } else if (intent === 'ai.team') {
@@ -123,6 +127,10 @@ export function buildGraphFromPipeline(
         data.outputVar = String(step.payload?.outputVar || 'team_result');
         data.outputVarPath = String(step.payload?.outputVarPath || 'team_path');
         data.outputVarChanges = String(step.payload?.outputVarChanges || 'team_changes');
+        data.sessionId = String(step.payload?.sessionId || '');
+        data.sessionMode = String(step.payload?.sessionMode || 'read_write');
+        data.sessionResetBeforeRun = step.payload?.sessionResetBeforeRun === true;
+        data.sessionRecallLimit = Number(step.payload?.sessionRecallLimit || 12);
         data.kind = 'team';
       } else {
         type = 'actionNode';

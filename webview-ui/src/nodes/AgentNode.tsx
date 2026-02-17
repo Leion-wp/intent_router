@@ -40,6 +40,12 @@ const AgentNode = ({ data, id }: NodeProps) => {
   const [outputVar, setOutputVar] = useState<string>((data.outputVar as string) || 'ai_result');
   const [outputVarPath, setOutputVarPath] = useState<string>((data.outputVarPath as string) || 'ai_path');
   const [outputVarChanges, setOutputVarChanges] = useState<string>((data.outputVarChanges as string) || 'ai_changes');
+  const [sessionId, setSessionId] = useState<string>((data.sessionId as string) || '');
+  const [sessionMode, setSessionMode] = useState<'runtime_only' | 'read_only' | 'write_only' | 'read_write'>(
+    ((data.sessionMode as any) || 'read_write')
+  );
+  const [sessionResetBeforeRun, setSessionResetBeforeRun] = useState<boolean>(data.sessionResetBeforeRun === true);
+  const [sessionRecallLimit, setSessionRecallLimit] = useState<number>(Number(data.sessionRecallLimit || 12));
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
   const [label, setLabel] = useState<string>((data.label as string) || 'AI Agent');
   const [editingLabel, setEditingLabel] = useState(false);
@@ -59,6 +65,16 @@ const AgentNode = ({ data, id }: NodeProps) => {
     if (data.outputVar) setOutputVar(data.outputVar as string);
     if (data.outputVarPath) setOutputVarPath(data.outputVarPath as string);
     if (data.outputVarChanges) setOutputVarChanges(data.outputVarChanges as string);
+    if (data.sessionId !== undefined) setSessionId(String(data.sessionId || ''));
+    if (data.sessionMode !== undefined) {
+      const raw = String(data.sessionMode || 'read_write');
+      setSessionMode(raw === 'runtime_only' || raw === 'read_only' || raw === 'write_only' ? raw : 'read_write');
+    }
+    if (data.sessionResetBeforeRun !== undefined) setSessionResetBeforeRun(data.sessionResetBeforeRun === true);
+    if (data.sessionRecallLimit !== undefined) {
+      const value = Number(data.sessionRecallLimit || 12);
+      setSessionRecallLimit(Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 12);
+    }
     if (data.status) setStatus(data.status as string);
     if (data.label !== undefined) setLabel((data.label as string) || 'AI Agent');
 
@@ -285,7 +301,7 @@ const AgentNode = ({ data, id }: NodeProps) => {
                                   {OUTPUT_CONTRACT_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                               </select>
                           </div>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
                               <div>
                                   <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Content Var</label>
                                   <input
@@ -315,11 +331,74 @@ const AgentNode = ({ data, id }: NodeProps) => {
                                        placeholder="ai_changes"
                                        style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
                                    />
-                               </div>
-                           </div>
-                       </div>
-                   )}
-              </div>
+                                </div>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                <div>
+                                    <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Session ID</label>
+                                    <input
+                                        className="nodrag"
+                                        value={sessionId}
+                                        onChange={(e) => { setSessionId(e.target.value); updateField({ sessionId: e.target.value }); }}
+                                        placeholder="optional"
+                                        style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
+                                    />
+                                </div>
+                                <div>
+                                    <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Session Mode</label>
+                                    <select
+                                        className="nodrag"
+                                        value={sessionMode}
+                                        onChange={(e) => {
+                                          const next = e.target.value === 'runtime_only' || e.target.value === 'read_only' || e.target.value === 'write_only'
+                                            ? e.target.value
+                                            : 'read_write';
+                                          setSessionMode(next);
+                                          updateField({ sessionMode: next });
+                                        }}
+                                        style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
+                                    >
+                                        <option value="read_write">read/write</option>
+                                        <option value="read_only">read only</option>
+                                        <option value="write_only">write only</option>
+                                        <option value="runtime_only">runtime only</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', alignItems: 'center' }}>
+                                <div>
+                                    <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Recall Limit</label>
+                                    <input
+                                        className="nodrag"
+                                        type="number"
+                                        min={1}
+                                        value={sessionRecallLimit}
+                                        onChange={(e) => {
+                                          const value = Number(e.target.value || 12);
+                                          const next = Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 12;
+                                          setSessionRecallLimit(next);
+                                          updateField({ sessionRecallLimit: next });
+                                        }}
+                                        style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
+                                    />
+                                </div>
+                                <label style={{ marginTop: '22px', fontSize: '11px', color: '#bbb', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <input
+                                    className="nodrag"
+                                    type="checkbox"
+                                    checked={sessionResetBeforeRun}
+                                    onChange={(e) => {
+                                      const next = e.target.checked;
+                                      setSessionResetBeforeRun(next);
+                                      updateField({ sessionResetBeforeRun: next });
+                                    }}
+                                  />
+                                  reset before run
+                                </label>
+                            </div>
+                        </div>
+                    )}
+               </div>
 
               <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
                   <div style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

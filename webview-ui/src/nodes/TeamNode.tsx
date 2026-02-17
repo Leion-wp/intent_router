@@ -35,7 +35,15 @@ const TeamNode = ({ data, id }: NodeProps) => {
   const [outputVarPath, setOutputVarPath] = useState<string>((data.outputVarPath as string) || 'team_path');
   const [outputVarChanges, setOutputVarChanges] = useState<string>((data.outputVarChanges as string) || 'team_changes');
   const [sessionId, setSessionId] = useState<string>((data.sessionId as string) || '');
+  const [sessionMode, setSessionMode] = useState<'runtime_only' | 'read_only' | 'write_only' | 'read_write'>(
+    ((data.sessionMode as any) || 'read_write')
+  );
+  const [sessionResetBeforeRun, setSessionResetBeforeRun] = useState<boolean>(data.sessionResetBeforeRun === true);
+  const [sessionRecallLimit, setSessionRecallLimit] = useState<number>(Number(data.sessionRecallLimit || 12));
+  const [sessionImportJson, setSessionImportJson] = useState<string>('');
+  const [sessionImportMode, setSessionImportMode] = useState<'merge' | 'replace'>('merge');
   const [teamSummary, setTeamSummary] = useState<any>(data.teamSummary || null);
+  const [sessionMemoryStatus, setSessionMemoryStatus] = useState<any>(data.sessionMemoryStatus || null);
 
   useEffect(() => {
     if (data.label !== undefined) setLabel(String(data.label || 'AI Team'));
@@ -47,7 +55,17 @@ const TeamNode = ({ data, id }: NodeProps) => {
     if (data.outputVarPath) setOutputVarPath(String(data.outputVarPath));
     if (data.outputVarChanges) setOutputVarChanges(String(data.outputVarChanges));
     if (data.sessionId !== undefined) setSessionId(String(data.sessionId || ''));
+    if (data.sessionMode !== undefined) {
+      const raw = String(data.sessionMode || 'read_write');
+      setSessionMode(raw === 'runtime_only' || raw === 'read_only' || raw === 'write_only' ? raw : 'read_write');
+    }
+    if (data.sessionResetBeforeRun !== undefined) setSessionResetBeforeRun(data.sessionResetBeforeRun === true);
+    if (data.sessionRecallLimit !== undefined) {
+      const value = Number(data.sessionRecallLimit || 12);
+      setSessionRecallLimit(Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 12);
+    }
     setTeamSummary(data.teamSummary || null);
+    setSessionMemoryStatus(data.sessionMemoryStatus || null);
   }, [data]);
 
   const update = (patch: Record<string, any>) => updateNodeData(id, patch);
@@ -161,6 +179,118 @@ const TeamNode = ({ data, id }: NodeProps) => {
           placeholder="session id (optional, persistent memory)"
           style={inputStyle}
         />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          <select
+            className="nodrag"
+            value={sessionMode}
+            onChange={(event) => {
+              const next = event.target.value === 'runtime_only' || event.target.value === 'read_only' || event.target.value === 'write_only'
+                ? event.target.value
+                : 'read_write';
+              setSessionMode(next);
+              update({ sessionMode: next });
+            }}
+            style={inputStyle}
+          >
+            <option value="read_write">session: read/write</option>
+            <option value="read_only">session: read only</option>
+            <option value="write_only">session: write only</option>
+            <option value="runtime_only">session: runtime only</option>
+          </select>
+          <input
+            className="nodrag"
+            type="number"
+            min={1}
+            value={sessionRecallLimit}
+            onChange={(event) => {
+              const value = Number(event.target.value || 12);
+              const next = Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 12;
+              setSessionRecallLimit(next);
+              update({ sessionRecallLimit: next });
+            }}
+            placeholder="recall limit"
+            style={inputStyle}
+          />
+        </div>
+        <label style={{ fontSize: 10, color: '#aaa', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input
+            className="nodrag"
+            type="checkbox"
+            checked={sessionResetBeforeRun}
+            onChange={(event) => {
+              const next = event.target.checked;
+              setSessionResetBeforeRun(next);
+              update({ sessionResetBeforeRun: next });
+            }}
+          />
+          reset session before run
+        </label>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button
+            className="nodrag"
+            onClick={() => {
+              (window as any).vscode?.postMessage?.({ type: 'sessionMemory.export', sessionId: String(sessionId || '').trim() || undefined });
+            }}
+            style={miniButtonStyle}
+          >
+            Export Memory
+          </button>
+          <button
+            className="nodrag"
+            onClick={() => {
+              (window as any).vscode?.postMessage?.({ type: 'sessionMemory.clear', sessionId: String(sessionId || '').trim() || undefined });
+            }}
+            style={miniButtonStyle}
+          >
+            Clear Memory
+          </button>
+          <button
+            className="nodrag"
+            onClick={() => {
+              (window as any).vscode?.postMessage?.({
+                type: 'sessionMemory.inspect',
+                nodeId: id,
+                sessionId: String(sessionId || '').trim() || undefined
+              });
+            }}
+            style={miniButtonStyle}
+          >
+            Inspect Memory
+          </button>
+          <select
+            className="nodrag"
+            value={sessionImportMode}
+            onChange={(event) => setSessionImportMode(event.target.value === 'replace' ? 'replace' : 'merge')}
+            style={{ ...inputStyle, width: 110 }}
+          >
+            <option value="merge">merge</option>
+            <option value="replace">replace</option>
+          </select>
+        </div>
+        <textarea
+          className="nodrag"
+          value={sessionImportJson}
+          onChange={(event) => setSessionImportJson(event.target.value)}
+          placeholder='paste session memory JSON here: {"sessions":{...}}'
+          rows={3}
+          style={{ ...inputStyle, resize: 'vertical' }}
+        />
+        <button
+          className="nodrag"
+          onClick={() => {
+            if (!String(sessionImportJson || '').trim()) return;
+            (window as any).vscode?.postMessage?.({ type: 'sessionMemory.import', jsonText: sessionImportJson, mode: sessionImportMode });
+          }}
+          style={miniButtonStyle}
+        >
+          Import Memory JSON
+        </button>
+        {sessionMemoryStatus && (
+          <div style={{ fontSize: 10, color: '#cfc7e8' }}>
+            Memory: {Number(sessionMemoryStatus.entries || 0)} entr{Number(sessionMemoryStatus.entries || 0) > 1 ? 'ies' : 'y'}
+            {sessionMemoryStatus.lastTimestamp ? ` · ${new Date(Number(sessionMemoryStatus.lastTimestamp)).toLocaleString()}` : ''}
+          </div>
+        )}
 
         {teamSummary && (
           <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 8, background: 'rgba(0,0,0,0.2)' }}>
