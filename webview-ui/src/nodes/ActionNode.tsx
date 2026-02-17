@@ -75,6 +75,23 @@ const ActionNode = ({ data, id }: NodeProps) => {
       selectedCapConfig = currentCaps.find((c: any) => c.capability.endsWith(`.${capability}`));
   }
 
+  useEffect(() => {
+    if (!currentCaps.length) return;
+    if (!capability) {
+      const nextCapability = String(currentCaps[0]?.capability || '').trim();
+      if (!nextCapability) return;
+      setCapability(nextCapability);
+      updateNodeData(id, { provider, capability: nextCapability });
+      return;
+    }
+    if (!selectedCapConfig) {
+      const nextCapability = String(currentCaps[0]?.capability || '').trim();
+      if (!nextCapability || nextCapability === capability) return;
+      setCapability(nextCapability);
+      updateNodeData(id, { provider, capability: nextCapability });
+    }
+  }, [currentCaps, capability, selectedCapConfig, id, provider, updateNodeData]);
+
   const schemaArgs = selectedCapConfig?.args || [];
   const displayArgs = [
      ...schemaArgs,
@@ -188,11 +205,32 @@ const ActionNode = ({ data, id }: NodeProps) => {
                 <select
                     className="nodrag"
                     value={selectedCapConfig?.capability || capability}
-                    onChange={(e) => updateNodeData(id, { capability: e.target.value })}
-                    style={{ width: '100%', background: 'rgba(0,0,0,0.2)', color: '#ccc', border: '1px solid rgba(255,255,255,0.1)', padding: '4px', borderRadius: '4px', fontSize: '11px' }}
+                    onChange={(e) => {
+                      const nextCapability = e.target.value;
+                      setCapability(nextCapability);
+                      updateNodeData(id, { capability: nextCapability });
+                    }}
+                    style={{
+                      width: '100%',
+                      background: 'var(--vscode-dropdown-background)',
+                      color: 'var(--vscode-dropdown-foreground)',
+                      border: '1px solid var(--vscode-dropdown-border)',
+                      padding: '4px',
+                      borderRadius: '4px',
+                      fontSize: '11px'
+                    }}
                 >
                     {currentCaps.map((c: any) => (
-                        <option key={c.capability} value={c.capability}>{c.capability.split('.').pop()}</option>
+                        <option
+                          key={c.capability}
+                          value={c.capability}
+                          style={{
+                            background: 'var(--vscode-dropdown-background)',
+                            color: 'var(--vscode-dropdown-foreground)'
+                          }}
+                        >
+                          {c.capability.split('.').pop()}
+                        </option>
                     ))}
                 </select>
             </div>

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { listPublicCapabilities } from './registry';
-import { PipelineFile, ensurePipelineFolder, writePipelineToUri } from './pipelineRunner';
+import { PipelineFile, ensurePipelineFolder, writePipelineToUri, resolveDecision } from './pipelineRunner';
 import { gitTemplates } from './providers/gitAdapter';
 import { dockerTemplates } from './providers/dockerAdapter';
 import { terminalTemplates } from './providers/terminalAdapter';
@@ -260,6 +260,10 @@ export class PipelineBuilder {
                     message.pipeline as PipelineFile,
                     !!message.dryRun
                 );
+                return;
+            }
+            if (message?.type === 'pipelineDecision') {
+                resolveDecision(message.nodeId, message.decision);
                 return;
             }
             if (message?.type === 'saveEnvironment') {

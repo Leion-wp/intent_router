@@ -26,7 +26,8 @@ const AgentNode = ({ data, id }: NodeProps) => {
   const [model, setModel] = useState<string>((data.model as string) || 'gemini-2.5-flash');
   const [instruction, setInstruction] = useState<string>((data.instruction as string) || '');
   const [contextFiles, setContextFiles] = useState<string[]>((data.contextFiles as string[]) || ['src/**/*.ts']);
-  const [outputVar, setOutputVar] = useState<string>((data.outputVar as string) || '');
+  const [outputVar, setOutputVar] = useState<string>((data.outputVar as string) || 'ai_result');
+  const [outputVarPath, setOutputVarPath] = useState<string>((data.outputVarPath as string) || 'ai_path');
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
   const [label, setLabel] = useState<string>((data.label as string) || 'AI Agent');
   const [editingLabel, setEditingLabel] = useState(false);
@@ -42,6 +43,7 @@ const AgentNode = ({ data, id }: NodeProps) => {
     if (data.instruction) setInstruction(data.instruction as string);
     if (data.contextFiles) setContextFiles(data.contextFiles as string[]);
     if (data.outputVar) setOutputVar(data.outputVar as string);
+    if (data.outputVarPath) setOutputVarPath(data.outputVarPath as string);
     if (data.status) setStatus(data.status as string);
     if (data.label !== undefined) setLabel((data.label as string) || 'AI Agent');
 
@@ -246,15 +248,27 @@ const AgentNode = ({ data, id }: NodeProps) => {
                                   {MODEL_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                               </select>
                           </div>
-                          <div>
-                              <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Persistence Variable</label>
-                              <input
-                                  className="nodrag"
-                                  value={outputVar}
-                                  onChange={(e) => { setOutputVar(e.target.value); updateField({ outputVar: e.target.value }); }}
-                                  placeholder="e.g. task_output"
-                                  style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
-                              />
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                              <div>
+                                  <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Content Var</label>
+                                  <input
+                                      className="nodrag"
+                                      value={outputVar}
+                                      onChange={(e) => { setOutputVar(e.target.value); updateField({ outputVar: e.target.value }); }}
+                                      placeholder="ai_msg"
+                                      style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
+                                  />
+                              </div>
+                              <div>
+                                  <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Path Var</label>
+                                  <input
+                                      className="nodrag"
+                                      value={outputVarPath}
+                                      onChange={(e) => { setOutputVarPath(e.target.value); updateField({ outputVarPath: e.target.value }); }}
+                                      placeholder="ai_path"
+                                      style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
+                                  />
+                              </div>
                           </div>
                       </div>
                   )}

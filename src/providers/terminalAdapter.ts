@@ -68,7 +68,7 @@ function getOrCreateTerminal(): { terminal: vscode.Terminal, write: (data: strin
 
 export async function executeTerminalCommand(args: any): Promise<void> {
     const commandText = args?.command;
-    const cwd = args?.cwd;
+    const cwd = normalizeExecutionCwd(args?.cwd);
     const meta = args?.__meta;
 
     if (!commandText || typeof commandText !== 'string') {
@@ -129,6 +129,26 @@ function isEnvEqual(a: Record<string, string>, b: Record<string, string>): boole
         }
     }
     return true;
+}
+
+function normalizeExecutionCwd(rawCwd: any): string {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || path.resolve('.');
+    const raw = typeof rawCwd === 'string' ? rawCwd.trim() : '';
+
+    if (!raw || raw === '.' || raw === '${workspaceRoot}') {
+        return workspaceRoot;
+    }
+
+    if (raw.startsWith('${workspaceRoot}')) {
+        const suffix = raw.slice('${workspaceRoot}'.length).trim().replace(/^[/\\]+/, '');
+        return suffix ? path.resolve(workspaceRoot, suffix) : workspaceRoot;
+    }
+
+    if (path.isAbsolute(raw)) {
+        return raw;
+    }
+
+    return path.resolve(workspaceRoot, raw);
 }
 
 export function cancelTerminalRun(runId: string | undefined | null): void {

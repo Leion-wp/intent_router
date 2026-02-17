@@ -27,6 +27,7 @@ import SwitchNode from './nodes/SwitchNode';
 import ScriptNode from './nodes/ScriptNode';
 import AgentNode from './nodes/AgentNode';
 import HttpNode from './nodes/HttpNode';
+import ApprovalNode from './nodes/ApprovalNode';
 import AppLayoutShell from './components/AppLayoutShell';
 import ChromeControlsPanel from './components/ChromeControlsPanel';
 import { edgeTypes } from './components/InsertableEdge';
@@ -85,9 +86,11 @@ export const RegistryContext = createContext<any>({});
 export const FlowRuntimeContext = createContext<{
   getAvailableVars: () => string[];
   isRunPreviewNode: (id: string) => boolean;
+  vscode: any;
 }>({
   getAvailableVars: () => [],
-  isRunPreviewNode: () => false
+  isRunPreviewNode: () => false,
+  vscode: null
 });
 
 // Editor context for mutating nodes from within node components (single source of truth)
@@ -117,7 +120,8 @@ const nodeTypes = {
   switchNode: SwitchNode,
   scriptNode: ScriptNode,
   agentNode: AgentNode,
-  httpNode: HttpNode
+  httpNode: HttpNode,
+  approvalNode: ApprovalNode
 };
 
 declare global {
@@ -282,7 +286,7 @@ function Flow({
   );
 
   const flowRuntime = useMemo(
-    () => ({ getAvailableVars, isRunPreviewNode }),
+    () => ({ getAvailableVars, isRunPreviewNode, vscode }),
     [getAvailableVars, isRunPreviewNode]
   );
 
@@ -659,9 +663,17 @@ function Flow({
             model: data.model,
             instruction: data.instruction,
             contextFiles: data.contextFiles,
-            outputVar: data.outputVar
+            outputVar: data.outputVar || 'ai_msg',
+            outputVarPath: data.outputVarPath || 'ai_path'
           };
           description = String(data.label || 'AI Task');
+        } else if (node.type === 'approvalNode') {
+          intent = 'vscode.reviewDiff';
+          payload = {
+            path: data.filePath,
+            proposal: data.proposal
+          };
+          description = String(data.label || 'Review Change');
         } else if (node.type === 'httpNode') {
           intent = 'http.request';
           payload = {
