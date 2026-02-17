@@ -171,7 +171,7 @@ function getActiveProfile(config: vscode.WorkspaceConfiguration): ProfileConfig 
     return profiles.find(p => p.name === activeName);
 }
 
-async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
+export async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
     if (typeof input === 'string') {
         const regex = /\$\{input:([^}]+)\}/g;
         let match;

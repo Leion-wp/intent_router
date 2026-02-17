@@ -10,6 +10,18 @@ export function run() {
   assert.strictEqual(filtered.length, 1);
   assert.strictEqual(filtered[0].name, 'Deploy B');
 
+  const withPr = filterHistoryRuns([
+    {
+      name: 'Factory Run',
+      status: 'success',
+      timestamp: Date.parse('2026-02-01T12:00:00Z'),
+      pullRequests: [
+        { title: 'feat(frontend): TICKET-7', url: 'https://github.com/acme/repo/pull/77', head: 'feature/TICKET-7-frontend', base: 'main' }
+      ]
+    }
+  ], 'pull/77 frontend');
+  assert.strictEqual(withPr.length, 1);
+
   const window = computeHistoryWindow({
     total: 300,
     scrollTop: 920,

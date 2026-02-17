@@ -18,6 +18,29 @@ export type PipelineEvent =
         policyBlocked?: boolean;
         policyViolations?: string[];
     }
+    | {
+        type: 'teamRunSummary';
+        runId: string;
+        intentId: string;
+        stepId?: string;
+        strategy: 'sequential' | 'reviewer_gate' | 'vote';
+        winnerMember?: string;
+        winnerReason?: string;
+        voteScoreByMember?: Array<{ member: string; role: 'writer' | 'reviewer'; weight: number; score: number }>;
+        members: Array<{ name: string; role: 'writer' | 'reviewer'; path: string; files: number }>;
+        totalFiles: number;
+    }
+    | {
+        type: 'githubPullRequestCreated';
+        runId?: string;
+        intentId?: string;
+        stepId?: string;
+        provider: 'github';
+        url: string;
+        head: string;
+        base: string;
+        title: string;
+    }
     | { type: 'pipelineReviewOpenDiff'; nodeId?: string; runId?: string; path?: string }
     | { type: 'pipelinePause'; runId: string; timestamp: number }
     | { type: 'pipelineResume'; runId: string; timestamp: number };

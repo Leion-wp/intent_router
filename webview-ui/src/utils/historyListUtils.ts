@@ -6,7 +6,15 @@ export function filterHistoryRuns(history: any[], query: string): any[] {
     const name = String(run?.name || '').toLowerCase();
     const status = String(run?.status || '').toLowerCase();
     const time = new Date(run?.timestamp || 0).toLocaleTimeString().toLowerCase();
-    const haystack = `${name} ${status} ${time}`;
+    const prs = Array.isArray(run?.pullRequests) ? run.pullRequests : [];
+    const prHaystack = prs.map((entry: any) => {
+      const title = String(entry?.title || '');
+      const url = String(entry?.url || '');
+      const head = String(entry?.head || '');
+      const base = String(entry?.base || '');
+      return `${title} ${url} ${head} ${base}`;
+    }).join(' ').toLowerCase();
+    const haystack = `${name} ${status} ${time} ${prHaystack}`;
     return terms.every((term) => haystack.includes(term));
   });
 }

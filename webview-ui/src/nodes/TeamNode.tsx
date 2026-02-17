@@ -4,6 +4,7 @@ import { FlowEditorContext } from '../App';
 
 type TeamMember = {
   name: string;
+  role: 'writer' | 'reviewer';
   agent: string;
   model: string;
   instruction: string;
@@ -11,6 +12,7 @@ type TeamMember = {
 
 const DEFAULT_MEMBER: TeamMember = {
   name: 'member_1',
+  role: 'writer',
   agent: 'gemini',
   model: 'gemini-2.5-flash',
   instruction: ''
@@ -32,6 +34,7 @@ const TeamNode = ({ data, id }: NodeProps) => {
   const [outputVar, setOutputVar] = useState<string>((data.outputVar as string) || 'team_result');
   const [outputVarPath, setOutputVarPath] = useState<string>((data.outputVarPath as string) || 'team_path');
   const [outputVarChanges, setOutputVarChanges] = useState<string>((data.outputVarChanges as string) || 'team_changes');
+  const [teamSummary, setTeamSummary] = useState<any>(data.teamSummary || null);
 
   useEffect(() => {
     if (data.label !== undefined) setLabel(String(data.label || 'AI Team'));
@@ -42,6 +45,7 @@ const TeamNode = ({ data, id }: NodeProps) => {
     if (data.outputVar) setOutputVar(String(data.outputVar));
     if (data.outputVarPath) setOutputVarPath(String(data.outputVarPath));
     if (data.outputVarChanges) setOutputVarChanges(String(data.outputVarChanges));
+    setTeamSummary(data.teamSummary || null);
   }, [data]);
 
   const update = (patch: Record<string, any>) => updateNodeData(id, patch);
@@ -111,8 +115,12 @@ const TeamNode = ({ data, id }: NodeProps) => {
         </div>
         {members.map((member, index) => (
           <div key={`${member.name}-${index}`} style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
               <input className="nodrag" value={member.name} onChange={(event) => setMemberField(index, 'name', event.target.value)} placeholder="name" style={inputStyle} />
+              <select className="nodrag" value={member.role || 'writer'} onChange={(event) => setMemberField(index, 'role', event.target.value as 'writer' | 'reviewer')} style={inputStyle}>
+                <option value="writer">writer</option>
+                <option value="reviewer">reviewer</option>
+              </select>
               <select className="nodrag" value={member.agent || 'gemini'} onChange={(event) => setMemberField(index, 'agent', event.target.value)} style={inputStyle}>
                 <option value="gemini">gemini</option>
                 <option value="codex">codex</option>
@@ -144,6 +152,47 @@ const TeamNode = ({ data, id }: NodeProps) => {
           <input className="nodrag" value={outputVarPath} onChange={(event) => { setOutputVarPath(event.target.value); update({ outputVarPath: event.target.value }); }} placeholder="team_path" style={inputStyle} />
           <input className="nodrag" value={outputVarChanges} onChange={(event) => { setOutputVarChanges(event.target.value); update({ outputVarChanges: event.target.value }); }} placeholder="team_changes" style={inputStyle} />
         </div>
+
+        {teamSummary && (
+          <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 8, background: 'rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#cfc7e8', marginBottom: 6 }}>
+              <span>Team Summary</span>
+              <span>{String(teamSummary.strategy || 'sequential')}</span>
+            </div>
+            <div style={{ fontSize: 10, color: '#b6adcf', marginBottom: 6 }}>
+              Winner: {String(teamSummary.winnerMember || 'n/a')} · Total files: {Number(teamSummary.totalFiles || 0)}
+            </div>
+            {teamSummary.winnerReason && (
+              <div style={{ fontSize: 10, color: '#cbbde9', marginBottom: 6 }}>
+                Reason: {String(teamSummary.winnerReason)}
+              </div>
+            )}
+            {Array.isArray(teamSummary.voteScoreByMember) && teamSummary.voteScoreByMember.length > 0 && (
+              <div style={{ marginBottom: 6, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: 6 }}>
+                <div style={{ fontSize: 10, color: '#cfc7e8', marginBottom: 4 }}>Vote Scores</div>
+                {teamSummary.voteScoreByMember.map((entry: any, index: number) => (
+                  <div key={`${entry?.member || 'member'}-${index}`} style={{ fontSize: 10, color: '#ddd', display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 6 }}>
+                    <span>{String(entry?.member || `member_${index + 1}`)}</span>
+                    <span>{String(entry?.role || 'writer')}</span>
+                    <span>w={Number(entry?.weight || 1)}</span>
+                    <span>s={Number(entry?.score || 0)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {(Array.isArray(teamSummary.members) ? teamSummary.members : []).map((entry: any, index: number) => (
+                <div key={`${entry?.name || 'member'}-${index}`} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 6, fontSize: 10, color: '#ddd' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {String(entry?.name || `member_${index + 1}`)} ({String(entry?.role || 'writer')})
+                  </span>
+                  <span>{String(entry?.path || 'n/a')}</span>
+                  <span>{Number(entry?.files || 0)} file(s)</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

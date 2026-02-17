@@ -6,6 +6,15 @@ export type PipelineRun = {
   timestamp: number;
   status: 'running' | 'success' | 'failure' | 'cancelled';
   steps: Array<any>;
+  pullRequests?: Array<{
+    provider: 'github';
+    url: string;
+    head: string;
+    base: string;
+    title: string;
+    stepId?: string;
+    timestamp: number;
+  }>;
   pipelineSnapshot?: any;
 };
 
@@ -24,6 +33,18 @@ export type WebviewInboundMessage =
       policyMode?: 'warn' | 'block';
       policyBlocked?: boolean;
       policyViolations?: string[];
+    }
+  | {
+      type: 'teamRunSummary';
+      runId: string;
+      intentId: string;
+      stepId?: string;
+      strategy: 'sequential' | 'reviewer_gate' | 'vote';
+      winnerMember?: string;
+      winnerReason?: string;
+      voteScoreByMember?: Array<{ member: string; role: 'writer' | 'reviewer'; weight: number; score: number }>;
+      members: Array<{ name: string; role: 'writer' | 'reviewer'; path: string; files: number }>;
+      totalFiles: number;
     }
   | { type: 'historyUpdate'; history: PipelineRun[] }
   | { type: 'environmentUpdate'; environment: Record<string, string> }
@@ -59,6 +80,7 @@ export type WebviewOutboundMessage =
   | { type: 'uiPreset.importDraft'; source: 'paste' | 'file'; jsonText?: string }
   | { type: 'uiPreset.resetToDefaults' }
   | { type: 'uiPreset.propagateDraft' }
+  | { type: 'openExternal'; url: string }
   | { type: 'devPackager.loadPreset' }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };

@@ -77,11 +77,12 @@ suite('Pipeline Builder Tests (Mocked)', () => {
             index: 0
         });
 
-        assert.strictEqual(receivedMessages.length, 1);
-        assert.strictEqual(receivedMessages[0].type, 'executionStatus');
-        assert.strictEqual(receivedMessages[0].status, 'running');
-        assert.strictEqual(receivedMessages[0].index, 0);
-        assert.strictEqual(receivedMessages[0].intentId, 'a'); // Verify intentId
+        const executionStatusMessages = receivedMessages.filter(m => m.type === 'executionStatus');
+        assert.ok(executionStatusMessages.length >= 1);
+        const message = executionStatusMessages[executionStatusMessages.length - 1];
+        assert.strictEqual(message.status, 'running');
+        assert.strictEqual(message.index, 0);
+        assert.strictEqual(message.intentId, 'a');
     });
 
     test('Log forwarding to Webview', async () => {
@@ -102,10 +103,11 @@ suite('Pipeline Builder Tests (Mocked)', () => {
             stream: 'stdout'
         });
 
-        assert.strictEqual(receivedMessages.length, 1);
-        assert.strictEqual(receivedMessages[0].type, 'stepLog');
-        assert.strictEqual(receivedMessages[0].intentId, 'a');
-        assert.strictEqual(receivedMessages[0].text, 'log line');
+        const logMessages = receivedMessages.filter(m => m.type === 'stepLog');
+        assert.ok(logMessages.length >= 1);
+        const message = logMessages[logMessages.length - 1];
+        assert.strictEqual(message.intentId, 'a');
+        assert.strictEqual(message.text, 'log line');
     });
 
     test('Clear History message clears history and notifies webview', async () => {

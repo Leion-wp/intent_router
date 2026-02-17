@@ -125,6 +125,32 @@ export function useFlowHydrationMessages(options: UseFlowHydrationMessagesOption
             };
           }));
           break;
+
+        case 'teamRunSummary':
+          if (!typed.stepId) {
+            break;
+          }
+          setNodes((nodes: any[]) => nodes.map((node: any) => {
+            if (node.id !== typed.stepId) {
+              return node;
+            }
+            return {
+              ...node,
+              data: {
+                ...(node.data || {}),
+                teamSummary: {
+                  runId: typed.runId,
+                  strategy: typed.strategy,
+                  winnerMember: typed.winnerMember,
+                  winnerReason: typed.winnerReason,
+                  voteScoreByMember: Array.isArray(typed.voteScoreByMember) ? typed.voteScoreByMember : [],
+                  members: Array.isArray(typed.members) ? typed.members : [],
+                  totalFiles: Number(typed.totalFiles || 0)
+                }
+              }
+            };
+          }));
+          break;
       }
     };
 

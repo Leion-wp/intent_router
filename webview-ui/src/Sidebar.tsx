@@ -229,6 +229,12 @@ function Sidebar({
     window.vscode.postMessage(msg);
   };
 
+  const openExternal = (url: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'openExternal', url };
+    window.vscode.postMessage(msg);
+  };
+
   useEffect(() => {
     return () => {
       if (historyScrollRafRef.current !== null) {
@@ -252,7 +258,7 @@ function Sidebar({
     [deferredHistorySearch, history]
   );
 
-  const HISTORY_ROW_HEIGHT = 92;
+  const HISTORY_ROW_HEIGHT = 108;
   const HISTORY_OVERSCAN = 6;
   const historyTotalHeight = filteredHistory.length * HISTORY_ROW_HEIGHT;
   const {
@@ -313,6 +319,7 @@ function Sidebar({
             historyRowHeight={HISTORY_ROW_HEIGHT}
             onSelectHistory={onSelectHistory}
             onRestoreHistory={onRestoreHistory}
+            onOpenExternal={openExternal}
           />
         )}
 

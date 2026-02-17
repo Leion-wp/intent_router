@@ -20,6 +20,7 @@ type AiCliSpec = {
 type TeamStrategy = 'sequential' | 'reviewer_gate' | 'vote';
 type TeamMember = {
     name?: string;
+    role?: 'writer' | 'reviewer';
     agent?: string;
     model?: string;
     instruction?: string;
@@ -205,18 +206,19 @@ ${instruction}
 export async function executeAiTeamCommand(args: any): Promise<any> {
     const strategy = normalizeTeamStrategy(args?.strategy);
     const members = normalizeTeamMembers(args?.members);
+    const meta = args?.__meta;
+    const runId = meta?.runId;
+    const stepId = meta?.stepId;
+    const intentId = meta?.traceId || 'unknown';
     if (members.length === 0) {
         throw new Error('AI Team: members is required and must contain at least one member.');
-    }
-
-    if (strategy !== 'sequential') {
-        throw new Error(`AI Team: strategy "${strategy}" is not yet implemented in this version.`);
     }
 
     const sharedContextFiles = asStringArray(args?.contextFiles);
     const sharedSpecFiles = asStringArray(args?.agentSpecFiles);
     const teamVarStore = new Map<string, string>();
-    let finalResult: any = null;
+    const runResults: Array<{ member: TeamMember; result: any }> = [];
+    const reviewerVoteWeight = resolveReviewerVoteWeight();
 
     for (let index = 0; index < members.length; index += 1) {
         const member = members[index];
@@ -226,7 +228,10 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
             throw new Error(`AI Team: member "${memberName}" has empty instruction.`);
         }
 
-        const instructionResolved = applyTeamVariables(instructionRaw, teamVarStore);
+        const instructionResolved = applyTeamVariables(
+            `${instructionRaw}\n\n${buildTeamMemoryBlock(teamVarStore)}`,
+            teamVarStore
+        );
         const memberArgs = {
             ...args,
             agent: member.agent || args?.agent || 'gemini',
@@ -240,7 +245,7 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
         };
 
         const result = await executeAiCommand(memberArgs);
-        finalResult = result;
+        runResults.push({ member, result });
 
         if (result && typeof result === 'object') {
             if (result.content !== undefined) {
@@ -252,9 +257,26 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
             if (result.changes !== undefined) {
                 teamVarStore.set(`${memberName}.changes`, JSON.stringify(result.changes));
             }
+            teamVarStore.set(`${memberName}.result`, JSON.stringify(result));
         }
     }
 
+    const decision = computeTeamDecision(strategy, runResults, reviewerVoteWeight);
+    const finalResult = decision.result;
+    if (runId) {
+        pipelineEventBus.emit({
+            type: 'teamRunSummary',
+            runId,
+            intentId,
+            stepId,
+            strategy,
+            winnerMember: decision.winnerMember,
+            winnerReason: decision.winnerReason,
+            voteScoreByMember: decision.voteScoreByMember,
+            members: buildTeamSummaryMembers(runResults),
+            totalFiles: sumTeamFiles(runResults)
+        });
+    }
     return finalResult;
 }
 
@@ -276,6 +298,17 @@ function applyTeamVariables(input: string, vars: Map<string, string>): string {
     });
 }
 
+function buildTeamMemoryBlock(vars: Map<string, string>): string {
+    if (!vars || vars.size === 0) {
+        return 'TEAM_MEMORY: none';
+    }
+    const lines: string[] = [];
+    for (const [key, value] of vars.entries()) {
+        lines.push(`- ${key}: ${String(value).slice(0, 800)}`);
+    }
+    return ['TEAM_MEMORY:', ...lines].join('\n');
+}
+
 export function normalizeTeamStrategy(value: any): TeamStrategy {
     const raw = String(value || '').trim().toLowerCase();
     if (raw === 'reviewer_gate') return 'reviewer_gate';
@@ -292,6 +325,7 @@ export function normalizeTeamMembers(input: any): TeamMember[] {
         if (!entry || typeof entry !== 'object') continue;
         members.push({
             name: String(entry.name || '').trim(),
+            role: normalizeTeamMemberRole(entry.role),
             agent: String(entry.agent || '').trim() || undefined,
             model: String(entry.model || '').trim() || undefined,
             instruction: String(entry.instruction || '').trim(),
@@ -303,6 +337,216 @@ export function normalizeTeamMembers(input: any): TeamMember[] {
         });
     }
     return members.filter((member) => !!String(member.instruction || '').trim());
+}
+
+export function resolveTeamStrategyResult(
+    strategy: TeamStrategy,
+    runResults: Array<{ member: TeamMember; result: any }>
+): any {
+    return computeTeamDecision(strategy, runResults, resolveReviewerVoteWeight()).result;
+}
+
+type TeamDecision = {
+    result: any;
+    winnerMember?: string;
+    winnerReason?: string;
+    voteScoreByMember?: Array<{ member: string; role: 'writer' | 'reviewer'; weight: number; score: number }>;
+};
+
+function computeTeamDecision(
+    strategy: TeamStrategy,
+    runResults: Array<{ member: TeamMember; result: any }>,
+    reviewerVoteWeight: number
+): TeamDecision {
+    if (!Array.isArray(runResults) || runResults.length === 0) {
+        throw new Error('AI Team: no member result available.');
+    }
+
+    if (strategy === 'sequential') {
+        const winner = runResults[runResults.length - 1];
+        return {
+            result: winner.result,
+            winnerMember: String(winner.member?.name || ''),
+            winnerReason: 'sequential: last member result'
+        };
+    }
+
+    if (strategy === 'reviewer_gate') {
+        const reviewer = runResults.find((entry) => entry.member.role === 'reviewer');
+        if (!reviewer) {
+            throw new Error('AI Team: reviewer_gate requires at least one member with role="reviewer".');
+        }
+        return {
+            result: reviewer.result,
+            winnerMember: String(reviewer.member?.name || ''),
+            winnerReason: 'reviewer_gate: reviewer decision'
+        };
+    }
+
+    const vote = pickTeamResultByWeightedVote(runResults, reviewerVoteWeight);
+    if (!vote?.result) {
+        throw new Error('AI Team: vote strategy failed to select a winner.');
+    }
+    return {
+        result: vote.result,
+        winnerMember: vote.winnerMember,
+        winnerReason: vote.winnerReason,
+        voteScoreByMember: vote.voteScoreByMember
+    };
+}
+
+export function pickTeamResultByVote(results: any[]): any | null {
+    if (!Array.isArray(results) || results.length === 0) {
+        return null;
+    }
+
+    const buckets = new Map<string, { count: number; result: any }>();
+    for (const result of results) {
+        const key = serializeTeamResultKey(result);
+        const existing = buckets.get(key);
+        if (existing) {
+            existing.count += 1;
+            continue;
+        }
+        buckets.set(key, { count: 1, result });
+    }
+
+    let winner: { count: number; result: any } | null = null;
+    for (const bucket of buckets.values()) {
+        if (!winner || bucket.count > winner.count) {
+            winner = bucket;
+        }
+    }
+    return winner ? winner.result : results[0];
+}
+
+export function pickTeamResultByWeightedVote(
+    runResults: Array<{ member: TeamMember; result: any }>,
+    reviewerVoteWeight: number
+): {
+    result: any;
+    winnerMember?: string;
+    winnerReason: string;
+    voteScoreByMember: Array<{ member: string; role: 'writer' | 'reviewer'; weight: number; score: number }>;
+} | null {
+    if (!Array.isArray(runResults) || runResults.length === 0) {
+        return null;
+    }
+
+    const normalizedReviewerWeight = Number.isFinite(reviewerVoteWeight) ? Math.max(1, Math.floor(reviewerVoteWeight)) : 2;
+    const scoreBySignature = new Map<string, { score: number; firstIndex: number; result: any }>();
+    const voteScoreByMember: Array<{ member: string; role: 'writer' | 'reviewer'; weight: number; score: number }> = [];
+
+    for (let index = 0; index < runResults.length; index += 1) {
+        const entry = runResults[index];
+        const signature = serializeTeamResultKey(entry.result);
+        const role = entry.member.role === 'reviewer' ? 'reviewer' : 'writer';
+        const weight = role === 'reviewer' ? normalizedReviewerWeight : 1;
+        voteScoreByMember.push({
+            member: String(entry.member.name || `member_${index + 1}`),
+            role,
+            weight,
+            score: weight
+        });
+
+        const bucket = scoreBySignature.get(signature);
+        if (bucket) {
+            bucket.score += weight;
+        } else {
+            scoreBySignature.set(signature, {
+                score: weight,
+                firstIndex: index,
+                result: entry.result
+            });
+        }
+    }
+
+    let winningSignature: string | null = null;
+    let winningBucket: { score: number; firstIndex: number; result: any } | null = null;
+    for (const [signature, bucket] of scoreBySignature.entries()) {
+        if (!winningBucket) {
+            winningSignature = signature;
+            winningBucket = bucket;
+            continue;
+        }
+        if (bucket.score > winningBucket.score) {
+            winningSignature = signature;
+            winningBucket = bucket;
+            continue;
+        }
+        if (bucket.score === winningBucket.score && bucket.firstIndex < winningBucket.firstIndex) {
+            winningSignature = signature;
+            winningBucket = bucket;
+        }
+    }
+
+    if (!winningBucket || !winningSignature) {
+        return null;
+    }
+
+    const winningEntry = runResults[winningBucket.firstIndex];
+    const winnerName = String(winningEntry?.member?.name || `member_${winningBucket.firstIndex + 1}`);
+    return {
+        result: winningBucket.result,
+        winnerMember: winnerName,
+        winnerReason: `vote: score=${winningBucket.score} (reviewer weight=${normalizedReviewerWeight})`,
+        voteScoreByMember
+    };
+}
+
+function serializeTeamResultKey(result: any): string {
+    if (!result || typeof result !== 'object') {
+        return String(result);
+    }
+    const path = String(result.path || '');
+    const changes = Array.isArray(result.changes) ? result.changes : [];
+    const normalized = changes.map((entry: any) => ({
+        path: String(entry?.path || '').trim(),
+        content: String(entry?.content || '').trim()
+    }));
+    return JSON.stringify({ path, changes: normalized });
+}
+
+function buildTeamSummaryMembers(runResults: Array<{ member: TeamMember; result: any }>): Array<{ name: string; role: 'writer' | 'reviewer'; path: string; files: number }> {
+    return runResults.map(({ member, result }, index) => {
+        const name = String(member.name || `member_${index + 1}`);
+        const role = member.role === 'reviewer' ? 'reviewer' : 'writer';
+        const pathValue = String(result?.path || '');
+        const files = Array.isArray(result?.changes) ? result.changes.length : (pathValue ? 1 : 0);
+        return { name, role, path: pathValue, files };
+    });
+}
+
+function sumTeamFiles(runResults: Array<{ member: TeamMember; result: any }>): number {
+    return buildTeamSummaryMembers(runResults).reduce((sum, item) => sum + item.files, 0);
+}
+
+function resolveTeamWinnerMember(
+    strategy: TeamStrategy,
+    runResults: Array<{ member: TeamMember; result: any }>,
+    finalResult: any
+): string | undefined {
+    if (strategy === 'reviewer_gate') {
+        const reviewer = runResults.find((entry) => entry.member.role === 'reviewer');
+        return reviewer?.member?.name ? String(reviewer.member.name) : undefined;
+    }
+    const matched = runResults.find((entry) => serializeTeamResultKey(entry.result) === serializeTeamResultKey(finalResult));
+    if (matched?.member?.name) {
+        return String(matched.member.name);
+    }
+    return runResults.length > 0 ? String(runResults[runResults.length - 1].member?.name || '') || undefined : undefined;
+}
+
+function normalizeTeamMemberRole(value: any): 'writer' | 'reviewer' {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'reviewer') return 'reviewer';
+    return 'writer';
+}
+
+function resolveReviewerVoteWeight(): number {
+    const cfg = vscode.workspace.getConfiguration('intentRouter');
+    const raw = cfg.get<number>('ai.team.reviewerVoteWeight', 2);
+    return Number.isFinite(raw) ? Math.max(1, Math.floor(raw)) : 2;
 }
 
 async function loadContextFilesBlock(

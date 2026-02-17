@@ -13,6 +13,7 @@ type HistoryPanelProps = {
   historyRowHeight: number;
   onSelectHistory?: (run: any) => void;
   onRestoreHistory?: (run: any) => void;
+  onOpenExternal?: (url: string) => void;
 };
 
 function HistoryPanel({
@@ -27,7 +28,8 @@ function HistoryPanel({
   historyWindow,
   historyRowHeight,
   onSelectHistory,
-  onRestoreHistory
+  onRestoreHistory,
+  onOpenExternal
 }: HistoryPanelProps) {
   return (
     <div className="sidebar-list" style={{ minHeight: '220px' }}>
@@ -62,6 +64,8 @@ function HistoryPanel({
           <div style={{ height: `${historyTotalHeight}px`, position: 'relative' }}>
             {historyWindow.map((run: any, localIndex: number) => {
               const absoluteIndex = historyStartIndex + localIndex;
+              const pullRequests = Array.isArray(run.pullRequests) ? run.pullRequests : [];
+              const firstPr = pullRequests[0];
               return (
                 <div
                   key={String(run.id || absoluteIndex)}
@@ -127,6 +131,36 @@ function HistoryPanel({
                       {String(run.status || '').toUpperCase()}
                     </span>
                   </div>
+                  {pullRequests.length > 0 && (
+                    <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '10px', opacity: 0.85 }}>PRs: {pullRequests.length}</span>
+                      {firstPr?.url && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenExternal?.(String(firstPr.url));
+                          }}
+                          style={{
+                            padding: '1px 6px',
+                            fontSize: '10px',
+                            borderRadius: '10px',
+                            border: '1px solid var(--vscode-panel-border)',
+                            background: 'transparent',
+                            color: 'var(--vscode-textLink-foreground)',
+                            cursor: 'pointer',
+                            maxWidth: '170px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}
+                          title={String(firstPr.title || firstPr.url)}
+                        >
+                          Open PR
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

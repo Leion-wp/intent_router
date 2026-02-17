@@ -62,6 +62,16 @@
                 "icon": "$(add)"
             },
             {
+                "command": "intentRouter.pipelines.loadSoftwareFactoryTemplate",
+                "title": "Intent Router: Load Software Factory Template",
+                "icon": "$(organization)"
+            },
+            {
+                "command": "intentRouter.pipelines.loadSoftwareFactoryBranchTemplate",
+                "title": "Intent Router: Load Software Factory FE/BE Branch Template",
+                "icon": "$(git-branch)"
+            },
+            {
                 "command": "intentRouter.pipelines.run",
                 "title": "Intent Router: Run Selected Pipeline",
                 "icon": "$(play)"
@@ -138,6 +148,16 @@
                 },
                 {
                     "command": "intentRouter.generatePromptAndOpenCodex",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.loadSoftwareFactoryTemplate",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.loadSoftwareFactoryBranchTemplate",
                     "when": "view == intentRouterPipelines",
                     "group": "navigation"
                 },
@@ -424,6 +444,12 @@
                         "type": "string"
                     },
                     "description": "Codex CLI args template. Placeholders: {model}, {stdin}, {prompt}."
+                },
+                "intentRouter.ai.team.reviewerVoteWeight": {
+                    "type": "number",
+                    "default": 2,
+                    "minimum": 1,
+                    "description": "Vote weight multiplier for reviewer members in ai.team strategy=vote."
                 },
                 "intentRouter.devMode": {
                     "type": "boolean",

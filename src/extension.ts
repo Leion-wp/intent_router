@@ -3,7 +3,7 @@ import { routeIntent, invalidateLogLevelCache } from './router';
 import { Intent, RegisterCapabilitiesArgs } from './types';
 import { registerCapabilities } from './registry';
 import { generateSecureNonce } from './security';
-import { PipelineBuilder } from './pipelineBuilder';
+import { createSoftwareFactoryBranchPreset, createSoftwareFactoryPreset, PipelineBuilder } from './pipelineBuilder';
 import { PipelinesTreeDataProvider } from './pipelinesView';
 import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri, cancelCurrentPipeline, pauseCurrentPipeline, resumeCurrentPipeline } from './pipelineRunner';
 import { registerGitProvider } from './providers/gitAdapter';
@@ -13,6 +13,7 @@ import { registerSystemProvider } from './providers/systemAdapter';
 import { registerVSCodeProvider } from './providers/vscodeAdapter';
 import { registerAiProvider, executeAiCommand, executeAiTeamCommand } from './providers/aiAdapter';
 import { registerHttpProvider, executeHttpCommand } from './providers/httpAdapter';
+import { executeGitHubOpenPr, registerGitHubProvider } from './providers/githubAdapter';
 import { StatusBarManager } from './statusBar';
 import { historyManager } from './historyManager';
 
@@ -28,6 +29,7 @@ export function activate(context: vscode.ExtensionContext) {
     registerVSCodeProvider(context);
     registerAiProvider(context);
     registerHttpProvider(context);
+    registerGitHubProvider(context);
 
     const pipelineBuilder = new PipelineBuilder(context.extensionUri);
     const pipelinesProvider = new PipelinesTreeDataProvider();
@@ -79,6 +81,9 @@ export function activate(context: vscode.ExtensionContext) {
 
         let httpRequestDisposable = vscode.commands.registerCommand('intentRouter.internal.httpRequest', async (args: any) => {
             return await executeHttpCommand(args);
+        });
+        let githubOpenPrDisposable = vscode.commands.registerCommand('intentRouter.internal.githubOpenPr', async (args: any) => {
+            return await executeGitHubOpenPr(args);
         });
 
     let promptDisposable = vscode.commands.registerCommand('intentRouter.routeFromJson', async () => {
@@ -203,6 +208,12 @@ export function activate(context: vscode.ExtensionContext) {
     let newPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.new', async () => {
         await pipelineBuilder.open();
     });
+    let loadSoftwareFactoryTemplateDisposable = vscode.commands.registerCommand('intentRouter.pipelines.loadSoftwareFactoryTemplate', async () => {
+        await pipelineBuilder.open(createSoftwareFactoryPreset());
+    });
+    let loadSoftwareFactoryBranchTemplateDisposable = vscode.commands.registerCommand('intentRouter.pipelines.loadSoftwareFactoryBranchTemplate', async () => {
+        await pipelineBuilder.open(createSoftwareFactoryBranchPreset());
+    });
 
     let openPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.openBuilder', async (uri?: vscode.Uri) => {
         if (!uri) {
@@ -286,7 +297,8 @@ export function activate(context: vscode.ExtensionContext) {
 	    context.subscriptions.push(internalTerminalCancelDisposable);
         context.subscriptions.push(aiGenerateDisposable);
         context.subscriptions.push(aiTeamDisposable);
-        context.subscriptions.push(httpRequestDisposable);
+    context.subscriptions.push(httpRequestDisposable);
+    context.subscriptions.push(githubOpenPrDisposable);
 	    context.subscriptions.push(promptDisposable);
 	    context.subscriptions.push(createPipelineDisposable);
 	    context.subscriptions.push(runPipelineDisposable);
@@ -300,6 +312,8 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(internalCommitMessageDisposable);
     context.subscriptions.push(internalCreatePRDisposable);
     context.subscriptions.push(newPipelineDisposable);
+    context.subscriptions.push(loadSoftwareFactoryTemplateDisposable);
+    context.subscriptions.push(loadSoftwareFactoryBranchTemplateDisposable);
     context.subscriptions.push(openPipelineDisposable);
     context.subscriptions.push(runSelectedPipelineDisposable);
     context.subscriptions.push(dryRunSelectedPipelineDisposable);

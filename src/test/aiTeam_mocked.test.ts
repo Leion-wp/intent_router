@@ -11,7 +11,7 @@ Module.prototype.require = function (request: string) {
   return originalRequire.apply(this, arguments);
 };
 
-const { normalizeTeamStrategy, normalizeTeamMembers } = require('../../out/providers/aiAdapter');
+const { normalizeTeamStrategy, normalizeTeamMembers, resolveTeamStrategyResult, pickTeamResultByVote, pickTeamResultByWeightedVote } = require('../../out/providers/aiAdapter');
 Module.prototype.require = originalRequire;
 
 suite('AI Team Helpers (Mocked)', () => {
@@ -33,5 +33,41 @@ suite('AI Team Helpers (Mocked)', () => {
     assert.strictEqual(members[0].name, 'a');
     assert.strictEqual(members[1].name, 'c');
     assert.deepStrictEqual(members[1].contextFiles, ['src/**/*.ts']);
+  });
+
+  test('reviewer_gate returns reviewer result', () => {
+    const result = resolveTeamStrategyResult('reviewer_gate', [
+      { member: { name: 'writer', role: 'writer' }, result: { path: 'a', changes: [{ path: 'a', content: '1' }] } },
+      { member: { name: 'reviewer', role: 'reviewer' }, result: { path: 'a', changes: [{ path: 'a', content: '2' }] } }
+    ]);
+    assert.strictEqual(result.changes[0].content, '2');
+  });
+
+  test('vote picks most common changes', () => {
+    const winner = pickTeamResultByVote([
+      { path: 'a', changes: [{ path: 'a', content: 'x' }] },
+      { path: 'a', changes: [{ path: 'a', content: 'x' }] },
+      { path: 'a', changes: [{ path: 'a', content: 'y' }] }
+    ]);
+    assert.strictEqual(winner.changes[0].content, 'x');
+  });
+
+  test('reviewer_gate throws without reviewer', () => {
+    assert.throws(() => resolveTeamStrategyResult('reviewer_gate', [
+      { member: { name: 'writer-1', role: 'writer' }, result: { path: 'a', changes: [] } }
+    ]), /requires at least one member with role=\"reviewer\"/i);
+  });
+
+  test('weighted vote favors reviewer when configured', () => {
+    const vote = pickTeamResultByWeightedVote([
+      { member: { name: 'writerA', role: 'writer' }, result: { path: 'a', changes: [{ path: 'a', content: 'x' }] } },
+      { member: { name: 'writerB', role: 'writer' }, result: { path: 'a', changes: [{ path: 'a', content: 'y' }] } },
+      { member: { name: 'reviewer', role: 'reviewer' }, result: { path: 'a', changes: [{ path: 'a', content: 'y' }] } }
+    ], 3);
+
+    assert.ok(vote);
+    assert.strictEqual(vote.result.changes[0].content, 'y');
+    assert.strictEqual(vote.winnerMember, 'writerB');
+    assert.ok(String(vote.winnerReason).includes('reviewer weight=3'));
   });
 });

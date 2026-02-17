@@ -52,7 +52,7 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.label = 'AI Team';
     data.strategy = 'sequential';
     data.members = [
-      { name: 'member_1', agent: 'gemini', model: 'gemini-2.5-flash', instruction: '' }
+      { name: 'member_1', role: 'writer', agent: 'gemini', model: 'gemini-2.5-flash', instruction: '' }
     ];
     data.contextFiles = [];
     data.agentSpecFiles = ['AGENTS.md', '**/SKILL.md'];
@@ -106,7 +106,7 @@ export function buildDropNodeData(
     return {
       label: 'AI Team',
       strategy: 'sequential',
-      members: [{ name: 'member_1', agent: 'gemini', model: 'gemini-2.5-flash', instruction: '' }],
+      members: [{ name: 'member_1', role: 'writer', agent: 'gemini', model: 'gemini-2.5-flash', instruction: '' }],
       contextFiles: [],
       agentSpecFiles: ['AGENTS.md', '**/SKILL.md'],
       outputContract: 'path_result',

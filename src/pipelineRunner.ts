@@ -130,6 +130,20 @@ export async function runPipelineFromData(pipeline: PipelineFile, dryRun: boolea
     await runPipeline(pipeline, dryRun);
 }
 
+function seedVariableCacheFromEnvironment(store: Map<string, string>): void {
+    const env = vscode.workspace.getConfiguration('intentRouter').get<Record<string, any>>('environment', {});
+    if (!env || typeof env !== 'object') {
+        return;
+    }
+    for (const [key, value] of Object.entries(env)) {
+        const normalizedKey = String(key || '').trim();
+        if (!normalizedKey) {
+            continue;
+        }
+        store.set(normalizedKey, String(value ?? ''));
+    }
+}
+
 function parsePipeline(text: string): PipelineFile | undefined {
     try {
         const pipeline = JSON.parse(text);
@@ -262,6 +276,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
     isCancelled = false;
     isPaused = false;
     const variableCache = new Map<string, string>();
+    seedVariableCacheFromEnvironment(variableCache);
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
     let currentCwd = resolveInitialCwd();
     const trustedRoot = workspaceRoot ?? path.resolve('.');
@@ -282,18 +297,22 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             const step = pipeline.steps[currentIndex];
             const stepId = String(step?.id || '').trim();
             if (stepId && blockedStepIds.has(stepId)) { currentIndex++; continue; }
+            const localIntentId = generateSecureToken(8);
 
             // SYSTEM.SETCWD
             if (step.intent === 'system.setCwd') {
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, index: currentIndex, stepId: step.id });
                 const rawPath = (step.payload as any)?.path;
                 if (rawPath) {
                     currentCwd = normalizeCwd(rawPath, currentCwd);
                 }
+                pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
                 currentIndex++; continue;
             }
 
             // SYSTEM.FORM
             if (step.intent === 'system.form') {
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, index: currentIndex, stepId: step.id });
                 const fields = Array.isArray(step.payload?.fields) ? (step.payload.fields as any[]) : [];
                 for (const raw of fields) {
                     const key = String(raw?.key || '').trim();
@@ -362,12 +381,17 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
                     variableCache.set(key, normalized || defaultValue);
                 }
-                if (isCancelled) break;
+                if (isCancelled) {
+                    pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: false, index: currentIndex, stepId: step.id });
+                    break;
+                }
+                pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
                 currentIndex++; continue;
             }
 
             // SYSTEM.SWITCH
             if (step.intent === 'system.switch') {
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, index: currentIndex, stepId: step.id });
                 const varKey = String(step.payload?.variableKey || '').trim();
                 const currentValue = variableCache.get(varKey) || '';
                 const routes = Array.isArray(step.payload?.routes) ? step.payload.routes : [];
@@ -386,11 +410,26 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                         const allTargets = [...routes.map((r:any) => r.targetStepId), step.payload?.defaultStepId].filter(Boolean);
                         const toBlock = computeSwitchBlockedSteps(pipeline, targetStepId, allTargets);
                         toBlock.forEach(id => blockedStepIds.add(id));
+                        pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
                         currentIndex = nextIdx;
                         continue;
                     }
                 }
+                pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
                 currentIndex++; continue;
+            }
+
+            // SYSTEM.SETVAR
+            if (step.intent === 'system.setVar') {
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, index: currentIndex, stepId: step.id });
+                const variableName = String((step.payload as any)?.name || '').trim();
+                if (variableName) {
+                    const variableValue = (step.payload as any)?.value;
+                    variableCache.set(variableName, String(variableValue ?? ''));
+                }
+                pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
+                currentIndex++;
+                continue;
             }
 
             // COMPILE AND EXECUTE

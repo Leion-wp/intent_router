@@ -19,6 +19,15 @@ export interface PipelineRun {
     timestamp: number;
     status: 'running' | 'success' | 'failure' | 'cancelled';
     steps: StepLog[];
+    pullRequests?: Array<{
+        provider: 'github';
+        url: string;
+        head: string;
+        base: string;
+        title: string;
+        stepId?: string;
+        timestamp: number;
+    }>;
     pipelineSnapshot?: any; // Store the full pipeline definition
 }
 
@@ -167,6 +176,22 @@ export class HistoryManager {
                         step.endTime = event.timestamp;
                     }
                     // Autosave on step completion? Maybe too frequent.
+                }
+                break;
+
+            case 'githubPullRequestCreated':
+                if (this.currentRun && (!event.runId || this.currentRun.id === event.runId)) {
+                    const list = this.currentRun.pullRequests || (this.currentRun.pullRequests = []);
+                    list.push({
+                        provider: 'github',
+                        url: event.url,
+                        head: event.head,
+                        base: event.base,
+                        title: event.title,
+                        stepId: event.stepId,
+                        timestamp: Date.now()
+                    });
+                    this.saveHistory();
                 }
                 break;
 
