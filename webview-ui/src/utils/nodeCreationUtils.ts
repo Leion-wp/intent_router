@@ -27,7 +27,54 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
   if (item.nodeType === 'actionNode') {
     data.provider = item.provider || 'terminal';
     data.capability = item.capability || getDefaultCapability(item.provider || 'terminal');
-    data.args = {};
+    if (data.capability === 'system.trigger.cron') {
+      data.args = {
+        everyHours: '1',
+        enabled: true,
+        cooldownMs: '5000'
+      };
+    } else if (data.capability === 'system.trigger.webhook') {
+      data.args = {
+        path: '/factory/trigger',
+        method: 'POST',
+        enabled: true,
+        cooldownMs: '2000'
+      };
+    } else if (data.capability === 'system.trigger.watch') {
+      data.args = {
+        glob: 'idea.md',
+        events: 'change',
+        enabled: true,
+        debounceMs: '800',
+        cooldownMs: '1500'
+      };
+    } else if (data.capability === 'memory.save') {
+      data.args = {
+        sessionId: 'default',
+        key: 'entry',
+        scope: 'variables',
+        variableKeys: '',
+        tags: ''
+      };
+    } else if (data.capability === 'memory.recall') {
+      data.args = {
+        sessionId: 'default',
+        key: '',
+        limit: '5',
+        mode: 'latest',
+        outputVar: 'memory_recall',
+        injectVars: false,
+        injectPrefix: ''
+      };
+    } else if (data.capability === 'memory.clear') {
+      data.args = {
+        sessionId: 'default',
+        key: '',
+        keepLast: '0'
+      };
+    } else {
+      data.args = {};
+    }
   } else if (item.nodeType === 'customNode') {
     return buildCustomNodeData(String(item.customNodeId || ''), customNodesById);
   } else if (item.nodeType === 'formNode') {

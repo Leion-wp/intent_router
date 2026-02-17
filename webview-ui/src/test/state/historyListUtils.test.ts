@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { computeHistoryWindow, filterHistoryRuns } from '../../utils/historyListUtils';
+import { computeHistoryWindow, filterHistoryRuns, getResumeFromFailedStepId } from '../../utils/historyListUtils';
 
 export function run() {
   const history = [
@@ -30,6 +30,16 @@ export function run() {
     }
   ], 'merged 78');
   assert.strictEqual(byState.length, 1);
+  assert.strictEqual(getResumeFromFailedStepId({
+    steps: [
+      { stepId: 'a', status: 'success' },
+      { stepId: 'b', status: 'failure' },
+      { stepId: 'c', status: 'failure' }
+    ]
+  }), 'b');
+  assert.strictEqual(getResumeFromFailedStepId({
+    steps: [{ status: 'failure' }]
+  }), null);
 
   const window = computeHistoryWindow({
     total: 300,

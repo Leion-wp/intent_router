@@ -19,6 +19,22 @@ type OpenPrArgs = {
     };
 };
 
+type PrRefArgs = {
+    url?: string;
+    number?: number | string;
+    repo?: string;
+    cwd?: string;
+    __meta?: {
+        runId?: string;
+        traceId?: string;
+        stepId?: string;
+    };
+};
+
+type PrCommentArgs = PrRefArgs & {
+    body?: string;
+};
+
 export function validateGitBranchRef(value: string, label: 'head' | 'base'): string {
     const ref = String(value || '').trim();
     if (!ref) {
@@ -62,6 +78,43 @@ export function registerGitHubProvider(_context: vscode.ExtensionContext) {
                     { name: 'title', type: 'string', description: 'PR title', required: true },
                     { name: 'body', type: 'string', description: 'PR body markdown' },
                     { name: 'bodyFile', type: 'path', description: 'PR body markdown file path' },
+                    { name: 'cwd', type: 'path', description: 'Repository working directory', default: '${workspaceRoot}' }
+                ]
+            },
+            {
+                capability: 'github.prChecks',
+                command: 'intentRouter.internal.githubPrChecks',
+                description: 'Fetch checks summary for a PR with gh CLI',
+                determinism: 'deterministic',
+                args: [
+                    { name: 'url', type: 'string', description: 'PR URL (preferred)' },
+                    { name: 'number', type: 'string', description: 'PR number (fallback)' },
+                    { name: 'repo', type: 'string', description: 'repo owner/name (fallback)' },
+                    { name: 'cwd', type: 'path', description: 'Repository working directory', default: '${workspaceRoot}' }
+                ]
+            },
+            {
+                capability: 'github.prRerunFailedChecks',
+                command: 'intentRouter.internal.githubPrRerunFailedChecks',
+                description: 'Re-run failed checks for a PR with gh CLI',
+                determinism: 'deterministic',
+                args: [
+                    { name: 'url', type: 'string', description: 'PR URL (preferred)' },
+                    { name: 'number', type: 'string', description: 'PR number (fallback)' },
+                    { name: 'repo', type: 'string', description: 'repo owner/name (fallback)' },
+                    { name: 'cwd', type: 'path', description: 'Repository working directory', default: '${workspaceRoot}' }
+                ]
+            },
+            {
+                capability: 'github.prComment',
+                command: 'intentRouter.internal.githubPrComment',
+                description: 'Post a comment on a PR with gh CLI',
+                determinism: 'interactive',
+                args: [
+                    { name: 'url', type: 'string', description: 'PR URL (preferred)' },
+                    { name: 'number', type: 'string', description: 'PR number (fallback)' },
+                    { name: 'repo', type: 'string', description: 'repo owner/name (fallback)' },
+                    { name: 'body', type: 'string', description: 'Comment body', required: true },
                     { name: 'cwd', type: 'path', description: 'Repository working directory', default: '${workspaceRoot}' }
                 ]
             }
@@ -116,6 +169,41 @@ function runGhCommand(cliArgs: string[], cwd: string, env: NodeJS.ProcessEnv): P
     });
 }
 
+function parsePrRefFromUrl(rawUrl: string): { repo: string; number: number } | null {
+    const match = String(rawUrl || '').trim().match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/i);
+    if (!match) return null;
+    return {
+        repo: match[1],
+        number: Number(match[2])
+    };
+}
+
+function resolvePrRef(args: PrRefArgs): { repo: string; number: number } {
+    const fromUrl = parsePrRefFromUrl(String(args?.url || ''));
+    if (fromUrl) return fromUrl;
+    const repo = String(args?.repo || '').trim();
+    const number = Number(args?.number);
+    if (!repo || !Number.isFinite(number) || number <= 0) {
+        throw new Error('github PR operation requires url or both repo + number.');
+    }
+    return { repo, number: Math.floor(number) };
+}
+
+function emitGithubStepLog(meta: any, text: string, stream: 'stdout' | 'stderr' = 'stdout'): void {
+    const runId = meta?.runId;
+    const intentId = meta?.traceId || '';
+    const stepId = meta?.stepId;
+    if (!runId || !intentId) return;
+    pipelineEventBus.emit({
+        type: 'stepLog',
+        runId,
+        intentId,
+        stepId,
+        text: text.endsWith('\n') ? text : `${text}\n`,
+        stream
+    });
+}
+
 function parsePrMetadata(output: string): { url: string; number?: number; state?: 'open' | 'closed' | 'merged'; isDraft?: boolean } {
     const trimmed = String(output || '').trim();
     if (!trimmed) {
@@ -162,21 +250,11 @@ export async function executeGitHubOpenPr(args: OpenPrArgs): Promise<{ url: stri
     const output = await runGhCommand(cliArgs, cwd, env);
     const pr = parsePrMetadata(output);
     const url = pr.url;
-
     const runId = args?.__meta?.runId;
     const intentId = args?.__meta?.traceId || '';
     const stepId = args?.__meta?.stepId;
 
-    if (runId && intentId) {
-        pipelineEventBus.emit({
-            type: 'stepLog',
-            runId,
-            intentId,
-            stepId,
-            text: `[github] PR created: ${url}\n`,
-            stream: 'stdout'
-        });
-    }
+    emitGithubStepLog(args?.__meta, `[github] PR created: ${url}`, 'stdout');
 
     pipelineEventBus.emit({
         type: 'githubPullRequestCreated',
@@ -194,4 +272,41 @@ export async function executeGitHubOpenPr(args: OpenPrArgs): Promise<{ url: stri
     });
 
     return pr;
+}
+
+export async function executeGitHubPrChecks(args: PrRefArgs): Promise<{ repo: string; number: number; output: string }> {
+    const ref = resolvePrRef(args);
+    const cwd = normalizeExecutionCwd(args?.cwd);
+    const envOverrides = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
+    const env = { ...process.env, ...envOverrides };
+    const cliArgs = ['pr', 'checks', String(ref.number), '--repo', ref.repo];
+    const output = await runGhCommand(cliArgs, cwd, env);
+    emitGithubStepLog(args?.__meta, `[github] Checks fetched for PR #${ref.number} (${ref.repo})`, 'stdout');
+    return { ...ref, output: String(output || '') };
+}
+
+export async function executeGitHubPrRerunFailedChecks(args: PrRefArgs): Promise<{ repo: string; number: number }> {
+    const ref = resolvePrRef(args);
+    const cwd = normalizeExecutionCwd(args?.cwd);
+    const envOverrides = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
+    const env = { ...process.env, ...envOverrides };
+    const cliArgs = ['pr', 'checks', String(ref.number), '--repo', ref.repo, '--rerun-failed'];
+    await runGhCommand(cliArgs, cwd, env);
+    emitGithubStepLog(args?.__meta, `[github] Re-run failed checks requested for PR #${ref.number} (${ref.repo})`, 'stdout');
+    return ref;
+}
+
+export async function executeGitHubPrComment(args: PrCommentArgs): Promise<{ repo: string; number: number }> {
+    const ref = resolvePrRef(args);
+    const body = String(args?.body || '').trim();
+    if (!body) {
+        throw new Error('github.prComment requires a non-empty body.');
+    }
+    const cwd = normalizeExecutionCwd(args?.cwd);
+    const envOverrides = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
+    const env = { ...process.env, ...envOverrides };
+    const cliArgs = ['pr', 'comment', String(ref.number), '--repo', ref.repo, '--body', body];
+    await runGhCommand(cliArgs, cwd, env);
+    emitGithubStepLog(args?.__meta, `[github] Comment posted on PR #${ref.number} (${ref.repo})`, 'stdout');
+    return ref;
 }

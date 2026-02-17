@@ -66,12 +66,32 @@ export function usePipelineRunActions(options: UsePipelineRunActionsOptions) {
       vscode.postMessage({
         type: 'runPipeline',
         pipeline,
-        dryRun
+        dryRun,
+        startStepId: String(nodeId || '')
       });
     } else {
       console.log('Run Pipeline From Here (Mock):', pipeline);
     }
   }, [buildPipeline, computeRunSubset, setRunMenuOpen, setRunPillStatus, setRunPreviewIds, vscode]);
+
+  const runPipelineFromSnapshotStep = useCallback((pipeline: any, startStepId: string, dryRun = false) => {
+    if (!pipeline) return;
+    const normalizedStepId = String(startStepId || '').trim();
+    if (!normalizedStepId) return;
+    setRunPillStatus('running');
+    setRunMenuOpen(false);
+
+    if (vscode) {
+      vscode.postMessage({
+        type: 'runPipeline',
+        pipeline,
+        dryRun,
+        startStepId: normalizedStepId
+      });
+    } else {
+      console.log('Run Pipeline From Snapshot Step (Mock):', { startStepId: normalizedStepId, pipeline });
+    }
+  }, [setRunMenuOpen, setRunPillStatus, vscode]);
 
   const resetRuntimeUiState = useCallback(() => {
     setRunPreviewIds([]);
@@ -91,6 +111,7 @@ export function usePipelineRunActions(options: UsePipelineRunActionsOptions) {
     savePipeline,
     runPipeline,
     runPipelineFromHere,
+    runPipelineFromSnapshotStep,
     resetRuntimeUiState
   };
 }

@@ -23,56 +23,33 @@ const StartNode = ({ data, id }: NodeProps) => {
     }
   }, []);
 
+  const themeColor = '#007acc';
+
   const handleStyle = {
     width: '12px',
     height: '12px',
-    border: '3px solid rgba(30, 30, 35, 0.85)',
-    boxShadow: '0 0 8px rgba(0,0,0,0.4)',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 0 8px rgba(0,0,0,0.5)',
     zIndex: 10,
-    background: '#007acc',
-    right: '-6px'
+    background: themeColor,
+    right: '-6px',
+    transition: 'all 0.2s ease'
   };
 
   return (
-    <div
-      style={{
-        position: 'relative',
-        padding: '0px',
-        borderRadius: '12px',
-        background: 'rgba(30, 30, 35, 0.85)',
-        backdropFilter: 'blur(12px)',
-        border: '1.5px solid rgba(0, 122, 204, 0.4)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.45)',
-        minWidth: '280px',
-        color: '#e0e0e0',
-        fontFamily: 'var(--vscode-font-family)',
-        overflow: 'visible'
-      }}
-    >
-      <div style={{ 
-        padding: '10px 12px', 
-        background: 'rgba(0, 122, 204, 0.2)', 
-        borderTopLeftRadius: '12px', 
-        borderTopRightRadius: '12px',
-        fontWeight: 'bold', 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '8px',
-        borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
-      }}>
-        <div style={{ 
-          width: '24px', height: '24px', borderRadius: '50%', 
-          background: '#007acc',
-          display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }}>
-          <span className="codicon codicon-run-all" style={{ color: '#fff', fontSize: '14px' }}></span>
+    <div className="glass-node" style={{ minWidth: '280px' }}>
+      <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}22 0%, transparent 100%)` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+          <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #00a2ff 100%)` }}>
+            <span className="codicon codicon-run-all" style={{ color: '#fff', fontSize: '16px' }}></span>
+          </div>
+          <span style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.4px' }}>PIPELINE START</span>
         </div>
-        <span style={{ fontSize: '13px', letterSpacing: '0.4px' }}>PIPELINE START</span>
       </div>
 
-      <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase' }}>Pipeline Name</label>
+      <div className="glass-node-body">
+        <div className="glass-node-input-group">
+          <label className="glass-node-input-label">Pipeline Name</label>
           <input
             className="nodrag"
             type="text"
@@ -83,19 +60,11 @@ const StartNode = ({ data, id }: NodeProps) => {
               updateNodeData(id, { label: v });
             }}
             placeholder="My Pipeline"
-            style={{
-              background: 'rgba(0,0,0,0.25)',
-              color: '#fff',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '6px',
-              padding: '6px 10px',
-              fontSize: '12px'
-            }}
           />
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase' }}>Description</label>
+        <div className="glass-node-input-group">
+          <label className="glass-node-input-label">Description</label>
           <textarea
             className="nodrag"
             value={description}
@@ -104,19 +73,8 @@ const StartNode = ({ data, id }: NodeProps) => {
               setDescription(v);
               updateNodeData(id, { description: v });
             }}
-            placeholder="Optional…"
+            placeholder="Optional description…"
             rows={2}
-            style={{
-              width: '100%',
-              resize: 'vertical',
-              background: 'rgba(0,0,0,0.25)',
-              color: '#fff',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: '6px',
-              padding: '8px',
-              fontSize: '11px',
-              fontFamily: 'var(--vscode-font-family)'
-            }}
           />
         </div>
       </div>

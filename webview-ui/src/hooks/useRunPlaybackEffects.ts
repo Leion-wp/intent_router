@@ -2,18 +2,24 @@ import { useEffect } from 'react';
 
 type UseRunPlaybackEffectsOptions = {
   restoreRun: any;
+  resumeRun: { run: any; startStepId: string } | null;
   selectedRun: any;
   loadPipeline: (pipeline: any) => void;
   onRestoreHandled: () => void;
+  onResumeHandled: () => void;
+  runPipelineFromSnapshotStep: (pipeline: any, startStepId: string, dryRun?: boolean) => void;
   setNodes: (updater: (nodes: any[]) => any[]) => void;
 };
 
 export function useRunPlaybackEffects(options: UseRunPlaybackEffectsOptions) {
   const {
     restoreRun,
+    resumeRun,
     selectedRun,
     loadPipeline,
     onRestoreHandled,
+    onResumeHandled,
+    runPipelineFromSnapshotStep,
     setNodes
   } = options;
 
@@ -24,6 +30,19 @@ export function useRunPlaybackEffects(options: UseRunPlaybackEffectsOptions) {
       onRestoreHandled();
     }
   }, [restoreRun, loadPipeline, onRestoreHandled]);
+
+  useEffect(() => {
+    if (!resumeRun?.run?.pipelineSnapshot) return;
+    const snapshot = resumeRun.run.pipelineSnapshot;
+    const startStepId = String(resumeRun.startStepId || '').trim();
+    if (!startStepId) {
+      onResumeHandled();
+      return;
+    }
+    loadPipeline(snapshot);
+    runPipelineFromSnapshotStep(snapshot, startStepId, false);
+    onResumeHandled();
+  }, [resumeRun, loadPipeline, onResumeHandled, runPipelineFromSnapshotStep]);
 
   useEffect(() => {
     const timeouts: any[] = [];

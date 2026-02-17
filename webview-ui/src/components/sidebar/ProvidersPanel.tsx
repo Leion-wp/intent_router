@@ -37,24 +37,29 @@ function ProvidersPanel({
   onOpenStudio
 }: ProvidersPanelProps) {
   return (
-    <div className="sidebar-list">
-      <input
-        ref={providersSearchRef}
-        className="nodrag"
-        value={providersSearch}
-        onChange={(event) => onProvidersSearchChange(event.target.value)}
-        placeholder="Search nodes..."
-        aria-label="Search available nodes"
-        style={{
-          width: '100%',
-          background: 'var(--vscode-input-background)',
-          color: 'var(--vscode-input-foreground)',
-          border: '1px solid var(--vscode-input-border)',
-          padding: '6px',
-          fontSize: '11px',
-          borderRadius: '4px'
-        }}
-      />
+    <div className="sidebar-list" style={{ gap: '16px' }}>
+      <div style={{ position: 'relative' }}>
+        <span className="codicon codicon-search" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', opacity: 0.4, pointerEvents: 'none' }}></span>
+        <input
+          ref={providersSearchRef}
+          className="nodrag"
+          value={providersSearch}
+          onChange={(event) => onProvidersSearchChange(event.target.value)}
+          placeholder="Search modules..."
+          aria-label="Search available nodes"
+          style={{
+            width: '100%',
+            background: 'rgba(255, 255, 255, 0.03)',
+            color: '#fff',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            padding: '10px 12px 10px 36px',
+            fontSize: '12px',
+            borderRadius: '999px',
+            outline: 'none',
+            boxSizing: 'border-box'
+          }}
+        />
+      </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
         {[
           { key: 'all', label: 'All' },
@@ -70,13 +75,15 @@ function ProvidersPanel({
             onClick={() => onProvidersFilterChange(entry.key as CatalogFilter)}
             aria-pressed={providersFilter === entry.key}
             style={{
-              padding: '4px 8px',
-              border: '1px solid var(--vscode-panel-border)',
+              padding: '6px 12px',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
               borderRadius: '999px',
-              background: providersFilter === entry.key ? 'var(--vscode-button-secondaryBackground)' : 'transparent',
-              color: providersFilter === entry.key ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-foreground)',
-              fontSize: '10px',
-              cursor: 'pointer'
+              background: providersFilter === entry.key ? 'var(--ir-accent-primary)' : 'rgba(255, 255, 255, 0.03)',
+              color: providersFilter === entry.key ? '#fff' : 'rgba(255, 255, 255, 0.5)',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
             }}
           >
             {entry.label}

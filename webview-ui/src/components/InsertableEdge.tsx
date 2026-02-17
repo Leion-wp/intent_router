@@ -30,12 +30,12 @@ const InsertableEdge = (props: EdgeProps) => {
       
       {/* Cyber Flow Dot (Animated) */}
       <circle
-        r="3"
-        fill="#bb86fc"
+        r="4"
+        fill="var(--ir-accent-primary)"
         className="edge-dot"
         style={{
           offsetPath: `path('${edgePath}')`,
-          filter: 'drop-shadow(0 0 5px #bb86fc)'
+          filter: 'drop-shadow(0 0 8px var(--ir-accent-primary))'
         }}
       />
 
@@ -54,17 +54,19 @@ const InsertableEdge = (props: EdgeProps) => {
             <div
               style={{
                 position: 'absolute',
-                bottom: '24px',
+                bottom: '26px',
                 left: '50%',
                 transform: 'translateX(-50%)',
-                background: 'var(--vscode-editorWidget-background)',
-                border: '1px solid var(--vscode-editorWidget-border)',
-                color: 'var(--vscode-foreground)',
-                fontSize: '10px',
-                padding: '2px 6px',
-                borderRadius: '10px',
+                background: 'rgba(20, 20, 25, 0.9)',
+                backdropFilter: 'blur(10px)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                color: '#fff',
+                fontSize: '11px',
+                fontWeight: 600,
+                padding: '4px 10px',
+                borderRadius: '12px',
                 whiteSpace: 'nowrap',
-                opacity: 0.9
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
               }}
             >
               {(data as any).label}
@@ -81,19 +83,23 @@ const InsertableEdge = (props: EdgeProps) => {
             }}
             title="Insert node"
             style={{
-              width: '20px',
-              height: '20px',
-              borderRadius: '10px',
-              border: '1px solid var(--vscode-editorWidget-border)',
-              background: 'var(--vscode-button-secondaryBackground)',
-              color: 'var(--vscode-button-secondaryForeground)',
+              width: '24px',
+              height: '24px',
+              borderRadius: '50%',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              background: 'var(--ir-accent-primary)',
+              color: '#fff',
               cursor: 'pointer',
-              fontSize: '12px',
-              lineHeight: '18px',
-              padding: 0
+              fontSize: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              boxShadow: '0 4px 10px rgba(0, 162, 255, 0.4)',
+              transition: 'transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
             }}
           >
-            +
+            <span className="codicon codicon-add" style={{ fontSize: '14px' }}></span>
           </button>
         </div>
       </EdgeLabelRenderer>

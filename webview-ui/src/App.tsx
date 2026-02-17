@@ -166,14 +166,18 @@ function emitPipelineBuildError(message: string): null {
 function Flow({
   selectedRun,
   restoreRun,
+  resumeRun,
   onRestoreHandled,
+  onResumeHandled,
   sidebarCollapsed,
   onSetSidebarCollapsed,
   uiPreset
 }: {
   selectedRun: any,
   restoreRun: any,
+  resumeRun: { run: any; startStepId: string } | null,
   onRestoreHandled: () => void,
+  onResumeHandled: () => void,
   sidebarCollapsed: boolean,
   onSetSidebarCollapsed: (next: boolean) => void,
   uiPreset: UiPreset
@@ -845,14 +849,6 @@ function Flow({
     setChromePanelPos
   });
 
-  useRunPlaybackEffects({
-    restoreRun,
-    selectedRun,
-    loadPipeline,
-    onRestoreHandled,
-    setNodes
-  });
-
   useReactiveEdgeStyles({
     nodes,
     setEdges
@@ -877,6 +873,7 @@ function Flow({
     savePipeline,
     runPipeline,
     runPipelineFromHere,
+    runPipelineFromSnapshotStep,
     resetRuntimeUiState
   } = usePipelineRunActions({
     vscode,
@@ -885,6 +882,17 @@ function Flow({
     setRunPreviewIds,
     setRunPillStatus,
     setRunMenuOpen,
+    setNodes
+  });
+
+  useRunPlaybackEffects({
+    restoreRun,
+    resumeRun,
+    selectedRun,
+    loadPipeline,
+    onRestoreHandled,
+    onResumeHandled,
+    runPipelineFromSnapshotStep,
     setNodes
   });
 
@@ -1028,15 +1036,24 @@ function Flow({
               onNodeContextMenu={onNodeContextMenu}
               >
                 {showControls && <Controls style={{ opacity: chromeOpacity }} />}
-                <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
-                {showMiniMap && <MiniMap style={{ opacity: chromeOpacity }} />}
+                <Background 
+                  variant={BackgroundVariant.Lines} 
+                  gap={40} 
+                  size={1} 
+                  color="rgba(255, 255, 255, 0.03)" 
+                />
+                {showMiniMap && <MiniMap 
+                  style={{ opacity: chromeOpacity }} 
+                  pannable 
+                  zoomable 
+                />}
               </ReactFlow>
               </CustomNodesContext.Provider>
               </FlowEditorContext.Provider>
   	        </FlowRuntimeContext.Provider>
   	      </div>
 
-        <FlowToasts connectionError={connectionError} graphToast={graphToast} />
+        <FlowToasts connectionError={connectionError} setConnectionError={setConnectionError} graphToast={graphToast} />
 
         <NodeContextMenu
           contextMenu={contextMenu}
@@ -1105,19 +1122,28 @@ function Flow({
           aria-label="Auto layout graph"
           style={{
            position: 'absolute',
-           top: '10px',
-           right: '260px',
-           padding: '10px 14px',
-           background: 'var(--vscode-button-secondaryBackground)',
-           color: 'var(--vscode-button-secondaryForeground)',
-           border: 'none',
-           borderRadius: '4px',
+           top: '20px',
+           right: '180px',
+           padding: '10px 18px',
+           background: 'var(--ir-glass-bg)',
+           backdropFilter: 'var(--ir-glass-blur)',
+           color: '#fff',
+           border: '1px solid var(--ir-glass-border)',
+           borderRadius: '10px',
            cursor: 'pointer',
            zIndex: 5,
+           fontSize: '13px',
+           fontWeight: 600,
+           display: 'flex',
+           alignItems: 'center',
+           gap: '8px',
+           boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+           transition: 'all 0.2s ease',
            opacity: chromeOpacity
          }}
        >
-         Auto layout
+         <span className="codicon codicon-layout" style={{ fontSize: '14px' }}></span>
+         Auto Layout
        </button>
 
         <ChromeControlsPanel
@@ -1149,18 +1175,26 @@ function Flow({
          aria-label="Save pipeline"
          style={{
            position: 'absolute',
-           top: '10px',
-           right: '10px',
-           padding: '10px 20px',
-           background: 'var(--vscode-button-background)',
-           color: 'var(--vscode-button-foreground)',
+           top: '20px',
+           right: '20px',
+           padding: '10px 22px',
+           background: 'var(--ir-accent-primary)',
+           color: '#fff',
            border: 'none',
-           borderRadius: '4px',
+           borderRadius: '10px',
            cursor: 'pointer',
            zIndex: 5,
+           fontSize: '13px',
+           fontWeight: 700,
+           display: 'flex',
+           alignItems: 'center',
+           gap: '8px',
+           boxShadow: '0 8px 20px rgba(0, 162, 255, 0.4)',
+           transition: 'all 0.2s ease',
            opacity: chromeOpacity
          }}
        >
+         <span className="codicon codicon-save" style={{ fontSize: '16px' }}></span>
          Save Pipeline
        </button>
      </div>
@@ -1174,6 +1208,7 @@ export default function App() {
     selectedRun,
     setSelectedRun,
     restoreRun,
+    resumeRun,
     uiPreset,
     uiPresetRelease,
     adminMode,
@@ -1186,6 +1221,8 @@ export default function App() {
     visibleSidebarTabs,
     onRestoreHistory,
     onRestoreHandled,
+    onResumeHistory,
+    onResumeHandled,
     sidebarResizeRef,
     defaultSidebarWidth,
     minSidebarWidth,
@@ -1229,6 +1266,7 @@ export default function App() {
             adminMode={adminMode}
             onSelectHistory={setSelectedRun}
             onRestoreHistory={onRestoreHistory}
+            onResumeHistory={onResumeHistory}
           />
         }
         canvas={(
@@ -1236,10 +1274,12 @@ export default function App() {
             <Flow
               selectedRun={selectedRun}
               restoreRun={restoreRun}
+              resumeRun={resumeRun}
               uiPreset={uiPreset}
               sidebarCollapsed={sidebarCollapsed}
               onSetSidebarCollapsed={setSidebarCollapsed}
               onRestoreHandled={onRestoreHandled}
+              onResumeHandled={onResumeHandled}
             />
           </ReactFlowProvider>
         )}

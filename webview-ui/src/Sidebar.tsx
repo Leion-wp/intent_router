@@ -18,6 +18,8 @@ type SidebarProps = {
   history?: any[];
   onSelectHistory?: (run: any) => void;
   onRestoreHistory?: (run: any) => void;
+  onResumeHistory?: (run: any, startStepId: string) => void;
+  onExportRunAudit?: (runId: string) => void;
   adminMode?: boolean;
   tab?: string;
   onTabChange?: (tab: string) => void;
@@ -44,6 +46,8 @@ function Sidebar({
   history = [],
   onSelectHistory,
   onRestoreHistory,
+  onResumeHistory,
+  onExportRunAudit,
   adminMode = false,
   tab: tabProp,
   onTabChange,
@@ -241,6 +245,32 @@ function Sidebar({
     window.vscode.postMessage(msg);
   };
 
+  const exportRunAudit = (runId: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'exportRunAudit', runId };
+    window.vscode.postMessage(msg);
+    onExportRunAudit?.(runId);
+  };
+
+  const fetchPrChecks = (url: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'githubPrChecks', url };
+    window.vscode.postMessage(msg);
+  };
+
+  const rerunPrChecks = (url: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'githubPrRerunFailed', url };
+    window.vscode.postMessage(msg);
+  };
+
+  const commentPr = (url: string) => {
+    const body = window.prompt('PR comment');
+    if (!body || !window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'githubPrComment', url, body };
+    window.vscode.postMessage(msg);
+  };
+
   useEffect(() => {
     return () => {
       if (historyScrollRafRef.current !== null) {
@@ -325,8 +355,13 @@ function Sidebar({
             historyRowHeight={HISTORY_ROW_HEIGHT}
             onSelectHistory={onSelectHistory}
             onRestoreHistory={onRestoreHistory}
+            onResumeHistory={onResumeHistory}
             onOpenExternal={openExternal}
             onCopyToClipboard={copyToClipboard}
+            onExportRunAudit={exportRunAudit}
+            onFetchPrChecks={fetchPrChecks}
+            onRerunPrChecks={rerunPrChecks}
+            onCommentPr={commentPr}
           />
         )}
 

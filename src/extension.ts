@@ -13,9 +13,10 @@ import { registerSystemProvider } from './providers/systemAdapter';
 import { registerVSCodeProvider } from './providers/vscodeAdapter';
 import { registerAiProvider, executeAiCommand, executeAiTeamCommand } from './providers/aiAdapter';
 import { registerHttpProvider, executeHttpCommand } from './providers/httpAdapter';
-import { executeGitHubOpenPr, registerGitHubProvider } from './providers/githubAdapter';
+import { executeGitHubOpenPr, executeGitHubPrChecks, executeGitHubPrComment, executeGitHubPrRerunFailedChecks, registerGitHubProvider } from './providers/githubAdapter';
 import { StatusBarManager } from './statusBar';
 import { historyManager } from './historyManager';
+import { RuntimeTriggerManager } from './runtimeTriggerManager';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
@@ -39,6 +40,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     const statusBarManager = new StatusBarManager();
     context.subscriptions.push(statusBarManager);
+    const runtimeTriggerManager = new RuntimeTriggerManager(context);
+    context.subscriptions.push(runtimeTriggerManager);
+    void runtimeTriggerManager.start().catch((error) => {
+        console.warn('[Intent Router] Runtime trigger manager failed to start:', error);
+    });
 
     let disposable = vscode.commands.registerCommand('intentRouter.route', async (args: any) => {
         // Basic validation
@@ -84,6 +90,15 @@ export function activate(context: vscode.ExtensionContext) {
         });
         let githubOpenPrDisposable = vscode.commands.registerCommand('intentRouter.internal.githubOpenPr', async (args: any) => {
             return await executeGitHubOpenPr(args);
+        });
+        let githubPrChecksDisposable = vscode.commands.registerCommand('intentRouter.internal.githubPrChecks', async (args: any) => {
+            return await executeGitHubPrChecks(args);
+        });
+        let githubPrRerunFailedChecksDisposable = vscode.commands.registerCommand('intentRouter.internal.githubPrRerunFailedChecks', async (args: any) => {
+            return await executeGitHubPrRerunFailedChecks(args);
+        });
+        let githubPrCommentDisposable = vscode.commands.registerCommand('intentRouter.internal.githubPrComment', async (args: any) => {
+            return await executeGitHubPrComment(args);
         });
 
     let promptDisposable = vscode.commands.registerCommand('intentRouter.routeFromJson', async () => {
@@ -164,8 +179,8 @@ export function activate(context: vscode.ExtensionContext) {
         await runPipelineFromActiveEditor(true);
     });
 
-    let runPipelineFromDataDisposable = vscode.commands.registerCommand('intentRouter.runPipelineFromData', async (pipeline, dryRun: boolean) => {
-        await runPipelineFromData(pipeline, !!dryRun);
+    let runPipelineFromDataDisposable = vscode.commands.registerCommand('intentRouter.runPipelineFromData', async (pipeline, dryRun: boolean, startStepId?: string) => {
+        await runPipelineFromData(pipeline, !!dryRun, startStepId);
     });
 
     let generatePromptDisposable = vscode.commands.registerCommand('intentRouter.generatePipelinePrompt', async () => {
@@ -254,6 +269,10 @@ export function activate(context: vscode.ExtensionContext) {
     let refreshPipelinesDisposable = vscode.commands.registerCommand('intentRouter.pipelines.refresh', async () => {
         pipelinesProvider.refresh();
     });
+    let refreshRuntimeTriggersDisposable = vscode.commands.registerCommand('intentRouter.runtime.refreshTriggers', async () => {
+        await runtimeTriggerManager.refresh();
+        vscode.window.showInformationMessage('Runtime triggers refreshed.');
+    });
 
     let showPipelineActionsDisposable = vscode.commands.registerCommand('intentRouter.showPipelineActions', async () => {
         const selection = await vscode.window.showQuickPick(['Pause Pipeline', 'Resume Pipeline', 'Cancel Pipeline'], {
@@ -299,6 +318,9 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(aiTeamDisposable);
     context.subscriptions.push(httpRequestDisposable);
     context.subscriptions.push(githubOpenPrDisposable);
+    context.subscriptions.push(githubPrChecksDisposable);
+    context.subscriptions.push(githubPrRerunFailedChecksDisposable);
+    context.subscriptions.push(githubPrCommentDisposable);
 	    context.subscriptions.push(promptDisposable);
 	    context.subscriptions.push(createPipelineDisposable);
 	    context.subscriptions.push(runPipelineDisposable);
@@ -319,6 +341,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(dryRunSelectedPipelineDisposable);
     context.subscriptions.push(openPipelineJsonDisposable);
     context.subscriptions.push(refreshPipelinesDisposable);
+    context.subscriptions.push(refreshRuntimeTriggersDisposable);
     context.subscriptions.push(showPipelineActionsDisposable);
     context.subscriptions.push(cancelPipelineDisposable);
     context.subscriptions.push(pausePipelineDisposable);

@@ -120,6 +120,11 @@
                 "command": "intentRouter.pipelines.refresh",
                 "title": "Intent Router: Refresh Pipelines",
                 "icon": "$(refresh)"
+            },
+            {
+                "command": "intentRouter.runtime.refreshTriggers",
+                "title": "Intent Router: Refresh Runtime Triggers",
+                "icon": "$(watch)"
             }
         ],
         "viewsContainers": {
@@ -188,6 +193,11 @@
                 },
                 {
                     "command": "intentRouter.pipelines.refresh",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.runtime.refreshTriggers",
                     "when": "view == intentRouterPipelines",
                     "group": "navigation"
                 }
@@ -468,10 +478,94 @@
                     "minimum": 5,
                     "description": "Maximum stored session memory entries per session id."
                 },
+                "intentRouter.memory.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable Memory v2 runtime nodes (memory.save / memory.recall / memory.clear)."
+                },
+                "intentRouter.memory.ttlDays": {
+                    "type": "number",
+                    "default": 30,
+                    "minimum": 1,
+                    "description": "Retention window for Memory v2 records in days."
+                },
+                "intentRouter.memory.maxRecordsPerSession": {
+                    "type": "number",
+                    "default": 200,
+                    "minimum": 10,
+                    "description": "Maximum Memory v2 records kept per session."
+                },
+                "intentRouter.memory.maxPayloadChars": {
+                    "type": "number",
+                    "default": 120000,
+                    "minimum": 1024,
+                    "description": "Maximum serialized payload size per Memory v2 record before truncation."
+                },
                 "intentRouter.devMode": {
                     "type": "boolean",
                     "default": false,
                     "description": "Dev mode: show self-packaging preset pipeline (npm install/compile/vsce package/install vsix/reload)."
+                },
+                "intentRouter.runtime.triggers.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable autonomous runtime triggers (cron/webhook/watch) discovered from pipeline steps."
+                },
+                "intentRouter.runtime.triggers.webhookPort": {
+                    "type": "number",
+                    "default": 7781,
+                    "minimum": 1,
+                    "maximum": 65535,
+                    "description": "Local webhook server port for system.trigger.webhook."
+                },
+                "intentRouter.runtime.triggers.maxChainDepth": {
+                    "type": "number",
+                    "default": 4,
+                    "minimum": 1,
+                    "maximum": 20,
+                    "description": "Maximum onSuccess pipeline chaining depth for runtime triggers."
+                },
+                "intentRouter.runtime.sandbox.allowNetwork": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Default runtime sandbox policy: allow network-capable intents."
+                },
+                "intentRouter.runtime.sandbox.allowFileWrite": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Default runtime sandbox policy: allow file-writing intents."
+                },
+                "intentRouter.runtime.sandbox.timeoutMs": {
+                    "type": "number",
+                    "default": 120000,
+                    "minimum": 1000,
+                    "description": "Default per-step timeout enforced by runtime sandbox."
+                },
+                "intentRouter.runtime.sandbox.maxCommandChars": {
+                    "type": "number",
+                    "default": 12000,
+                    "minimum": 256,
+                    "description": "Maximum allowed terminal command length before sandbox rejects the step."
+                },
+                "intentRouter.runtime.sandbox.allowedIntents": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Optional allowlist of intent prefixes for runtime execution. Empty = allow all."
+                },
+                "intentRouter.runtime.sandbox.maxNetworkOps": {
+                    "type": "number",
+                    "default": 40,
+                    "minimum": 1,
+                    "description": "Maximum number of network-capable steps per run."
+                },
+                "intentRouter.runtime.sandbox.maxFileWrites": {
+                    "type": "number",
+                    "default": 40,
+                    "minimum": 1,
+                    "description": "Maximum number of file-writing steps per run."
                 },
                 "leionRoots.adminMode": {
                     "type": "boolean",

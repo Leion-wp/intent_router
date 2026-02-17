@@ -46,61 +46,37 @@ const PromptNode = ({ data, id }: NodeProps) => {
     }
   }, []);
 
-  const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
-  const runningGlow = status === 'running' ? `0 0 10px ${borderColor}` : '';
-  const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : '';
-  const boxShadow = [runningGlow, previewGlow].filter(Boolean).join(', ') || 'none';
+  const isRunning = status === 'running';
+  const themeColor = '#ff00ff';
 
   const handleStyle = {
-    width: '10px',
-    height: '10px',
-    border: '2px solid rgba(30, 30, 35, 0.85)',
-    boxShadow: '0 0 5px rgba(0,0,0,0.4)',
-    zIndex: 10
+    width: '12px',
+    height: '12px',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 0 8px rgba(0,0,0,0.5)',
+    zIndex: 10,
+    transition: 'all 0.2s ease'
   };
 
   return (
-    <div style={{
-      position: 'relative',
-      padding: '0px',
-      borderRadius: '12px',
-      background: 'rgba(30, 30, 35, 0.85)',
-      backdropFilter: 'blur(12px)',
-      border: `1.5px solid ${status === 'running' ? '#ff00ff' : 'rgba(255, 0, 255, 0.4)'}`,
-      boxShadow: status === 'running' ? `0 0 20px rgba(255, 0, 255, 0.4)` : `0 8px 32px rgba(0, 0, 0, 0.45)`,
-      minWidth: '280px',
-      color: '#e0e0e0',
-      fontFamily: 'var(--vscode-font-family)',
-      transition: 'all 0.3s ease'
-    }}>
+    <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '280px' }}>
       {inputHandles.map((inputName, index) => (
         <div key={`in-${inputName}`}>
           <Handle
             type="target"
             position={Position.Left}
             id={inputName === 'in' ? 'in' : `in_${inputName}`}
-            style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-5px', background: '#ff00ff' }}
+            style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-6px', background: themeColor }}
           />
         </div>
       ))}
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-5px', background: '#ff00ff' }} />
-      <Handle type="source" position={Position.Right} id="out_value" style={{ ...handleStyle, top: '74%', right: '-5px', background: '#7e57c2' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-6px', background: themeColor }} />
+      <Handle type="source" position={Position.Right} id="out_value" style={{ ...handleStyle, top: '74%', right: '-6px', background: '#7e57c2' }} />
 
-      <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
-        <div style={{ 
-          padding: '10px 12px', 
-          background: 'rgba(255, 0, 255, 0.15)', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'space-between',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, fontWeight: 'bold' }}>
-            <div style={{ 
-              width: '24px', height: '24px', borderRadius: '50%', 
-              background: '#ff00ff',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
+      <div>
+        <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}15 0%, transparent 100%)` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+            <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #e000e0 100%)` }}>
               <span className="codicon codicon-symbol-string" style={{ color: '#fff', fontSize: '14px' }}></span>
             </div>
             {editingLabel ? (
@@ -111,17 +87,10 @@ const PromptNode = ({ data, id }: NodeProps) => {
                 onChange={(e) => { setLabel(e.target.value); updateNodeData(id, { label: e.target.value }); }}
                 onBlur={() => setEditingLabel(false)}
                 onKeyDown={(e) => { if (e.key === 'Enter') setEditingLabel(false); }}
-                style={{
-                  background: 'rgba(0,0,0,0.3)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  borderRadius: '4px',
-                  padding: '2px 6px',
-                  fontSize: '13px'
-                }}
+                style={{ width: '100%' }}
               />
             ) : (
-              <span onClick={() => setEditingLabel(true)} style={{ fontSize: '13px', letterSpacing: '0.4px', cursor: 'pointer' }}>
+              <span onClick={() => setEditingLabel(true)} className="glass-node-label">
                 {label || 'Prompt / Set Var'}
               </span>
             )}
@@ -129,16 +98,27 @@ const PromptNode = ({ data, id }: NodeProps) => {
           <button
             className="nodrag"
             onClick={() => updateNodeData(id, { collapsed: !collapsed })}
-            style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}
+            style={{ 
+              background: 'rgba(255,255,255,0.05)', 
+              border: 'none', 
+              color: '#aaa', 
+              cursor: 'pointer',
+              borderRadius: '6px',
+              width: '24px',
+              height: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
           >
-            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`}></span>
+            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`} style={{ fontSize: '12px' }}></span>
           </button>
         </div>
 
         {!collapsed && (
-          <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Variable Name</label>
+          <div className="glass-node-body">
+            <div className="glass-node-input-group">
+              <label className="glass-node-input-label">Variable Name</label>
               <input
                 className="nodrag"
                 type="text"
@@ -149,20 +129,11 @@ const PromptNode = ({ data, id }: NodeProps) => {
                   updateNodeData(id, { name: v });
                 }}
                 placeholder="e.g. branchName"
-                style={{
-                  width: '100%',
-                  background: 'rgba(0,0,0,0.2)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: '4px',
-                  padding: '6px',
-                  fontSize: '11px'
-                }}
               />
             </div>
 
-            <div>
-              <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Default Value</label>
+            <div className="glass-node-input-group">
+              <label className="glass-node-input-label">Default Value</label>
               <input
                 className="nodrag"
                 type="text"
@@ -173,15 +144,6 @@ const PromptNode = ({ data, id }: NodeProps) => {
                   updateNodeData(id, { value: v });
                 }}
                 placeholder="Default value"
-                style={{
-                  width: '100%',
-                  background: 'rgba(0,0,0,0.2)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: '4px',
-                  padding: '6px',
-                  fontSize: '11px'
-                }}
               />
             </div>
           </div>

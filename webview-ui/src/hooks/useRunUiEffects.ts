@@ -30,7 +30,7 @@ export function useRunUiEffects(options: UseRunUiEffectsOptions) {
 
   useEffect(() => {
     if (!connectionError) return;
-    const timer = window.setTimeout(() => setConnectionError(null), 1800);
+    const timer = window.setTimeout(() => setConnectionError(null), 5000);
     return () => window.clearTimeout(timer);
   }, [connectionError, setConnectionError]);
 

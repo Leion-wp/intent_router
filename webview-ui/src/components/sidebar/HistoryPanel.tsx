@@ -1,4 +1,5 @@
 import React from 'react';
+import { getResumeFromFailedStepId } from '../../utils/historyListUtils';
 
 type HistoryPanelProps = {
   historySearch: string;
@@ -13,8 +14,13 @@ type HistoryPanelProps = {
   historyRowHeight: number;
   onSelectHistory?: (run: any) => void;
   onRestoreHistory?: (run: any) => void;
+  onResumeHistory?: (run: any, startStepId: string) => void;
   onOpenExternal?: (url: string) => void;
   onCopyToClipboard?: (text: string) => void;
+  onExportRunAudit?: (runId: string) => void;
+  onFetchPrChecks?: (url: string) => void;
+  onRerunPrChecks?: (url: string) => void;
+  onCommentPr?: (url: string) => void;
 };
 
 function HistoryPanel({
@@ -30,8 +36,13 @@ function HistoryPanel({
   historyRowHeight,
   onSelectHistory,
   onRestoreHistory,
+  onResumeHistory,
   onOpenExternal,
-  onCopyToClipboard
+  onCopyToClipboard,
+  onExportRunAudit,
+  onFetchPrChecks,
+  onRerunPrChecks,
+  onCommentPr
 }: HistoryPanelProps) {
   return (
     <div className="sidebar-list" style={{ minHeight: '220px' }}>
@@ -67,6 +78,11 @@ function HistoryPanel({
             {historyWindow.map((run: any, localIndex: number) => {
               const absoluteIndex = historyStartIndex + localIndex;
               const pullRequests = Array.isArray(run.pullRequests) ? run.pullRequests : [];
+              const estimatedCost = Number(run?.audit?.cost?.estimatedTotal || 0);
+              const timelineCount = Array.isArray(run?.audit?.timeline) ? run.audit.timeline.length : 0;
+              const hitlCount = Array.isArray(run?.audit?.hitl) ? run.audit.hitl.length : 0;
+              const resumeStepId = getResumeFromFailedStepId(run);
+              const canResumeFromFailure = !!run.pipelineSnapshot && !!resumeStepId;
               const visiblePrs = pullRequests.slice(0, 2);
               const hiddenPrCount = Math.max(0, pullRequests.length - visiblePrs.length);
               return (
@@ -122,6 +138,52 @@ function HistoryPanel({
                     >
                       Restore
                     </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (canResumeFromFailure && resumeStepId) {
+                          onResumeHistory?.(run, resumeStepId);
+                        }
+                      }}
+                      disabled={!canResumeFromFailure}
+                      title={
+                        canResumeFromFailure
+                          ? `Resume from failed step: ${resumeStepId}`
+                          : 'No failed step with stepId found'
+                      }
+                      style={{
+                        padding: '2px 8px',
+                        fontSize: '10px',
+                        borderRadius: '4px',
+                        border: '1px solid var(--vscode-panel-border)',
+                        background: canResumeFromFailure ? 'var(--vscode-button-secondaryBackground)' : 'transparent',
+                        color: canResumeFromFailure ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
+                        cursor: canResumeFromFailure ? 'pointer' : 'not-allowed',
+                        opacity: canResumeFromFailure ? 1 : 0.6
+                      }}
+                    >
+                      Resume failed
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onExportRunAudit?.(String(run.id || ''));
+                      }}
+                      title="Export run audit JSON to clipboard"
+                      style={{
+                        padding: '2px 8px',
+                        fontSize: '10px',
+                        borderRadius: '4px',
+                        border: '1px solid var(--vscode-panel-border)',
+                        background: 'transparent',
+                        color: 'var(--vscode-descriptionForeground)',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Export audit
+                    </button>
                   </div>
                   <div style={{ fontSize: '10px', opacity: 0.8, display: 'flex', justifyContent: 'space-between' }}>
                     <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
@@ -133,6 +195,9 @@ function HistoryPanel({
                     }}>
                       {String(run.status || '').toUpperCase()}
                     </span>
+                  </div>
+                  <div style={{ fontSize: '10px', opacity: 0.75, marginTop: '3px' }}>
+                    Timeline {timelineCount} · HITL {hitlCount} · Cost ~{estimatedCost.toFixed(2)}
                   </div>
                   {pullRequests.length > 0 && (
                     <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -199,7 +264,7 @@ function HistoryPanel({
                             key={`${prUrl}-${index}`}
                             style={{
                               display: 'grid',
-                              gridTemplateColumns: '1fr auto auto auto',
+                              gridTemplateColumns: '1fr auto auto auto auto auto auto',
                               gap: '4px',
                               alignItems: 'center',
                               fontSize: '10px',
@@ -261,6 +326,63 @@ function HistoryPanel({
                               title={prUrl}
                             >
                               Open
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (prUrl) onFetchPrChecks?.(prUrl);
+                              }}
+                              style={{
+                                padding: '1px 6px',
+                                fontSize: '10px',
+                                borderRadius: '10px',
+                                border: '1px solid var(--vscode-panel-border)',
+                                background: 'transparent',
+                                color: 'var(--vscode-foreground)',
+                                cursor: 'pointer'
+                              }}
+                              title="Fetch checks summary"
+                            >
+                              Checks
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (prUrl) onRerunPrChecks?.(prUrl);
+                              }}
+                              style={{
+                                padding: '1px 6px',
+                                fontSize: '10px',
+                                borderRadius: '10px',
+                                border: '1px solid var(--vscode-panel-border)',
+                                background: 'transparent',
+                                color: 'var(--vscode-foreground)',
+                                cursor: 'pointer'
+                              }}
+                              title="Re-run failed checks"
+                            >
+                              Re-run
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (prUrl) onCommentPr?.(prUrl);
+                              }}
+                              style={{
+                                padding: '1px 6px',
+                                fontSize: '10px',
+                                borderRadius: '10px',
+                                border: '1px solid var(--vscode-panel-border)',
+                                background: 'transparent',
+                                color: 'var(--vscode-foreground)',
+                                cursor: 'pointer'
+                              }}
+                              title="Comment on PR"
+                            >
+                              Comment
                             </button>
                             <button
                               type="button"

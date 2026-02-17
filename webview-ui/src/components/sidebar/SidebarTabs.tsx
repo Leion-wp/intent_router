@@ -23,7 +23,14 @@ function SidebarTabs({ effectiveTabs, activeTabId, onSelectTab }: SidebarTabsPro
       className="sidebar-header"
       role="tablist"
       aria-label="Sidebar Sections"
-      style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}
+      style={{ 
+        display: 'flex', 
+        gap: '4px', 
+        background: 'rgba(255, 255, 255, 0.03)',
+        padding: '4px', 
+        borderRadius: '12px',
+        border: '1px solid rgba(255, 255, 255, 0.05)'
+      }}
     >
       {effectiveTabs.map((entry, index) => (
         <button
@@ -52,10 +59,23 @@ function SidebarTabs({ effectiveTabs, activeTabId, onSelectTab }: SidebarTabsPro
           onClick={() => onSelectTab(entry.id)}
           className="sidebar-tab"
           title={entry.title}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+          style={{ 
+            display: 'inline-flex', 
+            alignItems: 'center', 
+            gap: '8px', 
+            flex: 1, 
+            justifyContent: 'center',
+            padding: '8px 4px',
+            borderRadius: '8px',
+            border: 'none',
+            outline: 'none',
+            fontSize: '11px',
+            fontWeight: activeTabId === entry.id ? 700 : 500,
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+          }}
         >
-          <span className={`codicon ${entry.icon || 'codicon-symbol-misc'}`} style={{ fontSize: '12px' }} />
-          <span>{entry.title}</span>
+          <span className={`codicon ${entry.icon || 'codicon-symbol-misc'}`} style={{ fontSize: '14px' }} />
+          <span style={{ display: effectiveTabs.length > 3 ? 'none' : 'inline' }}>{entry.title}</span>
         </button>
       ))}
     </div>

@@ -58,7 +58,7 @@ function AppLayoutShell({
           />
         </>
       )}
-      <div style={{ flex: 1, position: 'relative' }}>
+      <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
         <button
           type="button"
           className="nodrag"
@@ -68,20 +68,29 @@ function AppLayoutShell({
           title={sidebarCollapsed ? 'Show sidebar (Ctrl+B)' : 'Hide sidebar (Ctrl+B)'}
           style={{
             position: 'absolute',
-            top: '10px',
-            left: '10px',
+            top: '20px',
+            left: '20px',
             zIndex: 950,
-            background: 'var(--vscode-button-secondaryBackground)',
-            color: 'var(--vscode-button-secondaryForeground)',
-            border: 'none',
-            borderRadius: '4px',
-            padding: '8px 10px',
-            cursor: 'pointer'
+            background: 'var(--ir-glass-bg)',
+            backdropFilter: 'var(--ir-glass-blur)',
+            color: '#fff',
+            border: '1px solid var(--ir-glass-border)',
+            borderRadius: '10px',
+            width: '36px',
+            height: '36px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
           }}
         >
-          {sidebarCollapsed ? '≡' : '⟨'}
+          <span className={`codicon codicon-${sidebarCollapsed ? 'layout-sidebar-left' : 'chevron-left'}`} style={{ fontSize: '18px' }}></span>
         </button>
-        {canvas}
+        <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}>
+          {canvas}
+        </div>
       </div>
     </div>
   );

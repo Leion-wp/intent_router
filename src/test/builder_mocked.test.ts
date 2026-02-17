@@ -149,4 +149,70 @@ suite('Pipeline Builder Tests (Mocked)', () => {
         assert.strictEqual(mockVscode.__mock.clipboardWrites.length, 1);
         assert.strictEqual(mockVscode.__mock.clipboardWrites[0], 'https://github.com/acme/repo/pull/2');
     });
+
+    test('runPipeline forwards startStepId to command', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        const calls: any[] = [];
+        const originalExecute = mockVscode.commands.executeCommand;
+        mockVscode.commands.executeCommand = async (id: string, ...args: any[]) => {
+            if (id === 'intentRouter.runPipelineFromData') {
+                calls.push(args);
+                return undefined;
+            }
+            return originalExecute(id, ...args);
+        };
+        const pipelineData = { name: 'resume-test', steps: [{ id: 'step.alpha' }] };
+        try {
+            if (panel.postMessageCallback) {
+                await panel.postMessageCallback({ type: 'runPipeline', pipeline: pipelineData, dryRun: false, startStepId: 'step.alpha' });
+            }
+        } finally {
+            mockVscode.commands.executeCommand = originalExecute;
+        }
+        assert.strictEqual(calls.length, 1);
+        assert.deepStrictEqual(calls[0], [pipelineData, false, 'step.alpha']);
+    });
+
+    test('exportRunAudit copies JSON to clipboard', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        const { historyManager } = require('../../out/historyManager');
+        historyManager.getHistory().length = 0;
+        historyManager.getHistory().push({
+            id: 'run-1',
+            name: 'run',
+            timestamp: Date.now(),
+            status: 'success',
+            steps: [],
+            audit: { timeline: [], hitl: [], reviews: [], cost: { estimatedTotal: 0, byIntent: {} } }
+        });
+        if (panel.postMessageCallback) {
+            await panel.postMessageCallback({ type: 'exportRunAudit', runId: 'run-1' });
+        }
+        assert.strictEqual(mockVscode.__mock.clipboardWrites.length > 0, true);
+        const last = mockVscode.__mock.clipboardWrites[mockVscode.__mock.clipboardWrites.length - 1];
+        assert.strictEqual(String(last).includes('"runId": "run-1"'), true);
+    });
+
+    test('githubPrChecks message executes command and copies output', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        const originalExecute = mockVscode.commands.executeCommand;
+        mockVscode.commands.executeCommand = async (id: string, ..._args: any[]) => {
+            if (id === 'intentRouter.internal.githubPrChecks') {
+                return { output: 'check-a: pass' };
+            }
+            return originalExecute(id, ..._args);
+        };
+        try {
+            if (panel.postMessageCallback) {
+                await panel.postMessageCallback({ type: 'githubPrChecks', url: 'https://github.com/acme/repo/pull/9' });
+            }
+        } finally {
+            mockVscode.commands.executeCommand = originalExecute;
+        }
+        const last = mockVscode.__mock.clipboardWrites[mockVscode.__mock.clipboardWrites.length - 1];
+        assert.strictEqual(String(last).includes('check-a'), true);
+    });
 });

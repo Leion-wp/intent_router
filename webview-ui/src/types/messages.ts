@@ -19,6 +19,15 @@ export type PipelineRun = {
     timestamp: number;
   }>;
   pipelineSnapshot?: any;
+  audit?: {
+    timeline?: Array<any>;
+    hitl?: Array<any>;
+    reviews?: Array<any>;
+    cost?: {
+      estimatedTotal?: number;
+      byIntent?: Record<string, number>;
+    };
+  };
 };
 
 // Extension -> Webview
@@ -33,6 +42,7 @@ export type WebviewInboundMessage =
       files: Array<{ path: string; added: number; removed: number }>;
       totalAdded: number;
       totalRemoved: number;
+      diffSignature?: string;
       policyMode?: 'warn' | 'block';
       policyBlocked?: boolean;
       policyViolations?: string[];
@@ -69,7 +79,7 @@ export type WebviewInboundMessage =
 // Webview -> Extension
 export type WebviewOutboundMessage =
   | { type: 'savePipeline'; pipeline: any; silent?: boolean }
-  | { type: 'runPipeline'; pipeline: any; dryRun?: boolean }
+  | { type: 'runPipeline'; pipeline: any; dryRun?: boolean; startStepId?: string }
   | { type: 'pipelineDecision'; nodeId: string; runId?: string; decision: 'approve' | 'reject'; approvedPaths?: string[] }
   | { type: 'pipelineReviewOpenDiff'; nodeId: string; runId?: string; path?: string }
   | { type: 'saveEnvironment'; environment: Record<string, string> }
@@ -86,6 +96,10 @@ export type WebviewOutboundMessage =
   | { type: 'uiPreset.propagateDraft' }
   | { type: 'openExternal'; url: string }
   | { type: 'copyToClipboard'; text: string }
+  | { type: 'exportRunAudit'; runId: string }
+  | { type: 'githubPrChecks'; url: string }
+  | { type: 'githubPrRerunFailed'; url: string }
+  | { type: 'githubPrComment'; url: string; body: string }
   | { type: 'sessionMemory.export'; sessionId?: string }
   | { type: 'sessionMemory.clear'; sessionId?: string }
   | { type: 'sessionMemory.import'; jsonText: string; mode?: 'merge' | 'replace' }

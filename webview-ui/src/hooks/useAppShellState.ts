@@ -11,6 +11,7 @@ type UseAppShellStateResult = {
   selectedRun: any;
   setSelectedRun: Dispatch<SetStateAction<any>>;
   restoreRun: any;
+  resumeRun: { run: any; startStepId: string } | null;
   uiPreset: UiPreset;
   uiPresetRelease: UiPreset;
   adminMode: boolean;
@@ -23,6 +24,8 @@ type UseAppShellStateResult = {
   visibleSidebarTabs: SidebarTabPreset[];
   onRestoreHistory: (run: any) => void;
   onRestoreHandled: () => void;
+  onResumeHistory: (run: any, startStepId: string) => void;
+  onResumeHandled: () => void;
   sidebarResizeRef: MutableRefObject<{ startX: number; startWidth: number } | null>;
   defaultSidebarWidth: number;
   minSidebarWidth: number;
@@ -35,6 +38,7 @@ export function useAppShellState(): UseAppShellStateResult {
   const [history, setHistory] = useState<any[]>([]);
   const [selectedRun, setSelectedRun] = useState<any>(null);
   const [restoreRun, setRestoreRun] = useState<any>(null);
+  const [resumeRun, setResumeRun] = useState<{ run: any; startStepId: string } | null>(null);
   const [uiPreset, setUiPreset] = useState<UiPreset>(() => initialPreset);
   const [uiPresetRelease, setUiPresetRelease] = useState<UiPreset>(() => normalizeUiPreset(window.initialData?.uiPresetRelease || initialPreset));
   const [adminMode, setAdminMode] = useState<boolean>(!!window.initialData?.adminMode);
@@ -182,12 +186,24 @@ export function useAppShellState(): UseAppShellStateResult {
     setRestoreRun(null);
   };
 
+  const onResumeHistory = (run: any, startStepId: string) => {
+    const normalized = String(startStepId || '').trim();
+    if (!run?.pipelineSnapshot || !normalized) return;
+    setResumeRun({ run, startStepId: normalized });
+    setSelectedRun(null);
+  };
+
+  const onResumeHandled = () => {
+    setResumeRun(null);
+  };
+
   return {
     commandGroups,
     history,
     selectedRun,
     setSelectedRun,
     restoreRun,
+    resumeRun,
     uiPreset,
     uiPresetRelease,
     adminMode,
@@ -200,6 +216,8 @@ export function useAppShellState(): UseAppShellStateResult {
     visibleSidebarTabs,
     onRestoreHistory,
     onRestoreHandled,
+    onResumeHistory,
+    onResumeHandled,
     sidebarResizeRef,
     defaultSidebarWidth: DEFAULT_SIDEBAR_WIDTH,
     minSidebarWidth: MIN_SIDEBAR_WIDTH,

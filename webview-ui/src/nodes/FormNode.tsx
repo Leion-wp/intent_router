@@ -77,61 +77,40 @@ const FormNode = ({ data, id }: NodeProps) => {
     updateNodeData(id, { fields: next });
   };
 
+  const isRunning = status === 'running';
+  const themeColor = '#4caf50';
+
   const handleStyle = {
-    width: '10px',
-    height: '10px',
-    border: '2px solid rgba(30, 30, 35, 0.85)',
-    boxShadow: '0 0 5px rgba(0,0,0,0.4)',
-    zIndex: 10
+    width: '12px',
+    height: '12px',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 0 8px rgba(0,0,0,0.5)',
+    zIndex: 10,
+    transition: 'all 0.2s ease'
   };
 
   return (
-    <div
-      style={{
-        position: 'relative',
-        padding: '0px',
-        borderRadius: '12px',
-        background: 'rgba(30, 30, 35, 0.85)',
-        backdropFilter: 'blur(12px)',
-        border: `1.5px solid ${status === 'running' ? '#4caf50' : 'rgba(76, 175, 80, 0.4)'}`,
-        boxShadow: status === 'running' ? `0 0 20px rgba(76, 175, 80, 0.4)` : `0 8px 32px rgba(0, 0, 0, 0.45)`,
-        minWidth: '300px',
-        color: '#e0e0e0',
-        fontFamily: 'var(--vscode-font-family)',
-        transition: 'all 0.3s ease'
-      }}
-    >
+    <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '300px' }}>
       {inputHandles.map((inputName, index) => (
         <div key={`in-${inputName}-${index}`}>
           <Handle
             type="target"
             position={Position.Left}
             id={inputName === 'in' ? 'in' : `in_${inputName}`}
-            style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-5px', background: '#4caf50' }}
+            style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-6px', background: themeColor }}
           />
         </div>
       ))}
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-5px', background: '#4caf50' }} />
-      <Handle type="source" position={Position.Right} id="out_values" style={{ ...handleStyle, top: '76%', right: '-5px', background: '#ff9800' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-6px', background: themeColor }} />
+      <Handle type="source" position={Position.Right} id="out_values" style={{ ...handleStyle, top: '76%', right: '-6px', background: '#ff9800' }} />
 
-      <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
-        <div style={{ 
-          padding: '10px 12px', 
-          background: 'rgba(76, 175, 80, 0.15)', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'space-between',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, fontWeight: 'bold' }}>
-            <div style={{ 
-              width: '24px', height: '24px', borderRadius: '50%', 
-              background: '#4caf50',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
-              <span className="codicon codicon-list-selection" style={{ color: '#fff', fontSize: '14px' }}></span>
+      <div>
+        <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}15 0%, transparent 100%)` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+            <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #45b39d 100%)` }}>
+              <span className="codicon codicon-list-selection" style={{ color: '#fff', fontSize: '16px' }}></span>
             </div>
-            <span style={{ fontSize: '13px', letterSpacing: '0.4px' }}>FORM</span>
+            <span className="glass-node-label">USER FORM</span>
           </div>
           <button
             className="nodrag"
@@ -139,71 +118,97 @@ const FormNode = ({ data, id }: NodeProps) => {
               setCollapsed((v) => !v);
               updateNodeData(id, { collapsed: !collapsed });
             }}
-            style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}
+            style={{ 
+              background: 'rgba(255,255,255,0.05)', 
+              border: 'none', 
+              color: '#aaa', 
+              cursor: 'pointer',
+              borderRadius: '6px',
+              width: '24px',
+              height: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
           >
-            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`}></span>
+            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`} style={{ fontSize: '12px' }}></span>
           </button>
         </div>
 
         {!collapsed && (
-          <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase' }}>Fields</label>
+          <div className="glass-node-body">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <label className="glass-node-input-label">Form Fields</label>
               <button
                 className="nodrag"
                 onClick={addField}
                 style={{
-                  background: 'rgba(255,255,255,0.05)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  color: '#ccc',
+                  background: 'var(--ir-accent-primary)',
+                  border: 'none',
+                  color: '#fff',
                   cursor: 'pointer',
                   fontSize: '10px',
-                  padding: '2px 8px',
-                  borderRadius: '4px'
+                  fontWeight: 700,
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  boxShadow: '0 4px 10px rgba(0, 162, 255, 0.2)'
                 }}
               >
                 + Add Field
               </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {fields.length === 0 && <div style={{ fontSize: '11px', opacity: 0.5, textAlign: 'center', padding: '10px' }}>No fields defined.</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {fields.length === 0 && <div style={{ fontSize: '12px', opacity: 0.3, textAlign: 'center', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px dashed rgba(255,255,255,0.1)' }}>No fields defined.</div>}
               {fields.map((f, i) => (
-                <div key={i} style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '6px', padding: '10px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 24px', gap: '6px', marginBottom: '6px' }}>
+                <div key={i} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <input
                       className="nodrag"
                       placeholder="Label"
                       value={String(f.label || '')}
                       onChange={(e) => updateField(i, { label: e.target.value })}
-                      style={{ background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '4px', fontSize: '11px', borderRadius: '4px' }}
+                      style={{ fontSize: '11px', padding: '6px 10px' }}
                     />
                     <select
                       className="nodrag"
                       value={f.type}
                       onChange={(e) => updateField(i, { type: e.target.value as FieldType })}
-                      style={{ background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '4px', fontSize: '11px', borderRadius: '4px' }}
+                      style={{ fontSize: '11px', padding: '6px' }}
                     >
-                      <option value="text">text</option>
-                      <option value="textarea">textarea</option>
-                      <option value="select">select</option>
-                      <option value="checkbox">checkbox</option>
+                      <option value="text" style={{ background: '#1a1a20' }}>text</option>
+                      <option value="textarea" style={{ background: '#1a1a20' }}>textarea</option>
+                      <option value="select" style={{ background: '#1a1a20' }}>select</option>
+                      <option value="checkbox" style={{ background: '#1a1a20' }}>checkbox</option>
                     </select>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      className="nodrag"
+                      placeholder="Key (variable name)"
+                      value={String(f.key || '')}
+                      onChange={(e) => updateField(i, { key: e.target.value })}
+                      style={{ flex: 1, fontSize: '11px', padding: '6px 10px' }}
+                    />
                     <button
                       className="nodrag"
                       onClick={() => removeField(i)}
-                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#f44336' }}
+                      style={{ 
+                        background: 'rgba(255, 77, 77, 0.1)', 
+                        border: 'none', 
+                        cursor: 'pointer', 
+                        color: '#ff4d4d', 
+                        borderRadius: '6px',
+                        width: '28px',
+                        height: '28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
                     >
-                      ×
+                      <span className="codicon codicon-trash" style={{ fontSize: '14px' }}></span>
                     </button>
                   </div>
-                  <input
-                    className="nodrag"
-                    placeholder="Key (variable name)"
-                    value={String(f.key || '')}
-                    onChange={(e) => updateField(i, { key: e.target.value })}
-                    style={{ width: '100%', background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '4px', fontSize: '11px', borderRadius: '4px' }}
-                  />
                 </div>
               ))}
             </div>

@@ -121,58 +121,29 @@ const AgentNode = ({ data, id }: NodeProps) => {
   };
 
   const isRunning = status === 'running';
-  const glowColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
+  const themeColor = '#8a2be2';
 
-  // BIGGER AND MORE VISIBLE HANDLES
   const handleStyle = {
-    width: '14px',
-    height: '14px',
-    border: '3px solid #1e1e23',
-    boxShadow: '0 0 10px rgba(0,0,0,0.8)',
-    zIndex: 100,
-    transition: 'transform 0.2s ease'
+    width: '12px',
+    height: '12px',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 0 8px rgba(0,0,0,0.5)',
+    zIndex: 10,
+    transition: 'all 0.2s ease'
   };
 
   return (
-    <div style={{
-      position: 'relative',
-      padding: '0px',
-      borderRadius: '14px',
-      background: 'rgba(25, 25, 30, 0.9)',
-      backdropFilter: 'blur(16px)',
-      border: `2px solid ${isRunning ? '#bb86fc' : 'rgba(138, 43, 226, 0.5)'}`,
-      boxShadow: isRunning 
-        ? `0 0 30px rgba(187, 134, 252, 0.5), inset 0 0 15px rgba(187, 134, 252, 0.1)` 
-        : `0 10px 40px rgba(0, 0, 0, 0.6)`,
-      minWidth: '340px',
-      color: '#efefef',
-      fontFamily: 'var(--vscode-font-family)',
-      transition: 'all 0.4s ease'
-    }}>
-      {/* Handles - Shifted outwards and bigger */}
-      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, background: '#8a2be2', left: '-10px' }} />
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, background: '#4caf50', top: '30%', right: '-10px' }} />
-      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, background: '#f44336', top: '70%', right: '-10px' }} />
+    <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '340px' }}>
+      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, background: themeColor, left: '-6px' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, background: '#00ff88', top: '30%', right: '-6px' }} />
+      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, background: '#ff4d4d', top: '70%', right: '-6px' }} />
 
-      <div style={{ borderRadius: '14px', overflow: 'hidden' }}>
-        {/* Header / Title Bar */}
-        <div style={{ 
-          padding: '12px 14px', 
-          background: 'rgba(138, 43, 226, 0.25)', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'space-between',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
-        }}>
+      <div>
+        {/* Header */}
+        <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}22 0%, transparent 100%)` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-            <div style={{ 
-              width: '26px', height: '24px', borderRadius: '6px', 
-              background: isRunning ? '#bb86fc' : '#8a2be2',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: isRunning ? '0 0 15px #bb86fc' : 'none',
-              animation: isRunning ? 'pulse 2s infinite' : 'none'
-            }}>
-              <span className={`codicon codicon-${isRunning ? 'loading spin' : 'sparkle'}`} style={{ fontSize: '14px', color: '#fff' }}></span>
+            <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #bb86fc 100%)` }}>
+              <span className={`codicon codicon-${isRunning ? 'loading spin' : 'sparkle'}`} style={{ color: '#fff', fontSize: '16px' }}></span>
             </div>
             
             {editingLabel ? (
@@ -183,68 +154,44 @@ const AgentNode = ({ data, id }: NodeProps) => {
                 onChange={(e) => { setLabel(e.target.value); updateField({ label: e.target.value }); }}
                 onBlur={() => setEditingLabel(false)}
                 onKeyDown={(e) => { if (e.key === 'Enter') setEditingLabel(false); }}
-                style={{
-                  background: 'rgba(0,0,0,0.4)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  borderRadius: '4px',
-                  padding: '2px 8px',
-                  fontSize: '13px',
-                  width: '100%'
-                }}
+                style={{ width: '100%' }}
               />
             ) : (
-              <span 
-                onClick={() => setEditingLabel(true)} 
-                style={{ fontWeight: 700, fontSize: '13px', letterSpacing: '0.5px', cursor: 'pointer', textShadow: '0 2px 4px rgba(0,0,0,0.3)' }}
-              >
+              <span onClick={() => setEditingLabel(true)} className="glass-node-label">
                 {label}
               </span>
             )}
           </div>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {status !== 'idle' && (
-              <div style={{ 
-                  fontSize: '9px', padding: '2px 8px', borderRadius: '12px', 
-                  background: glowColor, color: '#000', fontWeight: '900', textTransform: 'uppercase' 
-              }}>
-                  {status}
-              </div>
-            )}
             <button
               className="nodrag"
               onClick={() => updateField({ collapsed: !collapsed })}
-              style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', padding: '4px', opacity: 0.7 }}
+              style={{ 
+                background: 'rgba(255,255,255,0.05)', 
+                border: 'none', 
+                color: '#aaa', 
+                cursor: 'pointer',
+                borderRadius: '6px',
+                width: '24px',
+                height: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
             >
-              <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`} style={{ fontSize: '14px' }}></span>
+              <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`} style={{ fontSize: '12px' }}></span>
             </button>
           </div>
         </div>
 
         {!collapsed && (
-          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="glass-node-body">
             
             {/* Main Instruction Area */}
-            <div style={{ position: 'relative' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <label style={{ fontSize: '10px', fontWeight: 700, color: '#777', textTransform: 'uppercase', letterSpacing: '1px' }}>System Prompt / Instruction</label>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  {availableVars.length > 0 && (
-                      <select
-                          className="nodrag"
-                          onChange={(e) => insertVariable(e.target.value)}
-                          value=""
-                          style={{
-                              fontSize: '10px', background: 'rgba(138, 43, 226, 0.1)', color: '#bb86fc',
-                              border: '1px solid rgba(138, 43, 226, 0.2)', borderRadius: '4px', padding: '1px 8px'
-                          }}
-                      >
-                          <option value="">{'{ }'} Variable</option>
-                          {availableVars.map(v => <option key={v} value={v}>{v}</option>)}
-                      </select>
-                  )}
-                </div>
+            <div className="glass-node-input-group">
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <label className="glass-node-input-label">System Prompt / Instruction</label>
               </div>
               <textarea
                 className="nodrag"
@@ -252,137 +199,108 @@ const AgentNode = ({ data, id }: NodeProps) => {
                 onChange={(e) => { setInstruction(e.target.value); updateField({ instruction: e.target.value }); }}
                 placeholder="What should the agent do?"
                 rows={4}
-                style={{
-                  width: '100%',
-                  background: 'rgba(0,0,0,0.3)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: '10px',
-                  padding: '12px',
-                  fontSize: '12px',
-                  lineHeight: '1.6',
-                  outline: 'none',
-                  boxShadow: 'inset 0 4px 12px rgba(0,0,0,0.3)',
-                  resize: 'vertical'
-                }}
               />
             </div>
 
             {/* Advanced Panels */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)', background: 'rgba(255,255,255,0.02)' }}>
                   <div 
                       onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-                      style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                      style={{ padding: '12px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                   >
-                      <span style={{ fontSize: '11px', color: '#999', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span className="codicon codicon-settings-gear" style={{ fontSize: '12px' }}></span>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span className="codicon codicon-settings-gear" style={{ fontSize: '14px' }}></span>
                           AGENT CONFIGURATION
                       </span>
-                      <span className={`codicon codicon-chevron-${isSettingsOpen ? 'up' : 'down'}`} style={{ fontSize: '10px', opacity: 0.4 }}></span>
+                      <span className={`codicon codicon-chevron-${isSettingsOpen ? 'up' : 'down'}`} style={{ fontSize: '12px', opacity: 0.3 }}></span>
                   </div>
                   {isSettingsOpen && (
-                      <div style={{ padding: '14px', background: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: '14px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                          <div>
-                              <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Provider</label>
+                      <div style={{ padding: '16px', background: 'rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', gap: '14px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                          <div className="glass-node-input-group">
+                              <label className="glass-node-input-label">Provider</label>
                               <select
                                   className="nodrag"
                                   value={agent}
                                   onChange={(e) => { setAgent(e.target.value); updateField({ agent: e.target.value }); }}
-                                  style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
                               >
                                   {AGENT_PROVIDER_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                               </select>
                           </div>
-                          <div>
-                              <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Role</label>
+                          <div className="glass-node-input-group">
+                              <label className="glass-node-input-label">Role</label>
                               <select
                                   className="nodrag"
                                   value={role}
                                   onChange={(e) => { setRole(e.target.value); updateField({ role: e.target.value }); }}
-                                  style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
                               >
                                   {AGENT_ROLE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                               </select>
                           </div>
-                          <div>
-                              <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Intelligence Model</label>
+                          <div className="glass-node-input-group">
+                              <label className="glass-node-input-label">Intelligence Model</label>
                               <select
                                   className="nodrag"
                                   value={model}
                                   onChange={(e) => { setModel(e.target.value); updateField({ model: e.target.value }); }}
-                                  style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
                               >
                                   {MODEL_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                               </select>
                           </div>
-                          <div>
-                              <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Output Contract</label>
+                          <div className="glass-node-input-group">
+                              <label className="glass-node-input-label">Output Contract</label>
                               <select
                                   className="nodrag"
                                   value={outputContract}
                                   onChange={(e) => { setOutputContract(e.target.value); updateField({ outputContract: e.target.value }); }}
-                                  style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
                               >
                                   {OUTPUT_CONTRACT_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                               </select>
                           </div>
-                          <div>
-                              <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Instruction Template</label>
-                              <textarea
-                                  className="nodrag"
-                                  value={instructionTemplate}
-                                  onChange={(e) => { setInstructionTemplate(e.target.value); updateField({ instructionTemplate: e.target.value }); }}
-                                  placeholder="Optional. Use ${instruction} placeholder."
-                                  rows={2}
-                                  style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px', resize: 'vertical' }}
-                              />
-                          </div>
+                          
+                          <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', margin: '4px 0' }} />
+                          
                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-                              <div>
-                                  <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Content Var</label>
+                              <div className="glass-node-input-group">
+                                  <label className="glass-node-input-label">Content Var</label>
                                   <input
                                       className="nodrag"
                                       value={outputVar}
                                       onChange={(e) => { setOutputVar(e.target.value); updateField({ outputVar: e.target.value }); }}
                                       placeholder="ai_msg"
-                                      style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
                                   />
                               </div>
-                              <div>
-                                  <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Path Var</label>
+                              <div className="glass-node-input-group">
+                                  <label className="glass-node-input-label">Path Var</label>
                                   <input
                                       className="nodrag"
                                       value={outputVarPath}
                                       onChange={(e) => { setOutputVarPath(e.target.value); updateField({ outputVarPath: e.target.value }); }}
                                       placeholder="ai_path"
-                                       style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
                                    />
                                </div>
-                               <div>
-                                   <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Changes Var</label>
+                               <div className="glass-node-input-group">
+                                   <label className="glass-node-input-label">Changes Var</label>
                                    <input
                                        className="nodrag"
                                        value={outputVarChanges}
                                        onChange={(e) => { setOutputVarChanges(e.target.value); updateField({ outputVarChanges: e.target.value }); }}
                                        placeholder="ai_changes"
-                                       style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
                                    />
                                 </div>
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                                <div>
-                                    <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Session ID</label>
+                                <div className="glass-node-input-group">
+                                    <label className="glass-node-input-label">Session ID</label>
                                     <input
                                         className="nodrag"
                                         value={sessionId}
                                         onChange={(e) => { setSessionId(e.target.value); updateField({ sessionId: e.target.value }); }}
                                         placeholder="optional"
-                                        style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
                                     />
                                 </div>
-                                <div>
-                                    <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Session Mode</label>
+                                <div className="glass-node-input-group">
+                                    <label className="glass-node-input-label">Session Mode</label>
                                     <select
                                         className="nodrag"
                                         value={sessionMode}
@@ -393,62 +311,34 @@ const AgentNode = ({ data, id }: NodeProps) => {
                                           setSessionMode(next);
                                           updateField({ sessionMode: next });
                                         }}
-                                        style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
                                     >
-                                        <option value="read_write">read/write</option>
-                                        <option value="read_only">read only</option>
-                                        <option value="write_only">write only</option>
-                                        <option value="runtime_only">runtime only</option>
+                                        <option value="read_write" style={{ background: '#1a1a20' }}>read/write</option>
+                                        <option value="read_only" style={{ background: '#1a1a20' }}>read only</option>
+                                        <option value="write_only" style={{ background: '#1a1a20' }}>write only</option>
+                                        <option value="runtime_only" style={{ background: '#1a1a20' }}>runtime only</option>
                                     </select>
                                 </div>
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', alignItems: 'center' }}>
-                                <div>
-                                    <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Recall Limit</label>
-                                    <input
-                                        className="nodrag"
-                                        type="number"
-                                        min={1}
-                                        value={sessionRecallLimit}
-                                        onChange={(e) => {
-                                          const value = Number(e.target.value || 12);
-                                          const next = Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 12;
-                                          setSessionRecallLimit(next);
-                                          updateField({ sessionRecallLimit: next });
-                                        }}
-                                        style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
-                                    />
-                                </div>
-                                <label style={{ marginTop: '22px', fontSize: '11px', color: '#bbb', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <input
-                                    className="nodrag"
-                                    type="checkbox"
-                                    checked={sessionResetBeforeRun}
-                                    onChange={(e) => {
-                                      const next = e.target.checked;
-                                      setSessionResetBeforeRun(next);
-                                      updateField({ sessionResetBeforeRun: next });
-                                    }}
-                                  />
-                                  reset before run
-                                </label>
                             </div>
                         </div>
                     )}
                </div>
 
-              <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
-                  <div style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '11px', color: '#999', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span className="codicon codicon-library" style={{ fontSize: '12px' }}></span>
+              {/* Context Panels */}
+              <div style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)', background: 'rgba(255,255,255,0.02)' }}>
+                  <div style={{ padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span className="codicon codicon-library" style={{ fontSize: '14px' }}></span>
                           KNOWLEDGE CONTEXT
                       </span>
                       <button 
                           onClick={() => { const nc = [...contextFiles, '']; setContextFiles(nc); updateField({ contextFiles: nc }); }}
-                          style={{ background: 'transparent', border: 'none', color: '#bb86fc', cursor: 'pointer', fontSize: '18px', padding: '0 4px' }}
-                      >+</button>
+                          className="nodrag"
+                          style={{ background: 'var(--ir-accent-primary)', border: 'none', color: '#fff', cursor: 'pointer', borderRadius: '4px', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <span className="codicon codicon-add" style={{ fontSize: '12px' }}></span>
+                      </button>
                   </div>
-                  <div style={{ padding: '0 10px 10px 10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ padding: '0 12px 12px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {contextFiles.map((glob, idx) => (
                           <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                               <input
@@ -459,45 +349,13 @@ const AgentNode = ({ data, id }: NodeProps) => {
                                       setContextFiles(nc); updateField({ contextFiles: nc }); 
                                   }}
                                   placeholder="src/**/*.ts"
-                                  style={{ flex: 1, background: 'rgba(0,0,0,0.3)', color: '#999', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '6px', padding: '5px 10px', fontSize: '10px' }}
+                                  style={{ flex: 1 }}
                               />
                               <button
                                   onClick={() => { const nc = contextFiles.filter((_, i) => i !== idx); setContextFiles(nc); updateField({ contextFiles: nc }); }}
-                                  style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer' }}
-                              ><span className="codicon codicon-trash" style={{ fontSize: '12px' }}></span></button>
-                          </div>
-                      ))}
-                  </div>
-              </div>
-
-              <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
-                  <div style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '11px', color: '#999', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span className="codicon codicon-book" style={{ fontSize: '12px' }}></span>
-                          AGENT / SKILL FILES
-                      </span>
-                      <button
-                          onClick={() => { const next = [...agentSpecFiles, '']; setAgentSpecFiles(next); updateField({ agentSpecFiles: next }); }}
-                          style={{ background: 'transparent', border: 'none', color: '#bb86fc', cursor: 'pointer', fontSize: '18px', padding: '0 4px' }}
-                      >+</button>
-                  </div>
-                  <div style={{ padding: '0 10px 10px 10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {agentSpecFiles.map((glob, idx) => (
-                          <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                              <input
                                   className="nodrag"
-                                  value={glob}
-                                  onChange={(e) => {
-                                      const next = [...agentSpecFiles]; next[idx] = e.target.value;
-                                      setAgentSpecFiles(next); updateField({ agentSpecFiles: next });
-                                  }}
-                                  placeholder="AGENTS.md or **/SKILL.md"
-                                  style={{ flex: 1, background: 'rgba(0,0,0,0.3)', color: '#999', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '6px', padding: '5px 10px', fontSize: '10px' }}
-                              />
-                              <button
-                                  onClick={() => { const next = agentSpecFiles.filter((_, i) => i !== idx); setAgentSpecFiles(next); updateField({ agentSpecFiles: next }); }}
-                                  style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer' }}
-                              ><span className="codicon codicon-trash" style={{ fontSize: '12px' }}></span></button>
+                                  style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer' }}
+                              ><span className="codicon codicon-trash" style={{ fontSize: '14px' }}></span></button>
                           </div>
                       ))}
                   </div>
@@ -506,39 +364,36 @@ const AgentNode = ({ data, id }: NodeProps) => {
 
             {/* Terminal Output */}
             {logs.length > 0 && (
-              <div className="nodrag" style={{ marginTop: '8px' }}>
+              <div className="nodrag" style={{ marginTop: '4px' }}>
                   <div
                       onClick={() => setIsConsoleOpen(!isConsoleOpen)}
                       style={{
-                          fontSize: '10px', padding: '10px 14px', cursor: 'pointer',
+                          fontSize: '11px', padding: '10px 14px', cursor: 'pointer',
                           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                          background: 'rgba(0,0,0,0.5)', color: '#aaa', borderTopLeftRadius: '10px', borderTopRightRadius: '10px',
-                          border: '1px solid rgba(255,255,255,0.05)', borderBottom: 'none', fontWeight: 'bold', letterSpacing: '1px'
+                          background: 'rgba(0,0,0,0.3)', color: 'rgba(255,255,255,0.6)', borderTopLeftRadius: '10px', borderTopRightRadius: '10px',
+                          border: '1px solid rgba(255,255,255,0.05)', borderBottom: 'none', fontWeight: 600
                       }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span className={`codicon codicon-terminal-view`} style={{ fontSize: '12px', color: '#bb86fc' }}></span>
-                          LIVE AGENT STREAM
+                          <span className={`codicon codicon-terminal-view`} style={{ fontSize: '14px', color: themeColor }}></span>
+                          LIVE STREAM
                       </span>
-                      <span className={`codicon codicon-chevron-${isConsoleOpen ? 'down' : 'up'}`} style={{ fontSize: '10px', opacity: 0.5 }}></span>
+                      <span className={`codicon codicon-chevron-${isConsoleOpen ? 'down' : 'up'}`} style={{ fontSize: '10px', opacity: 0.3 }}></span>
                   </div>
                   {isConsoleOpen && (
                       <div
                           ref={logsRef}
                           style={{
-                              maxHeight: '200px', overflowY: 'auto', background: '#020204',
-                              color: '#fff', padding: '14px', fontSize: '11px',
-                              fontFamily: '"JetBrains Mono", "Fira Code", Consolas, monospace',
+                              maxHeight: '180px', overflowY: 'auto', background: 'rgba(0,0,0,0.4)',
+                              color: 'rgba(255,255,255,0.8)', padding: '12px', fontSize: '11px',
+                              fontFamily: 'monospace',
                               whiteSpace: 'pre-wrap', borderBottomLeftRadius: '10px', borderBottomRightRadius: '10px',
                               border: '1px solid rgba(255,255,255,0.05)', borderTop: 'none',
-                              boxShadow: 'inset 0 10px 30px rgba(0,0,0,0.8)',
-                              scrollbarWidth: 'thin'
+                              lineHeight: '1.5'
                           }}>
                           {logs.map((log: any, i: number) => (
                               <div key={i} style={{ 
-                                  color: log.stream === 'stderr' ? '#ff5555' : (log.text.includes('Success') || log.text.includes('completed') ? '#50fa7b' : '#f8f8f2'),
-                                  marginBottom: '4px',
-                                  lineHeight: '1.5',
-                                  opacity: log.text.includes('Thinking') ? 0.6 : 1
+                                  color: log.stream === 'stderr' ? '#ff4d4d' : (log.text.includes('Success') || log.text.includes('completed') ? '#00ff88' : 'inherit'),
+                                  marginBottom: '4px'
                               }}>
                                   {log.text}
                               </div>
@@ -552,12 +407,7 @@ const AgentNode = ({ data, id }: NodeProps) => {
       </div>
 
       <style>{`
-        @keyframes pulse {
-          0% { box-shadow: 0 0 0 0 rgba(187, 134, 252, 0.6); }
-          70% { box-shadow: 0 0 0 15px rgba(187, 134, 252, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(187, 134, 252, 0); }
-        }
-        .codicon-loading.spin {
+        .spin {
           animation: spin 1s linear infinite;
         }
         @keyframes spin {

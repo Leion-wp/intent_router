@@ -57,15 +57,18 @@ function ChromeControlsPanel(props: ChromeControlsPanelProps) {
         zIndex: 940,
         display: 'flex',
         flexDirection: 'column',
-        gap: '6px',
-        padding: '6px 8px',
-        borderRadius: '8px',
-        background: 'var(--vscode-editorWidget-background)',
-        border: '1px solid var(--vscode-editorWidget-border)',
+        gap: '10px',
+        padding: '10px 14px',
+        borderRadius: '16px',
+        background: 'var(--ir-glass-bg)',
+        backdropFilter: 'var(--ir-glass-blur)',
+        border: '1px solid var(--ir-glass-border)',
         opacity: chromeOpacity,
-        width: chromeCollapsed ? '230px' : '760px',
-        maxWidth: 'calc(100vw - 16px)',
-        boxSizing: 'border-box'
+        width: chromeCollapsed ? '240px' : '780px',
+        maxWidth: 'calc(100vw - 40px)',
+        boxSizing: 'border-box',
+        boxShadow: '0 10px 40px rgba(0, 0, 0, 0.4)',
+        transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
       }}
     >
       <div
@@ -87,14 +90,26 @@ function ChromeControlsPanel(props: ChromeControlsPanelProps) {
           userSelect: 'none'
         }}
       >
-        <span style={{ fontSize: '11px', opacity: 0.85 }}>Chrome controls</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="codicon codicon-settings-gear" style={{ fontSize: '14px', opacity: 0.7 }}></span>
+          <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '0.3px', opacity: 0.9 }}>Chrome Controls</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
             type="button"
             className="nodrag"
             onClick={() => setChromePanelPos({ x: 430, y: 56 })}
             aria-label="Reset controls panel position"
-            style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px' }}
+            style={{ 
+              background: 'rgba(255, 255, 255, 0.05)', 
+              color: '#fff', 
+              border: '1px solid rgba(255, 255, 255, 0.1)', 
+              borderRadius: '6px', 
+              padding: '4px 8px', 
+              cursor: 'pointer', 
+              fontSize: '11px',
+              fontWeight: 500
+            }}
             title="Reset position"
           >
             Reset
@@ -104,7 +119,17 @@ function ChromeControlsPanel(props: ChromeControlsPanelProps) {
             className="nodrag"
             onClick={() => setChromeCollapsed((value: boolean) => !value)}
             aria-label={chromeCollapsed ? 'Expand controls panel' : 'Collapse controls panel'}
-            style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px' }}
+            style={{ 
+              background: 'var(--ir-accent-primary)', 
+              color: '#fff', 
+              border: 'none', 
+              borderRadius: '6px', 
+              padding: '4px 10px', 
+              cursor: 'pointer', 
+              fontSize: '11px',
+              fontWeight: 600,
+              boxShadow: '0 4px 10px rgba(0, 162, 255, 0.3)'
+            }}
             title={chromeCollapsed ? 'Expand controls' : 'Collapse controls'}
           >
             {chromeCollapsed ? 'Expand' : 'Collapse'}
@@ -113,9 +138,9 @@ function ChromeControlsPanel(props: ChromeControlsPanelProps) {
       </div>
 
       {!chromeCollapsed && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <label style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Opacity
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255, 255, 255, 0.05)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, opacity: 0.6 }}>Opacity</span>
             <input
               className="nodrag"
               type="range"
@@ -123,93 +148,76 @@ function ChromeControlsPanel(props: ChromeControlsPanelProps) {
               max={100}
               value={Math.round(chromeOpacity * 100)}
               onChange={(event) => setChromeOpacity(Number(event.target.value) / 100)}
+              style={{ width: '80px', height: '4px', accentColor: 'var(--ir-accent-primary)' }}
               aria-label="Adjust chrome controls opacity"
             />
-          </label>
-          <button type="button" className="nodrag" onClick={toggleFocusGraph} aria-label={focusGraph ? 'Disable focus mode' : 'Enable focus mode'} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
-            {focusGraph ? 'Unfocus' : 'Focus graph'}
+          </div>
+
+          <div style={{ width: '1px', height: '24px', background: 'rgba(255, 255, 255, 0.1)' }} />
+
+          <button type="button" className="nodrag chrome-btn" onClick={toggleFocusGraph}>
+            <span className={`codicon codicon-${focusGraph ? 'screen-normal' : 'screen-full'}`}></span>
+            {focusGraph ? 'Unfocus' : 'Focus'}
           </button>
-          <button type="button" className="nodrag" onClick={() => setShowMiniMap((value: boolean) => !value)} aria-label={showMiniMap ? 'Hide minimap' : 'Show minimap'} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
-            {showMiniMap ? 'MiniMap on' : 'MiniMap off'}
+          <button type="button" className="nodrag chrome-btn" onClick={() => setShowMiniMap((value: boolean) => !value)}>
+            <span className={`codicon codicon-${showMiniMap ? 'eye' : 'eye-closed'}`}></span>
+            MiniMap
           </button>
-          <button type="button" className="nodrag" onClick={() => setShowControls((value: boolean) => !value)} aria-label={showControls ? 'Hide flow controls' : 'Show flow controls'} style={{ background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-secondaryForeground)', border: 'none', borderRadius: '4px', padding: '6px 8px', cursor: 'pointer', fontSize: '11px' }}>
-            {showControls ? 'Controls on' : 'Controls off'}
+          <button type="button" className="nodrag chrome-btn" onClick={() => setShowControls((value: boolean) => !value)}>
+            <span className={`codicon codicon-${showControls ? 'layers' : 'layers-dot'}`}></span>
+            Controls
           </button>
-          <button
-            type="button"
-            className="nodrag"
-            onClick={undoGraph}
-            disabled={!canUndo}
-            aria-label="Undo graph change"
-            style={{
-              background: canUndo ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
-              color: canUndo ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '6px 8px',
-              cursor: canUndo ? 'pointer' : 'not-allowed',
-              fontSize: '11px'
-            }}
-            title="Undo graph change (Ctrl+Z)"
-          >
+
+          <div style={{ width: '1px', height: '24px', background: 'rgba(255, 255, 255, 0.1)' }} />
+
+          <button type="button" className="nodrag chrome-btn" onClick={undoGraph} disabled={!canUndo} style={{ opacity: canUndo ? 1 : 0.4 }}>
+            <span className="codicon codicon-discard"></span>
             Undo
           </button>
-          <button
-            type="button"
-            className="nodrag"
-            onClick={redoGraph}
-            disabled={!canRedo}
-            aria-label="Redo graph change"
-            style={{
-              background: canRedo ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
-              color: canRedo ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '6px 8px',
-              cursor: canRedo ? 'pointer' : 'not-allowed',
-              fontSize: '11px'
-            }}
-            title="Redo graph change (Ctrl+Y / Ctrl+Shift+Z)"
-          >
+          <button type="button" className="nodrag chrome-btn" onClick={redoGraph} disabled={!canRedo} style={{ opacity: canRedo ? 1 : 0.4 }}>
+            <span className="codicon codicon-redo"></span>
             Redo
           </button>
-          <button
-            type="button"
-            className="nodrag"
-            onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, false)}
-            disabled={!selectedNodeId}
-            aria-label="Run pipeline from selected node"
-            style={{
-              background: selectedNodeId ? 'var(--vscode-button-secondaryBackground)' : 'var(--vscode-input-background)',
-              color: selectedNodeId ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '6px 8px',
-              cursor: selectedNodeId ? 'pointer' : 'not-allowed',
-              fontSize: '11px'
-            }}
-            title={selectedNodeId ? 'Run from selected node' : 'Select a node first'}
-          >
-            Run selected
+
+          <div style={{ width: '1px', height: '24px', background: 'rgba(255, 255, 255, 0.1)' }} />
+
+          <button type="button" className="nodrag chrome-btn" onClick={() => selectedNodeId && runPipelineFromHere(selectedNodeId, false)} disabled={!selectedNodeId} style={{ opacity: selectedNodeId ? 1 : 0.4 }}>
+            <span className="codicon codicon-play"></span>
+            Run From Selection
           </button>
-          <button
-            type="button"
-            className="nodrag"
-            onClick={resetRuntimeUiState}
-            aria-label="Reset runtime visual state"
-            style={{
-              background: 'var(--vscode-button-secondaryBackground)',
-              color: 'var(--vscode-button-secondaryForeground)',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '6px 8px',
-              cursor: 'pointer',
-              fontSize: '11px'
-            }}
-            title="Reset runtime visual statuses"
-          >
-            Reset state
+          <button type="button" className="nodrag chrome-btn" onClick={resetRuntimeUiState}>
+            <span className="codicon codicon-refresh"></span>
+            Reset States
           </button>
+
+          <style>{`
+            .chrome-btn {
+              background: rgba(255, 255, 255, 0.05);
+              color: #fff;
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              border-radius: 8px;
+              padding: 8px 12px;
+              cursor: pointer;
+              font-size: 11px;
+              font-weight: 500;
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              transition: all 0.2s ease;
+            }
+            .chrome-btn:hover:not(:disabled) {
+              background: rgba(255, 255, 255, 0.1);
+              border-color: rgba(255, 255, 255, 0.2);
+              transform: translateY(-1px);
+            }
+            .chrome-btn:active:not(:disabled) {
+              transform: translateY(0);
+            }
+            .chrome-btn .codicon {
+              font-size: 14px;
+              opacity: 0.8;
+            }
+          `}</style>
         </div>
       )}
     </div>

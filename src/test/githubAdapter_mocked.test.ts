@@ -13,7 +13,13 @@ Module.prototype.require = function (request: string) {
 };
 
 const childProcess = require('child_process');
-const { executeGitHubOpenPr, validateGitBranchRef } = require('../../out/providers/githubAdapter');
+const {
+  executeGitHubOpenPr,
+  executeGitHubPrChecks,
+  executeGitHubPrRerunFailedChecks,
+  executeGitHubPrComment,
+  validateGitBranchRef
+} = require('../../out/providers/githubAdapter');
 const { pipelineEventBus } = require('../../out/eventBus');
 Module.prototype.require = originalRequire;
 
@@ -89,5 +95,49 @@ suite('GitHub Adapter (Mocked)', () => {
     assert.strictEqual(failed, true);
     assert.strictEqual(spawnCalled, false);
     assert.throws(() => validateGitBranchRef('main..bad', 'head'));
+  });
+
+  test('fetches PR checks from URL', async () => {
+    let seenArgs: string[] = [];
+    childProcess.spawn = (_command: string, args: string[]) => {
+      seenArgs = args;
+      const child: any = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      setImmediate(() => {
+        child.stdout.emit('data', Buffer.from('checks ok'));
+        child.emit('close', 0);
+      });
+      return child;
+    };
+
+    const result = await executeGitHubPrChecks({
+      url: 'https://github.com/acme/repo/pull/12'
+    });
+    assert.strictEqual(result.repo, 'acme/repo');
+    assert.strictEqual(result.number, 12);
+    assert.strictEqual(String(result.output).includes('checks ok'), true);
+    assert.ok(seenArgs.includes('checks'));
+    assert.ok(seenArgs.includes('--repo'));
+  });
+
+  test('reruns failed checks and comments on PR', async () => {
+    const calls: string[][] = [];
+    childProcess.spawn = (_command: string, args: string[]) => {
+      calls.push(args);
+      const child: any = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      setImmediate(() => child.emit('close', 0));
+      return child;
+    };
+
+    await executeGitHubPrRerunFailedChecks({ url: 'https://github.com/acme/repo/pull/13' });
+    await executeGitHubPrComment({ url: 'https://github.com/acme/repo/pull/13', body: 'looks good' });
+
+    assert.strictEqual(calls.length, 2);
+    assert.ok(calls[0].includes('--rerun-failed'));
+    assert.ok(calls[1].includes('comment'));
+    assert.ok(calls[1].includes('--body'));
   });
 });

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { registerCapabilities } from '../registry';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { pipelineEventBus } from '../eventBus';
 
 type ReviewChange = {
@@ -25,6 +26,16 @@ type ReviewPolicyResult = {
     blocked: boolean;
     violations: string[];
 };
+
+function buildDiffSignature(prepared: PreparedReviewItem[]): string {
+    const digestInput = prepared.map((item) => ({
+        path: item.path,
+        added: item.added,
+        removed: item.removed,
+        proposal: item.proposal
+    }));
+    return crypto.createHash('sha256').update(JSON.stringify(digestInput)).digest('hex');
+}
 
 export function registerVSCodeProvider(context: vscode.ExtensionContext) {
     // Register internal commands
@@ -120,6 +131,7 @@ export async function reviewDiff(payload: any): Promise<boolean> {
 
         const totalAdded = prepared.reduce((sum, item) => sum + item.added, 0);
         const totalRemoved = prepared.reduce((sum, item) => sum + item.removed, 0);
+        const diffSignature = buildDiffSignature(prepared);
         const policy = evaluateReviewPolicy(prepared, { totalAdded, totalRemoved });
 
         if (policy.violations.length > 0) {
@@ -145,6 +157,7 @@ export async function reviewDiff(payload: any): Promise<boolean> {
                 })),
                 totalAdded,
                 totalRemoved,
+                diffSignature,
                 policyMode: policy.mode,
                 policyBlocked: policy.blocked,
                 policyViolations: policy.violations

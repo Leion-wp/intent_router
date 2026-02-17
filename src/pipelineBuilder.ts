@@ -153,6 +153,7 @@ export class PipelineBuilder {
                        files: e.files,
                        totalAdded: e.totalAdded,
                        totalRemoved: e.totalRemoved,
+                       diffSignature: e.diffSignature,
                        policyMode: e.policyMode,
                        policyBlocked: e.policyBlocked,
                        policyViolations: e.policyViolations
@@ -296,7 +297,8 @@ export class PipelineBuilder {
                 await vscode.commands.executeCommand(
                     'intentRouter.runPipelineFromData',
                     message.pipeline as PipelineFile,
-                    !!message.dryRun
+                    !!message.dryRun,
+                    message.startStepId ? String(message.startStepId) : undefined
                 );
                 return;
             }
@@ -390,6 +392,65 @@ export class PipelineBuilder {
                     vscode.window.showInformationMessage('Copied to clipboard.');
                 } catch (error: any) {
                     vscode.window.showErrorMessage(`Failed to copy: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'exportRunAudit') {
+                try {
+                    const runId = String(message.runId || '').trim();
+                    if (!runId) {
+                        throw new Error('Missing runId.');
+                    }
+                    const payload = historyManager.buildRunAuditExport(runId);
+                    if (!payload) {
+                        throw new Error(`Run not found: ${runId}`);
+                    }
+                    const json = JSON.stringify(payload, null, 2);
+                    await vscode.env.clipboard.writeText(json);
+                    vscode.window.showInformationMessage('Run audit copied to clipboard.');
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to export run audit: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'githubPrChecks') {
+                try {
+                    const url = String(message.url || '').trim();
+                    if (!url) throw new Error('Missing PR URL.');
+                    const result = await vscode.commands.executeCommand('intentRouter.internal.githubPrChecks', { url });
+                    const output = String((result as any)?.output || '').trim();
+                    if (output) {
+                        await vscode.env.clipboard.writeText(output);
+                        vscode.window.showInformationMessage('PR checks summary copied to clipboard.');
+                    } else {
+                        vscode.window.showInformationMessage('PR checks fetched.');
+                    }
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to fetch PR checks: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'githubPrRerunFailed') {
+                try {
+                    const url = String(message.url || '').trim();
+                    if (!url) throw new Error('Missing PR URL.');
+                    await vscode.commands.executeCommand('intentRouter.internal.githubPrRerunFailedChecks', { url });
+                    vscode.window.showInformationMessage('Requested re-run of failed PR checks.');
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to re-run PR checks: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'githubPrComment') {
+                try {
+                    const url = String(message.url || '').trim();
+                    const body = String(message.body || '').trim();
+                    if (!url) throw new Error('Missing PR URL.');
+                    if (!body) throw new Error('Missing PR comment body.');
+                    await vscode.commands.executeCommand('intentRouter.internal.githubPrComment', { url, body });
+                    vscode.window.showInformationMessage('PR comment posted.');
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to comment PR: ${error?.message || error}`);
                 }
                 return;
             }

@@ -6,6 +6,7 @@ import { pipelineEventBus } from './eventBus';
 import { generateSecureToken, validateStrictShellArg, sanitizeShellArg, validateSafeRelativePath } from './security';
 import { listPublicCapabilities } from './registry';
 import { Determinism } from './types';
+import { clearRunMemory, isRunMemoryEnabled, queryRunMemory, saveRunMemory } from './runMemoryStore';
 
 export type PipelineFile = {
     name: string;
@@ -21,6 +22,167 @@ export type PipelineFile = {
         [key: string]: any;
     };
 };
+
+export type PipelineRunContext = {
+    source?: 'manual' | 'cron' | 'webhook' | 'watch';
+    triggerStepId?: string;
+    runtimeVariables?: Record<string, string>;
+};
+
+export type PipelineRunResult = {
+    runId: string;
+    status: 'success' | 'failure' | 'cancelled';
+    success: boolean;
+};
+
+type RuntimeSandboxPolicy = {
+    allowNetwork: boolean;
+    allowFileWrite: boolean;
+    timeoutMs: number;
+    maxCommandChars: number;
+    allowedIntents: string[];
+    maxNetworkOps: number;
+    maxFileWrites: number;
+};
+
+type RuntimeSandboxUsage = {
+    networkOps: number;
+    fileWrites: number;
+};
+
+function parseCsvList(raw: any): string[] {
+    if (Array.isArray(raw)) {
+        return raw.map((entry) => String(entry || '').trim()).filter(Boolean);
+    }
+    return String(raw || '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+
+function toPositiveInt(raw: any, fallback: number): number {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return Math.floor(parsed);
+}
+
+function toBool(raw: any, fallback: boolean): boolean {
+    if (typeof raw === 'boolean') return raw;
+    const normalized = String(raw || '').trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+    return fallback;
+}
+
+function parseBoolean(raw: any, fallback: boolean): boolean {
+    if (typeof raw === 'boolean') return raw;
+    const normalized = String(raw || '').trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+    return fallback;
+}
+
+function pickVariableSubset(source: Map<string, string>, variableKeys: string[]): Record<string, string> {
+    if (!Array.isArray(variableKeys) || variableKeys.length === 0) {
+        return Object.fromEntries(source.entries());
+    }
+    const result: Record<string, string> = {};
+    for (const key of variableKeys) {
+        if (!source.has(key)) continue;
+        result[key] = String(source.get(key) || '');
+    }
+    return result;
+}
+
+function normalizeValueForMemory(value: any): any {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+    if (Array.isArray(value)) {
+        return value.map((entry) => normalizeValueForMemory(entry));
+    }
+    if (typeof value === 'object') {
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch {
+            return String(value);
+        }
+    }
+    return String(value);
+}
+
+export function detectIntentUsesNetwork(intent: Intent): boolean {
+    const intentName = String(intent.intent || '').trim().toLowerCase();
+    if (
+        intentName.startsWith('http.') ||
+        intentName.startsWith('ai.') ||
+        intentName.startsWith('github.') ||
+        intentName.startsWith('docker.')
+    ) {
+        return true;
+    }
+    if (intentName !== 'terminal.run') return false;
+    const command = String(intent.payload?.command || '').toLowerCase();
+    return /(curl|wget|gh\s|git\s+(clone|pull|push|fetch)|npm\s+(install|i)\b|pnpm\s+add|yarn\s+add|pip\s+install|docker\s+(pull|push))/i.test(command);
+}
+
+export function detectIntentWritesFiles(intent: Intent): boolean {
+    const intentName = String(intent.intent || '').trim().toLowerCase();
+    if (intentName === 'vscode.reviewdiff') return true;
+    if (intentName.startsWith('git.') || intentName.startsWith('docker.')) return true;
+    if (intentName !== 'terminal.run') return false;
+    const command = String(intent.payload?.command || '').toLowerCase();
+    return /(>>?|set-content|add-content|out-file|\brm\b|\bdel\b|\bmv\b|\bmove-item\b|\bcp\b|\bcopy-item\b|\bmkdir\b|\bnew-item\b|\bni\b|\btouch\b)/i.test(command);
+}
+
+function resolveRuntimeSandboxPolicy(step: Intent): RuntimeSandboxPolicy {
+    const config = vscode.workspace.getConfiguration('intentRouter');
+    const stepSandbox = step.payload?.__sandbox || step.payload?.sandbox || {};
+    return {
+        allowNetwork: toBool(stepSandbox?.allowNetwork, config.get<boolean>('runtime.sandbox.allowNetwork', true)),
+        allowFileWrite: toBool(stepSandbox?.allowFileWrite, config.get<boolean>('runtime.sandbox.allowFileWrite', true)),
+        timeoutMs: toPositiveInt(stepSandbox?.timeoutMs, config.get<number>('runtime.sandbox.timeoutMs', 120000)),
+        maxCommandChars: toPositiveInt(stepSandbox?.maxCommandChars, config.get<number>('runtime.sandbox.maxCommandChars', 12000)),
+        allowedIntents: parseCsvList(stepSandbox?.allowedIntents ?? config.get<string[]>('runtime.sandbox.allowedIntents', []))
+            .map((entry) => entry.toLowerCase()),
+        maxNetworkOps: toPositiveInt(stepSandbox?.maxNetworkOps, config.get<number>('runtime.sandbox.maxNetworkOps', 40)),
+        maxFileWrites: toPositiveInt(stepSandbox?.maxFileWrites, config.get<number>('runtime.sandbox.maxFileWrites', 40))
+    };
+}
+
+function checkRuntimeSandbox(step: Intent, policy: RuntimeSandboxPolicy, usage: RuntimeSandboxUsage): string | null {
+    const intentName = String(step.intent || '').trim().toLowerCase();
+    if (policy.allowedIntents.length > 0) {
+        const allowed = policy.allowedIntents.some((prefix) => intentName === prefix || intentName.startsWith(`${prefix}.`));
+        if (!allowed) {
+            return `Intent blocked by allowlist: ${intentName}`;
+        }
+    }
+    if (intentName === 'terminal.run') {
+        const command = String(step.payload?.command || '');
+        if (command.length > policy.maxCommandChars) {
+            return `Terminal command exceeds sandbox maxCommandChars (${policy.maxCommandChars}).`;
+        }
+    }
+    const usesNetwork = detectIntentUsesNetwork(step);
+    if (usesNetwork) {
+        if (!policy.allowNetwork) {
+            return `Network access blocked by sandbox for intent ${intentName}.`;
+        }
+        if (usage.networkOps >= policy.maxNetworkOps) {
+            return `Network quota exceeded (${policy.maxNetworkOps}).`;
+        }
+    }
+    const writesFiles = detectIntentWritesFiles(step);
+    if (writesFiles) {
+        if (!policy.allowFileWrite) {
+            return `File-write access blocked by sandbox for intent ${intentName}.`;
+        }
+        if (usage.fileWrites >= policy.maxFileWrites) {
+            return `File-write quota exceeded (${policy.maxFileWrites}).`;
+        }
+    }
+    return null;
+}
 
 let currentRunId: string | null = null;
 let isCancelled = false;
@@ -91,18 +253,18 @@ export function resumeCurrentPipeline() {
     }
 }
 
-export async function runPipelineFromActiveEditor(dryRun: boolean): Promise<void> {
+export async function runPipelineFromActiveEditor(dryRun: boolean): Promise<PipelineRunResult | undefined> {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
     const pipeline = parsePipeline(editor.document.getText());
     if (!pipeline) return;
-    await runPipelineFromData(pipeline, dryRun);
+    return await runPipelineFromData(pipeline, dryRun);
 }
 
-export async function runPipelineFromUri(uri: vscode.Uri, dryRun: boolean): Promise<void> {
+export async function runPipelineFromUri(uri: vscode.Uri, dryRun: boolean): Promise<PipelineRunResult | undefined> {
     const pipeline = await readPipelineFromUri(uri);
     if (!pipeline) return;
-    await runPipelineFromData(pipeline, dryRun);
+    return await runPipelineFromData(pipeline, dryRun);
 }
 
 export async function readPipelineFromUri(uri: vscode.Uri): Promise<PipelineFile | undefined> {
@@ -126,8 +288,13 @@ export async function ensurePipelineFolder(): Promise<vscode.Uri | undefined> {
     return folderUri;
 }
 
-export async function runPipelineFromData(pipeline: PipelineFile, dryRun: boolean): Promise<void> {
-    await runPipeline(pipeline, dryRun);
+export async function runPipelineFromData(
+    pipeline: PipelineFile,
+    dryRun: boolean,
+    startStepId?: string,
+    context?: PipelineRunContext
+): Promise<PipelineRunResult> {
+    return await runPipeline(pipeline, dryRun, startStepId, context);
 }
 
 function seedVariableCacheFromEnvironment(store: Map<string, string>): void {
@@ -272,11 +439,31 @@ function matchesSwitchRoute(currentValue: string, route: any): boolean {
     }
 }
 
-async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<void> {
+function seedVariableCacheFromRuntimeContext(store: Map<string, string>, context?: PipelineRunContext): void {
+    if (!context?.runtimeVariables || typeof context.runtimeVariables !== 'object') {
+        return;
+    }
+    for (const [key, value] of Object.entries(context.runtimeVariables)) {
+        const normalizedKey = String(key || '').trim();
+        if (!normalizedKey) continue;
+        store.set(normalizedKey, String(value ?? ''));
+    }
+}
+
+async function runPipeline(
+    pipeline: PipelineFile,
+    dryRun: boolean,
+    startStepId?: string,
+    context?: PipelineRunContext
+): Promise<PipelineRunResult> {
     isCancelled = false;
     isPaused = false;
+    let runStatus: 'success' | 'failure' | 'cancelled' = 'success';
     const variableCache = new Map<string, string>();
     seedVariableCacheFromEnvironment(variableCache);
+    seedVariableCacheFromRuntimeContext(variableCache, context);
+    const sandboxUsage: RuntimeSandboxUsage = { networkOps: 0, fileWrites: 0 };
+    const stepResultCache = new Map<string, { intent: string; success: boolean; timestamp: number; output: any }>();
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
     let currentCwd = resolveInitialCwd();
     const trustedRoot = workspaceRoot ?? path.resolve('.');
@@ -287,12 +474,23 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
     try {
         let currentIndex = 0;
+        const normalizedStartStepId = String(startStepId || '').trim();
+        if (normalizedStartStepId) {
+            const startIndex = pipeline.steps.findIndex((entry) => String(entry?.id || '').trim() === normalizedStartStepId);
+            if (startIndex === -1) {
+                throw new Error(`startStepId not found in pipeline: ${normalizedStartStepId}`);
+            }
+            currentIndex = startIndex;
+        }
         const blockedStepIds = new Set<string>();
         const determinismByCapability = buildDeterminismMap();
 
         while (currentIndex < pipeline.steps.length) {
             while (isPaused && !isCancelled) await new Promise(r => setTimeout(r, 100));
-            if (isCancelled) break;
+            if (isCancelled) {
+                runStatus = 'cancelled';
+                break;
+            }
 
             const step = pipeline.steps[currentIndex];
             const stepId = String(step?.id || '').trim();
@@ -301,7 +499,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
             // SYSTEM.SETCWD
             if (step.intent === 'system.setCwd') {
-                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, index: currentIndex, stepId: step.id });
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, intent: step.intent, index: currentIndex, stepId: step.id });
                 const rawPath = (step.payload as any)?.path;
                 if (rawPath) {
                     currentCwd = normalizeCwd(rawPath, currentCwd);
@@ -312,7 +510,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
             // SYSTEM.FORM
             if (step.intent === 'system.form') {
-                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, index: currentIndex, stepId: step.id });
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, intent: step.intent, index: currentIndex, stepId: step.id });
                 const fields = Array.isArray(step.payload?.fields) ? (step.payload.fields as any[]) : [];
                 for (const raw of fields) {
                     const key = String(raw?.key || '').trim();
@@ -382,6 +580,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     variableCache.set(key, normalized || defaultValue);
                 }
                 if (isCancelled) {
+                    runStatus = 'cancelled';
                     pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: false, index: currentIndex, stepId: step.id });
                     break;
                 }
@@ -391,7 +590,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
             // SYSTEM.SWITCH
             if (step.intent === 'system.switch') {
-                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, index: currentIndex, stepId: step.id });
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, intent: step.intent, index: currentIndex, stepId: step.id });
                 const varKey = String(step.payload?.variableKey || '').trim();
                 const currentValue = variableCache.get(varKey) || '';
                 const routes = Array.isArray(step.payload?.routes) ? step.payload.routes : [];
@@ -421,7 +620,7 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
 
             // SYSTEM.SETVAR
             if (step.intent === 'system.setVar') {
-                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, index: currentIndex, stepId: step.id });
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, intent: step.intent, index: currentIndex, stepId: step.id });
                 const variableName = String((step.payload as any)?.name || '').trim();
                 if (variableName) {
                     const variableValue = (step.payload as any)?.value;
@@ -432,14 +631,334 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 continue;
             }
 
+            // SYSTEM.TRIGGER.*
+            if (
+                step.intent === 'system.trigger.cron' ||
+                step.intent === 'system.trigger.webhook' ||
+                step.intent === 'system.trigger.watch'
+            ) {
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, intent: step.intent, index: currentIndex, stepId: step.id });
+                const triggerKind = step.intent.replace('system.trigger.', '');
+                variableCache.set('trigger_step_id', String(step.id || ''));
+                if (context?.source) {
+                    variableCache.set('trigger_source', context.source);
+                } else {
+                    variableCache.set('trigger_source', 'manual');
+                }
+                variableCache.set('trigger_kind', triggerKind);
+                pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
+                currentIndex++;
+                continue;
+            }
+
+            // MEMORY.SAVE
+            if (step.intent === 'memory.save') {
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, intent: step.intent, index: currentIndex, stepId: step.id });
+                try {
+                    const payload = resolveTemplateVariables(step.payload, variableCache);
+                    if (!isRunMemoryEnabled()) {
+                        pipelineEventBus.emit({
+                            type: 'stepLog',
+                            runId,
+                            intentId: localIntentId,
+                            stepId: step.id,
+                            text: '[memory] disabled by intentRouter.memory.enabled=false',
+                            stream: 'stderr'
+                        } as any);
+                        pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
+                        currentIndex++;
+                        continue;
+                    }
+
+                    const sessionId = String(payload?.sessionId || 'default').trim() || 'default';
+                    const key = String(payload?.key || '').trim() || String(step.id || 'entry');
+                    const scopeRaw = String(payload?.scope || 'variables').trim().toLowerCase();
+                    const scope = scopeRaw === 'full_run' || scopeRaw === 'run_segment' || scopeRaw === 'variables' || scopeRaw === 'raw'
+                        ? scopeRaw
+                        : 'variables';
+                    const tags = parseCsvList(payload?.tags);
+                    let data: any = {};
+
+                    if (scope === 'full_run') {
+                        data = {
+                            variables: Object.fromEntries(variableCache.entries()),
+                            stepResults: Array.from(stepResultCache.entries()).map(([stepId, entry]) => ({ stepId, ...entry }))
+                        };
+                    } else if (scope === 'run_segment') {
+                        const stepIds = parseCsvList(payload?.stepIds);
+                        const selected = stepIds.length > 0 ? stepIds : Array.from(stepResultCache.keys());
+                        data = {
+                            stepResults: selected
+                                .filter((stepId) => stepResultCache.has(stepId))
+                                .map((stepId) => ({ stepId, ...(stepResultCache.get(stepId) as any) })),
+                            variables: pickVariableSubset(variableCache, parseCsvList(payload?.variableKeys))
+                        };
+                    } else if (scope === 'variables') {
+                        const variableKeys = parseCsvList(payload?.variableKeys);
+                        data = { variables: pickVariableSubset(variableCache, variableKeys) };
+                    } else {
+                        data = normalizeValueForMemory(payload?.data ?? payload?.value ?? '');
+                    }
+
+                    const saved = saveRunMemory({
+                        sessionId,
+                        key,
+                        tags,
+                        scope: scope as any,
+                        runId,
+                        stepId: String(step.id || '').trim() || undefined,
+                        data
+                    });
+
+                    const outputVar = String(payload?.outputVar || '').trim();
+                    if (outputVar) {
+                        variableCache.set(outputVar, saved.id);
+                    }
+                    pipelineEventBus.emit({
+                        type: 'stepLog',
+                        runId,
+                        intentId: localIntentId,
+                        stepId: step.id,
+                        text: `[memory] saved entry ${saved.id} (${scope})`,
+                        stream: 'stdout'
+                    } as any);
+                    pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
+                    currentIndex++;
+                    continue;
+                } catch (error: any) {
+                    pipelineEventBus.emit({
+                        type: 'stepLog',
+                        runId,
+                        intentId: localIntentId,
+                        stepId: step.id,
+                        text: `[memory] save failed: ${String(error?.message || error)}`,
+                        stream: 'stderr'
+                    } as any);
+                    pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: false, index: currentIndex, stepId: step.id });
+                    if (step.onFailure) {
+                        const nextIdx = pipeline.steps.findIndex(s => s.id === step.onFailure);
+                        if (nextIdx !== -1) {
+                            currentIndex = nextIdx;
+                            continue;
+                        }
+                    }
+                    runStatus = 'failure';
+                    break;
+                }
+            }
+
+            // MEMORY.RECALL
+            if (step.intent === 'memory.recall') {
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, intent: step.intent, index: currentIndex, stepId: step.id });
+                try {
+                    const payload = resolveTemplateVariables(step.payload, variableCache);
+                    if (!isRunMemoryEnabled()) {
+                        pipelineEventBus.emit({
+                            type: 'stepLog',
+                            runId,
+                            intentId: localIntentId,
+                            stepId: step.id,
+                            text: '[memory] disabled by intentRouter.memory.enabled=false',
+                            stream: 'stderr'
+                        } as any);
+                        pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
+                        currentIndex++;
+                        continue;
+                    }
+
+                    const sessionId = String(payload?.sessionId || '').trim();
+                    const key = String(payload?.key || '').trim();
+                    const tag = String(payload?.tag || '').trim();
+                    const recallRunId = String(payload?.runId || '').trim();
+                    const limit = toPositiveInt(payload?.limit, 5);
+                    const mode = String(payload?.mode || 'latest').trim().toLowerCase() === 'all' ? 'all' : 'latest';
+                    const records = queryRunMemory({
+                        sessionId: sessionId || undefined,
+                        key: key || undefined,
+                        tag: tag || undefined,
+                        runId: recallRunId || undefined,
+                        limit: mode === 'all' ? Math.max(limit, 1) : 1,
+                        newestFirst: true
+                    });
+                    const selected = mode === 'all' ? records : records.slice(0, 1);
+
+                    const outputVar = String(payload?.outputVar || '').trim();
+                    if (outputVar) {
+                        variableCache.set(outputVar, JSON.stringify(mode === 'all' ? selected : (selected[0] || null)));
+                    }
+                    const outputVarCount = String(payload?.outputVarCount || '').trim();
+                    if (outputVarCount) {
+                        variableCache.set(outputVarCount, String(selected.length));
+                    }
+
+                    const injectVars = parseBoolean(payload?.injectVars, false);
+                    const injectPrefix = String(payload?.injectPrefix || '').trim();
+                    if (injectVars) {
+                        for (const record of selected) {
+                            const variableBag = record?.data?.variables;
+                            if (!variableBag || typeof variableBag !== 'object') continue;
+                            for (const [varName, value] of Object.entries(variableBag)) {
+                                const targetKey = `${injectPrefix}${String(varName || '').trim()}`;
+                                if (!targetKey.trim()) continue;
+                                variableCache.set(targetKey, String(value ?? ''));
+                            }
+                        }
+                    }
+
+                    const requireMatch = parseBoolean(payload?.requireMatch, false);
+                    if (requireMatch && selected.length === 0) {
+                        throw new Error('No memory record matched the recall filters.');
+                    }
+
+                    pipelineEventBus.emit({
+                        type: 'stepLog',
+                        runId,
+                        intentId: localIntentId,
+                        stepId: step.id,
+                        text: `[memory] recalled ${selected.length} record(s)`,
+                        stream: 'stdout'
+                    } as any);
+                    pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
+                    currentIndex++;
+                    continue;
+                } catch (error: any) {
+                    pipelineEventBus.emit({
+                        type: 'stepLog',
+                        runId,
+                        intentId: localIntentId,
+                        stepId: step.id,
+                        text: `[memory] recall failed: ${String(error?.message || error)}`,
+                        stream: 'stderr'
+                    } as any);
+                    pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: false, index: currentIndex, stepId: step.id });
+                    if (step.onFailure) {
+                        const nextIdx = pipeline.steps.findIndex(s => s.id === step.onFailure);
+                        if (nextIdx !== -1) {
+                            currentIndex = nextIdx;
+                            continue;
+                        }
+                    }
+                    runStatus = 'failure';
+                    break;
+                }
+            }
+
+            // MEMORY.CLEAR
+            if (step.intent === 'memory.clear') {
+                pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, intent: step.intent, index: currentIndex, stepId: step.id });
+                try {
+                    const payload = resolveTemplateVariables(step.payload, variableCache);
+                    if (!isRunMemoryEnabled()) {
+                        pipelineEventBus.emit({
+                            type: 'stepLog',
+                            runId,
+                            intentId: localIntentId,
+                            stepId: step.id,
+                            text: '[memory] disabled by intentRouter.memory.enabled=false',
+                            stream: 'stderr'
+                        } as any);
+                        pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
+                        currentIndex++;
+                        continue;
+                    }
+
+                    const removed = clearRunMemory({
+                        sessionId: String(payload?.sessionId || '').trim() || undefined,
+                        key: String(payload?.key || '').trim() || undefined,
+                        tag: String(payload?.tag || '').trim() || undefined,
+                        runId: String(payload?.runId || '').trim() || undefined,
+                        keepLast: Number(payload?.keepLast || 0)
+                    });
+                    const outputVarRemoved = String(payload?.outputVarRemoved || '').trim();
+                    const outputVarRemaining = String(payload?.outputVarRemaining || '').trim();
+                    if (outputVarRemoved) variableCache.set(outputVarRemoved, String(removed.removed));
+                    if (outputVarRemaining) variableCache.set(outputVarRemaining, String(removed.remaining));
+
+                    pipelineEventBus.emit({
+                        type: 'stepLog',
+                        runId,
+                        intentId: localIntentId,
+                        stepId: step.id,
+                        text: `[memory] cleared ${removed.removed} record(s), remaining ${removed.remaining}`,
+                        stream: 'stdout'
+                    } as any);
+                    pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
+                    currentIndex++;
+                    continue;
+                } catch (error: any) {
+                    pipelineEventBus.emit({
+                        type: 'stepLog',
+                        runId,
+                        intentId: localIntentId,
+                        stepId: step.id,
+                        text: `[memory] clear failed: ${String(error?.message || error)}`,
+                        stream: 'stderr'
+                    } as any);
+                    pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: false, index: currentIndex, stepId: step.id });
+                    if (step.onFailure) {
+                        const nextIdx = pipeline.steps.findIndex(s => s.id === step.onFailure);
+                        if (nextIdx !== -1) {
+                            currentIndex = nextIdx;
+                            continue;
+                        }
+                    }
+                    runStatus = 'failure';
+                    break;
+                }
+            }
+
             // COMPILE AND EXECUTE
             const compiledStep = await compileStep(step, variableCache, currentCwd, trustedRoot);
             const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
-            pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: compiledStep.description, index: currentIndex, stepId: compiledStep.id });
+            pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: compiledStep.description, intent: compiledStep.intent, index: currentIndex, stepId: compiledStep.id });
 
             compiledStep.meta = { ...(compiledStep.meta || {}), traceId: intentId, runId, stepId: compiledStep.id };
+            const sandboxPolicy = resolveRuntimeSandboxPolicy(compiledStep);
+            const sandboxError = checkRuntimeSandbox(compiledStep, sandboxPolicy, sandboxUsage);
+            if (sandboxError) {
+                pipelineEventBus.emit({
+                    type: 'stepLog',
+                    runId,
+                    intentId,
+                    stepId: compiledStep.id,
+                    text: `[sandbox] ${sandboxError}`,
+                    stream: 'stderr'
+                } as any);
+                pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: false, index: currentIndex, stepId: compiledStep.id });
+                if (step.onFailure) {
+                    const nextIdx = pipeline.steps.findIndex(s => s.id === step.onFailure);
+                    if (nextIdx !== -1) {
+                        currentIndex = nextIdx;
+                        continue;
+                    }
+                }
+                runStatus = 'failure';
+                break;
+            }
 
-            const result = await routeIntent(compiledStep, variableCache);
+            if (detectIntentUsesNetwork(compiledStep)) sandboxUsage.networkOps += 1;
+            if (detectIntentWritesFiles(compiledStep)) sandboxUsage.fileWrites += 1;
+
+            const timedResult = await Promise.race([
+                routeIntent(compiledStep, variableCache),
+                new Promise<any>((_, reject) => {
+                    const handle = setTimeout(() => {
+                        clearTimeout(handle);
+                        reject(new Error(`Step timed out after ${sandboxPolicy.timeoutMs}ms.`));
+                    }, sandboxPolicy.timeoutMs);
+                })
+            ]).catch((error) => {
+                pipelineEventBus.emit({
+                    type: 'stepLog',
+                    runId,
+                    intentId,
+                    stepId: compiledStep.id,
+                    text: `[sandbox] ${String(error?.message || error)}`,
+                    stream: 'stderr'
+                } as any);
+                return false;
+            });
+            const result = timedResult;
             const ok = typeof result === 'boolean' ? result : (result !== undefined && result !== null);
 
             // VARIABLE CAPTURE (Multi-value support)
@@ -454,6 +973,14 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                 const outVar = compiledStep.payload?.outputVar;
                 if (outVar) variableCache.set(outVar, String(result));
             }
+            if (compiledStep.id) {
+                stepResultCache.set(String(compiledStep.id), {
+                    intent: String(compiledStep.intent || ''),
+                    success: ok,
+                    timestamp: Date.now(),
+                    output: normalizeValueForMemory(result)
+                });
+            }
 
             pipelineEventBus.emit({ type: 'stepEnd', runId, intentId, timestamp: Date.now(), success: ok, index: currentIndex, stepId: compiledStep.id });
             
@@ -464,12 +991,25 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
                     const nextIdx = pipeline.steps.findIndex(s => s.id === step.onFailure);
                     if (nextIdx !== -1) { currentIndex = nextIdx; continue; }
                 }
+                runStatus = 'failure';
                 break;
             }
         }
-        pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: !isCancelled, status: isCancelled ? 'cancelled' : 'success' });
+        if (isCancelled && runStatus !== 'failure') {
+            runStatus = 'cancelled';
+        }
+        pipelineEventBus.emit({
+            type: 'pipelineEnd',
+            runId,
+            timestamp: Date.now(),
+            success: runStatus === 'success',
+            status: runStatus
+        });
+        return { runId, success: runStatus === 'success', status: runStatus };
     } catch (e) {
+        runStatus = 'failure';
         pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: false, status: 'failure' });
+        return { runId, success: false, status: 'failure' };
     } finally {
         currentRunId = null;
     }

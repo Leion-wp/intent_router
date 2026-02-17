@@ -113,33 +113,21 @@ const ActionNode = ({ data, id }: NodeProps) => {
   };
 
   const theme = PROVIDER_THEMES[provider] || PROVIDER_THEMES.default;
+  const themeColor = theme.color;
   const isRunning = status === 'running';
-  const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || theme.color;
+  const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || themeColor;
 
   const handleStyle = {
-    width: '10px',
-    height: '10px',
-    border: '2px solid rgba(30, 30, 35, 0.85)',
-    boxShadow: '0 0 5px rgba(0,0,0,0.4)',
-    zIndex: 10
+    width: '12px',
+    height: '12px',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 0 8px rgba(0,0,0,0.5)',
+    zIndex: 10,
+    transition: 'all 0.2s ease'
   };
 
   return (
-    <div style={{
-      position: 'relative',
-      padding: '0px',
-      borderRadius: '12px',
-      background: 'rgba(30, 30, 35, 0.85)',
-      backdropFilter: 'blur(12px)',
-      border: `1.5px solid ${isRunning ? theme.color : 'rgba(255, 255, 255, 0.15)'}`,
-      boxShadow: isRunning 
-        ? `0 0 20px ${theme.color}66` 
-        : `0 8px 32px rgba(0, 0, 0, 0.45)`,
-      minWidth: '280px',
-      color: '#e0e0e0',
-      fontFamily: 'var(--vscode-font-family)',
-      transition: 'all 0.3s ease'
-    }}>
+    <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '280px' }}>
       {/* Target Handles */}
       {inputHandles.map((inputName, index) => (
         <Handle
@@ -147,31 +135,20 @@ const ActionNode = ({ data, id }: NodeProps) => {
           type="target"
           position={Position.Left}
           id={inputName === 'in' ? 'in' : `in_${inputName}`}
-          style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-5px', background: theme.color }}
+          style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-6px', background: theme.color }}
         />
       ))}
       
       {/* Source Handles */}
-      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '30%', right: '-5px', background: '#f44336' }} />
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-5px', background: '#4caf50' }} />
+      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '30%', right: '-6px', background: '#ff4d4d' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-6px', background: '#00ff88' }} />
 
-      <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
+      <div>
         {/* Header */}
-        <div style={{ 
-          padding: '10px 12px', 
-          background: `${theme.color}22`, 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'space-between',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, fontWeight: 'bold' }}>
-            <div style={{ 
-              width: '24px', height: '24px', borderRadius: '50%', 
-              background: theme.color,
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
-              <span className={`codicon codicon-${theme.icon}`} style={{ color: '#fff', fontSize: '14px' }}></span>
+        <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}15 0%, transparent 100%)` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+            <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${theme.color} 0%, ${theme.color}cc 100%)` }}>
+              <span className={`codicon codicon-${theme.icon}`} style={{ color: '#fff', fontSize: '16px' }}></span>
             </div>
             {editingLabel ? (
               <input
@@ -181,10 +158,10 @@ const ActionNode = ({ data, id }: NodeProps) => {
                 onChange={(e) => { setLabel(e.target.value); updateNodeData(id, { label: e.target.value }); }}
                 onBlur={() => setEditingLabel(false)}
                 onKeyDown={(e) => { if (e.key === 'Enter') setEditingLabel(false); }}
-                style={{ background: 'rgba(0,0,0,0.3)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '4px', padding: '2px 6px', fontSize: '13px' }}
+                style={{ width: '100%' }}
               />
             ) : (
-              <span onClick={() => setEditingLabel(true)} style={{ fontSize: '12px', letterSpacing: '0.4px', cursor: 'pointer' }}>
+              <span onClick={() => setEditingLabel(true)} className="glass-node-label">
                 {label || `${provider.toUpperCase()} ACTION`}
               </span>
             )}
@@ -192,16 +169,27 @@ const ActionNode = ({ data, id }: NodeProps) => {
           <button
             className="nodrag"
             onClick={() => updateNodeData(id, { collapsed: !collapsed })}
-            style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}
+            style={{ 
+              background: 'rgba(255,255,255,0.05)', 
+              border: 'none', 
+              color: '#aaa', 
+              cursor: 'pointer',
+              borderRadius: '6px',
+              width: '24px',
+              height: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
           >
-            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`}></span>
+            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`} style={{ fontSize: '12px' }}></span>
           </button>
         </div>
 
         {!collapsed && (
-          <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ marginBottom: '4px' }}>
-                <label style={{ fontSize: '9px', fontWeight: 600, color: '#666', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Capability</label>
+          <div className="glass-node-body">
+            <div className="glass-node-input-group">
+                <label className="glass-node-input-label">Capability</label>
                 <select
                     className="nodrag"
                     value={selectedCapConfig?.capability || capability}
@@ -210,24 +198,12 @@ const ActionNode = ({ data, id }: NodeProps) => {
                       setCapability(nextCapability);
                       updateNodeData(id, { capability: nextCapability });
                     }}
-                    style={{
-                      width: '100%',
-                      background: 'var(--vscode-dropdown-background)',
-                      color: 'var(--vscode-dropdown-foreground)',
-                      border: '1px solid var(--vscode-dropdown-border)',
-                      padding: '4px',
-                      borderRadius: '4px',
-                      fontSize: '11px'
-                    }}
                 >
                     {currentCaps.map((c: any) => (
                         <option
                           key={c.capability}
                           value={c.capability}
-                          style={{
-                            background: 'var(--vscode-dropdown-background)',
-                            color: 'var(--vscode-dropdown-foreground)'
-                          }}
+                          style={{ background: '#1a1a20' }}
                         >
                           {c.capability.split('.').pop()}
                         </option>
@@ -241,10 +217,22 @@ const ActionNode = ({ data, id }: NodeProps) => {
       </div>
 
       {!collapsed && logs.length > 0 && (
-        <div className="nodrag" style={{ padding: '0 10px 10px 10px' }}>
+        <div className="nodrag" style={{ padding: '0 16px 16px 16px' }}>
             <div
                 onClick={() => setIsConsoleOpen(!isConsoleOpen)}
-                style={{ fontSize: '10px', padding: '4px 8px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', background: 'rgba(0,0,0,0.2)', color: '#777', borderRadius: '4px' }}
+                style={{ 
+                  fontSize: '10px', 
+                  fontWeight: 600,
+                  padding: '6px 10px', 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  background: 'rgba(255,255,255,0.03)', 
+                  color: 'rgba(255,255,255,0.5)', 
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  transition: 'all 0.2s ease'
+                }}
             >
                 <span>LOGS ({logs.length})</span>
                 <span className={`codicon codicon-chevron-${isConsoleOpen ? 'up' : 'down'}`} style={{ fontSize: '10px' }}></span>
@@ -252,10 +240,23 @@ const ActionNode = ({ data, id }: NodeProps) => {
             {isConsoleOpen && (
                 <div
                     ref={logsRef}
-                    style={{ maxHeight: '120px', overflowY: 'auto', background: '#050505', color: '#bbb', padding: '8px', fontSize: '10px', fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '4px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}
+                    style={{ 
+                      maxHeight: '140px', 
+                      overflowY: 'auto', 
+                      background: 'rgba(0,0,0,0.3)', 
+                      color: 'rgba(255,255,255,0.7)', 
+                      padding: '10px', 
+                      fontSize: '11px', 
+                      fontFamily: 'monospace', 
+                      whiteSpace: 'pre-wrap', 
+                      marginTop: '8px', 
+                      borderRadius: '8px', 
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      lineHeight: '1.4'
+                    }}
                 >
                     {logs.map((log: any, i: number) => (
-                        <div key={i} style={{ color: log.stream === 'stderr' ? '#f44336' : 'inherit', marginBottom: '2px' }}>{log.text}</div>
+                        <div key={i} style={{ color: log.stream === 'stderr' ? '#ff4d4d' : 'inherit', marginBottom: '4px' }}>{log.text}</div>
                     ))}
                 </div>
             )}

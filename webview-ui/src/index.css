@@ -1,80 +1,97 @@
+:root {
+  --ir-glass-bg: rgba(20, 20, 25, 0.7);
+  --ir-glass-bg-hover: rgba(30, 30, 40, 0.8);
+  --ir-glass-border: rgba(255, 255, 255, 0.1);
+  --ir-glass-border-bright: rgba(255, 255, 255, 0.2);
+  --ir-glass-blur: blur(12px);
+  --ir-glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  
+  --ir-accent-primary: #00a2ff;
+  --ir-accent-success: #00ff88;
+  --ir-accent-warning: #ffcc00;
+  --ir-accent-error: #ff4d4d;
+  
+  --ir-run-idle: #717171;
+  --ir-run-running: var(--ir-accent-primary);
+  --ir-run-success: var(--ir-accent-success);
+  --ir-run-error: var(--ir-accent-error);
+  --ir-run-foreground: #ffffff;
+
+  --ir-add-bg: var(--ir-accent-primary);
+  --ir-add-fg: #ffffff;
+  --ir-add-border: rgba(255, 255, 255, 0.1);
+
+  --ir-node-bg: var(--ir-glass-bg);
+  --ir-node-border: var(--ir-glass-border);
+  --ir-node-text: #e0e0e0;
+
+  --ir-status-running: var(--ir-accent-warning);
+  --ir-status-success: var(--ir-accent-success);
+  --ir-status-error: var(--ir-accent-error);
+
+  --ir-edge-idle: rgba(255, 255, 255, 0.3);
+  --ir-edge-running: var(--ir-accent-primary);
+  --ir-edge-success: var(--ir-accent-success);
+  --ir-edge-error: var(--ir-accent-error);
+
+  --ir-minimap-bg: rgba(0, 0, 0, 0.2);
+  --ir-minimap-node: rgba(255, 255, 255, 0.2);
+  --ir-minimap-mask: rgba(0, 0, 0, 0.5);
+  --ir-minimap-viewport: rgba(255, 255, 255, 0.1);
+
+  --ir-controls-bg: var(--ir-glass-bg);
+  --ir-controls-btn-bg: transparent;
+  --ir-controls-btn-fg: #ffffff;
+  --ir-controls-btn-hover-bg: rgba(255, 255, 255, 0.1);
+  --ir-controls-btn-hover-fg: #ffffff;
+}
+
 html, body, #root {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
-}
-
-:root {
-  --ir-run-idle: #717171;
-  --ir-run-running: #007acc;
-  --ir-run-success: #4caf50;
-  --ir-run-error: #f44336;
-  --ir-run-foreground: #ffffff;
-
-  --ir-add-bg: #0e639c;
-  --ir-add-fg: #ffffff;
-  --ir-add-border: #3c3c3c;
-
-  --ir-node-bg: var(--vscode-editor-background);
-  --ir-node-border: var(--vscode-editorWidget-border);
-  --ir-node-text: var(--vscode-editor-foreground);
-
-  --ir-status-running: #f2c94c;
-  --ir-status-success: #4caf50;
-  --ir-status-error: #f44336;
-
-  --ir-edge-idle: var(--vscode-editor-foreground);
-  --ir-edge-running: #007acc;
-  --ir-edge-success: #4caf50;
-  --ir-edge-error: #f44336;
-
-  --ir-minimap-bg: var(--vscode-editor-background);
-  --ir-minimap-node: var(--vscode-editor-foreground);
-  --ir-minimap-mask: rgba(0, 0, 0, 0.35);
-  --ir-minimap-viewport: var(--vscode-editorWidget-border);
-
-  --ir-controls-bg: var(--vscode-editor-background);
-  --ir-controls-btn-bg: var(--vscode-button-secondaryBackground);
-  --ir-controls-btn-fg: var(--vscode-button-secondaryForeground);
-  --ir-controls-btn-hover-bg: var(--vscode-list-hoverBackground);
-  --ir-controls-btn-hover-fg: var(--vscode-list-hoverForeground);
+  background-color: #0b0b0e;
+  color: #e0e0e0;
+  overflow: hidden;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 .dndflow {
   width: 100%;
   height: 100%;
   position: relative;
+  background: radial-gradient(circle at 50% 50%, #1a1a24 0%, #0b0b0e 100%);
 }
 
 .react-flow__node {
   color: var(--ir-node-text);
+  border-radius: 12px;
 }
 
 .dndnode {
-  height: 36px;
+  height: 38px;
   display: flex;
   align-items: center;
-  padding: 0 12px;
-  border: 1px solid var(--vscode-dropdown-border);
-  border-radius: 2px;
+  padding: 0 16px;
+  border: 1px solid var(--ir-glass-border);
+  border-radius: 10px;
   cursor: grab;
-  background: var(--vscode-dropdown-background);
-  color: var(--vscode-dropdown-foreground);
-  transition: background 0.1s ease;
-  transition: background 0.1s ease, border-color 0.1s ease;
+  background: var(--ir-glass-bg);
+  backdrop-filter: var(--ir-glass-blur);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   user-select: none;
+  box-shadow: var(--ir-glass-shadow);
 }
 
 .dndnode:hover {
-  background: var(--vscode-list-hoverBackground);
-
-  color: var(--vscode-list-hoverForeground);
-}
-
-.dndnode:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: -1px;
+  background: var(--ir-glass-bg-hover);
+  border-color: var(--ir-glass-border-bright);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(0,0,0,0.4);
 }
 
 .sidebar {
@@ -82,211 +99,303 @@ html, body, #root {
   min-width: 0;
   max-width: none;
   flex-shrink: 0;
-  border-right: 1px solid var(--vscode-panel-border);
-  padding: 16px;
-  background: var(--vscode-sideBar-background);
-  color: var(--vscode-sideBar-foreground);
+  border-right: 1px solid var(--ir-glass-border);
+  padding: 20px;
+  background: rgba(15, 15, 20, 0.8);
+  backdrop-filter: blur(20px);
+  color: #fff;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
+  gap: 20px;
+  z-index: 10;
 }
 
 .sidebar-resizer {
-  width: 6px;
+  width: 12px;
+  margin-left: -6px;
+  margin-right: -6px;
   cursor: col-resize;
   background: transparent;
   flex-shrink: 0;
-  border-right: 1px solid transparent;
-}
-
-.sidebar-resizer:hover {
-  background: rgba(0, 122, 204, 0.2);
-  border-right-color: var(--vscode-focusBorder);
-}
-
-.sidebar-resizer:focus-visible {
-  outline: 2px solid var(--vscode-focusBorder);
-  outline-offset: -1px;
-  background: rgba(0, 122, 204, 0.2);
-  border-right-color: var(--vscode-focusBorder);
-}
-
-.sidebar-header {
-  font-size: 11px;
-  font-weight: bold;
-  text-transform: uppercase;
-  opacity: 0.8;
-  letter-spacing: 0.5px;
-}
-
-.sidebar-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.sidebar-footer {
-  margin-top: auto;
-  font-size: 11px;
-  opacity: 0.6;
+  transition: all 0.2s ease;
+  z-index: 100;
   display: flex;
   align-items: center;
-  gap: 6px;
-  border-color: var(--vscode-focusBorder);
+  justify-content: center;
+  position: relative;
+}
+
+.sidebar-resizer::after {
+  content: "";
+  width: 2px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  transition: all 0.2s ease;
+}
+
+.sidebar-resizer:hover::after {
+  background: var(--ir-accent-primary);
+  height: 100%;
+  box-shadow: 0 0 10px var(--ir-accent-primary);
 }
 
 .sidebar-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 0 0 4px 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid transparent;
+  padding: 6px 12px;
+  border-radius: 8px;
   cursor: pointer;
-  font-family: inherit;
   font-size: 11px;
-  font-weight: normal;
+  font-weight: 600;
   text-transform: uppercase;
-  color: inherit;
-  opacity: 0.6;
-  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.8px;
+  transition: all 0.2s ease;
 }
 
 .sidebar-tab:hover {
-  opacity: 1;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .sidebar-tab[aria-selected="true"] {
-  font-weight: bold;
-  opacity: 1;
-  border-bottom-color: var(--vscode-panelTitle-activeBorder);
-}
-
-.sidebar-tab:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: 2px;
-  opacity: 1;
-}
-
-.quick-add-item:hover {
-  background: var(--vscode-list-hoverBackground);
-  color: var(--vscode-list-hoverForeground);
-}
-
-.quick-add-item:focus-visible {
-  outline: 1px solid var(--vscode-focusBorder);
-  outline-offset: -1px;
-  background: var(--vscode-list-hoverBackground);
-  color: var(--vscode-list-hoverForeground);
-}
-
-.history-row:hover,
-.history-row:focus-visible {
-  border: 1px solid var(--vscode-focusBorder) !important;
-  outline: none;
-}
-
-.edge-insert-btn {
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.react-flow__edge:hover .edge-insert-btn {
-  opacity: 1;
+  color: #fff;
+  background: var(--ir-accent-primary);
+  box-shadow: 0 4px 12px rgba(0, 162, 255, 0.3);
 }
 
 .react-flow__minimap {
-  background: var(--ir-minimap-bg);
-  border: 1px solid var(--ir-minimap-viewport);
+  background: rgba(10, 10, 15, 0.8) !important;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
 }
 
 .react-flow__minimap-mask {
-  fill: var(--ir-minimap-mask);
+  fill: rgba(0, 0, 0, 0.6);
 }
 
 .react-flow__minimap-node {
-  fill: var(--ir-minimap-node);
-  stroke: var(--ir-minimap-viewport);
+  fill: var(--ir-accent-primary);
+  stroke: none;
+  rx: 4;
 }
 
 .react-flow__controls {
-  background: var(--ir-controls-bg);
-  border: 1px solid var(--ir-minimap-viewport);
-  border-radius: 4px;
+  background: var(--ir-glass-bg) !important;
+  backdrop-filter: var(--ir-glass-blur);
+  border: 1px solid var(--ir-glass-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--ir-glass-shadow);
+  padding: 4px;
 }
 
 .react-flow__controls-button {
-  background: var(--ir-controls-btn-bg);
-  color: var(--ir-controls-btn-fg);
-  border-bottom: 1px solid var(--ir-minimap-viewport);
+  background: transparent !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 6px !important;
+  margin: 2px 0;
+  transition: background 0.2s ease !important;
 }
 
 .react-flow__controls-button:hover {
-  background: var(--ir-controls-btn-hover-bg);
-  color: var(--ir-controls-btn-hover-fg);
+  background: rgba(255, 255, 255, 0.1) !important;
 }
 
 .react-flow__edge-path {
-  transition: stroke 0.14s ease, stroke-width 0.14s ease;
+  stroke-width: 2.5;
+  transition: stroke 0.3s ease, stroke-width 0.3s ease;
 }
 
-.react-flow__edge.ir-edge-flow .react-flow__edge-path {
-  stroke-dasharray: 5;
-  animation: irEdgeFlow 1s linear infinite;
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--ir-accent-primary);
+  stroke-width: 3.5;
+  filter: drop-shadow(0 0 5px var(--ir-accent-primary));
 }
 
 @keyframes irEdgeFlow {
-  from { stroke-dashoffset: 10; }
+  from { stroke-dashoffset: 20; }
   to { stroke-dashoffset: 0; }
-}
-
-/* Cyber Flow Dots */
-.edge-dot {
-  animation: edgeDot 2s linear infinite;
-}
-
-@keyframes edgeDot {
-  0% { offset-distance: 0%; opacity: 0; }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { offset-distance: 100%; opacity: 0; }
 }
 
 .status-badge {
   font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 10px;
-  border: 1px solid var(--vscode-editorWidget-border);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 
 .status-badge.running {
   background: var(--ir-status-running);
-  color: #111;
-  animation: statusPulse 1.6s ease-in-out infinite;
+  color: #000;
+  animation: statusGlow 2s ease-in-out infinite;
 }
 
-.status-badge.success {
-  background: var(--ir-status-success);
-  color: #fff;
+@keyframes statusGlow {
+  0% { box-shadow: 0 0 0 0 rgba(242, 201, 76, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(242, 201, 76, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(242, 201, 76, 0); }
 }
 
-.status-badge.failure {
-  background: var(--ir-status-error);
-  color: #fff;
+/* Form Elements Styling */
+input[type="text"], 
+input[type="password"], 
+input[type="number"], 
+select, 
+textarea {
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+  padding: 8px 12px !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+  outline: none !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-.status-badge.error {
-  background: var(--ir-status-error);
-  color: #fff;
+input[type="text"]:focus, 
+select:focus, 
+textarea:focus {
+  border-color: var(--ir-accent-primary) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  box-shadow: 0 0 0 3px rgba(0, 162, 255, 0.15) !important;
 }
 
-@keyframes statusPulse {
-  0% { box-shadow: 0 0 0 0 rgba(0, 122, 204, 0.45); }
-  70% { box-shadow: 0 0 0 8px rgba(0, 122, 204, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(0, 122, 204, 0); }
+input[type="checkbox"] {
+  accent-color: var(--ir-accent-primary);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
 }
+
+button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+button:active {
+  transform: scale(0.96);
+}
+
+.nodrag:focus-visible {
+  outline: 2px solid var(--ir-accent-primary) !important;
+  outline-offset: 2px !important;
+}
+
+/* Handle animations */
+.react-flow__handle {
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.4);
+  box-shadow: 0 0 10px currentColor;
+}
+
+.react-flow__handle-connecting {
+  animation: handlePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes handlePulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,255,255,0.4); }
+  70% { transform: scale(1.2); box-shadow: 0 0 0 10px rgba(255,255,255,0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+}
+
+/* Node Utility Classes */
+.glass-node {
+  position: relative;
+  padding: 0px;
+  border-radius: 16px;
+  background: var(--ir-glass-bg);
+  backdrop-filter: var(--ir-glass-blur);
+  border: 1px solid var(--ir-glass-border);
+  box-shadow: var(--ir-glass-shadow);
+  color: #ffffff;
+  font-family: inherit;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.glass-node.running {
+  border-color: var(--ir-accent-primary);
+  box-shadow: 0 0 30px rgba(0, 162, 255, 0.3), 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.glass-node-header {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.glass-node-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.glass-node-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+.glass-node-label {
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.glass-node-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.glass-node-input-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 
 .nodrag button:focus-visible,
 .nodrag input:focus-visible,

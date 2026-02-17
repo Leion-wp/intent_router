@@ -22,6 +22,16 @@ export function filterHistoryRuns(history: any[], query: string): any[] {
   });
 }
 
+export function getResumeFromFailedStepId(run: any): string | null {
+  if (!run || !Array.isArray(run.steps)) return null;
+  for (const step of run.steps) {
+    if (String(step?.status || '').toLowerCase() !== 'failure') continue;
+    const stepId = String(step?.stepId || '').trim();
+    if (stepId) return stepId;
+  }
+  return null;
+}
+
 type ComputeHistoryWindowOptions = {
   total: number;
   scrollTop: number;

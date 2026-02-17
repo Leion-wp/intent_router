@@ -80,26 +80,8 @@ const SwitchNode = ({ data, id }: NodeProps) => {
     }
   }, [getAvailableVars]);
 
-  const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
-
-  const setRoute = (index: number, patch: Partial<SwitchRoute>) => {
-    const next = [...routes];
-    next[index] = { ...next[index], ...patch };
-    setRoutes(next);
-    updateNodeData(id, { routes: next });
-  };
-
-  const addRoute = () => {
-    const next = [...routes, { label: `route ${routes.length + 1}`, condition: 'equals', value: '' }];
-    setRoutes(next);
-    updateNodeData(id, { routes: next });
-  };
-
-  const removeRoute = (index: number) => {
-    const next = routes.filter((_, i) => i !== index);
-    setRoutes(next);
-    updateNodeData(id, { routes: next });
-  };
+  const isRunning = status === 'running';
+  const themeColor = '#4ec9b0';
 
   const handleTop = (i: number, total: number) => {
     if (total <= 1) return '40%';
@@ -110,30 +92,17 @@ const SwitchNode = ({ data, id }: NodeProps) => {
   };
 
   const handleStyle = {
-    width: '10px',
-    height: '10px',
-    border: '2px solid rgba(30, 30, 35, 0.85)',
-    boxShadow: '0 0 5px rgba(0,0,0,0.4)',
-    zIndex: 10
+    width: '12px',
+    height: '12px',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 0 8px rgba(0,0,0,0.5)',
+    zIndex: 10,
+    transition: 'all 0.2s ease'
   };
 
   return (
-    <div
-      style={{
-        position: 'relative',
-        padding: '0px',
-        borderRadius: '12px',
-        background: 'rgba(30, 30, 35, 0.85)',
-        backdropFilter: 'blur(12px)',
-        border: `1.5px solid ${status === 'running' ? '#4ec9b0' : 'rgba(78, 201, 176, 0.4)'}`,
-        boxShadow: status === 'running' ? `0 0 20px rgba(78, 201, 176, 0.4)` : `0 8px 32px rgba(0, 0, 0, 0.45)`,
-        minWidth: '300px',
-        color: '#e0e0e0',
-        fontFamily: 'var(--vscode-font-family)',
-        transition: 'all 0.3s ease'
-      }}
-    >
-      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-5px', background: '#4ec9b0' }} />
+    <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '300px' }}>
+      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-6px', background: themeColor }} />
 
       {/* Dynamic route outputs */}
       {routes.map((r, i) => (
@@ -143,20 +112,21 @@ const SwitchNode = ({ data, id }: NodeProps) => {
             position={Position.Right}
             id={`route_${i}`}
             title={r.label || `route_${i}`}
-            style={{ ...handleStyle, top: handleTop(i, Math.max(routes.length, 1)), right: '-5px', background: 'var(--vscode-button-background)' }}
+            style={{ ...handleStyle, top: handleTop(i, Math.max(routes.length, 1)), right: '-6px', background: 'var(--ir-accent-primary)' }}
           />
           <div
             style={{
               position: 'absolute',
-              right: '10px',
+              right: '12px',
               top: handleTop(i, Math.max(routes.length, 1)),
               transform: 'translate(0, -50%)',
-              fontSize: '9px',
-              fontWeight: 'bold',
-              opacity: 0.5,
+              fontSize: '10px',
+              fontWeight: 700,
+              opacity: 0.4,
               pointerEvents: 'none',
               whiteSpace: 'nowrap',
-              textTransform: 'uppercase'
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
             }}
           >
             {r.label || `route_${i}`}
@@ -171,42 +141,32 @@ const SwitchNode = ({ data, id }: NodeProps) => {
           position={Position.Right}
           id="default"
           title="default"
-          style={{ ...handleStyle, top: '90%', right: '-5px', background: '#666' }}
+          style={{ ...handleStyle, top: '92%', right: '-6px', background: 'rgba(255,255,255,0.3)' }}
         />
         <div
           style={{
             position: 'absolute',
-            right: '10px',
-            top: '90%',
+            right: '12px',
+            top: '92%',
             transform: 'translate(0, -50%)',
-            fontSize: '9px',
-            fontWeight: 'bold',
-            opacity: 0.5,
+            fontSize: '10px',
+            fontWeight: 700,
+            opacity: 0.4,
             pointerEvents: 'none',
             whiteSpace: 'nowrap',
-            textTransform: 'uppercase'
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px'
           }}
         >
           default
         </div>
       </div>
 
-      <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
-        <div style={{ 
-          padding: '10px 12px', 
-          background: 'rgba(78, 201, 176, 0.15)', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'space-between',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, fontWeight: 'bold' }}>
-            <div style={{ 
-              width: '24px', height: '24px', borderRadius: '50%', 
-              background: '#4ec9b0',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
-              <span className="codicon codicon-filter" style={{ color: '#fff', fontSize: '14px' }}></span>
+      <div>
+        <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}15 0%, transparent 100%)` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+            <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #45b39d 100%)` }}>
+              <span className="codicon codicon-filter" style={{ color: '#fff', fontSize: '16px' }}></span>
             </div>
             {editingLabel ? (
               <input
@@ -220,17 +180,10 @@ const SwitchNode = ({ data, id }: NodeProps) => {
                 }}
                 onBlur={() => setEditingLabel(false)}
                 onKeyDown={(e) => { if (e.key === 'Enter') setEditingLabel(false); }}
-                style={{
-                  background: 'rgba(0,0,0,0.3)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  borderRadius: '4px',
-                  padding: '2px 6px',
-                  fontSize: '13px'
-                }}
+                style={{ width: '100%' }}
               />
             ) : (
-              <span onClick={() => setEditingLabel(true)} style={{ fontSize: '13px', letterSpacing: '0.4px', cursor: 'pointer' }}>
+              <span onClick={() => setEditingLabel(true)} className="glass-node-label">
                 {label || 'Switch'}
               </span>
             )}
@@ -238,16 +191,27 @@ const SwitchNode = ({ data, id }: NodeProps) => {
           <button
             className="nodrag"
             onClick={() => updateNodeData(id, { collapsed: !collapsed })}
-            style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}
+            style={{ 
+              background: 'rgba(255,255,255,0.05)', 
+              border: 'none', 
+              color: '#aaa', 
+              cursor: 'pointer',
+              borderRadius: '6px',
+              width: '24px',
+              height: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
           >
-            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`}></span>
+            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`} style={{ fontSize: '12px' }}></span>
           </button>
         </div>
 
         {!collapsed && (
-          <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Variable key</label>
+          <div className="glass-node-body">
+            <div className="glass-node-input-group">
+              <label className="glass-node-input-label">Variable key</label>
               <input
                 className="nodrag"
                 list={`switch-vars-${id}`}
@@ -258,15 +222,6 @@ const SwitchNode = ({ data, id }: NodeProps) => {
                   updateNodeData(id, { variableKey: v });
                 }}
                 placeholder="mode"
-                style={{
-                  width: '100%',
-                  background: 'rgba(0,0,0,0.2)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  padding: '6px',
-                  borderRadius: '4px',
-                  fontSize: '11px'
-                }}
               />
               <datalist id={`switch-vars-${id}`}>
                 {availableVars.map((v) => (
@@ -275,63 +230,89 @@ const SwitchNode = ({ data, id }: NodeProps) => {
               </datalist>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase' }}>Routes</label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+              <label className="glass-node-input-label">Routes</label>
               <button
                 className="nodrag"
                 onClick={addRoute}
                 style={{
-                  background: 'rgba(255,255,255,0.05)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  color: '#ccc',
+                  background: 'var(--ir-accent-primary)',
+                  border: 'none',
+                  color: '#fff',
                   cursor: 'pointer',
                   fontSize: '10px',
-                  padding: '2px 8px',
-                  borderRadius: '4px'
+                  fontWeight: 700,
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  boxShadow: '0 4px 10px rgba(0, 162, 255, 0.2)'
                 }}
               >
-                + Route
+                + Add Route
               </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {routes.map((r, i) => (
-                <div key={i} style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '6px', padding: '10px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
+                <div key={i} style={{ 
+                  background: 'rgba(255,255,255,0.03)', 
+                  border: '1px solid rgba(255,255,255,0.05)', 
+                  borderRadius: '10px', 
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                     <input
                       className="nodrag"
                       value={String(r.label || '')}
                       onChange={(e) => setRoute(i, { label: e.target.value })}
                       placeholder="Label"
-                      style={{ background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '4px', fontSize: '11px', borderRadius: '4px' }}
+                      style={{ fontSize: '11px', padding: '6px 10px' }}
                     />
                     <select
                       className="nodrag"
                       value={String(r.condition || 'equals')}
                       onChange={(e) => setRoute(i, { condition: normalizeCondition(e.target.value) })}
-                      style={{ background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '4px', fontSize: '11px', borderRadius: '4px' }}
+                      style={{ fontSize: '11px', padding: '6px' }}
                     >
-                      <option value="equals">equals</option>
-                      <option value="exists">exists</option>
-                      <option value="contains">contains</option>
-                      <option value="regex">regex</option>
+                      <option value="equals" style={{ background: '#1a1a20' }}>equals</option>
+                      <option value="exists" style={{ background: '#1a1a20' }}>exists</option>
+                      <option value="contains" style={{ background: '#1a1a20' }}>contains</option>
+                      <option value="regex" style={{ background: '#1a1a20' }}>regex</option>
                     </select>
                   </div>
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <input
                       className="nodrag"
                       value={String(r.value || '')}
                       onChange={(e) => setRoute(i, { value: e.target.value })}
                       placeholder="Value"
                       disabled={r.condition === 'exists'}
-                      style={{ flex: 1, background: 'rgba(0,0,0,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '4px', fontSize: '11px', borderRadius: '4px', opacity: r.condition === 'exists' ? 0.4 : 1 }}
+                      style={{ 
+                        flex: 1, 
+                        fontSize: '11px', 
+                        padding: '6px 10px',
+                        opacity: r.condition === 'exists' ? 0.3 : 1 
+                      }}
                     />
                     <button
                       className="nodrag"
                       onClick={() => removeRoute(i)}
-                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#f44336', fontSize: '14px' }}
+                      style={{ 
+                        background: 'rgba(255, 77, 77, 0.1)', 
+                        border: 'none', 
+                        cursor: 'pointer', 
+                        color: '#ff4d4d', 
+                        borderRadius: '6px',
+                        width: '28px',
+                        height: '28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
                     >
-                      ×
+                      <span className="codicon codicon-trash" style={{ fontSize: '14px' }}></span>
                     </button>
                   </div>
                 </div>
