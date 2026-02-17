@@ -60,6 +60,7 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.outputVar = 'team_result';
     data.outputVarPath = 'team_path';
     data.outputVarChanges = 'team_changes';
+    data.sessionId = '';
     data.kind = 'team';
   } else if (item.nodeType === 'repoNode') {
     data.path = '';
@@ -113,6 +114,7 @@ export function buildDropNodeData(
       outputVar: 'team_result',
       outputVarPath: 'team_path',
       outputVarChanges: 'team_changes',
+      sessionId: '',
       status: 'idle',
       kind: 'team'
     };

@@ -1,6 +1,8 @@
 const terminals: any[] = [];
 let webviewPanel: any = null;
 const outputLines: string[] = [];
+const openedExternalUris: any[] = [];
+const clipboardWrites: string[] = [];
 const commandHandlers = new Map<string, (...args: any[]) => any>();
 const configurationChangeListeners: Array<(event: { affectsConfiguration: (section: string) => boolean }) => void> = [];
 
@@ -34,7 +36,12 @@ function fireConfigurationChange(changedKey: string) {
 
 const Uri = {
     file: (path: string) => ({ fsPath: path, path, scheme: 'file' }),
-    parse: (path: string) => ({ fsPath: path, path, scheme: 'file' }),
+    parse: (value: string) => {
+        const raw = String(value || '');
+        const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+\-.]*):/.exec(raw);
+        const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : 'file';
+        return { fsPath: raw, path: raw, scheme };
+    },
     joinPath: (base: any, ...parts: string[]) => ({
         path: base.path + '/' + parts.join('/'),
         scheme: 'file'
@@ -161,13 +168,29 @@ module.exports = {
           readFile: async () => Buffer.from('[]')
       }
   },
+  env: {
+    openExternal: async (uri: any) => {
+      openedExternalUris.push(uri);
+      return true;
+    },
+    clipboard: {
+      writeText: async (text: string) => {
+        clipboardWrites.push(String(text));
+      },
+      readText: async () => clipboardWrites[clipboardWrites.length - 1] || ''
+    }
+  },
   __mock: {
     outputLines,
+    openedExternalUris,
+    clipboardWrites,
     commandHandlers,
     configStore,
     reset: () => {
       terminals.length = 0;
       outputLines.length = 0;
+      openedExternalUris.length = 0;
+      clipboardWrites.length = 0;
       commandHandlers.clear();
       configurationChangeListeners.length = 0;
       configStore.clear();

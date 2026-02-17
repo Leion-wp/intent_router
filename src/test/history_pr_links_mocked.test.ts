@@ -33,6 +33,9 @@ suite('History PR Links (Mocked)', () => {
       stepId: 'factory.open_frontend_pr',
       provider: 'github',
       url: 'https://github.com/acme/repo/pull/101',
+      number: 101,
+      state: 'open',
+      isDraft: false,
       head: 'feature/TICKET-1-frontend',
       base: 'main',
       title: 'feat(frontend): TICKET-1'
@@ -51,5 +54,7 @@ suite('History PR Links (Mocked)', () => {
     assert.ok(Array.isArray(run.pullRequests), 'expected pullRequests array');
     assert.strictEqual(run.pullRequests.length, 1);
     assert.strictEqual(run.pullRequests[0].url, 'https://github.com/acme/repo/pull/101');
+    assert.strictEqual(run.pullRequests[0].number, 101);
+    assert.strictEqual(run.pullRequests[0].state, 'open');
   });
 });

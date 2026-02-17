@@ -451,6 +451,23 @@
                     "minimum": 1,
                     "description": "Vote weight multiplier for reviewer members in ai.team strategy=vote."
                 },
+                "intentRouter.ai.memory.enabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable persistent AI team session memory in workspace .intent-router/session-memory.json."
+                },
+                "intentRouter.ai.memory.ttlDays": {
+                    "type": "number",
+                    "default": 7,
+                    "minimum": 1,
+                    "description": "Session memory retention in days before pruning old entries."
+                },
+                "intentRouter.ai.memory.maxEntries": {
+                    "type": "number",
+                    "default": 40,
+                    "minimum": 5,
+                    "description": "Maximum stored session memory entries per session id."
+                },
                 "intentRouter.devMode": {
                     "type": "boolean",
                     "default": false,

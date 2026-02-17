@@ -93,7 +93,7 @@ function buildGhPrArgs(args: OpenPrArgs): string[] {
     if (args.draft) {
         cliArgs.push('--draft');
     }
-    cliArgs.push('--json', 'url');
+    cliArgs.push('--json', 'url,number,state,isDraft');
     return cliArgs;
 }
 
@@ -116,7 +116,7 @@ function runGhCommand(cliArgs: string[], cwd: string, env: NodeJS.ProcessEnv): P
     });
 }
 
-function parsePrUrl(output: string): string {
+function parsePrMetadata(output: string): { url: string; number?: number; state?: 'open' | 'closed' | 'merged'; isDraft?: boolean } {
     const trimmed = String(output || '').trim();
     if (!trimmed) {
         throw new Error('GitHub PR creation returned empty output.');
@@ -125,7 +125,16 @@ function parsePrUrl(output: string): string {
     try {
         const json = JSON.parse(trimmed);
         if (json && typeof json.url === 'string' && json.url.trim()) {
-            return json.url.trim();
+            const rawState = String(json.state || '').trim().toLowerCase();
+            const state = rawState === 'open' || rawState === 'closed' || rawState === 'merged'
+                ? (rawState as 'open' | 'closed' | 'merged')
+                : undefined;
+            return {
+                url: json.url.trim(),
+                number: Number.isFinite(Number(json.number)) ? Number(json.number) : undefined,
+                state,
+                isDraft: json.isDraft === true
+            };
         }
     } catch {
         // fallback: detect URL from plaintext output
@@ -133,12 +142,12 @@ function parsePrUrl(output: string): string {
 
     const match = trimmed.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/i);
     if (match) {
-        return match[0];
+        return { url: match[0] };
     }
     throw new Error(`Unable to extract PR URL from gh output: ${trimmed}`);
 }
 
-export async function executeGitHubOpenPr(args: OpenPrArgs): Promise<{ url: string }> {
+export async function executeGitHubOpenPr(args: OpenPrArgs): Promise<{ url: string; number?: number; state?: 'open' | 'closed' | 'merged'; isDraft?: boolean }> {
     const head = validateGitBranchRef(String(args?.head || ''), 'head');
     const base = validateGitBranchRef(String(args?.base || ''), 'base');
     const title = String(args?.title || '').trim();
@@ -151,7 +160,8 @@ export async function executeGitHubOpenPr(args: OpenPrArgs): Promise<{ url: stri
     const envOverrides = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
     const env = { ...process.env, ...envOverrides };
     const output = await runGhCommand(cliArgs, cwd, env);
-    const url = parsePrUrl(output);
+    const pr = parsePrMetadata(output);
+    const url = pr.url;
 
     const runId = args?.__meta?.runId;
     const intentId = args?.__meta?.traceId || '';
@@ -175,10 +185,13 @@ export async function executeGitHubOpenPr(args: OpenPrArgs): Promise<{ url: stri
         stepId,
         provider: 'github',
         url,
+        number: pr.number,
+        state: pr.state,
+        isDraft: pr.isDraft,
         head,
         base,
         title
     });
 
-    return { url };
+    return pr;
 }

@@ -34,6 +34,7 @@ const TeamNode = ({ data, id }: NodeProps) => {
   const [outputVar, setOutputVar] = useState<string>((data.outputVar as string) || 'team_result');
   const [outputVarPath, setOutputVarPath] = useState<string>((data.outputVarPath as string) || 'team_path');
   const [outputVarChanges, setOutputVarChanges] = useState<string>((data.outputVarChanges as string) || 'team_changes');
+  const [sessionId, setSessionId] = useState<string>((data.sessionId as string) || '');
   const [teamSummary, setTeamSummary] = useState<any>(data.teamSummary || null);
 
   useEffect(() => {
@@ -45,6 +46,7 @@ const TeamNode = ({ data, id }: NodeProps) => {
     if (data.outputVar) setOutputVar(String(data.outputVar));
     if (data.outputVarPath) setOutputVarPath(String(data.outputVarPath));
     if (data.outputVarChanges) setOutputVarChanges(String(data.outputVarChanges));
+    if (data.sessionId !== undefined) setSessionId(String(data.sessionId || ''));
     setTeamSummary(data.teamSummary || null);
   }, [data]);
 
@@ -152,6 +154,13 @@ const TeamNode = ({ data, id }: NodeProps) => {
           <input className="nodrag" value={outputVarPath} onChange={(event) => { setOutputVarPath(event.target.value); update({ outputVarPath: event.target.value }); }} placeholder="team_path" style={inputStyle} />
           <input className="nodrag" value={outputVarChanges} onChange={(event) => { setOutputVarChanges(event.target.value); update({ outputVarChanges: event.target.value }); }} placeholder="team_changes" style={inputStyle} />
         </div>
+        <input
+          className="nodrag"
+          value={sessionId}
+          onChange={(event) => { setSessionId(event.target.value); update({ sessionId: event.target.value }); }}
+          placeholder="session id (optional, persistent memory)"
+          style={inputStyle}
+        />
 
         {teamSummary && (
           <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: 8, background: 'rgba(0,0,0,0.2)' }}>

@@ -129,4 +129,24 @@ suite('Pipeline Builder Tests (Mocked)', () => {
         assert.strictEqual(historyManager.getHistory().length, 0);
         assert.ok(receivedMessages.some(m => m.type === 'historyUpdate' && Array.isArray(m.history) && m.history.length === 0));
     });
+
+    test('openExternal message opens allowed URL', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        if (panel.postMessageCallback) {
+            await panel.postMessageCallback({ type: 'openExternal', url: 'https://github.com/acme/repo/pull/1' });
+        }
+        assert.strictEqual(mockVscode.__mock.openedExternalUris.length, 1);
+        assert.strictEqual(String(mockVscode.__mock.openedExternalUris[0].scheme), 'https');
+    });
+
+    test('copyToClipboard message writes clipboard text', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        if (panel.postMessageCallback) {
+            await panel.postMessageCallback({ type: 'copyToClipboard', text: 'https://github.com/acme/repo/pull/2' });
+        }
+        assert.strictEqual(mockVscode.__mock.clipboardWrites.length, 1);
+        assert.strictEqual(mockVscode.__mock.clipboardWrites[0], 'https://github.com/acme/repo/pull/2');
+    });
 });

@@ -16,11 +16,20 @@ export function run() {
       status: 'success',
       timestamp: Date.parse('2026-02-01T12:00:00Z'),
       pullRequests: [
-        { title: 'feat(frontend): TICKET-7', url: 'https://github.com/acme/repo/pull/77', head: 'feature/TICKET-7-frontend', base: 'main' }
+        { title: 'feat(frontend): TICKET-7', url: 'https://github.com/acme/repo/pull/77', head: 'feature/TICKET-7-frontend', base: 'main', number: 77, state: 'open', isDraft: false }
       ]
     }
   ], 'pull/77 frontend');
   assert.strictEqual(withPr.length, 1);
+  const byState = filterHistoryRuns([
+    {
+      name: 'Factory Run',
+      status: 'success',
+      timestamp: Date.parse('2026-02-01T12:00:00Z'),
+      pullRequests: [{ title: 'feat(api): TICKET-8', url: 'https://github.com/acme/repo/pull/78', head: 'feature/TICKET-8-backend', base: 'main', number: 78, state: 'merged', isDraft: false }]
+    }
+  ], 'merged 78');
+  assert.strictEqual(byState.length, 1);
 
   const window = computeHistoryWindow({
     total: 300,

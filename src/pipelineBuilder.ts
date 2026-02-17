@@ -383,6 +383,15 @@ export class PipelineBuilder {
                 }
                 return;
             }
+            if (message?.type === 'copyToClipboard') {
+                try {
+                    await vscode.env.clipboard.writeText(String(message.text || ''));
+                    vscode.window.showInformationMessage('Copied to clipboard.');
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to copy: ${error?.message || error}`);
+                }
+                return;
+            }
             if (message?.type === 'customNodes.upsert') {
                 try {
                     const nodes = await upsertCustomNodeInWorkspace(message.node);

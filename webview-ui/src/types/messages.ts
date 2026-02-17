@@ -9,6 +9,9 @@ export type PipelineRun = {
   pullRequests?: Array<{
     provider: 'github';
     url: string;
+    number?: number;
+    state?: 'open' | 'closed' | 'merged';
+    isDraft?: boolean;
     head: string;
     base: string;
     title: string;
@@ -81,6 +84,7 @@ export type WebviewOutboundMessage =
   | { type: 'uiPreset.resetToDefaults' }
   | { type: 'uiPreset.propagateDraft' }
   | { type: 'openExternal'; url: string }
+  | { type: 'copyToClipboard'; text: string }
   | { type: 'devPackager.loadPreset' }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };

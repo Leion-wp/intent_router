@@ -22,6 +22,9 @@ export interface PipelineRun {
     pullRequests?: Array<{
         provider: 'github';
         url: string;
+        number?: number;
+        state?: 'open' | 'closed' | 'merged';
+        isDraft?: boolean;
         head: string;
         base: string;
         title: string;
@@ -185,6 +188,9 @@ export class HistoryManager {
                     list.push({
                         provider: 'github',
                         url: event.url,
+                        number: event.number,
+                        state: event.state,
+                        isDraft: event.isDraft,
                         head: event.head,
                         base: event.base,
                         title: event.title,

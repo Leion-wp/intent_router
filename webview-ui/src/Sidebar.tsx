@@ -235,6 +235,12 @@ function Sidebar({
     window.vscode.postMessage(msg);
   };
 
+  const copyToClipboard = (text: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'copyToClipboard', text };
+    window.vscode.postMessage(msg);
+  };
+
   useEffect(() => {
     return () => {
       if (historyScrollRafRef.current !== null) {
@@ -258,7 +264,7 @@ function Sidebar({
     [deferredHistorySearch, history]
   );
 
-  const HISTORY_ROW_HEIGHT = 108;
+  const HISTORY_ROW_HEIGHT = 176;
   const HISTORY_OVERSCAN = 6;
   const historyTotalHeight = filteredHistory.length * HISTORY_ROW_HEIGHT;
   const {
@@ -320,6 +326,7 @@ function Sidebar({
             onSelectHistory={onSelectHistory}
             onRestoreHistory={onRestoreHistory}
             onOpenExternal={openExternal}
+            onCopyToClipboard={copyToClipboard}
           />
         )}
 

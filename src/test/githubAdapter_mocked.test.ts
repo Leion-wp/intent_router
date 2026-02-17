@@ -34,7 +34,7 @@ suite('GitHub Adapter (Mocked)', () => {
       child.stdout = new EventEmitter();
       child.stderr = new EventEmitter();
       setImmediate(() => {
-        child.stdout.emit('data', Buffer.from('{"url":"https://github.com/acme/repo/pull/42"}'));
+        child.stdout.emit('data', Buffer.from('{"url":"https://github.com/acme/repo/pull/42","number":42,"state":"OPEN","isDraft":false}'));
         child.emit('close', 0);
       });
       return child;
@@ -53,7 +53,11 @@ suite('GitHub Adapter (Mocked)', () => {
       });
 
       assert.strictEqual(result.url, 'https://github.com/acme/repo/pull/42');
+      assert.strictEqual(result.number, 42);
+      assert.strictEqual(result.state, 'open');
+      assert.strictEqual(result.isDraft, false);
       assert.ok(events.some((event) => event.type === 'githubPullRequestCreated' && event.url.includes('/pull/42')));
+      assert.ok(events.some((event) => event.type === 'githubPullRequestCreated' && event.number === 42 && event.state === 'open'));
       assert.ok(events.some((event) => event.type === 'stepLog' && String(event.text || '').includes('PR created')));
     } finally {
       sub.dispose();

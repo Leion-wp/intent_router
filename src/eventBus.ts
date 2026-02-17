@@ -37,6 +37,9 @@ export type PipelineEvent =
         stepId?: string;
         provider: 'github';
         url: string;
+        number?: number;
+        state?: 'open' | 'closed' | 'merged';
+        isDraft?: boolean;
         head: string;
         base: string;
         title: string;

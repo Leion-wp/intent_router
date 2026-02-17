@@ -12,7 +12,10 @@ export function filterHistoryRuns(history: any[], query: string): any[] {
       const url = String(entry?.url || '');
       const head = String(entry?.head || '');
       const base = String(entry?.base || '');
-      return `${title} ${url} ${head} ${base}`;
+      const state = String(entry?.state || '');
+      const number = String(entry?.number || '');
+      const draft = entry?.isDraft ? 'draft' : '';
+      return `${title} ${url} ${head} ${base} ${state} ${number} ${draft}`;
     }).join(' ').toLowerCase();
     const haystack = `${name} ${status} ${time} ${prHaystack}`;
     return terms.every((term) => haystack.includes(term));

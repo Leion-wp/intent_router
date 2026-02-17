@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { glob } from 'glob';
 import { pipelineEventBus } from '../eventBus';
 import { registerCapabilities } from '../registry';
+import { appendSessionMemory, isSessionMemoryEnabled, loadSessionMemory, SessionMemoryEntry } from '../sessionMemoryStore';
 
 type ProposedChange = {
     path: string;
@@ -50,7 +51,8 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'agentSpecFiles', type: 'string', description: 'Glob patterns for AGENTS.md / SKILL.md', default: [] },
                     { name: 'outputVar', type: 'string', description: 'Variable to store result content' },
                     { name: 'outputVarPath', type: 'string', description: 'Variable to store result path' },
-                    { name: 'outputVarChanges', type: 'string', description: 'Variable to store structured changes list' }
+                    { name: 'outputVarChanges', type: 'string', description: 'Variable to store structured changes list' },
+                    { name: 'sessionId', type: 'string', description: 'Optional persistent memory session id' }
                 ]
             },
             {
@@ -66,7 +68,8 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'outputContract', type: 'enum', options: ['path_result'], description: 'Expected AI output contract', default: 'path_result' },
                     { name: 'outputVar', type: 'string', description: 'Variable to store final result content' },
                     { name: 'outputVarPath', type: 'string', description: 'Variable to store final result path' },
-                    { name: 'outputVarChanges', type: 'string', description: 'Variable to store final structured changes list' }
+                    { name: 'outputVarChanges', type: 'string', description: 'Variable to store final structured changes list' },
+                    { name: 'sessionId', type: 'string', description: 'Optional persistent memory session id' }
                 ]
             }
         ]
@@ -219,6 +222,9 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
     const teamVarStore = new Map<string, string>();
     const runResults: Array<{ member: TeamMember; result: any }> = [];
     const reviewerVoteWeight = resolveReviewerVoteWeight();
+    const sessionEnabled = isSessionMemoryEnabled();
+    const sessionId = String(args?.sessionId || '').trim();
+    const persistedSession = sessionEnabled && sessionId ? loadSessionMemory(sessionId) : [];
 
     for (let index = 0; index < members.length; index += 1) {
         const member = members[index];
@@ -229,7 +235,7 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
         }
 
         const instructionResolved = applyTeamVariables(
-            `${instructionRaw}\n\n${buildTeamMemoryBlock(teamVarStore)}`,
+            `${instructionRaw}\n\n${buildTeamMemoryBlock(teamVarStore)}\n\n${buildPersistedSessionBlock(persistedSession)}`,
             teamVarStore
         );
         const memberArgs = {
@@ -263,6 +269,21 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
 
     const decision = computeTeamDecision(strategy, runResults, reviewerVoteWeight);
     const finalResult = decision.result;
+    if (sessionEnabled && sessionId) {
+        const entries: SessionMemoryEntry[] = runResults.map(({ member, result }, index) => {
+            const memberName = String(member.name || `member_${index + 1}`);
+            const role = member.role === 'reviewer' ? 'reviewer' : 'writer';
+            const content = String(result?.content || '');
+            return {
+                member: memberName,
+                role,
+                path: String(result?.path || ''),
+                contentSnippet: content.slice(0, 1200),
+                timestamp: Date.now()
+            };
+        });
+        appendSessionMemory(sessionId, entries);
+    }
     if (runId) {
         pipelineEventBus.emit({
             type: 'teamRunSummary',
@@ -307,6 +328,16 @@ function buildTeamMemoryBlock(vars: Map<string, string>): string {
         lines.push(`- ${key}: ${String(value).slice(0, 800)}`);
     }
     return ['TEAM_MEMORY:', ...lines].join('\n');
+}
+
+function buildPersistedSessionBlock(entries: SessionMemoryEntry[]): string {
+    if (!Array.isArray(entries) || entries.length === 0) {
+        return 'SESSION_MEMORY: none';
+    }
+    const lines = entries
+        .slice(-12)
+        .map((entry) => `- ${entry.member} [${entry.role}] ${entry.path}: ${String(entry.contentSnippet || '').slice(0, 280)}`);
+    return ['SESSION_MEMORY:', ...lines].join('\n');
 }
 
 export function normalizeTeamStrategy(value: any): TeamStrategy {

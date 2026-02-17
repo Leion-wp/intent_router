@@ -14,6 +14,7 @@ type HistoryPanelProps = {
   onSelectHistory?: (run: any) => void;
   onRestoreHistory?: (run: any) => void;
   onOpenExternal?: (url: string) => void;
+  onCopyToClipboard?: (text: string) => void;
 };
 
 function HistoryPanel({
@@ -29,7 +30,8 @@ function HistoryPanel({
   historyRowHeight,
   onSelectHistory,
   onRestoreHistory,
-  onOpenExternal
+  onOpenExternal,
+  onCopyToClipboard
 }: HistoryPanelProps) {
   return (
     <div className="sidebar-list" style={{ minHeight: '220px' }}>
@@ -65,7 +67,8 @@ function HistoryPanel({
             {historyWindow.map((run: any, localIndex: number) => {
               const absoluteIndex = historyStartIndex + localIndex;
               const pullRequests = Array.isArray(run.pullRequests) ? run.pullRequests : [];
-              const firstPr = pullRequests[0];
+              const visiblePrs = pullRequests.slice(0, 2);
+              const hiddenPrCount = Math.max(0, pullRequests.length - visiblePrs.length);
               return (
                 <div
                   key={String(run.id || absoluteIndex)}
@@ -132,14 +135,16 @@ function HistoryPanel({
                     </span>
                   </div>
                   {pullRequests.length > 0 && (
-                    <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '10px', opacity: 0.85 }}>PRs: {pullRequests.length}</span>
-                      {firstPr?.url && (
+                    <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '10px', opacity: 0.85 }}>PRs: {pullRequests.length}</span>
                         <button
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            onOpenExternal?.(String(firstPr.url));
+                            for (const entry of pullRequests) {
+                              if (entry?.url) onOpenExternal?.(String(entry.url));
+                            }
                           }}
                           style={{
                             padding: '1px 6px',
@@ -148,16 +153,141 @@ function HistoryPanel({
                             border: '1px solid var(--vscode-panel-border)',
                             background: 'transparent',
                             color: 'var(--vscode-textLink-foreground)',
-                            cursor: 'pointer',
-                            maxWidth: '170px',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap'
+                            cursor: 'pointer'
                           }}
-                          title={String(firstPr.title || firstPr.url)}
+                          title="Open all PR links"
                         >
-                          Open PR
+                          Open all
                         </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onCopyToClipboard?.(pullRequests.map((entry: any) => String(entry?.url || '')).filter(Boolean).join('\n'));
+                          }}
+                          style={{
+                            padding: '1px 6px',
+                            fontSize: '10px',
+                            borderRadius: '10px',
+                            border: '1px solid var(--vscode-panel-border)',
+                            background: 'transparent',
+                            color: 'var(--vscode-descriptionForeground)',
+                            cursor: 'pointer'
+                          }}
+                          title="Copy all PR URLs"
+                        >
+                          Copy URLs
+                        </button>
+                      </div>
+                      {visiblePrs.map((entry: any, index: number) => {
+                        const prTitle = String(entry?.title || entry?.url || `PR ${index + 1}`);
+                        const prMeta = `${String(entry?.head || '')} → ${String(entry?.base || '')}`;
+                        const prUrl = String(entry?.url || '');
+                        const prNumber = Number.isFinite(Number(entry?.number)) ? Number(entry.number) : undefined;
+                        const prState = String(entry?.state || '').toLowerCase();
+                        const isDraft = entry?.isDraft === true;
+                        const statusLabel = isDraft
+                          ? 'DRAFT'
+                          : (prState === 'merged' ? 'MERGED' : (prState === 'closed' ? 'CLOSED' : 'OPEN'));
+                        const statusColor = isDraft
+                          ? 'var(--vscode-descriptionForeground)'
+                          : (prState === 'merged'
+                            ? 'var(--ir-status-success)'
+                            : (prState === 'closed' ? 'var(--ir-status-error)' : 'var(--vscode-textLink-foreground)'));
+                        return (
+                          <div
+                            key={`${prUrl}-${index}`}
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1fr auto auto auto',
+                              gap: '4px',
+                              alignItems: 'center',
+                              fontSize: '10px',
+                              minHeight: '20px'
+                            }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <div
+                                style={{
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  fontWeight: 600
+                                }}
+                                title={prTitle}
+                              >
+                                {prNumber ? `#${prNumber} ${prTitle}` : prTitle}
+                              </div>
+                              <div
+                                style={{
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  opacity: 0.7
+                                }}
+                                title={prMeta}
+                              >
+                                {prMeta}
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: '9px',
+                                padding: '1px 6px',
+                                borderRadius: '10px',
+                                border: '1px solid var(--vscode-panel-border)',
+                                color: statusColor,
+                                whiteSpace: 'nowrap'
+                              }}
+                              title={`State: ${statusLabel}`}
+                            >
+                              {statusLabel}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (prUrl) onOpenExternal?.(prUrl);
+                              }}
+                              style={{
+                                padding: '1px 6px',
+                                fontSize: '10px',
+                                borderRadius: '10px',
+                                border: '1px solid var(--vscode-panel-border)',
+                                background: 'transparent',
+                                color: 'var(--vscode-textLink-foreground)',
+                                cursor: 'pointer'
+                              }}
+                              title={prUrl}
+                            >
+                              Open
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (prUrl) onCopyToClipboard?.(prUrl);
+                              }}
+                              style={{
+                                padding: '1px 6px',
+                                fontSize: '10px',
+                                borderRadius: '10px',
+                                border: '1px solid var(--vscode-panel-border)',
+                                background: 'transparent',
+                                color: 'var(--vscode-descriptionForeground)',
+                                cursor: 'pointer'
+                              }}
+                              title="Copy PR URL"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {hiddenPrCount > 0 && (
+                        <div style={{ fontSize: '10px', opacity: 0.7 }}>
+                          +{hiddenPrCount} more PR(s)
+                        </div>
                       )}
                     </div>
                   )}

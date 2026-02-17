@@ -679,11 +679,12 @@ function Flow({
             members: Array.isArray(data.members) ? data.members : [],
             contextFiles: Array.isArray(data.contextFiles) ? data.contextFiles : [],
             agentSpecFiles: Array.isArray(data.agentSpecFiles) ? data.agentSpecFiles : [],
-            outputContract: data.outputContract || 'path_result',
-            outputVar: data.outputVar || 'team_result',
-            outputVarPath: data.outputVarPath || 'team_path',
-            outputVarChanges: data.outputVarChanges || 'team_changes'
-          };
+             outputContract: data.outputContract || 'path_result',
+             outputVar: data.outputVar || 'team_result',
+             outputVarPath: data.outputVarPath || 'team_path',
+             outputVarChanges: data.outputVarChanges || 'team_changes',
+             sessionId: String(data.sessionId || '').trim() || undefined
+           };
           description = String(data.label || 'AI Team');
         } else if (node.type === 'approvalNode') {
           intent = 'vscode.reviewDiff';
