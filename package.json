@@ -376,6 +376,55 @@
                     "default": "confirm",
                     "description": "Behavior when an interactive step is encountered (when ciStrict=false). confirm=warn+confirm, allow=run without prompts."
                 },
+                "intentRouter.policy.review.mode": {
+                    "type": "string",
+                    "enum": [
+                        "warn",
+                        "block"
+                    ],
+                    "default": "warn",
+                    "description": "Review policy mode for ApprovalNode. warn=show violations but allow approval, block=refuse review when violations exist."
+                },
+                "intentRouter.policy.review.blockedPaths": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Glob-like path patterns blocked by review policy (e.g. **/secrets/**, package-lock.json)."
+                },
+                "intentRouter.policy.review.blockedExtensions": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Blocked file extensions for AI review apply (e.g. .pem, .key, .pfx)."
+                },
+                "intentRouter.policy.review.maxChangedLines": {
+                    "type": "number",
+                    "default": 0,
+                    "minimum": 0,
+                    "description": "Maximum total changed lines (+/-) allowed in one approval step. 0 disables this guard."
+                },
+                "intentRouter.ai.codex.command": {
+                    "type": "string",
+                    "default": "codex",
+                    "description": "Codex CLI command name/path used by ai.generate when provider=codex."
+                },
+                "intentRouter.ai.codex.args": {
+                    "type": "array",
+                    "default": [
+                        "exec",
+                        "--model",
+                        "{model}",
+                        "{stdin}"
+                    ],
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Codex CLI args template. Placeholders: {model}, {stdin}, {prompt}."
+                },
                 "intentRouter.devMode": {
                     "type": "boolean",
                     "default": false,

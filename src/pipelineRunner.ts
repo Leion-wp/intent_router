@@ -27,10 +27,12 @@ let isCancelled = false;
 let isPaused = false;
 
 // Global registry for pending decisions
-export function resolveDecision(nodeId: string, decision: 'approve' | 'reject') {
+export function resolveDecision(nodeId: string, decision: 'approve' | 'reject', runId?: string, approvedPaths?: string[]) {
     pipelineEventBus.emit({
         type: 'pipelineDecision',
         nodeId,
+        runId,
+        approvedPaths,
         decision
     } as any);
 }
@@ -405,8 +407,10 @@ async function runPipeline(pipeline: PipelineFile, dryRun: boolean): Promise<voi
             if (ok && result && typeof result === 'object') {
                 const outContent = compiledStep.payload?.outputVar;
                 const outPath = compiledStep.payload?.outputVarPath;
+                const outChanges = compiledStep.payload?.outputVarChanges;
                 if (outContent && result.content !== undefined) variableCache.set(outContent, String(result.content));
                 if (outPath && result.path !== undefined) variableCache.set(outPath, String(result.path));
+                if (outChanges && result.changes !== undefined) variableCache.set(outChanges, JSON.stringify(result.changes));
             } else if (ok) {
                 const outVar = compiledStep.payload?.outputVar;
                 if (outVar) variableCache.set(outVar, String(result));

@@ -26,6 +26,7 @@ import FormNode from './nodes/FormNode';
 import SwitchNode from './nodes/SwitchNode';
 import ScriptNode from './nodes/ScriptNode';
 import AgentNode from './nodes/AgentNode';
+import TeamNode from './nodes/TeamNode';
 import HttpNode from './nodes/HttpNode';
 import ApprovalNode from './nodes/ApprovalNode';
 import AppLayoutShell from './components/AppLayoutShell';
@@ -120,6 +121,7 @@ const nodeTypes = {
   switchNode: SwitchNode,
   scriptNode: ScriptNode,
   agentNode: AgentNode,
+  teamNode: TeamNode,
   httpNode: HttpNode,
   approvalNode: ApprovalNode
 };
@@ -663,10 +665,26 @@ function Flow({
             model: data.model,
             instruction: data.instruction,
             contextFiles: data.contextFiles,
+            agentSpecFiles: data.agentSpecFiles,
+            outputContract: data.outputContract || 'path_result',
             outputVar: data.outputVar || 'ai_msg',
-            outputVarPath: data.outputVarPath || 'ai_path'
+            outputVarPath: data.outputVarPath || 'ai_path',
+            outputVarChanges: data.outputVarChanges || 'ai_changes'
           };
           description = String(data.label || 'AI Task');
+        } else if (node.type === 'teamNode') {
+          intent = 'ai.team';
+          payload = {
+            strategy: data.strategy || 'sequential',
+            members: Array.isArray(data.members) ? data.members : [],
+            contextFiles: Array.isArray(data.contextFiles) ? data.contextFiles : [],
+            agentSpecFiles: Array.isArray(data.agentSpecFiles) ? data.agentSpecFiles : [],
+            outputContract: data.outputContract || 'path_result',
+            outputVar: data.outputVar || 'team_result',
+            outputVarPath: data.outputVarPath || 'team_path',
+            outputVarChanges: data.outputVarChanges || 'team_changes'
+          };
+          description = String(data.label || 'AI Team');
         } else if (node.type === 'approvalNode') {
           intent = 'vscode.reviewDiff';
           payload = {

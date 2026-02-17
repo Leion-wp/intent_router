@@ -99,6 +99,31 @@ export function buildGraphFromPipeline(
         data.commandId = step.payload?.commandId;
         data.argsJson = typeof step.payload?.argsJson === 'string' ? step.payload.argsJson : '';
         data.kind = 'vscodeCommand';
+      } else if (intent === 'ai.generate') {
+        type = 'agentNode';
+        data.agent = String(step.payload?.agent || 'gemini');
+        data.model = String(step.payload?.model || 'gemini-2.5-flash');
+        data.instruction = String(step.payload?.instruction || '');
+        data.contextFiles = Array.isArray(step.payload?.contextFiles) ? step.payload.contextFiles : ['src/**/*.ts'];
+        data.agentSpecFiles = Array.isArray(step.payload?.agentSpecFiles) ? step.payload.agentSpecFiles : ['AGENTS.md', '**/SKILL.md'];
+        data.outputContract = String(step.payload?.outputContract || 'path_result');
+        data.outputVar = String(step.payload?.outputVar || 'ai_result');
+        data.outputVarPath = String(step.payload?.outputVarPath || 'ai_path');
+        data.outputVarChanges = String(step.payload?.outputVarChanges || 'ai_changes');
+        data.label = String(step.description || 'AI Task');
+        data.kind = 'agent';
+      } else if (intent === 'ai.team') {
+        type = 'teamNode';
+        data.label = String(step.description || 'AI Team');
+        data.strategy = String(step.payload?.strategy || 'sequential');
+        data.members = Array.isArray(step.payload?.members) ? step.payload.members : [];
+        data.contextFiles = Array.isArray(step.payload?.contextFiles) ? step.payload.contextFiles : [];
+        data.agentSpecFiles = Array.isArray(step.payload?.agentSpecFiles) ? step.payload.agentSpecFiles : ['AGENTS.md', '**/SKILL.md'];
+        data.outputContract = String(step.payload?.outputContract || 'path_result');
+        data.outputVar = String(step.payload?.outputVar || 'team_result');
+        data.outputVarPath = String(step.payload?.outputVarPath || 'team_path');
+        data.outputVarChanges = String(step.payload?.outputVarChanges || 'team_changes');
+        data.kind = 'team';
       } else {
         type = 'actionNode';
         const normalized = canonicalizeIntent('', intent);

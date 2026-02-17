@@ -132,16 +132,31 @@ export class PipelineBuilder {
 	                   });
 	               }
 
-	               if (e.type === 'stepLog') {
-	                   this.panel.webview.postMessage({
-	                       type: 'stepLog',
-	                       runId: e.runId,
+               if (e.type === 'stepLog') {
+                   this.panel.webview.postMessage({
+                       type: 'stepLog',
+                       runId: e.runId,
 	                       intentId: e.intentId,
 	                       stepId: e.stepId,
 	                       text: e.text,
-	                       stream: e.stream
-	                   });
-	               }
+                       stream: e.stream
+                   });
+               }
+
+               if (e.type === 'approvalReviewReady') {
+                   this.panel.webview.postMessage({
+                       type: 'approvalReviewReady',
+                       runId: e.runId,
+                       intentId: e.intentId,
+                       stepId: e.stepId,
+                       files: e.files,
+                       totalAdded: e.totalAdded,
+                       totalRemoved: e.totalRemoved,
+                       policyMode: e.policyMode,
+                       policyBlocked: e.policyBlocked,
+                       policyViolations: e.policyViolations
+                   });
+               }
 
                if (e.type === 'pipelineStart' || e.type === 'pipelineEnd') {
                    this.panel.webview.postMessage({
@@ -263,7 +278,16 @@ export class PipelineBuilder {
                 return;
             }
             if (message?.type === 'pipelineDecision') {
-                resolveDecision(message.nodeId, message.decision);
+                resolveDecision(message.nodeId, message.decision, message.runId, message.approvedPaths);
+                return;
+            }
+            if (message?.type === 'pipelineReviewOpenDiff') {
+                pipelineEventBus.emit({
+                    type: 'pipelineReviewOpenDiff',
+                    nodeId: message.nodeId,
+                    runId: message.runId,
+                    path: message.path
+                } as any);
                 return;
             }
             if (message?.type === 'saveEnvironment') {

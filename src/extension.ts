@@ -11,7 +11,7 @@ import { registerDockerProvider } from './providers/dockerAdapter';
 import { cancelTerminalRun, executeTerminalCommand, registerTerminalProvider } from './providers/terminalAdapter';
 import { registerSystemProvider } from './providers/systemAdapter';
 import { registerVSCodeProvider } from './providers/vscodeAdapter';
-import { registerAiProvider, executeAiCommand } from './providers/aiAdapter';
+import { registerAiProvider, executeAiCommand, executeAiTeamCommand } from './providers/aiAdapter';
 import { registerHttpProvider, executeHttpCommand } from './providers/httpAdapter';
 import { StatusBarManager } from './statusBar';
 import { historyManager } from './historyManager';
@@ -72,6 +72,9 @@ export function activate(context: vscode.ExtensionContext) {
 
         let aiGenerateDisposable = vscode.commands.registerCommand('intentRouter.internal.aiGenerate', async (args: any) => {
             return await executeAiCommand(args);
+        });
+        let aiTeamDisposable = vscode.commands.registerCommand('intentRouter.internal.aiTeam', async (args: any) => {
+            return await executeAiTeamCommand(args);
         });
 
         let httpRequestDisposable = vscode.commands.registerCommand('intentRouter.internal.httpRequest', async (args: any) => {
@@ -282,6 +285,7 @@ export function activate(context: vscode.ExtensionContext) {
 	    context.subscriptions.push(internalTerminalDisposable);
 	    context.subscriptions.push(internalTerminalCancelDisposable);
         context.subscriptions.push(aiGenerateDisposable);
+        context.subscriptions.push(aiTeamDisposable);
         context.subscriptions.push(httpRequestDisposable);
 	    context.subscriptions.push(promptDisposable);
 	    context.subscriptions.push(createPipelineDisposable);

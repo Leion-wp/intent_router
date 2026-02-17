@@ -18,6 +18,15 @@ const MODEL_OPTIONS = [
   { value: 'gemini-2.0-flash-exp', label: 'Gemini 2.0 Flash' }
 ];
 
+const AGENT_PROVIDER_OPTIONS = [
+  { value: 'gemini', label: 'Gemini CLI' },
+  { value: 'codex', label: 'Codex CLI' }
+];
+
+const OUTPUT_CONTRACT_OPTIONS = [
+  { value: 'path_result', label: 'Path/Result (strict)' }
+];
+
 const AgentNode = ({ data, id }: NodeProps) => {
   const { updateNodeData } = useContext(FlowEditorContext);
   const { getAvailableVars, isRunPreviewNode } = useContext(FlowRuntimeContext);
@@ -26,8 +35,11 @@ const AgentNode = ({ data, id }: NodeProps) => {
   const [model, setModel] = useState<string>((data.model as string) || 'gemini-2.5-flash');
   const [instruction, setInstruction] = useState<string>((data.instruction as string) || '');
   const [contextFiles, setContextFiles] = useState<string[]>((data.contextFiles as string[]) || ['src/**/*.ts']);
+  const [agentSpecFiles, setAgentSpecFiles] = useState<string[]>((data.agentSpecFiles as string[]) || ['AGENTS.md', '**/SKILL.md']);
+  const [outputContract, setOutputContract] = useState<string>((data.outputContract as string) || 'path_result');
   const [outputVar, setOutputVar] = useState<string>((data.outputVar as string) || 'ai_result');
   const [outputVarPath, setOutputVarPath] = useState<string>((data.outputVarPath as string) || 'ai_path');
+  const [outputVarChanges, setOutputVarChanges] = useState<string>((data.outputVarChanges as string) || 'ai_changes');
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
   const [label, setLabel] = useState<string>((data.label as string) || 'AI Agent');
   const [editingLabel, setEditingLabel] = useState(false);
@@ -42,8 +54,11 @@ const AgentNode = ({ data, id }: NodeProps) => {
     if (data.model) setModel(data.model as string);
     if (data.instruction) setInstruction(data.instruction as string);
     if (data.contextFiles) setContextFiles(data.contextFiles as string[]);
+    if (data.agentSpecFiles) setAgentSpecFiles(data.agentSpecFiles as string[]);
+    if (data.outputContract) setOutputContract(data.outputContract as string);
     if (data.outputVar) setOutputVar(data.outputVar as string);
     if (data.outputVarPath) setOutputVarPath(data.outputVarPath as string);
+    if (data.outputVarChanges) setOutputVarChanges(data.outputVarChanges as string);
     if (data.status) setStatus(data.status as string);
     if (data.label !== undefined) setLabel((data.label as string) || 'AI Agent');
 
@@ -238,6 +253,17 @@ const AgentNode = ({ data, id }: NodeProps) => {
                   {isSettingsOpen && (
                       <div style={{ padding: '14px', background: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: '14px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
                           <div>
+                              <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Provider</label>
+                              <select
+                                  className="nodrag"
+                                  value={agent}
+                                  onChange={(e) => { setAgent(e.target.value); updateField({ agent: e.target.value }); }}
+                                  style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
+                              >
+                                  {AGENT_PROVIDER_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                              </select>
+                          </div>
+                          <div>
                               <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Intelligence Model</label>
                               <select
                                   className="nodrag"
@@ -248,7 +274,18 @@ const AgentNode = ({ data, id }: NodeProps) => {
                                   {MODEL_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                               </select>
                           </div>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                          <div>
+                              <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Output Contract</label>
+                              <select
+                                  className="nodrag"
+                                  value={outputContract}
+                                  onChange={(e) => { setOutputContract(e.target.value); updateField({ outputContract: e.target.value }); }}
+                                  style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
+                              >
+                                  {OUTPUT_CONTRACT_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                              </select>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
                               <div>
                                   <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Content Var</label>
                                   <input
@@ -266,12 +303,22 @@ const AgentNode = ({ data, id }: NodeProps) => {
                                       value={outputVarPath}
                                       onChange={(e) => { setOutputVarPath(e.target.value); updateField({ outputVarPath: e.target.value }); }}
                                       placeholder="ai_path"
-                                      style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
-                                  />
-                              </div>
-                          </div>
-                      </div>
-                  )}
+                                       style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
+                                   />
+                               </div>
+                               <div>
+                                   <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Changes Var</label>
+                                   <input
+                                       className="nodrag"
+                                       value={outputVarChanges}
+                                       onChange={(e) => { setOutputVarChanges(e.target.value); updateField({ outputVarChanges: e.target.value }); }}
+                                       placeholder="ai_changes"
+                                       style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
+                                   />
+                               </div>
+                           </div>
+                       </div>
+                   )}
               </div>
 
               <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
@@ -300,6 +347,39 @@ const AgentNode = ({ data, id }: NodeProps) => {
                               />
                               <button
                                   onClick={() => { const nc = contextFiles.filter((_, i) => i !== idx); setContextFiles(nc); updateField({ contextFiles: nc }); }}
+                                  style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer' }}
+                              ><span className="codicon codicon-trash" style={{ fontSize: '12px' }}></span></button>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+
+              <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
+                  <div style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', color: '#999', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span className="codicon codicon-book" style={{ fontSize: '12px' }}></span>
+                          AGENT / SKILL FILES
+                      </span>
+                      <button
+                          onClick={() => { const next = [...agentSpecFiles, '']; setAgentSpecFiles(next); updateField({ agentSpecFiles: next }); }}
+                          style={{ background: 'transparent', border: 'none', color: '#bb86fc', cursor: 'pointer', fontSize: '18px', padding: '0 4px' }}
+                      >+</button>
+                  </div>
+                  <div style={{ padding: '0 10px 10px 10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {agentSpecFiles.map((glob, idx) => (
+                          <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              <input
+                                  className="nodrag"
+                                  value={glob}
+                                  onChange={(e) => {
+                                      const next = [...agentSpecFiles]; next[idx] = e.target.value;
+                                      setAgentSpecFiles(next); updateField({ agentSpecFiles: next });
+                                  }}
+                                  placeholder="AGENTS.md or **/SKILL.md"
+                                  style={{ flex: 1, background: 'rgba(0,0,0,0.3)', color: '#999', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '6px', padding: '5px 10px', fontSize: '10px' }}
+                              />
+                              <button
+                                  onClick={() => { const next = agentSpecFiles.filter((_, i) => i !== idx); setAgentSpecFiles(next); updateField({ agentSpecFiles: next }); }}
                                   style={{ background: 'transparent', border: 'none', color: '#666', cursor: 'pointer' }}
                               ><span className="codicon codicon-trash" style={{ fontSize: '12px' }}></span></button>
                           </div>

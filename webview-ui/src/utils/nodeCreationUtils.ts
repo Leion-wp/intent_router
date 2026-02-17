@@ -48,6 +48,19 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.name = '';
     data.value = '';
     data.kind = 'prompt';
+  } else if (item.nodeType === 'teamNode') {
+    data.label = 'AI Team';
+    data.strategy = 'sequential';
+    data.members = [
+      { name: 'member_1', agent: 'gemini', model: 'gemini-2.5-flash', instruction: '' }
+    ];
+    data.contextFiles = [];
+    data.agentSpecFiles = ['AGENTS.md', '**/SKILL.md'];
+    data.outputContract = 'path_result';
+    data.outputVar = 'team_result';
+    data.outputVarPath = 'team_path';
+    data.outputVarChanges = 'team_changes';
+    data.kind = 'team';
   } else if (item.nodeType === 'repoNode') {
     data.path = '';
     data.kind = 'repo';
@@ -88,6 +101,21 @@ export function buildDropNodeData(
   }
   if (type === 'promptNode') {
     return { name: '', value: '', kind: 'prompt' };
+  }
+  if (type === 'teamNode') {
+    return {
+      label: 'AI Team',
+      strategy: 'sequential',
+      members: [{ name: 'member_1', agent: 'gemini', model: 'gemini-2.5-flash', instruction: '' }],
+      contextFiles: [],
+      agentSpecFiles: ['AGENTS.md', '**/SKILL.md'],
+      outputContract: 'path_result',
+      outputVar: 'team_result',
+      outputVarPath: 'team_path',
+      outputVarChanges: 'team_changes',
+      status: 'idle',
+      kind: 'team'
+    };
   }
   if (type === 'repoNode') {
     return { path: '${workspaceRoot}', kind: 'repo' };

@@ -45,6 +45,7 @@ const providerItems: CatalogItem[] = [
   { id: 'formNode', category: 'context', type: 'formNode', label: 'Form', icon: 'codicon-list-selection', desc: 'Collect inputs (HITL)' },
   { id: 'switchNode', category: 'context', type: 'switchNode', label: 'Switch', icon: 'codicon-filter', desc: 'Route by variable' },
   { id: 'scriptNode', category: 'context', type: 'scriptNode', label: 'Script', icon: 'codicon-file-code', desc: 'Run versioned script file' },
+  { id: 'teamNode', category: 'context', type: 'teamNode', label: 'AI Team', icon: 'codicon-organization', desc: 'Run multiple agents in sequence' },
   { id: 'repoNode', category: 'context', type: 'repoNode', label: 'Repo', icon: 'codicon-repo', desc: 'Set workspace path' },
   { id: 'vscodeCommandNode', category: 'context', type: 'vscodeCommandNode', label: 'VS Code', icon: 'codicon-vscode', desc: 'Run an arbitrary VS Code command' },
   { id: 'actionNode:terminal', category: 'providers', type: 'actionNode', provider: 'terminal', label: 'Terminal', icon: 'codicon-terminal', desc: 'Run shell commands' },

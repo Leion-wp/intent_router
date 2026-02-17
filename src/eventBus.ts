@@ -6,6 +6,19 @@ export type PipelineEvent =
     | { type: 'stepStart'; runId: string; intentId: string; timestamp: number; description?: string; index?: number; stepId?: string }
     | { type: 'stepEnd'; runId: string; intentId: string; timestamp: number; success: boolean; index?: number; stepId?: string }
     | { type: 'stepLog'; runId: string; intentId: string; stepId?: string; text: string; stream: 'stdout' | 'stderr' }
+    | {
+        type: 'approvalReviewReady';
+        runId: string;
+        intentId: string;
+        stepId?: string;
+        files: Array<{ path: string; added: number; removed: number }>;
+        totalAdded: number;
+        totalRemoved: number;
+        policyMode?: 'warn' | 'block';
+        policyBlocked?: boolean;
+        policyViolations?: string[];
+    }
+    | { type: 'pipelineReviewOpenDiff'; nodeId?: string; runId?: string; path?: string }
     | { type: 'pipelinePause'; runId: string; timestamp: number }
     | { type: 'pipelineResume'; runId: string; timestamp: number };
 

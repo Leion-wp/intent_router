@@ -13,6 +13,18 @@ export type PipelineRun = {
 export type WebviewInboundMessage =
   | { type: 'executionStatus'; index?: number; stepId?: string; status: ExecutionStatus; intentId: string }
   | { type: 'stepLog'; runId: string; intentId: string; stepId?: string; text: string; stream: 'stdout' | 'stderr' }
+  | {
+      type: 'approvalReviewReady';
+      runId: string;
+      intentId: string;
+      stepId?: string;
+      files: Array<{ path: string; added: number; removed: number }>;
+      totalAdded: number;
+      totalRemoved: number;
+      policyMode?: 'warn' | 'block';
+      policyBlocked?: boolean;
+      policyViolations?: string[];
+    }
   | { type: 'historyUpdate'; history: PipelineRun[] }
   | { type: 'environmentUpdate'; environment: Record<string, string> }
   | { type: 'customNodesUpdate'; nodes: Array<any> }
@@ -33,6 +45,8 @@ export type WebviewInboundMessage =
 export type WebviewOutboundMessage =
   | { type: 'savePipeline'; pipeline: any; silent?: boolean }
   | { type: 'runPipeline'; pipeline: any; dryRun?: boolean }
+  | { type: 'pipelineDecision'; nodeId: string; runId?: string; decision: 'approve' | 'reject'; approvedPaths?: string[] }
+  | { type: 'pipelineReviewOpenDiff'; nodeId: string; runId?: string; path?: string }
   | { type: 'saveEnvironment'; environment: Record<string, string> }
   | { type: 'clearHistory' }
   | { type: 'customNodes.upsert'; node: any }
