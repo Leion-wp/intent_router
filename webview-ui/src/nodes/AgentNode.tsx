@@ -23,8 +23,19 @@ const AGENT_PROVIDER_OPTIONS = [
   { value: 'codex', label: 'Codex CLI' }
 ];
 
+const AGENT_ROLE_OPTIONS = [
+  { value: 'brainstorm', label: 'brainstorm' },
+  { value: 'prd', label: 'prd' },
+  { value: 'architect', label: 'architect' },
+  { value: 'backend', label: 'backend' },
+  { value: 'frontend', label: 'frontend' },
+  { value: 'reviewer', label: 'reviewer' },
+  { value: 'qa', label: 'qa' }
+];
+
 const OUTPUT_CONTRACT_OPTIONS = [
-  { value: 'path_result', label: 'Path/Result (strict)' }
+  { value: 'path_result', label: 'Path/Result (strict)' },
+  { value: 'unified_diff', label: 'Unified Diff (strict)' }
 ];
 
 const AgentNode = ({ data, id }: NodeProps) => {
@@ -33,7 +44,9 @@ const AgentNode = ({ data, id }: NodeProps) => {
 
   const [agent, setAgent] = useState<string>((data.agent as string) || 'gemini');
   const [model, setModel] = useState<string>((data.model as string) || 'gemini-2.5-flash');
+  const [role, setRole] = useState<string>((data.role as string) || 'architect');
   const [instruction, setInstruction] = useState<string>((data.instruction as string) || '');
+  const [instructionTemplate, setInstructionTemplate] = useState<string>((data.instructionTemplate as string) || '');
   const [contextFiles, setContextFiles] = useState<string[]>((data.contextFiles as string[]) || ['src/**/*.ts']);
   const [agentSpecFiles, setAgentSpecFiles] = useState<string[]>((data.agentSpecFiles as string[]) || ['AGENTS.md', '**/SKILL.md']);
   const [outputContract, setOutputContract] = useState<string>((data.outputContract as string) || 'path_result');
@@ -58,7 +71,9 @@ const AgentNode = ({ data, id }: NodeProps) => {
   useEffect(() => {
     if (data.agent) setAgent(data.agent as string);
     if (data.model) setModel(data.model as string);
+    if (data.role !== undefined) setRole(String(data.role || 'architect'));
     if (data.instruction) setInstruction(data.instruction as string);
+    if (data.instructionTemplate !== undefined) setInstructionTemplate(String(data.instructionTemplate || ''));
     if (data.contextFiles) setContextFiles(data.contextFiles as string[]);
     if (data.agentSpecFiles) setAgentSpecFiles(data.agentSpecFiles as string[]);
     if (data.outputContract) setOutputContract(data.outputContract as string);
@@ -280,6 +295,17 @@ const AgentNode = ({ data, id }: NodeProps) => {
                               </select>
                           </div>
                           <div>
+                              <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Role</label>
+                              <select
+                                  className="nodrag"
+                                  value={role}
+                                  onChange={(e) => { setRole(e.target.value); updateField({ role: e.target.value }); }}
+                                  style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px' }}
+                              >
+                                  {AGENT_ROLE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                              </select>
+                          </div>
+                          <div>
                               <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Intelligence Model</label>
                               <select
                                   className="nodrag"
@@ -300,6 +326,17 @@ const AgentNode = ({ data, id }: NodeProps) => {
                               >
                                   {OUTPUT_CONTRACT_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                               </select>
+                          </div>
+                          <div>
+                              <label style={{ fontSize: '10px', color: '#555', display: 'block', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Instruction Template</label>
+                              <textarea
+                                  className="nodrag"
+                                  value={instructionTemplate}
+                                  onChange={(e) => { setInstructionTemplate(e.target.value); updateField({ instructionTemplate: e.target.value }); }}
+                                  placeholder="Optional. Use ${instruction} placeholder."
+                                  rows={2}
+                                  style={{ width: '100%', background: '#121214', color: '#fff', border: '1px solid #333', padding: '8px', borderRadius: '8px', fontSize: '11px', resize: 'vertical' }}
+                              />
                           </div>
                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
                               <div>

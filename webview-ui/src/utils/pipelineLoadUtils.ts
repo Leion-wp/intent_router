@@ -103,7 +103,9 @@ export function buildGraphFromPipeline(
         type = 'agentNode';
         data.agent = String(step.payload?.agent || 'gemini');
         data.model = String(step.payload?.model || 'gemini-2.5-flash');
+        data.role = String(step.payload?.role || 'architect');
         data.instruction = String(step.payload?.instruction || '');
+        data.instructionTemplate = String(step.payload?.instructionTemplate || '');
         data.contextFiles = Array.isArray(step.payload?.contextFiles) ? step.payload.contextFiles : ['src/**/*.ts'];
         data.agentSpecFiles = Array.isArray(step.payload?.agentSpecFiles) ? step.payload.agentSpecFiles : ['AGENTS.md', '**/SKILL.md'];
         data.outputContract = String(step.payload?.outputContract || 'path_result');
@@ -127,6 +129,7 @@ export function buildGraphFromPipeline(
         data.outputVar = String(step.payload?.outputVar || 'team_result');
         data.outputVarPath = String(step.payload?.outputVarPath || 'team_path');
         data.outputVarChanges = String(step.payload?.outputVarChanges || 'team_changes');
+        data.reviewerVoteWeight = Number(step.payload?.reviewerVoteWeight || 2);
         data.sessionId = String(step.payload?.sessionId || '');
         data.sessionMode = String(step.payload?.sessionMode || 'read_write');
         data.sessionResetBeforeRun = step.payload?.sessionResetBeforeRun === true;

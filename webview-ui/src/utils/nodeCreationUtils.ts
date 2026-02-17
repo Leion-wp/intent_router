@@ -52,7 +52,9 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.label = 'AI Agent';
     data.agent = 'gemini';
     data.model = 'gemini-2.5-flash';
+    data.role = 'architect';
     data.instruction = '';
+    data.instructionTemplate = '';
     data.contextFiles = ['src/**/*.ts'];
     data.agentSpecFiles = ['AGENTS.md', '**/SKILL.md'];
     data.outputContract = 'path_result';
@@ -76,6 +78,7 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.outputVar = 'team_result';
     data.outputVarPath = 'team_path';
     data.outputVarChanges = 'team_changes';
+    data.reviewerVoteWeight = 2;
     data.sessionId = '';
     data.sessionMode = 'read_write';
     data.sessionResetBeforeRun = false;
@@ -127,7 +130,9 @@ export function buildDropNodeData(
       label: 'AI Agent',
       agent: 'gemini',
       model: 'gemini-2.5-flash',
+      role: 'architect',
       instruction: '',
+      instructionTemplate: '',
       contextFiles: ['src/**/*.ts'],
       agentSpecFiles: ['AGENTS.md', '**/SKILL.md'],
       outputContract: 'path_result',
@@ -153,6 +158,7 @@ export function buildDropNodeData(
       outputVar: 'team_result',
       outputVarPath: 'team_path',
       outputVarChanges: 'team_changes',
+      reviewerVoteWeight: 2,
       sessionId: '',
       sessionMode: 'read_write',
       sessionResetBeforeRun: false,

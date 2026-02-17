@@ -995,6 +995,122 @@ export function createSoftwareFactoryPreset(): PipelineFile {
                     path: '${var:split_path}',
                     proposal: '${var:split_result}'
                 }
+            },
+            {
+                id: 'team.frontend',
+                intent: 'ai.team',
+                description: 'Team Frontend implementation (atomic FE PR scope)',
+                payload: {
+                    strategy: 'vote',
+                    reviewerVoteWeight: 3,
+                    members: [
+                        {
+                            name: 'frontend_writer',
+                            role: 'writer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Implement frontend scope from pr_split.md. Output only FE files and content.',
+                            contextFiles: ['docs/pr_split.md', 'docs/prd.md', 'docs/architecture.md']
+                        },
+                        {
+                            name: 'frontend_reviewer',
+                            role: 'reviewer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-pro',
+                            instruction: 'Review/refine FE proposal and return final FE changes.',
+                            contextFiles: ['docs/pr_split.md', 'docs/prd.md', 'docs/architecture.md']
+                        }
+                    ],
+                    outputContract: 'path_result',
+                    outputVar: 'fe_result',
+                    outputVarPath: 'fe_path',
+                    outputVarChanges: 'fe_changes'
+                }
+            },
+            {
+                id: 'approve.frontend',
+                intent: 'vscode.reviewDiff',
+                description: 'Review frontend implementation changes',
+                payload: {
+                    path: '${var:fe_path}',
+                    proposal: '${var:fe_result}'
+                }
+            },
+            {
+                id: 'team.backend',
+                intent: 'ai.team',
+                description: 'Team Backend implementation (atomic BE PR scope)',
+                payload: {
+                    strategy: 'vote',
+                    reviewerVoteWeight: 3,
+                    members: [
+                        {
+                            name: 'backend_writer',
+                            role: 'writer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Implement backend scope from pr_split.md. Output only BE files and content.',
+                            contextFiles: ['docs/pr_split.md', 'docs/prd.md', 'docs/architecture.md']
+                        },
+                        {
+                            name: 'backend_reviewer',
+                            role: 'reviewer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-pro',
+                            instruction: 'Review/refine BE proposal and return final BE changes.',
+                            contextFiles: ['docs/pr_split.md', 'docs/prd.md', 'docs/architecture.md']
+                        }
+                    ],
+                    outputContract: 'path_result',
+                    outputVar: 'be_result',
+                    outputVarPath: 'be_path',
+                    outputVarChanges: 'be_changes'
+                }
+            },
+            {
+                id: 'approve.backend',
+                intent: 'vscode.reviewDiff',
+                description: 'Review backend implementation changes',
+                payload: {
+                    path: '${var:be_path}',
+                    proposal: '${var:be_result}'
+                }
+            },
+            {
+                id: 'factory.capture_pr_targets',
+                intent: 'system.form',
+                description: 'Capture PR targets (optional publish handoff)',
+                payload: {
+                    fields: [
+                        { type: 'text', key: 'baseBranch', label: 'Base branch', default: 'main', required: true },
+                        { type: 'text', key: 'feBranch', label: 'Frontend branch', default: 'feature/frontend', required: true },
+                        { type: 'text', key: 'beBranch', label: 'Backend branch', default: 'feature/backend', required: true }
+                    ]
+                }
+            },
+            {
+                id: 'factory.open_frontend_pr',
+                intent: 'github.openPr',
+                description: 'Open frontend PR (after branch push)',
+                payload: {
+                    cwd: '${workspaceRoot}',
+                    head: '${var:feBranch}',
+                    base: '${var:baseBranch}',
+                    title: 'feat(frontend): factory delivery',
+                    bodyFile: 'docs/pr_split.md'
+                }
+            },
+            {
+                id: 'factory.open_backend_pr',
+                intent: 'github.openPr',
+                description: 'Open backend PR (after branch push)',
+                payload: {
+                    cwd: '${workspaceRoot}',
+                    head: '${var:beBranch}',
+                    base: '${var:baseBranch}',
+                    title: 'feat(backend): factory delivery',
+                    bodyFile: 'docs/pr_split.md'
+                }
             }
         ]
     };

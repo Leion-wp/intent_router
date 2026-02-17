@@ -663,7 +663,9 @@ function Flow({
           payload = {
             agent: data.agent,
             model: data.model,
+            role: data.role || 'architect',
             instruction: data.instruction,
+            instructionTemplate: data.instructionTemplate || undefined,
             contextFiles: data.contextFiles,
             agentSpecFiles: data.agentSpecFiles,
             outputContract: data.outputContract || 'path_result',
@@ -687,6 +689,7 @@ function Flow({
              outputVar: data.outputVar || 'team_result',
              outputVarPath: data.outputVarPath || 'team_path',
              outputVarChanges: data.outputVarChanges || 'team_changes',
+             reviewerVoteWeight: Number(data.reviewerVoteWeight || 2),
              sessionId: String(data.sessionId || '').trim() || undefined,
              sessionMode: String(data.sessionMode || 'read_write'),
              sessionResetBeforeRun: data.sessionResetBeforeRun === true,

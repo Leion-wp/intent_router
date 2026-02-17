@@ -34,6 +34,7 @@ const TeamNode = ({ data, id }: NodeProps) => {
   const [outputVar, setOutputVar] = useState<string>((data.outputVar as string) || 'team_result');
   const [outputVarPath, setOutputVarPath] = useState<string>((data.outputVarPath as string) || 'team_path');
   const [outputVarChanges, setOutputVarChanges] = useState<string>((data.outputVarChanges as string) || 'team_changes');
+  const [reviewerVoteWeight, setReviewerVoteWeight] = useState<number>(Number(data.reviewerVoteWeight || 2));
   const [sessionId, setSessionId] = useState<string>((data.sessionId as string) || '');
   const [sessionMode, setSessionMode] = useState<'runtime_only' | 'read_only' | 'write_only' | 'read_write'>(
     ((data.sessionMode as any) || 'read_write')
@@ -54,6 +55,10 @@ const TeamNode = ({ data, id }: NodeProps) => {
     if (data.outputVar) setOutputVar(String(data.outputVar));
     if (data.outputVarPath) setOutputVarPath(String(data.outputVarPath));
     if (data.outputVarChanges) setOutputVarChanges(String(data.outputVarChanges));
+    if (data.reviewerVoteWeight !== undefined) {
+      const value = Number(data.reviewerVoteWeight || 2);
+      setReviewerVoteWeight(Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 2);
+    }
     if (data.sessionId !== undefined) setSessionId(String(data.sessionId || ''));
     if (data.sessionMode !== undefined) {
       const raw = String(data.sessionMode || 'read_write');
@@ -122,10 +127,28 @@ const TeamNode = ({ data, id }: NodeProps) => {
             style={{ width: '100%', background: '#151322', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, padding: '6px 8px', fontSize: 11 }}
           >
             <option value="sequential">sequential</option>
-            <option value="reviewer_gate">reviewer_gate (next)</option>
-            <option value="vote">vote (next)</option>
+            <option value="reviewer_gate">reviewer_gate</option>
+            <option value="vote">vote</option>
           </select>
         </div>
+        {strategy === 'vote' && (
+          <div>
+            <label style={{ fontSize: 10, color: '#aaa', display: 'block', marginBottom: 4 }}>Reviewer Vote Weight</label>
+            <input
+              className="nodrag"
+              type="number"
+              min={1}
+              value={reviewerVoteWeight}
+              onChange={(event) => {
+                const value = Number(event.target.value || 2);
+                const next = Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 2;
+                setReviewerVoteWeight(next);
+                update({ reviewerVoteWeight: next });
+              }}
+              style={inputStyle}
+            />
+          </div>
+        )}
 
         <div style={{ fontSize: 10, color: '#aaa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Members</span>

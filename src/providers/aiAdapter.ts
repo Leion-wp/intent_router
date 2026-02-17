@@ -19,6 +19,8 @@ type AiCliSpec = {
 };
 
 type TeamStrategy = 'sequential' | 'reviewer_gate' | 'vote';
+type AgentRole = 'brainstorm' | 'prd' | 'architect' | 'backend' | 'frontend' | 'reviewer' | 'qa' | 'custom';
+type OutputContract = 'path_result' | 'unified_diff';
 type TeamMember = {
     name?: string;
     role?: 'writer' | 'reviewer';
@@ -49,7 +51,9 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'contextFiles', type: 'string', description: 'Glob patterns for context files', default: [] },
                     { name: 'agent', type: 'enum', options: ['gemini', 'codex'], description: 'The AI agent provider', default: 'gemini' },
                     { name: 'model', type: 'string', description: 'Model name override' },
-                    { name: 'outputContract', type: 'enum', options: ['path_result'], description: 'Expected AI output contract', default: 'path_result' },
+                    { name: 'role', type: 'enum', options: ['brainstorm', 'prd', 'architect', 'backend', 'frontend', 'reviewer', 'qa'], description: 'Agent role profile', default: 'architect' },
+                    { name: 'instructionTemplate', type: 'string', description: 'Optional instruction template (supports ${instruction})' },
+                    { name: 'outputContract', type: 'enum', options: ['path_result', 'unified_diff'], description: 'Expected AI output contract', default: 'path_result' },
                     { name: 'agentSpecFiles', type: 'string', description: 'Glob patterns for AGENTS.md / SKILL.md', default: [] },
                     { name: 'outputVar', type: 'string', description: 'Variable to store result content' },
                     { name: 'outputVarPath', type: 'string', description: 'Variable to store result path' },
@@ -70,14 +74,15 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'members', type: 'string', description: 'Team members configuration', required: true },
                     { name: 'contextFiles', type: 'string', description: 'Shared context glob patterns', default: [] },
                     { name: 'agentSpecFiles', type: 'string', description: 'Shared spec files glob patterns', default: [] },
-                    { name: 'outputContract', type: 'enum', options: ['path_result'], description: 'Expected AI output contract', default: 'path_result' },
+                    { name: 'outputContract', type: 'enum', options: ['path_result', 'unified_diff'], description: 'Expected AI output contract', default: 'path_result' },
                     { name: 'outputVar', type: 'string', description: 'Variable to store final result content' },
                     { name: 'outputVarPath', type: 'string', description: 'Variable to store final result path' },
                     { name: 'outputVarChanges', type: 'string', description: 'Variable to store final structured changes list' },
                     { name: 'sessionId', type: 'string', description: 'Optional persistent memory session id' },
                     { name: 'sessionMode', type: 'enum', options: ['runtime_only', 'read_only', 'write_only', 'read_write'], description: 'Session memory mode', default: 'read_write' },
                     { name: 'sessionResetBeforeRun', type: 'boolean', description: 'Reset session memory before running team', default: false },
-                    { name: 'sessionRecallLimit', type: 'string', description: 'Max session memory entries injected into prompt', default: '12' }
+                    { name: 'sessionRecallLimit', type: 'string', description: 'Max session memory entries injected into prompt', default: '12' },
+                    { name: 'reviewerVoteWeight', type: 'string', description: 'Reviewer weight multiplier when strategy=vote', default: '2' }
                 ]
             }
         ]
@@ -109,6 +114,26 @@ export async function executeAiCommand(args: any): Promise<any> {
     const persistedSession = sessionEnabled && sessionId && sessionPolicy.read
         ? loadSessionMemory(sessionId).slice(-recallLimit)
         : [];
+    const role = normalizeAgentRole(args?.role);
+    const instructionResolved = applyInstructionTemplate(args?.instructionTemplate, instruction);
+    const outputContract = normalizeOutputContract(args?.outputContract);
+    const contractRules = outputContract === 'unified_diff'
+        ? [
+            '1. Use ONLY this format:',
+            '   [DIFF]```diff',
+            '   unified diff content',
+            '   ```[/DIFF]',
+            '2. Do not output any text outside [DIFF] block.'
+        ]
+        : [
+            '1. Use ONLY this format, repeated once per file:',
+            '   [PATH]relative/or/absolute/file/path[/PATH]',
+            '   [RESULT]```language',
+            '   file content here',
+            '   ```[/RESULT]',
+            '2. You may output multiple PATH/RESULT pairs for multi-file changes.',
+            '3. Do not output any extra text outside [PATH]/[RESULT] blocks.'
+        ];
 
     const log = (text: string, stream: 'stdout' | 'stderr' = 'stdout') => {
         if (runId) {
@@ -134,16 +159,11 @@ export async function executeAiCommand(args: any): Promise<any> {
     const fullPrompt = `
 IMPORTANT: You are an AI Architect. 
 Your role is to PROPOSE changes.
+${buildAgentRoleBlock(role)}
 
 RULES:
-1. Use ONLY this format, repeated once per file:
-   [PATH]relative/or/absolute/file/path[/PATH]
-   [RESULT]\`\`\`language
-   file content here
-   \`\`\`[/RESULT]
-2. You may output multiple PATH/RESULT pairs for multi-file changes.
-3. NEVER execute tools yourself.
-4. Do not output any extra text outside [PATH]/[RESULT] blocks.
+${contractRules.join('\n')}
+4. NEVER execute tools yourself.
 5. Return only the final answer blocks. No intro, no explanation.
 
 CONTEXT:
@@ -152,7 +172,7 @@ ${contextContent}
 ${buildPersistedSessionBlock(persistedSession)}
 
 INSTRUCTION:
-${instruction}
+${instructionResolved}
     `.trim();
 
     const modelName = args.model || 'gemini-2.0-flash-exp';
@@ -193,23 +213,45 @@ ${instruction}
             if (code === 0) {
                 log(`\n[AI Agent] Analysis complete.\n`);
                 let changes: ProposedChange[] = [];
+                let unifiedDiff: string | undefined;
                 try {
-                    changes = parseProposedChangesStrict(fullOutput);
-                    if (changes.length === 0) {
-                        return reject(new Error('Invalid AI output: expected [PATH]...[\\/PATH] + [RESULT]...[\\/RESULT] blocks.'));
+                    if (outputContract === 'unified_diff') {
+                        const parsed = parseUnifiedDiffStrict(fullOutput);
+                        unifiedDiff = parsed.diff;
+                        changes = parsed.paths.map((entryPath) => ({ path: entryPath, content: '' }));
+                        if (!changes.length) {
+                            return reject(new Error('Invalid AI output: expected [DIFF] block with at least one target file.'));
+                        }
+                    } else {
+                        changes = parseProposedChangesStrict(fullOutput);
+                        if (changes.length === 0) {
+                            return reject(new Error('Invalid AI output: expected [PATH]...[\\/PATH] + [RESULT]...[\\/RESULT] blocks.'));
+                        }
                     }
                     if (sessionEnabled && sessionId && sessionPolicy.write) {
                         const entries: SessionMemoryEntry[] = changes.map((change) => ({
                             member: 'agent',
                             role: 'writer',
                             path: String(change.path || ''),
-                            contentSnippet: String(change.content || '').slice(0, 1200),
+                            contentSnippet: outputContract === 'unified_diff'
+                                ? String(unifiedDiff || '').slice(0, 1200)
+                                : String(change.content || '').slice(0, 1200),
                             timestamp: Date.now()
                         }));
                         appendSessionMemory(sessionId, entries);
                     }
                 } catch (error: any) {
                     return reject(new Error(String(error?.message || error)));
+                }
+
+                if (outputContract === 'unified_diff') {
+                    resolve({
+                        content: String(unifiedDiff || ''),
+                        path: changes[0].path,
+                        changes,
+                        unifiedDiff: String(unifiedDiff || '')
+                    });
+                    return;
                 }
 
                 if (changes.length === 1) {
@@ -263,7 +305,7 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
     const sharedSpecFiles = asStringArray(args?.agentSpecFiles);
     const teamVarStore = new Map<string, string>();
     const runResults: Array<{ member: TeamMember; result: any }> = [];
-    const reviewerVoteWeight = resolveReviewerVoteWeight();
+    const reviewerVoteWeight = resolveReviewerVoteWeight(args?.reviewerVoteWeight);
 
     for (let index = 0; index < members.length; index += 1) {
         const member = members[index];
@@ -390,6 +432,42 @@ export function resolveSessionMemoryPolicy(modeRaw: any): { mode: SessionMemoryM
         return { mode: 'write_only', read: false, write: true };
     }
     return { mode: 'read_write', read: true, write: true };
+}
+
+export function normalizeAgentRole(value: any): AgentRole {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'brainstorm' || raw === 'prd' || raw === 'architect' || raw === 'backend' || raw === 'frontend' || raw === 'reviewer' || raw === 'qa') {
+        return raw;
+    }
+    return 'custom';
+}
+
+export function applyInstructionTemplate(templateRaw: any, instructionRaw: any): string {
+    const instruction = String(instructionRaw || '').trim();
+    const template = String(templateRaw || '').trim();
+    if (!template) {
+        return instruction;
+    }
+    if (template.includes('${instruction}')) {
+        return template.split('${instruction}').join(instruction);
+    }
+    return `${template}\n\n${instruction}`.trim();
+}
+
+function buildAgentRoleBlock(role: AgentRole): string {
+    const profiles: Record<Exclude<AgentRole, 'custom'>, string> = {
+        brainstorm: 'Generate broad options, alternatives, and exploration paths.',
+        prd: 'Produce precise product requirements and acceptance criteria.',
+        architect: 'Design robust technical architecture and tradeoffs.',
+        backend: 'Focus on backend implementation, APIs, data, and reliability.',
+        frontend: 'Focus on UI, UX, state, and frontend implementation details.',
+        reviewer: 'Critically review quality, risks, and consistency before approval.',
+        qa: 'Focus on testability, edge cases, and validation coverage.'
+    };
+    if (role === 'custom') {
+        return 'ROLE_PROFILE: custom';
+    }
+    return `ROLE_PROFILE: ${role}\nROLE_OBJECTIVE: ${profiles[role]}`;
 }
 
 export function normalizeTeamStrategy(value: any): TeamStrategy {
@@ -626,7 +704,11 @@ function normalizeTeamMemberRole(value: any): 'writer' | 'reviewer' {
     return 'writer';
 }
 
-function resolveReviewerVoteWeight(): number {
+export function resolveReviewerVoteWeight(explicit?: any): number {
+    const explicitValue = Number(explicit);
+    if (Number.isFinite(explicitValue)) {
+        return Math.max(1, Math.floor(explicitValue));
+    }
     const cfg = vscode.workspace.getConfiguration('intentRouter');
     const raw = cfg.get<number>('ai.team.reviewerVoteWeight', 2);
     return Number.isFinite(raw) ? Math.max(1, Math.floor(raw)) : 2;
@@ -712,6 +794,44 @@ export function resolveAiCliSpec(agent: string, model: string, prompt: string): 
 
 function stripAnsi(input: string): string {
     return String(input || '').replace(/\u001b\[[0-9;]*m/g, '');
+}
+
+export function normalizeOutputContract(value: any): OutputContract {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'unified_diff') {
+        return 'unified_diff';
+    }
+    return 'path_result';
+}
+
+export function parseUnifiedDiffStrict(output: string): { diff: string; paths: string[] } {
+    const normalized = stripAnsi(output);
+    const blockPattern = /\[DIFF\]\s*(?:```diff\s*)?([\s\S]*?)(?:```)?\s*\[\/DIFF\]/i;
+    const match = blockPattern.exec(normalized);
+    if (!match) {
+        return { diff: '', paths: [] };
+    }
+    const before = normalized.slice(0, match.index).trim();
+    const after = normalized.slice(match.index + match[0].length).trim();
+    if (before.length > 0 || after.length > 0) {
+        throw new Error('Invalid AI output: text found outside [DIFF] block.');
+    }
+    const diff = String(match[1] || '').trim();
+    if (!diff) {
+        throw new Error('Invalid AI output: empty [DIFF] block.');
+    }
+    const paths: string[] = [];
+    const seen = new Set<string>();
+    const pathPattern = /^\+\+\+\s+b\/(.+)$/gm;
+    let pathMatch: RegExpExecArray | null = null;
+    while ((pathMatch = pathPattern.exec(diff)) !== null) {
+        const entryPath = String(pathMatch[1] || '').trim();
+        if (!entryPath || entryPath === '/dev/null') continue;
+        if (seen.has(entryPath)) continue;
+        seen.add(entryPath);
+        paths.push(entryPath);
+    }
+    return { diff, paths };
 }
 
 export function parseProposedChangesStrict(output: string): ProposedChange[] {

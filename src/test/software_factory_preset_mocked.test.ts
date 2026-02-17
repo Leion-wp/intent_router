@@ -20,16 +20,33 @@ suite('Software Factory Preset (Mocked)', () => {
     assert.ok(preset);
     assert.strictEqual(preset.name, 'Software Factory Template');
     assert.ok(Array.isArray(preset.steps));
-    assert.ok(preset.steps.length >= 8);
+    assert.ok(preset.steps.length >= 15);
 
     const intents = preset.steps.map((step: any) => step.intent);
     const teamCount = intents.filter((intent: string) => intent === 'ai.team').length;
     const reviewCount = intents.filter((intent: string) => intent === 'vscode.reviewDiff').length;
 
-    assert.ok(teamCount >= 4, `Expected at least 4 ai.team steps. Got: ${teamCount}`);
-    assert.ok(reviewCount >= 4, `Expected at least 4 review steps. Got: ${reviewCount}`);
+    assert.ok(teamCount >= 6, `Expected at least 6 ai.team steps. Got: ${teamCount}`);
+    assert.ok(reviewCount >= 6, `Expected at least 6 review steps. Got: ${reviewCount}`);
     assert.strictEqual(preset.steps[0].intent, 'ai.team');
     assert.strictEqual(preset.steps[1].intent, 'vscode.reviewDiff');
+  });
+
+  test('includes FE/BE implementation and PR handoff steps', () => {
+    const preset = createSoftwareFactoryPreset();
+    const byId = new Map<string, any>();
+    for (const step of preset.steps) byId.set(step.id, step);
+
+    assert.ok(byId.has('team.frontend'));
+    assert.ok(byId.has('approve.frontend'));
+    assert.ok(byId.has('team.backend'));
+    assert.ok(byId.has('approve.backend'));
+    assert.ok(byId.has('factory.capture_pr_targets'));
+    assert.ok(byId.has('factory.open_frontend_pr'));
+    assert.ok(byId.has('factory.open_backend_pr'));
+
+    assert.strictEqual(byId.get('factory.open_frontend_pr').intent, 'github.openPr');
+    assert.strictEqual(byId.get('factory.open_backend_pr').intent, 'github.openPr');
   });
 
   test('team members include role metadata', () => {

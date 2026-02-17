@@ -11,7 +11,7 @@ Module.prototype.require = function (request: string) {
   return originalRequire.apply(this, arguments);
 };
 
-const { normalizeTeamStrategy, normalizeTeamMembers, resolveTeamStrategyResult, pickTeamResultByVote, pickTeamResultByWeightedVote, resolveSessionMemoryPolicy } = require('../../out/providers/aiAdapter');
+const { normalizeTeamStrategy, normalizeTeamMembers, resolveTeamStrategyResult, pickTeamResultByVote, pickTeamResultByWeightedVote, resolveSessionMemoryPolicy, resolveReviewerVoteWeight } = require('../../out/providers/aiAdapter');
 Module.prototype.require = originalRequire;
 
 suite('AI Team Helpers (Mocked)', () => {
@@ -77,5 +77,11 @@ suite('AI Team Helpers (Mocked)', () => {
     assert.deepStrictEqual(resolveSessionMemoryPolicy('write_only'), { mode: 'write_only', read: false, write: true });
     assert.deepStrictEqual(resolveSessionMemoryPolicy('read_write'), { mode: 'read_write', read: true, write: true });
     assert.deepStrictEqual(resolveSessionMemoryPolicy('invalid'), { mode: 'read_write', read: true, write: true });
+  });
+
+  test('reviewer vote weight accepts explicit override', () => {
+    assert.strictEqual(resolveReviewerVoteWeight(5), 5);
+    assert.strictEqual(resolveReviewerVoteWeight('3'), 3);
+    assert.strictEqual(resolveReviewerVoteWeight('0'), 1);
   });
 });
