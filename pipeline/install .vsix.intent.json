@@ -93,7 +93,7 @@
             "width": 282,
             "height": 54
           },
-          "selected": false,
+          "selected": true,
           "dragging": false
         },
         {
@@ -233,7 +233,8 @@
           "target": "node_9",
           "markerEnd": {
             "type": "arrowclosed"
-          }
+          },
+          "className": "ir-edge-running"
         },
         {
           "source": "node_5",
@@ -241,7 +242,8 @@
           "markerEnd": {
             "type": "arrowclosed"
           },
-          "id": "xy-edge__node_5-node_7"
+          "id": "xy-edge__node_5-node_7",
+          "className": "ir-edge-running"
         }
       ]
     }

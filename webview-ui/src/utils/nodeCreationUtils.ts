@@ -100,6 +100,7 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.agent = 'gemini';
     data.model = 'gemini-2.5-flash';
     data.role = 'architect';
+    data.reasoningEffort = 'medium';
     data.instruction = '';
     data.instructionTemplate = '';
     data.contextFiles = ['src/**/*.ts'];
@@ -178,6 +179,7 @@ export function buildDropNodeData(
       agent: 'gemini',
       model: 'gemini-2.5-flash',
       role: 'architect',
+      reasoningEffort: 'medium',
       instruction: '',
       instructionTemplate: '',
       contextFiles: ['src/**/*.ts'],

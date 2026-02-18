@@ -668,6 +668,7 @@ function Flow({
             agent: data.agent,
             model: data.model,
             role: data.role || 'architect',
+            reasoningEffort: String(data.reasoningEffort || 'medium'),
             instruction: data.instruction,
             instructionTemplate: data.instructionTemplate || undefined,
             contextFiles: data.contextFiles,

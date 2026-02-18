@@ -100,6 +100,51 @@ const SwitchNode = ({ data, id }: NodeProps) => {
     transition: 'all 0.2s ease'
   };
 
+  const commitRoutes = (next: SwitchRoute[]) => {
+    setRoutes(next);
+    updateNodeData(id, { routes: next });
+  };
+
+  const setRoute = (index: number, patch: Partial<SwitchRoute>) => {
+    const next = routes.map((route, routeIndex) => {
+      if (routeIndex !== index) return route;
+      const condition = normalizeCondition((patch as any).condition ?? route.condition);
+      const value = condition === 'exists'
+        ? ''
+        : String((patch as any).value ?? route.value ?? '');
+      return {
+        ...route,
+        ...patch,
+        condition,
+        value
+      };
+    });
+    commitRoutes(next);
+  };
+
+  const addRoute = () => {
+    const nextIndex = routes.length;
+    const next: SwitchRoute[] = [
+      ...routes,
+      {
+        label: `route_${nextIndex}`,
+        condition: 'equals',
+        value: ''
+      }
+    ];
+    commitRoutes(next);
+  };
+
+  const removeRoute = (index: number) => {
+    const next = routes
+      .filter((_, routeIndex) => routeIndex !== index)
+      .map((route, routeIndex) => ({
+        ...route,
+        label: route.label || `route_${routeIndex}`
+      }));
+    commitRoutes(next);
+  };
+
   return (
     <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '300px' }}>
       <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-6px', background: themeColor }} />
@@ -293,7 +338,10 @@ const SwitchNode = ({ data, id }: NodeProps) => {
                         flex: 1, 
                         fontSize: '11px', 
                         padding: '6px 10px',
-                        opacity: r.condition === 'exists' ? 0.3 : 1 
+                        opacity: r.condition === 'exists' ? 0.3 : 1,
+                        border: r.condition === 'regex' && String(r.value || '').trim() && !isValidRegex(String(r.value || '').trim())
+                          ? '1px solid #ff4d4d'
+                          : undefined
                       }}
                     />
                     <button

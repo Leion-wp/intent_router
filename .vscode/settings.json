@@ -1,4 +1,7 @@
 {
     "intentRouter.environment": {},
-    "gemini-cli.debug.logging.enabled": true
+    "gemini-cli.debug.logging.enabled": true,
+    "intentRouter.runtime.triggers.enabled": true,
+    "intentRouter.runtime.triggers.webhookPort": 7781,
+    "intentRouter.runtime.triggers.maxChainDepth": 4
 }

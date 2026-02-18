@@ -29,3 +29,7 @@ history.json
 PR*.md
 *.intent.json
 ROADMAP.md
+reports/
+*internal*.*
+*memory*.*
+/scripts/

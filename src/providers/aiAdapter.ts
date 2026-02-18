@@ -58,6 +58,7 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'outputVar', type: 'string', description: 'Variable to store result content' },
                     { name: 'outputVarPath', type: 'string', description: 'Variable to store result path' },
                     { name: 'outputVarChanges', type: 'string', description: 'Variable to store structured changes list' },
+                    { name: 'reasoningEffort', type: 'enum', options: ['low', 'medium', 'high', 'extra_high'], description: 'Reasoning depth (codex provider)', default: 'medium' },
                     { name: 'sessionId', type: 'string', description: 'Optional persistent memory session id' },
                     { name: 'sessionMode', type: 'enum', options: ['runtime_only', 'read_only', 'write_only', 'read_write'], description: 'Session memory mode', default: 'read_write' },
                     { name: 'sessionResetBeforeRun', type: 'boolean', description: 'Reset session memory before running agent', default: false },
@@ -176,106 +177,135 @@ ${instructionResolved}
     `.trim();
 
     const modelName = args.model || 'gemini-2.0-flash-exp';
-    const cliSpec = resolveAiCliSpec(agent, modelName, fullPrompt);
+    const cliSpec = resolveAiCliSpec(agent, modelName, fullPrompt, String(args?.reasoningEffort || 'medium'));
     log(`\nExecuting ${agent} CLI [Model: ${modelName}]...\n`);
     
     return new Promise((resolve, reject) => {
         const envOverrides = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
         const env = { ...process.env, ...envOverrides };
+        let settled = false;
 
-        const child = cp.spawn(cliSpec.executable, cliSpec.args, {
-            cwd: workspaceRoot, 
-            env,
-            shell: process.platform === 'win32'
-        });
+        const launch = (spec: AiCliSpec, allowReasoningFallback: boolean) => {
+            const child = cp.spawn(spec.executable, spec.args, {
+                cwd: workspaceRoot,
+                env,
+                shell: process.platform === 'win32'
+            });
 
-        let fullOutput = '';
+            let fullOutput = '';
+            let fullStderr = '';
 
-        if (cliSpec.useStdinPrompt && child.stdin) {
-            child.stdin.write(fullPrompt);
-            child.stdin.end();
-        }
-        
-        child.stdout.on('data', (d) => {
-            const text = d.toString();
-            fullOutput += text;
-            log(text);
-        });
-
-        child.stderr.on('data', (d) => {
-            const text = d.toString();
-            if (!text.includes('AttachConsole failed') && !text.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
-                log(text, 'stderr');
+            if (spec.useStdinPrompt && child.stdin) {
+                child.stdin.write(fullPrompt);
+                child.stdin.end();
             }
-        });
-        
-        child.on('close', (code) => {
-            if (code === 0) {
-                log(`\n[AI Agent] Analysis complete.\n`);
-                let changes: ProposedChange[] = [];
-                let unifiedDiff: string | undefined;
-                try {
+
+            child.stdout.on('data', (d) => {
+                const text = d.toString();
+                fullOutput += text;
+                log(text);
+            });
+
+            child.stderr.on('data', (d) => {
+                const text = d.toString();
+                fullStderr += text;
+                if (!text.includes('AttachConsole failed') && !text.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
+                    log(text, 'stderr');
+                }
+            });
+
+            child.on('close', (code) => {
+                if (settled) return;
+                if (code === 0) {
+                    log(`\n[AI Agent] Analysis complete.\n`);
+                    let changes: ProposedChange[] = [];
+                    let unifiedDiff: string | undefined;
+                    try {
+                        if (outputContract === 'unified_diff') {
+                            const parsed = parseUnifiedDiffStrict(fullOutput);
+                            unifiedDiff = parsed.diff;
+                            changes = parsed.paths.map((entryPath) => ({ path: entryPath, content: '' }));
+                            if (!changes.length) {
+                                settled = true;
+                                return reject(new Error('Invalid AI output: expected [DIFF] block with at least one target file.'));
+                            }
+                        } else {
+                            changes = parseProposedChangesStrict(fullOutput);
+                            if (changes.length === 0) {
+                                settled = true;
+                                return reject(new Error('Invalid AI output: expected [PATH]...[\\/PATH] + [RESULT]...[\\/RESULT] blocks.'));
+                            }
+                        }
+                        if (sessionEnabled && sessionId && sessionPolicy.write) {
+                            const entries: SessionMemoryEntry[] = changes.map((change) => ({
+                                member: 'agent',
+                                role: 'writer',
+                                path: String(change.path || ''),
+                                contentSnippet: outputContract === 'unified_diff'
+                                    ? String(unifiedDiff || '').slice(0, 1200)
+                                    : String(change.content || '').slice(0, 1200),
+                                timestamp: Date.now()
+                            }));
+                            appendSessionMemory(sessionId, entries);
+                        }
+                    } catch (error: any) {
+                        settled = true;
+                        return reject(new Error(String(error?.message || error)));
+                    }
+
+                    settled = true;
                     if (outputContract === 'unified_diff') {
-                        const parsed = parseUnifiedDiffStrict(fullOutput);
-                        unifiedDiff = parsed.diff;
-                        changes = parsed.paths.map((entryPath) => ({ path: entryPath, content: '' }));
-                        if (!changes.length) {
-                            return reject(new Error('Invalid AI output: expected [DIFF] block with at least one target file.'));
-                        }
-                    } else {
-                        changes = parseProposedChangesStrict(fullOutput);
-                        if (changes.length === 0) {
-                            return reject(new Error('Invalid AI output: expected [PATH]...[\\/PATH] + [RESULT]...[\\/RESULT] blocks.'));
-                        }
+                        resolve({
+                            content: String(unifiedDiff || ''),
+                            path: changes[0].path,
+                            changes,
+                            unifiedDiff: String(unifiedDiff || '')
+                        });
+                        return;
                     }
-                    if (sessionEnabled && sessionId && sessionPolicy.write) {
-                        const entries: SessionMemoryEntry[] = changes.map((change) => ({
-                            member: 'agent',
-                            role: 'writer',
-                            path: String(change.path || ''),
-                            contentSnippet: outputContract === 'unified_diff'
-                                ? String(unifiedDiff || '').slice(0, 1200)
-                                : String(change.content || '').slice(0, 1200),
-                            timestamp: Date.now()
-                        }));
-                        appendSessionMemory(sessionId, entries);
+
+                    if (changes.length === 1) {
+                        resolve({
+                            content: changes[0].content,
+                            path: changes[0].path,
+                            changes
+                        });
+                        return;
                     }
-                } catch (error: any) {
-                    return reject(new Error(String(error?.message || error)));
-                }
 
-                if (outputContract === 'unified_diff') {
                     resolve({
-                        content: String(unifiedDiff || ''),
-                        path: changes[0].path,
-                        changes,
-                        unifiedDiff: String(unifiedDiff || '')
-                    });
-                    return;
-                }
-
-                if (changes.length === 1) {
-                    resolve({
-                        content: changes[0].content,
+                        content: JSON.stringify({ changes }, null, 2),
                         path: changes[0].path,
                         changes
                     });
                     return;
                 }
 
-                resolve({
-                    content: JSON.stringify({ changes }, null, 2),
-                    path: changes[0].path,
-                    changes
-                });
-            } else {
-                reject(new Error(`Agent exited with code ${code}`));
-            }
-        });
+                const canRetryWithoutReasoning = allowReasoningFallback
+                    && normalizeAgentProvider(agent) === 'codex'
+                    && hasReasoningEffortFlag(spec.args)
+                    && isReasoningEffortUnsupportedError(`${fullOutput}\n${fullStderr}`);
 
-        child.on('error', (err) => {
-            reject(err);
-        });
+                if (canRetryWithoutReasoning) {
+                    const fallbackArgs = stripReasoningEffortFlag(spec.args);
+                    log('\n[AI Agent] Codex CLI does not support --reasoning-effort on this version. Retrying without it.\n', 'stderr');
+                    launch({ ...spec, args: fallbackArgs }, false);
+                    return;
+                }
+
+                settled = true;
+                const reason = String(fullStderr || '').trim();
+                reject(new Error(reason ? `Agent exited with code ${code}: ${reason}` : `Agent exited with code ${code}`));
+            });
+
+            child.on('error', (err) => {
+                if (settled) return;
+                settled = true;
+                reject(err);
+            });
+        };
+
+        launch(cliSpec, true);
     });
 }
 
@@ -752,7 +782,41 @@ function normalizeAgentProvider(agent: string): 'gemini' | 'codex' {
     return 'gemini';
 }
 
-export function resolveAiCliSpec(agent: string, model: string, prompt: string): AiCliSpec {
+function hasReasoningEffortFlag(args: string[]): boolean {
+    return (args || []).some((token) => {
+        const value = String(token || '').trim();
+        return value === '--reasoning-effort' || value.startsWith('--reasoning-effort=');
+    });
+}
+
+function stripReasoningEffortFlag(args: string[]): string[] {
+    const next: string[] = [];
+    let skipNext = false;
+    for (const token of args || []) {
+        if (skipNext) {
+            skipNext = false;
+            continue;
+        }
+        const value = String(token || '').trim();
+        if (value === '--reasoning-effort') {
+            skipNext = true;
+            continue;
+        }
+        if (value.startsWith('--reasoning-effort=')) {
+            continue;
+        }
+        next.push(token);
+    }
+    return next;
+}
+
+function isReasoningEffortUnsupportedError(output: string): boolean {
+    const text = String(output || '').toLowerCase();
+    return text.includes("unexpected argument '--reasoning-effort'")
+        || text.includes('unexpected argument "--reasoning-effort"');
+}
+
+export function resolveAiCliSpec(agent: string, model: string, prompt: string, reasoningEffortRaw?: string): AiCliSpec {
     const provider = normalizeAgentProvider(agent);
     if (provider === 'gemini') {
         return {
@@ -764,14 +828,23 @@ export function resolveAiCliSpec(agent: string, model: string, prompt: string): 
 
     const cfg = vscode.workspace.getConfiguration('intentRouter');
     const command = cfg.get<string>('ai.codex.command', process.platform === 'win32' ? 'codex.cmd' : 'codex');
-    const rawArgs = cfg.get<string[]>('ai.codex.args', ['exec', '--model', '{model}', '{stdin}']);
+    const rawArgs = cfg.get<string[]>('ai.codex.args', ['exec', '--model', '{model}', '--reasoning-effort', '{reasoningEffort}', '{stdin}']);
     if (!Array.isArray(rawArgs) || rawArgs.length === 0) {
         throw new Error('Codex CLI args are empty. Configure intentRouter.ai.codex.args.');
     }
+    const reasoningEffort = (() => {
+        const normalized = String(reasoningEffortRaw || 'medium').trim().toLowerCase();
+        if (normalized === 'low' || normalized === 'high' || normalized === 'extra_high' || normalized === 'medium') {
+            return normalized;
+        }
+        return 'medium';
+    })();
+
     let useStdinPrompt = false;
     const args = rawArgs
         .map((token) => String(token ?? ''))
         .map((token) => token.split('{model}').join(model))
+        .map((token) => token.split('{reasoningEffort}').join(reasoningEffort))
         .map((token) => {
             if (token.includes('{prompt}')) {
                 return token.split('{prompt}').join(prompt);

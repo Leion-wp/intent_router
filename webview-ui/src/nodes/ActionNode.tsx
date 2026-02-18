@@ -22,6 +22,34 @@ const PROVIDER_THEMES: Record<string, { color: string, icon: string }> = {
   default: { color: '#8a2be2', icon: 'gear' }
 };
 
+function parseCronIntervalMs(args: Record<string, any>): number | null {
+  const intervalMs = Number(args?.intervalMs);
+  if (Number.isFinite(intervalMs) && intervalMs > 0) return Math.floor(intervalMs);
+
+  const everyMinutes = Number(args?.everyMinutes);
+  if (Number.isFinite(everyMinutes) && everyMinutes > 0) return Math.floor(everyMinutes * 60_000);
+
+  const everyHours = Number(args?.everyHours);
+  if (Number.isFinite(everyHours) && everyHours > 0) return Math.floor(everyHours * 60 * 60_000);
+
+  const cron = String(args?.cron || '').trim();
+  const minuteMatch = cron.match(/^\*\/(\d+)\s+\*\s+\*\s+\*\s+\*$/);
+  if (minuteMatch) return Math.max(1, Number(minuteMatch[1])) * 60_000;
+  const hourMatch = cron.match(/^0\s+\*\/(\d+)\s+\*\s+\*\s+\*$/);
+  if (hourMatch) return Math.max(1, Number(hourMatch[1])) * 60 * 60_000;
+
+  return null;
+}
+
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 const ActionNode = ({ data, id }: NodeProps) => {
   const { commandGroups } = useContext(RegistryContext);
   const { getAvailableVars, isRunPreviewNode } = useContext(FlowRuntimeContext);
@@ -32,6 +60,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const [args, setArgs] = useState<Record<string, any>>((data.args as Record<string, any>) || {});
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
   const [label, setLabel] = useState<string>((data.label as string) || '');
+  const [nowTick, setNowTick] = useState<number>(Date.now());
   const [editingLabel, setEditingLabel] = useState(false);
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const logsRef = useRef<HTMLDivElement>(null);
@@ -59,6 +88,12 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
   const currentProviderGroup = commandGroups?.find((g: any) => g.provider === provider);
   const currentCaps = currentProviderGroup?.commands || [];
+  const cronIntervalMs = useMemo(
+    () => (capability === 'system.trigger.cron' ? parseCronIntervalMs(args || {}) : null),
+    [capability, args]
+  );
+  const cronEnabled = String((args as any)?.enabled ?? 'true').toLowerCase() !== 'false';
+  const initialCronAnchorRef = useRef<number>(Date.now());
 
   const handleArgChange = (key: string, value: any) => {
     const newArgs = { ...args, [key]: value };
@@ -116,6 +151,20 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const themeColor = theme.color;
   const isRunning = status === 'running';
   const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || themeColor;
+  const cronCountdownLabel = useMemo(() => {
+    if (capability !== 'system.trigger.cron' || !cronEnabled || !cronIntervalMs || cronIntervalMs <= 0) return '';
+    const elapsed = (nowTick - initialCronAnchorRef.current) % cronIntervalMs;
+    const remaining = cronIntervalMs - elapsed;
+    return formatCountdown(remaining);
+  }, [capability, cronEnabled, cronIntervalMs, nowTick]);
+
+  useEffect(() => {
+    if (capability !== 'system.trigger.cron' || !cronEnabled || !cronIntervalMs || cronIntervalMs <= 0) {
+      return;
+    }
+    const handle = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(handle);
+  }, [capability, cronEnabled, cronIntervalMs]);
 
   const handleStyle = {
     width: '12px',
@@ -163,6 +212,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
             ) : (
               <span onClick={() => setEditingLabel(true)} className="glass-node-label">
                 {label || `${provider.toUpperCase()} ACTION`}
+                {cronCountdownLabel ? ` (${cronCountdownLabel})` : ''}
               </span>
             )}
           </div>

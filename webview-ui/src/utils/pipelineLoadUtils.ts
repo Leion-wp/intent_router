@@ -104,6 +104,7 @@ export function buildGraphFromPipeline(
         data.agent = String(step.payload?.agent || 'gemini');
         data.model = String(step.payload?.model || 'gemini-2.5-flash');
         data.role = String(step.payload?.role || 'architect');
+        data.reasoningEffort = String(step.payload?.reasoningEffort || 'medium');
         data.instruction = String(step.payload?.instruction || '');
         data.instructionTemplate = String(step.payload?.instructionTemplate || '');
         data.contextFiles = Array.isArray(step.payload?.contextFiles) ? step.payload.contextFiles : ['src/**/*.ts'];

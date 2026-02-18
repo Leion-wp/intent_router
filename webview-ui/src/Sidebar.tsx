@@ -151,8 +151,6 @@ function Sidebar({
     providersSearchRef,
     providersSearch,
     setProvidersSearch,
-    providersFilter,
-    setProvidersFilter,
     catalogBySection,
     renderCatalogSection
   } = useProvidersCatalogState({
@@ -325,8 +323,6 @@ function Sidebar({
             providersSearchRef={providersSearchRef}
             providersSearch={providersSearch}
             onProvidersSearchChange={setProvidersSearch}
-            providersFilter={providersFilter}
-            onProvidersFilterChange={setProvidersFilter}
             catalogBySection={catalogBySection}
             renderCatalogSection={renderCatalogSection}
             devMode={devMode}

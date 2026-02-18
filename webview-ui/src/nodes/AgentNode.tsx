@@ -18,6 +18,14 @@ const MODEL_OPTIONS = [
   { value: 'gemini-2.0-flash-exp', label: 'Gemini 2.0 Flash' }
 ];
 
+const CODEX_MODEL_OPTIONS = [
+  { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex (current)' },
+  { value: 'gpt-5.2-codex', label: 'gpt-5.2-codex' },
+  { value: 'gpt-5.1-codex-max', label: 'gpt-5.1-codex-max' },
+  { value: 'gpt-5.2', label: 'gpt-5.2' },
+  { value: 'gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini' }
+];
+
 const AGENT_PROVIDER_OPTIONS = [
   { value: 'gemini', label: 'Gemini CLI' },
   { value: 'codex', label: 'Codex CLI' }
@@ -33,6 +41,13 @@ const AGENT_ROLE_OPTIONS = [
   { value: 'qa', label: 'qa' }
 ];
 
+const REASONING_EFFORT_OPTIONS = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'extra_high', label: 'Extra High' }
+];
+
 const OUTPUT_CONTRACT_OPTIONS = [
   { value: 'path_result', label: 'Path/Result (strict)' },
   { value: 'unified_diff', label: 'Unified Diff (strict)' }
@@ -45,6 +60,7 @@ const AgentNode = ({ data, id }: NodeProps) => {
   const [agent, setAgent] = useState<string>((data.agent as string) || 'gemini');
   const [model, setModel] = useState<string>((data.model as string) || 'gemini-2.5-flash');
   const [role, setRole] = useState<string>((data.role as string) || 'architect');
+  const [reasoningEffort, setReasoningEffort] = useState<string>((data.reasoningEffort as string) || 'medium');
   const [instruction, setInstruction] = useState<string>((data.instruction as string) || '');
   const [instructionTemplate, setInstructionTemplate] = useState<string>((data.instructionTemplate as string) || '');
   const [contextFiles, setContextFiles] = useState<string[]>((data.contextFiles as string[]) || ['src/**/*.ts']);
@@ -67,11 +83,16 @@ const AgentNode = ({ data, id }: NodeProps) => {
   
   const logsRef = useRef<HTMLDivElement>(null);
   const collapsed = !!data.collapsed;
+  const activeModelOptions = useMemo(
+    () => (agent === 'codex' ? CODEX_MODEL_OPTIONS : MODEL_OPTIONS),
+    [agent]
+  );
 
   useEffect(() => {
     if (data.agent) setAgent(data.agent as string);
     if (data.model) setModel(data.model as string);
     if (data.role !== undefined) setRole(String(data.role || 'architect'));
+    if (data.reasoningEffort !== undefined) setReasoningEffort(String(data.reasoningEffort || 'medium'));
     if (data.instruction) setInstruction(data.instruction as string);
     if (data.instructionTemplate !== undefined) setInstructionTemplate(String(data.instructionTemplate || ''));
     if (data.contextFiles) setContextFiles(data.contextFiles as string[]);
@@ -99,6 +120,15 @@ const AgentNode = ({ data, id }: NodeProps) => {
   }, [data]);
 
   const logs = (data.logs as any[]) || [];
+
+  useEffect(() => {
+    if (!activeModelOptions.some((entry) => entry.value === model)) {
+      const next = activeModelOptions[0]?.value || '';
+      if (!next) return;
+      setModel(next);
+      updateField({ model: next });
+    }
+  }, [activeModelOptions, model]);
 
   useEffect(() => {
     if (isConsoleOpen && logsRef.current) {
@@ -244,9 +274,33 @@ const AgentNode = ({ data, id }: NodeProps) => {
                                   value={model}
                                   onChange={(e) => { setModel(e.target.value); updateField({ model: e.target.value }); }}
                               >
-                                  {MODEL_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                                  {activeModelOptions.map(opt => (
+                                    <option key={opt.value} value={opt.value} style={{ background: '#1a1a20', color: '#fff' }}>
+                                      {opt.label}
+                                    </option>
+                                  ))}
                               </select>
                           </div>
+                          {agent === 'codex' && (
+                            <div className="glass-node-input-group">
+                                <label className="glass-node-input-label">Reasoning Effort</label>
+                                <select
+                                    className="nodrag"
+                                    value={reasoningEffort}
+                                    onChange={(e) => {
+                                      const next = String(e.target.value || 'medium');
+                                      setReasoningEffort(next);
+                                      updateField({ reasoningEffort: next });
+                                    }}
+                                >
+                                    {REASONING_EFFORT_OPTIONS.map((opt) => (
+                                      <option key={opt.value} value={opt.value}>
+                                        {opt.label}
+                                      </option>
+                                    ))}
+                                </select>
+                            </div>
+                          )}
                           <div className="glass-node-input-group">
                               <label className="glass-node-input-label">Output Contract</label>
                               <select

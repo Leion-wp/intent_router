@@ -269,6 +269,11 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(0, 162, 255, 0.15) !important;
 }
 
+select option {
+  background: #1a1a20 !important;
+  color: #ffffff !important;
+}
+
 input[type="checkbox"] {
   accent-color: var(--ir-accent-primary);
   width: 16px;

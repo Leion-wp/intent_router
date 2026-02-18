@@ -448,12 +448,14 @@
                         "exec",
                         "--model",
                         "{model}",
+                        "--reasoning-effort",
+                        "{reasoningEffort}",
                         "{stdin}"
                     ],
                     "items": {
                         "type": "string"
                     },
-                    "description": "Codex CLI args template. Placeholders: {model}, {stdin}, {prompt}."
+                    "description": "Codex CLI args template. Placeholders: {model}, {reasoningEffort}, {stdin}, {prompt}."
                 },
                 "intentRouter.ai.team.reviewerVoteWeight": {
                     "type": "number",
