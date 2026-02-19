@@ -24,11 +24,14 @@ import StartNode from './nodes/StartNode';
 import CustomNode from './nodes/CustomNode';
 import FormNode from './nodes/FormNode';
 import SwitchNode from './nodes/SwitchNode';
+import IfElseNode from './nodes/IfElseNode';
 import ScriptNode from './nodes/ScriptNode';
 import AgentNode from './nodes/AgentNode';
 import TeamNode from './nodes/TeamNode';
 import HttpNode from './nodes/HttpNode';
 import ApprovalNode from './nodes/ApprovalNode';
+import SubPipelineNode from './nodes/SubPipelineNode';
+import LoopNode from './nodes/LoopNode';
 import AppLayoutShell from './components/AppLayoutShell';
 import ChromeControlsPanel from './components/ChromeControlsPanel';
 import { edgeTypes } from './components/InsertableEdge';
@@ -119,11 +122,14 @@ const nodeTypes = {
   customNode: CustomNode,
   formNode: FormNode,
   switchNode: SwitchNode,
+  ifNode: IfElseNode,
   scriptNode: ScriptNode,
   agentNode: AgentNode,
   teamNode: TeamNode,
   httpNode: HttpNode,
-  approvalNode: ApprovalNode
+  approvalNode: ApprovalNode,
+  subPipelineNode: SubPipelineNode,
+  loopNode: LoopNode
 };
 
 declare global {
@@ -582,6 +588,9 @@ function Flow({
         let description = '';
         let payload: any = {};
         const data: any = node.data;
+        const nodeSandbox = (data && typeof data === 'object')
+          ? (data.__sandbox || data.sandbox)
+          : undefined;
 
         if (node.type === 'promptNode') {
           intent = 'system.setVar';
@@ -589,6 +598,38 @@ function Flow({
         } else if (node.type === 'formNode') {
           intent = 'system.form';
           payload = { fields: Array.isArray(data.fields) ? data.fields : [] };
+        } else if (node.type === 'ifNode') {
+          intent = 'system.switch';
+          description = String(data.label || 'If / Else');
+          const outgoing = effectiveEdges.filter((e: any) => e.source === node.id);
+          const trueEdge = outgoing.find((e: any) => String(e.sourceHandle || '') === 'true');
+          const falseEdge = outgoing.find((e: any) => String(e.sourceHandle || '') === 'false');
+          if (!trueEdge?.target) {
+            stepBuildError = 'If / Else node must have a connected "true" output.';
+            return;
+          }
+          if (!falseEdge?.target) {
+            stepBuildError = 'If / Else node must have a connected "false" output.';
+            return;
+          }
+          const condition = String(data.condition || 'equals').trim().toLowerCase();
+          const value = String(data.value ?? '').trim();
+          if (condition !== 'exists' && !value) {
+            stepBuildError = `If / Else node "${String(data.label || node.id)}" requires a value for condition "${condition}".`;
+            return;
+          }
+          payload = {
+            __kind: 'ifelse',
+            variableKey: String(data.variableKey || '').trim(),
+            routes: [{
+              label: 'true',
+              condition,
+              value,
+              equalsValue: condition === 'equals' ? value : '',
+              targetStepId: trueEdge.target
+            }],
+            defaultStepId: falseEdge.target
+          };
         } else if (node.type === 'switchNode') {
           intent = 'system.switch';
           description = String(data.label || '');
@@ -644,11 +685,12 @@ function Flow({
           const interpreter = String(data.interpreter || '').trim();
           const inferred = inferScriptInterpreter(scriptPath);
           const effectiveInterpreter = interpreter || inferred;
-          if (!effectiveInterpreter) {
+          const isTemplatedPath = /\$\{var:[^}]+\}/.test(scriptPath);
+          if (!effectiveInterpreter && !isTemplatedPath) {
             stepBuildError = `Script node "${node.id}" has unsupported extension. Set interpreter override.`;
             return;
           }
-          const command = buildScriptCommand(scriptPath, args, effectiveInterpreter);
+          const command = buildScriptCommand(scriptPath, args, effectiveInterpreter || undefined);
           const cwd = String(data.cwd || '').trim();
           payload = {
             command,
@@ -662,6 +704,82 @@ function Flow({
         } else if (node.type === 'repoNode') {
           intent = 'system.setCwd';
           payload = { path: data.path };
+        } else if (node.type === 'subPipelineNode') {
+          intent = 'system.subPipeline';
+          const pipelinePath = String(data.pipelinePath || '').trim();
+          if (!pipelinePath) {
+            stepBuildError = 'Sub-pipeline node must define "pipelinePath".';
+            return;
+          }
+          payload = {
+            pipelinePath,
+            dryRunChild: data.dryRunChild === true,
+            inputJson: String(data.inputJson || '').trim() || undefined,
+            outputVar: String(data.outputVar || '').trim() || 'subpipeline_result'
+          };
+          description = String(data.label || 'Sub-pipeline');
+        } else if (node.type === 'loopNode') {
+          intent = 'system.loop';
+          const pipelinePath = String(data.pipelinePath || '').trim();
+          const rawExecutionMode = String(data.executionMode || '').trim().toLowerCase();
+          const items = String(data.items || '').trim();
+          if (!items) {
+            stepBuildError = 'Loop node must define "items".';
+            return;
+          }
+          const outgoing = effectiveEdges.filter((e: any) => e.source === node.id);
+          const bodyTargets = outgoing
+            .filter((e: any) => String(e.sourceHandle || '') === 'body')
+            .map((e: any) => String(e.target || '').trim())
+            .filter(Boolean);
+          const doneTarget = outgoing.find((e: any) => String(e.sourceHandle || '') === 'done')?.target
+            || outgoing.find((e: any) => String(e.sourceHandle || '') === 'success')?.target;
+          const incomingSources = effectiveEdges
+            .filter((e: any) => e.target === node.id && String(e.targetHandle || 'in') === 'in')
+            .map((e: any) => String(e.source || '').trim())
+            .filter((sourceId: string) => sourceId && sourceId !== 'start' && sourceId !== node.id);
+          const legacyBodyTargets = bodyTargets.length > 0 ? bodyTargets : incomingSources;
+          const bodyStepIdsOverride = String(data.bodyStepIds || '').trim()
+            .split(',')
+            .map((entry: string) => entry.trim())
+            .filter(Boolean);
+          const inferLegacyGraphMode = !rawExecutionMode
+            && !pipelinePath
+            && (legacyBodyTargets.length > 0 || bodyStepIdsOverride.length > 0);
+          const executionMode = rawExecutionMode === 'graph_segment'
+            ? 'graph_segment'
+            : (rawExecutionMode === 'child_pipeline'
+              ? 'child_pipeline'
+              : (inferLegacyGraphMode ? 'graph_segment' : 'child_pipeline'));
+          if (executionMode === 'child_pipeline' && !pipelinePath) {
+            stepBuildError = 'Loop node must define "pipelinePath".';
+            return;
+          }
+          if (executionMode === 'graph_segment' && legacyBodyTargets.length === 0 && bodyStepIdsOverride.length === 0) {
+            stepBuildError = 'Loop node in graph_segment mode needs body steps (body handle or legacy incoming source).';
+            return;
+          }
+          const bodyStepIds = executionMode === 'graph_segment'
+            ? (bodyStepIdsOverride.length > 0 ? bodyStepIdsOverride : legacyBodyTargets)
+            : [];
+          payload = {
+            executionMode: executionMode === 'graph_segment' ? 'graph_segment' : 'child_pipeline',
+            items,
+            bodyStepIds: String(data.bodyStepIds || '').trim() || undefined,
+            pipelinePath: pipelinePath || undefined,
+            itemVar: String(data.itemVar || 'loop_item').trim() || 'loop_item',
+            indexVar: String(data.indexVar || 'loop_index').trim() || 'loop_index',
+            maxIterations: Number(data.maxIterations || 20),
+            repeatCount: Number(data.repeatCount || 1),
+            dryRunChild: data.dryRunChild === true,
+            continueOnChildError: data.continueOnChildError === true,
+            errorStrategy: String(data.errorStrategy || '').trim() || undefined,
+            errorThreshold: Number(data.errorThreshold || 1),
+            outputVar: String(data.outputVar || 'loop_result').trim() || 'loop_result',
+            graphStepIds: bodyStepIds,
+            doneStepId: doneTarget || undefined
+          };
+          description = String(data.label || 'Loop');
         } else if (node.type === 'agentNode') {
           intent = 'ai.generate';
           payload = {
@@ -669,6 +787,8 @@ function Flow({
             model: data.model,
             role: data.role || 'architect',
             reasoningEffort: String(data.reasoningEffort || 'medium'),
+            cwd: String(data.cwd || '').trim() || undefined,
+            systemPrompt: String(data.systemPrompt || '').trim() || undefined,
             instruction: data.instruction,
             instructionTemplate: data.instructionTemplate || undefined,
             contextFiles: data.contextFiles,
@@ -687,6 +807,8 @@ function Flow({
           intent = 'ai.team';
           payload = {
             strategy: data.strategy || 'sequential',
+            cwd: String(data.cwd || '').trim() || undefined,
+            systemPrompt: String(data.systemPrompt || '').trim() || undefined,
             members: Array.isArray(data.members) ? data.members : [],
             contextFiles: Array.isArray(data.contextFiles) ? data.contextFiles : [],
             agentSpecFiles: Array.isArray(data.agentSpecFiles) ? data.agentSpecFiles : [],
@@ -759,6 +881,12 @@ function Flow({
             description,
             payload
           };
+          if (nodeSandbox && typeof nodeSandbox === 'object') {
+            stepObj.payload = {
+              ...(stepObj.payload || {}),
+              __sandbox: nodeSandbox
+            };
+          }
 
           if (failureMap.has(node.id) && nodeMap.has(failureMap.get(node.id)!)) {
             stepObj.onFailure = failureMap.get(node.id);

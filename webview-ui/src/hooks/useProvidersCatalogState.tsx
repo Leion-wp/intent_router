@@ -41,7 +41,10 @@ type UseProvidersCatalogStateResult = {
 const baseNodeItems: CatalogItem[] = [
   { id: 'promptNode', category: 'flow', type: 'promptNode', label: 'Prompt', icon: 'codicon-symbol-string', desc: 'Set variable' },
   { id: 'formNode', category: 'flow', type: 'formNode', label: 'Form', icon: 'codicon-list-selection', desc: 'Collect inputs (HITL)' },
+  { id: 'ifNode', category: 'flow', type: 'ifNode', label: 'If / Else', icon: 'codicon-git-compare', desc: 'Route true/false' },
   { id: 'switchNode', category: 'flow', type: 'switchNode', label: 'Switch', icon: 'codicon-filter', desc: 'Route by condition' },
+  { id: 'subPipelineNode', category: 'flow', type: 'subPipelineNode', label: 'Sub-pipeline', icon: 'codicon-references', desc: 'Run nested pipeline file' },
+  { id: 'loopNode', category: 'flow', type: 'loopNode', label: 'Loop', icon: 'codicon-sync', desc: 'Iterate child pipeline over items' },
   { id: 'scriptNode', category: 'flow', type: 'scriptNode', label: 'Script', icon: 'codicon-file-code', desc: 'Run versioned script file' },
   { id: 'repoNode', category: 'flow', type: 'repoNode', label: 'Repo', icon: 'codicon-repo', desc: 'Set workspace path' },
   { id: 'vscodeCommandNode', category: 'flow', type: 'vscodeCommandNode', label: 'VS Code Command', icon: 'codicon-vscode', desc: 'Run any VS Code command' },

@@ -61,6 +61,8 @@ const AgentNode = ({ data, id }: NodeProps) => {
   const [model, setModel] = useState<string>((data.model as string) || 'gemini-2.5-flash');
   const [role, setRole] = useState<string>((data.role as string) || 'architect');
   const [reasoningEffort, setReasoningEffort] = useState<string>((data.reasoningEffort as string) || 'medium');
+  const [cwd, setCwd] = useState<string>((data.cwd as string) || '');
+  const [systemPrompt, setSystemPrompt] = useState<string>((data.systemPrompt as string) || '');
   const [instruction, setInstruction] = useState<string>((data.instruction as string) || '');
   const [instructionTemplate, setInstructionTemplate] = useState<string>((data.instructionTemplate as string) || '');
   const [contextFiles, setContextFiles] = useState<string[]>((data.contextFiles as string[]) || ['src/**/*.ts']);
@@ -93,6 +95,8 @@ const AgentNode = ({ data, id }: NodeProps) => {
     if (data.model) setModel(data.model as string);
     if (data.role !== undefined) setRole(String(data.role || 'architect'));
     if (data.reasoningEffort !== undefined) setReasoningEffort(String(data.reasoningEffort || 'medium'));
+    if (data.cwd !== undefined) setCwd(String(data.cwd || ''));
+    if (data.systemPrompt !== undefined) setSystemPrompt(String(data.systemPrompt || ''));
     if (data.instruction) setInstruction(data.instruction as string);
     if (data.instructionTemplate !== undefined) setInstructionTemplate(String(data.instructionTemplate || ''));
     if (data.contextFiles) setContextFiles(data.contextFiles as string[]);
@@ -301,6 +305,25 @@ const AgentNode = ({ data, id }: NodeProps) => {
                                 </select>
                             </div>
                           )}
+                          <div className="glass-node-input-group">
+                              <label className="glass-node-input-label">CWD (supports variables)</label>
+                              <input
+                                  className="nodrag"
+                                  value={cwd}
+                                  onChange={(e) => { setCwd(e.target.value); updateField({ cwd: e.target.value }); }}
+                                  placeholder="${workspaceRoot}/software_engine/docs"
+                              />
+                          </div>
+                          <div className="glass-node-input-group">
+                              <label className="glass-node-input-label">System Prompt (optional)</label>
+                              <textarea
+                                  className="nodrag"
+                                  value={systemPrompt}
+                                  onChange={(e) => { setSystemPrompt(e.target.value); updateField({ systemPrompt: e.target.value }); }}
+                                  rows={3}
+                                  placeholder="Global constraints and persona for this agent"
+                              />
+                          </div>
                           <div className="glass-node-input-group">
                               <label className="glass-node-input-label">Output Contract</label>
                               <select

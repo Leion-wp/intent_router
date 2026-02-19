@@ -26,6 +26,8 @@ type TeamMember = {
     role?: 'writer' | 'reviewer';
     agent?: string;
     model?: string;
+    cwd?: string;
+    systemPrompt?: string;
     instruction?: string;
     contextFiles?: string[];
     agentSpecFiles?: string[];
@@ -48,6 +50,8 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                 determinism: 'interactive',
                 args: [
                     { name: 'instruction', type: 'string', description: 'The prompt/instruction for the agent', required: true },
+                    { name: 'cwd', type: 'path', description: 'Working directory for CLI execution (inside workspace)' },
+                    { name: 'systemPrompt', type: 'string', description: 'Optional system-level constraints applied before instruction' },
                     { name: 'contextFiles', type: 'string', description: 'Glob patterns for context files', default: [] },
                     { name: 'agent', type: 'enum', options: ['gemini', 'codex'], description: 'The AI agent provider', default: 'gemini' },
                     { name: 'model', type: 'string', description: 'Model name override' },
@@ -72,6 +76,8 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                 determinism: 'interactive',
                 args: [
                     { name: 'strategy', type: 'enum', options: ['sequential', 'reviewer_gate', 'vote'], description: 'Team strategy', default: 'sequential' },
+                    { name: 'cwd', type: 'path', description: 'Shared working directory for team members (inside workspace)' },
+                    { name: 'systemPrompt', type: 'string', description: 'Optional shared system-level constraints for team members' },
                     { name: 'members', type: 'string', description: 'Team members configuration', required: true },
                     { name: 'contextFiles', type: 'string', description: 'Shared context glob patterns', default: [] },
                     { name: 'agentSpecFiles', type: 'string', description: 'Shared spec files glob patterns', default: [] },
@@ -116,6 +122,7 @@ export async function executeAiCommand(args: any): Promise<any> {
         ? loadSessionMemory(sessionId).slice(-recallLimit)
         : [];
     const role = normalizeAgentRole(args?.role);
+    const systemPrompt = String(args?.systemPrompt || '').trim();
     const instructionResolved = applyInstructionTemplate(args?.instructionTemplate, instruction);
     const outputContract = normalizeOutputContract(args?.outputContract);
     const contractRules = outputContract === 'unified_diff'
@@ -152,7 +159,8 @@ export async function executeAiCommand(args: any): Promise<any> {
     log(`Starting AI Agent: ${agent}\n`);
 
     let contextContent = '';
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '.';
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+    const effectiveCwd = resolveAiWorkingDirectory(args?.cwd, meta?.cwd, workspaceRoot, log);
 
     contextContent += await loadContextFilesBlock(contextFiles, workspaceRoot, log, 'FILE');
     contextContent += await loadContextFilesBlock(agentSpecFiles, workspaceRoot, log, 'SPEC');
@@ -161,6 +169,7 @@ export async function executeAiCommand(args: any): Promise<any> {
 IMPORTANT: You are an AI Architect. 
 Your role is to PROPOSE changes.
 ${buildAgentRoleBlock(role)}
+${systemPrompt ? `\nSYSTEM_PROMPT:\n${systemPrompt}\n` : ''}
 
 RULES:
 ${contractRules.join('\n')}
@@ -187,7 +196,7 @@ ${instructionResolved}
 
         const launch = (spec: AiCliSpec, allowReasoningFallback: boolean) => {
             const child = cp.spawn(spec.executable, spec.args, {
-                cwd: workspaceRoot,
+                cwd: effectiveCwd,
                 env,
                 shell: process.platform === 'win32'
             });
@@ -221,21 +230,38 @@ ${instructionResolved}
                     let changes: ProposedChange[] = [];
                     let unifiedDiff: string | undefined;
                     try {
-                        if (outputContract === 'unified_diff') {
-                            const parsed = parseUnifiedDiffStrict(fullOutput);
-                            unifiedDiff = parsed.diff;
-                            changes = parsed.paths.map((entryPath) => ({ path: entryPath, content: '' }));
-                            if (!changes.length) {
-                                settled = true;
-                                return reject(new Error('Invalid AI output: expected [DIFF] block with at least one target file.'));
-                            }
-                        } else {
+                    if (outputContract === 'unified_diff') {
+                        const parsed = parseUnifiedDiffStrict(fullOutput);
+                        unifiedDiff = parsed.diff;
+                        changes = parsed.paths.map((entryPath) => ({ path: entryPath, content: '' }));
+                        if (!changes.length) {
+                            settled = true;
+                            return reject(new Error('Invalid AI output: expected [DIFF] block with at least one target file.'));
+                        }
+                    } else {
+                        try {
                             changes = parseProposedChangesStrict(fullOutput);
-                            if (changes.length === 0) {
-                                settled = true;
-                                return reject(new Error('Invalid AI output: expected [PATH]...[\\/PATH] + [RESULT]...[\\/RESULT] blocks.'));
+                        } catch (strictError: any) {
+                            const strictMessage = String(strictError?.message || strictError || '');
+                            const recovered = parseProposedChangesLenient(fullOutput);
+                            if (
+                                recovered.length > 0 &&
+                                (
+                                    strictMessage.includes('text found outside [PATH]/[RESULT] blocks')
+                                    || strictMessage.includes('trailing text found outside [PATH]/[RESULT] blocks')
+                                )
+                            ) {
+                                log('\n[AI Agent] Non-block output detected; recovered valid [PATH]/[RESULT] blocks and continued.\n', 'stderr');
+                                changes = recovered;
+                            } else {
+                                throw strictError;
                             }
                         }
+                        if (changes.length === 0) {
+                            settled = true;
+                            return reject(new Error('Invalid AI output: expected [PATH]...[\\/PATH] + [RESULT]...[\\/RESULT] blocks.'));
+                        }
+                    }
                         if (sessionEnabled && sessionId && sessionPolicy.write) {
                             const entries: SessionMemoryEntry[] = changes.map((change) => ({
                                 member: 'agent',
@@ -353,6 +379,8 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
             ...args,
             agent: member.agent || args?.agent || 'gemini',
             model: member.model || args?.model,
+            cwd: member.cwd || args?.cwd,
+            systemPrompt: member.systemPrompt || args?.systemPrompt,
             instruction: instructionResolved,
             contextFiles: mergeStringArrays(sharedContextFiles, asStringArray(member.contextFiles)),
             agentSpecFiles: mergeStringArrays(sharedSpecFiles, asStringArray(member.agentSpecFiles)),
@@ -519,6 +547,8 @@ export function normalizeTeamMembers(input: any): TeamMember[] {
             role: normalizeTeamMemberRole(entry.role),
             agent: String(entry.agent || '').trim() || undefined,
             model: String(entry.model || '').trim() || undefined,
+            cwd: String(entry.cwd || '').trim() || undefined,
+            systemPrompt: String(entry.systemPrompt || '').trim() || undefined,
             instruction: String(entry.instruction || '').trim(),
             contextFiles: asStringArray(entry.contextFiles),
             agentSpecFiles: asStringArray(entry.agentSpecFiles),
@@ -782,6 +812,29 @@ function normalizeAgentProvider(agent: string): 'gemini' | 'codex' {
     return 'gemini';
 }
 
+function resolveAiWorkingDirectory(
+    payloadCwd: any,
+    metaCwd: any,
+    workspaceRoot: string,
+    log: (text: string, stream?: 'stdout' | 'stderr') => void
+): string {
+    const baseRoot = path.resolve(workspaceRoot || process.cwd());
+    const rawCandidate = String(payloadCwd || metaCwd || '').trim();
+    if (!rawCandidate) {
+        return baseRoot;
+    }
+    const resolved = path.isAbsolute(rawCandidate)
+        ? path.resolve(rawCandidate)
+        : path.resolve(baseRoot, rawCandidate);
+    const relative = path.relative(baseRoot, resolved);
+    const escapesRoot = relative.startsWith('..') || path.isAbsolute(relative);
+    if (escapesRoot) {
+        log(`[AI Agent] cwd "${rawCandidate}" is outside workspace; fallback to workspace root.\n`, 'stderr');
+        return baseRoot;
+    }
+    return resolved;
+}
+
 function hasReasoningEffortFlag(args: string[]): boolean {
     return (args || []).some((token) => {
         const value = String(token || '').trim();
@@ -940,5 +993,19 @@ export function parseProposedChangesStrict(output: string): ProposedChange[] {
         throw new Error('Invalid AI output: trailing text found outside [PATH]/[RESULT] blocks.');
     }
 
+    return changes;
+}
+
+function parseProposedChangesLenient(output: string): ProposedChange[] {
+    const normalized = stripAnsi(output);
+    const blockPattern = /\[PATH\]\s*([\s\S]*?)\s*\[\/PATH\]\s*\[RESULT\]\s*(?:```[\w-]*\s*)?([\s\S]*?)(?:```)?\s*\[\/RESULT\]/gi;
+    const changes: ProposedChange[] = [];
+    let match: RegExpExecArray | null = null;
+    while ((match = blockPattern.exec(normalized)) !== null) {
+        const targetPath = String(match[1] || '').trim();
+        const content = String(match[2] || '').trim();
+        if (!targetPath || !content) continue;
+        changes.push({ path: targetPath, content });
+    }
     return changes;
 }

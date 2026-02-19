@@ -22,6 +22,8 @@ const TeamNode = ({ data, id }: NodeProps) => {
   const { updateNodeData } = useContext(FlowEditorContext);
   const [label, setLabel] = useState<string>((data.label as string) || 'AI Team');
   const [strategy, setStrategy] = useState<string>((data.strategy as string) || 'sequential');
+  const [cwd, setCwd] = useState<string>((data.cwd as string) || '');
+  const [systemPrompt, setSystemPrompt] = useState<string>((data.systemPrompt as string) || '');
   const [members, setMembers] = useState<TeamMember[]>(
     Array.isArray(data.members) && data.members.length > 0 ? (data.members as TeamMember[]) : [DEFAULT_MEMBER]
   );
@@ -45,10 +47,13 @@ const TeamNode = ({ data, id }: NodeProps) => {
   const [sessionImportMode, setSessionImportMode] = useState<'merge' | 'replace'>('merge');
   const [teamSummary, setTeamSummary] = useState<any>(data.teamSummary || null);
   const [sessionMemoryStatus, setSessionMemoryStatus] = useState<any>(data.sessionMemoryStatus || null);
+  const collapsed = !!data.collapsed;
 
   useEffect(() => {
     if (data.label !== undefined) setLabel(String(data.label || 'AI Team'));
     if (data.strategy) setStrategy(String(data.strategy));
+    if (data.cwd !== undefined) setCwd(String(data.cwd || ''));
+    if (data.systemPrompt !== undefined) setSystemPrompt(String(data.systemPrompt || ''));
     if (Array.isArray(data.members) && data.members.length > 0) setMembers(data.members as TeamMember[]);
     if (Array.isArray(data.contextFiles)) setContextFiles(data.contextFiles as string[]);
     if (Array.isArray(data.agentSpecFiles)) setAgentSpecFiles(data.agentSpecFiles as string[]);
@@ -115,9 +120,17 @@ const TeamNode = ({ data, id }: NodeProps) => {
           onChange={(event) => { setLabel(event.target.value); update({ label: event.target.value }); }}
           style={{ flex: 1, background: 'rgba(0,0,0,0.25)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, padding: '4px 8px', fontSize: 12 }}
         />
+        <button
+          className="nodrag"
+          onClick={() => update({ collapsed: !collapsed })}
+          style={{ background: 'rgba(255,255,255,0.06)', color: '#d8cff2', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+          title={collapsed ? 'Expand team node' : 'Collapse team node'}
+        >
+          <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`} style={{ fontSize: 12 }}></span>
+        </button>
       </div>
 
-      <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      {!collapsed && <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <div>
           <label style={{ fontSize: 10, color: '#aaa', display: 'block', marginBottom: 4 }}>Strategy</label>
           <select
@@ -130,6 +143,22 @@ const TeamNode = ({ data, id }: NodeProps) => {
             <option value="reviewer_gate">reviewer_gate</option>
             <option value="vote">vote</option>
           </select>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          <input
+            className="nodrag"
+            value={cwd}
+            onChange={(event) => { setCwd(event.target.value); update({ cwd: event.target.value }); }}
+            placeholder="cwd (supports ${var:...})"
+            style={inputStyle}
+          />
+          <input
+            className="nodrag"
+            value={systemPrompt}
+            onChange={(event) => { setSystemPrompt(event.target.value); update({ systemPrompt: event.target.value }); }}
+            placeholder="system prompt (optional)"
+            style={inputStyle}
+          />
         </div>
         {strategy === 'vote' && (
           <div>
@@ -355,7 +384,7 @@ const TeamNode = ({ data, id }: NodeProps) => {
             </div>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 };

@@ -67,15 +67,26 @@ export function buildGraphFromPipeline(
         data.value = step.payload?.value;
         data.kind = 'prompt';
       } else if (intent === 'system.switch') {
-        type = 'switchNode';
-        data.label = String(step.description || 'Switch');
-        data.variableKey = step.payload?.variableKey || '';
-        data.routes = Array.isArray(step.payload?.routes) ? step.payload.routes.map((route: any) => ({
-          label: String(route?.label || ''),
-          condition: String(route?.condition || 'equals'),
-          value: String(route?.value ?? route?.equalsValue ?? '')
-        })) : [];
-        data.kind = 'switch';
+        const isIfElse = String(step.payload?.__kind || '').trim().toLowerCase() === 'ifelse';
+        if (isIfElse) {
+          type = 'ifNode';
+          data.label = String(step.description || 'If / Else');
+          data.variableKey = String(step.payload?.variableKey || '');
+          const route0 = Array.isArray(step.payload?.routes) ? step.payload.routes[0] : undefined;
+          data.condition = String(route0?.condition || 'equals');
+          data.value = String(route0?.value ?? route0?.equalsValue ?? '');
+          data.kind = 'ifelse';
+        } else {
+          type = 'switchNode';
+          data.label = String(step.description || 'Switch');
+          data.variableKey = step.payload?.variableKey || '';
+          data.routes = Array.isArray(step.payload?.routes) ? step.payload.routes.map((route: any) => ({
+            label: String(route?.label || ''),
+            condition: String(route?.condition || 'equals'),
+            value: String(route?.value ?? route?.equalsValue ?? '')
+          })) : [];
+          data.kind = 'switch';
+        }
       } else if (intent === 'system.form') {
         type = 'formNode';
         data.fields = Array.isArray(step.payload?.fields) ? step.payload.fields : [];
@@ -94,6 +105,32 @@ export function buildGraphFromPipeline(
         type = 'repoNode';
         data.path = step.payload?.path;
         data.kind = 'repo';
+      } else if (intent === 'system.subPipeline') {
+        type = 'subPipelineNode';
+        data.label = String(step.description || 'Sub-pipeline');
+        data.pipelinePath = String(step.payload?.pipelinePath || '');
+        data.dryRunChild = step.payload?.dryRunChild === true;
+        data.inputJson = String(step.payload?.inputJson || '');
+        data.outputVar = String(step.payload?.outputVar || 'subpipeline_result');
+        data.kind = 'subpipeline';
+      } else if (intent === 'system.loop') {
+        type = 'loopNode';
+        data.label = String(step.description || 'Loop');
+        data.executionMode = String(step.payload?.executionMode || 'child_pipeline');
+        data.items = String(step.payload?.items || '');
+        data.bodyStepIds = Array.isArray(step.payload?.graphStepIds) ? step.payload.graphStepIds.join(',') : String(step.payload?.bodyStepIds || '');
+        data.bodyStepIdsResolvedCount = Array.isArray(step.payload?.graphStepIds) ? step.payload.graphStepIds.length : 0;
+        data.pipelinePath = String(step.payload?.pipelinePath || '');
+        data.itemVar = String(step.payload?.itemVar || 'loop_item');
+        data.indexVar = String(step.payload?.indexVar || 'loop_index');
+        data.maxIterations = Number(step.payload?.maxIterations || 20);
+        data.repeatCount = Number(step.payload?.repeatCount || 1);
+        data.dryRunChild = step.payload?.dryRunChild === true;
+        data.continueOnChildError = step.payload?.continueOnChildError === true;
+        data.errorStrategy = String(step.payload?.errorStrategy || 'fail_fast');
+        data.errorThreshold = Number(step.payload?.errorThreshold || 1);
+        data.outputVar = String(step.payload?.outputVar || 'loop_result');
+        data.kind = 'loop';
       } else if (intent === 'vscode.runCommand') {
         type = 'vscodeCommandNode';
         data.commandId = step.payload?.commandId;
@@ -105,6 +142,8 @@ export function buildGraphFromPipeline(
         data.model = String(step.payload?.model || 'gemini-2.5-flash');
         data.role = String(step.payload?.role || 'architect');
         data.reasoningEffort = String(step.payload?.reasoningEffort || 'medium');
+        data.cwd = String(step.payload?.cwd || '');
+        data.systemPrompt = String(step.payload?.systemPrompt || '');
         data.instruction = String(step.payload?.instruction || '');
         data.instructionTemplate = String(step.payload?.instructionTemplate || '');
         data.contextFiles = Array.isArray(step.payload?.contextFiles) ? step.payload.contextFiles : ['src/**/*.ts'];
@@ -123,6 +162,8 @@ export function buildGraphFromPipeline(
         type = 'teamNode';
         data.label = String(step.description || 'AI Team');
         data.strategy = String(step.payload?.strategy || 'sequential');
+        data.cwd = String(step.payload?.cwd || '');
+        data.systemPrompt = String(step.payload?.systemPrompt || '');
         data.members = Array.isArray(step.payload?.members) ? step.payload.members : [];
         data.contextFiles = Array.isArray(step.payload?.contextFiles) ? step.payload.contextFiles : [];
         data.agentSpecFiles = Array.isArray(step.payload?.agentSpecFiles) ? step.payload.agentSpecFiles : ['AGENTS.md', '**/SKILL.md'];
@@ -143,6 +184,12 @@ export function buildGraphFromPipeline(
         data.capability = normalized.capability;
         data.args = { ...step.payload, description: step.description };
         data.kind = 'action';
+      }
+      if (step?.payload && typeof step.payload === 'object') {
+        const sandbox = (step.payload as any).__sandbox ?? (step.payload as any).sandbox;
+        if (sandbox && typeof sandbox === 'object') {
+          data.__sandbox = sandbox;
+        }
       }
 
       nodes.push({
@@ -170,33 +217,51 @@ export function buildGraphFromPipeline(
       const currentNodeId = nodeIds[index + 1];
 
       if (step.intent === 'system.switch') {
+        const isIfElse = String(step.payload?.__kind || '').trim().toLowerCase() === 'ifelse';
         const routes = Array.isArray(step.payload?.routes) ? step.payload.routes : [];
-        routes.forEach((route: any, routeIndex: number) => {
-          const target = String(route?.targetStepId || '').trim();
-          if (!target) return;
-          const targetNodeId = stepIdToNodeId.get(target) || target;
-          edges.push({
-            id: `e-${currentNodeId}-route_${routeIndex}-${targetNodeId}`,
-            source: currentNodeId,
-            target: targetNodeId,
-            sourceHandle: `route_${routeIndex}`,
-            targetHandle: 'in',
-            markerEnd: { type: MarkerType.ArrowClosed },
-            data: { label: String(route?.label || `route_${routeIndex}`) }
-          } as any);
-        });
+        if (isIfElse) {
+          const trueRoute = routes[0];
+          const trueTarget = String(trueRoute?.targetStepId || '').trim();
+          if (trueTarget) {
+            const targetNodeId = stepIdToNodeId.get(trueTarget) || trueTarget;
+            edges.push({
+              id: `e-${currentNodeId}-true-${targetNodeId}`,
+              source: currentNodeId,
+              target: targetNodeId,
+              sourceHandle: 'true',
+              targetHandle: 'in',
+              markerEnd: { type: MarkerType.ArrowClosed },
+              data: { label: 'true' }
+            } as any);
+          }
+        } else {
+          routes.forEach((route: any, routeIndex: number) => {
+            const target = String(route?.targetStepId || '').trim();
+            if (!target) return;
+            const targetNodeId = stepIdToNodeId.get(target) || target;
+            edges.push({
+              id: `e-${currentNodeId}-route_${routeIndex}-${targetNodeId}`,
+              source: currentNodeId,
+              target: targetNodeId,
+              sourceHandle: `route_${routeIndex}`,
+              targetHandle: 'in',
+              markerEnd: { type: MarkerType.ArrowClosed },
+              data: { label: String(route?.label || `route_${routeIndex}`) }
+            } as any);
+          });
+        }
 
         const defaultTarget = String(step.payload?.defaultStepId || '').trim();
         if (defaultTarget) {
           const targetNodeId = stepIdToNodeId.get(defaultTarget) || defaultTarget;
           edges.push({
-            id: `e-${currentNodeId}-default-${targetNodeId}`,
+            id: `e-${currentNodeId}-${isIfElse ? 'false' : 'default'}-${targetNodeId}`,
             source: currentNodeId,
             target: targetNodeId,
-            sourceHandle: 'default',
+            sourceHandle: isIfElse ? 'false' : 'default',
             targetHandle: 'in',
             markerEnd: { type: MarkerType.ArrowClosed },
-            data: { label: 'default' }
+            data: { label: isIfElse ? 'false' : 'default' }
           } as any);
         }
       } else if (index < pipeline.steps.length - 1) {

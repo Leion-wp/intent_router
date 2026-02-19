@@ -527,6 +527,30 @@
                     "maximum": 20,
                     "description": "Maximum onSuccess pipeline chaining depth for runtime triggers."
                 },
+                "intentRouter.runtime.subPipeline.maxDepth": {
+                    "type": "number",
+                    "default": 4,
+                    "minimum": 1,
+                    "maximum": 20,
+                    "description": "Maximum nested depth for system.subPipeline execution."
+                },
+                "intentRouter.runtime.loop.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable loop execution (system.loop) in runtime."
+                },
+                "intentRouter.runtime.loop.maxTotalOps": {
+                    "type": "number",
+                    "default": 500,
+                    "minimum": 1,
+                    "description": "Maximum total loop operations per step (iterations × body)."
+                },
+                "intentRouter.runtime.loop.maxDurationMs": {
+                    "type": "number",
+                    "default": 900000,
+                    "minimum": 1000,
+                    "description": "Maximum total duration for a loop step."
+                },
                 "intentRouter.runtime.sandbox.allowNetwork": {
                     "type": "boolean",
                     "default": true,
@@ -542,6 +566,12 @@
                     "default": 120000,
                     "minimum": 1000,
                     "description": "Default per-step timeout enforced by runtime sandbox."
+                },
+                "intentRouter.runtime.reviewDiff.timeoutMs": {
+                    "type": "number",
+                    "default": 1800000,
+                    "minimum": 1000,
+                    "description": "Default timeout for vscode.reviewDiff steps when no per-step __sandbox.timeoutMs override is set."
                 },
                 "intentRouter.runtime.sandbox.maxCommandChars": {
                     "type": "number",

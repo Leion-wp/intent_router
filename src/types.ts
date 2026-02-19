@@ -8,12 +8,23 @@ export type Intent = {
     provider?: string;
     target?: string;
     onFailure?: string;
+    retry?: {
+        mode?: 'none' | 'simple' | 'fixed' | 'exponential';
+        maxAttempts?: number;
+        delayMs?: number;
+        maxDelayMs?: number;
+        jitterMs?: number;
+    };
+    continueOnError?: boolean;
+    captureErrorVar?: string;
     meta?: {
         dryRun?: boolean;
         traceId?: string;
         debug?: boolean;
         runId?: string;
         stepId?: string;
+        cwd?: string;
+        subPipelineDepth?: number;
         ui?: any;
     };
 };

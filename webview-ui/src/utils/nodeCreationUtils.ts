@@ -85,12 +85,41 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.variableKey = '';
     data.routes = [];
     data.kind = 'switch';
+  } else if (item.nodeType === 'ifNode') {
+    data.label = 'If / Else';
+    data.variableKey = '';
+    data.condition = 'equals';
+    data.value = '';
+    data.kind = 'ifelse';
   } else if (item.nodeType === 'scriptNode') {
     data.scriptPath = '';
     data.args = '';
     data.cwd = '';
     data.interpreter = '';
     data.kind = 'script';
+  } else if (item.nodeType === 'subPipelineNode') {
+    data.label = 'Sub-pipeline';
+    data.pipelinePath = '';
+    data.dryRunChild = false;
+    data.inputJson = '';
+    data.outputVar = 'subpipeline_result';
+    data.kind = 'subpipeline';
+  } else if (item.nodeType === 'loopNode') {
+    data.label = 'Loop';
+    data.executionMode = 'child_pipeline';
+    data.items = '';
+    data.bodyStepIds = '';
+    data.pipelinePath = '';
+    data.itemVar = 'loop_item';
+    data.indexVar = 'loop_index';
+    data.maxIterations = 20;
+    data.repeatCount = 1;
+    data.dryRunChild = false;
+    data.continueOnChildError = false;
+    data.errorStrategy = 'fail_fast';
+    data.errorThreshold = 1;
+    data.outputVar = 'loop_result';
+    data.kind = 'loop';
   } else if (item.nodeType === 'promptNode') {
     data.name = '';
     data.value = '';
@@ -101,6 +130,8 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.model = 'gemini-2.5-flash';
     data.role = 'architect';
     data.reasoningEffort = 'medium';
+    data.cwd = '';
+    data.systemPrompt = '';
     data.instruction = '';
     data.instructionTemplate = '';
     data.contextFiles = ['src/**/*.ts'];
@@ -117,6 +148,8 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
   } else if (item.nodeType === 'teamNode') {
     data.label = 'AI Team';
     data.strategy = 'sequential';
+    data.cwd = '';
+    data.systemPrompt = '';
     data.members = [
       { name: 'member_1', role: 'writer', agent: 'gemini', model: 'gemini-2.5-flash', instruction: '' }
     ];
@@ -167,8 +200,34 @@ export function buildDropNodeData(
   if (type === 'switchNode') {
     return { label: 'Switch', variableKey: '', routes: [], status: 'idle', kind: 'switch' };
   }
+  if (type === 'ifNode') {
+    return { label: 'If / Else', variableKey: '', condition: 'equals', value: '', status: 'idle', kind: 'ifelse' };
+  }
   if (type === 'scriptNode') {
     return { scriptPath: '', args: '', cwd: '', interpreter: '', status: 'idle', kind: 'script' };
+  }
+  if (type === 'subPipelineNode') {
+    return { label: 'Sub-pipeline', pipelinePath: '', dryRunChild: false, inputJson: '', outputVar: 'subpipeline_result', status: 'idle', kind: 'subpipeline' };
+  }
+  if (type === 'loopNode') {
+    return {
+      label: 'Loop',
+      executionMode: 'child_pipeline',
+      items: '',
+      bodyStepIds: '',
+      pipelinePath: '',
+      itemVar: 'loop_item',
+      indexVar: 'loop_index',
+      maxIterations: 20,
+      repeatCount: 1,
+      dryRunChild: false,
+      continueOnChildError: false,
+      errorStrategy: 'fail_fast',
+      errorThreshold: 1,
+      outputVar: 'loop_result',
+      status: 'idle',
+      kind: 'loop'
+    };
   }
   if (type === 'promptNode') {
     return { name: '', value: '', kind: 'prompt' };
@@ -180,6 +239,8 @@ export function buildDropNodeData(
       model: 'gemini-2.5-flash',
       role: 'architect',
       reasoningEffort: 'medium',
+      cwd: '',
+      systemPrompt: '',
       instruction: '',
       instructionTemplate: '',
       contextFiles: ['src/**/*.ts'],
@@ -200,6 +261,8 @@ export function buildDropNodeData(
     return {
       label: 'AI Team',
       strategy: 'sequential',
+      cwd: '',
+      systemPrompt: '',
       members: [{ name: 'member_1', role: 'writer', agent: 'gemini', model: 'gemini-2.5-flash', instruction: '' }],
       contextFiles: [],
       agentSpecFiles: ['AGENTS.md', '**/SKILL.md'],

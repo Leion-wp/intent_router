@@ -29,12 +29,22 @@ export const IntentSchema: z.ZodType<Intent> = z.lazy(() => z.object({
     provider: z.string().optional(),
     target: z.string().optional(),
     onFailure: z.string().optional(),
+    retry: z.object({
+        mode: z.enum(['none', 'simple', 'fixed', 'exponential']).optional(),
+        maxAttempts: z.number().optional(),
+        delayMs: z.number().optional(),
+        maxDelayMs: z.number().optional(),
+        jitterMs: z.number().optional()
+    }).optional(),
+    continueOnError: z.boolean().optional(),
+    captureErrorVar: z.string().optional(),
     meta: z.object({
         dryRun: z.boolean().optional(),
         traceId: z.string().optional(),
         debug: z.boolean().optional(),
         runId: z.string().optional(),
         stepId: z.string().optional(),
+        subPipelineDepth: z.number().optional(),
         ui: z.any().optional(),
     }).optional(),
 }));
