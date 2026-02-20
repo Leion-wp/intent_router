@@ -4,7 +4,7 @@
     "description": "Human-centric visual orchestration runtime for VS Code",
     "publisher": "LeionCorp",
     "icon": "media/leion_roots_icon.png",
-    "version": "0.0.2",
+    "version": "0.0.5",
     "license": "MIT",
     "repository": {
         "type": "git",
@@ -27,12 +27,23 @@
         "onCommand:intentRouter.pipelines.openJson",
         "onCommand:intentRouter.pipelines.refresh",
         "onCommand:intentRouter.pipelines.openBuilder",
+        "onCommand:intentRouter.pipelines.addCluster",
+        "onCommand:intentRouter.pipelines.renameCluster",
+        "onCommand:intentRouter.pipelines.deleteCluster",
+        "onCommand:intentRouter.pipelines.addPipeline",
+        "onCommand:intentRouter.pipelines.assignCluster",
+        "onCommand:intentRouter.pipelines.removeCluster",
+        "onCommand:intentRouter.pipelines.rename",
+        "onCommand:intentRouter.pipelines.delete",
+        "onCommand:intentRouter.pipelines.sortByUpdated",
+        "onCommand:intentRouter.pipelines.sortManual",
         "onCommand:intentRouter.generatePipelinePrompt",
         "onCommand:intentRouter.importPipelineFromClipboard",
         "onCommand:intentRouter.openCodex",
         "onCommand:intentRouter.generatePromptAndOpenCodex",
         "onCommand:intentRouter.importPipelineFromClipboardAndRun",
-        "onView:intentRouterPipelines"
+        "onView:intentRouterPipelines",
+        "onCommand:intentRouter.openChromeTabs"
     ],
     "contributes": {
         "commands": [
@@ -92,6 +103,56 @@
                 "icon": "$(edit)"
             },
             {
+                "command": "intentRouter.pipelines.addCluster",
+                "title": "Intent Router: Add Cluster",
+                "icon": "$(new-folder)"
+            },
+            {
+                "command": "intentRouter.pipelines.renameCluster",
+                "title": "Intent Router: Rename Cluster",
+                "icon": "$(edit)"
+            },
+            {
+                "command": "intentRouter.pipelines.deleteCluster",
+                "title": "Intent Router: Delete Cluster",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "intentRouter.pipelines.addPipeline",
+                "title": "Intent Router: Add Pipeline",
+                "icon": "$(new-file)"
+            },
+            {
+                "command": "intentRouter.pipelines.assignCluster",
+                "title": "Intent Router: Add Cluster Membership",
+                "icon": "$(tag)"
+            },
+            {
+                "command": "intentRouter.pipelines.removeCluster",
+                "title": "Intent Router: Remove From Cluster",
+                "icon": "$(remove)"
+            },
+            {
+                "command": "intentRouter.pipelines.rename",
+                "title": "Intent Router: Rename Pipeline",
+                "icon": "$(edit)"
+            },
+            {
+                "command": "intentRouter.pipelines.delete",
+                "title": "Intent Router: Delete Pipeline",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "intentRouter.pipelines.sortByUpdated",
+                "title": "Intent Router: Sort Pipelines by Updated",
+                "icon": "$(history)"
+            },
+            {
+                "command": "intentRouter.pipelines.sortManual",
+                "title": "Intent Router: Sort Pipelines Manually",
+                "icon": "$(list-unordered)"
+            },
+            {
                 "command": "intentRouter.generatePipelinePrompt",
                 "title": "Intent Router: Generate Pipeline Prompt",
                 "icon": "$(sparkle)"
@@ -125,6 +186,11 @@
                 "command": "intentRouter.runtime.refreshTriggers",
                 "title": "Intent Router: Refresh Runtime Triggers",
                 "icon": "$(watch)"
+            },
+            {
+                "command": "intentRouter.openChromeTabs",
+                "title": "Leion Roots: Open Chrome Tabs",
+                "icon": "$(browser)"
             }
         ],
         "viewsContainers": {
@@ -148,6 +214,26 @@
             "view/title": [
                 {
                     "command": "intentRouter.pipelines.new",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.addCluster",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.addPipeline",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.sortByUpdated",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.sortManual",
                     "when": "view == intentRouterPipelines",
                     "group": "navigation"
                 },
@@ -200,6 +286,11 @@
                     "command": "intentRouter.runtime.refreshTriggers",
                     "when": "view == intentRouterPipelines",
                     "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.openChromeTabs",
+                    "when": "view == intentRouterPipelines",
+                    "group": "navigation"
                 }
             ],
             "view/item/context": [
@@ -222,6 +313,81 @@
                     "command": "intentRouter.pipelines.openBuilder",
                     "when": "view == intentRouterPipelines && viewItem == pipelineItem",
                     "group": "inline@4"
+                },
+                {
+                    "command": "intentRouter.pipelines.run",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "intentRouter.pipelines.dryRun",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+                    "group": "inline@2"
+                },
+                {
+                    "command": "intentRouter.pipelines.openJson",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+                    "group": "inline@3"
+                },
+                {
+                    "command": "intentRouter.pipelines.openBuilder",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+                    "group": "inline@4"
+                },
+                {
+                    "command": "intentRouter.pipelines.renameCluster",
+                    "when": "view == intentRouterPipelines && viewItem == clusterItem",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "intentRouter.pipelines.addPipeline",
+                    "when": "view == intentRouterPipelines && viewItem == clusterItem",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "intentRouter.pipelines.deleteCluster",
+                    "when": "view == intentRouterPipelines && viewItem == clusterItem",
+                    "group": "navigation@3"
+                },
+                {
+                    "command": "intentRouter.pipelines.addPipeline",
+                    "when": "view == intentRouterPipelines && viewItem == uncategorizedClusterItem",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "intentRouter.pipelines.assignCluster",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "intentRouter.pipelines.rename",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "intentRouter.pipelines.delete",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+                    "group": "navigation@3"
+                },
+                {
+                    "command": "intentRouter.pipelines.assignCluster",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "intentRouter.pipelines.removeCluster",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "intentRouter.pipelines.rename",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+                    "group": "navigation@3"
+                },
+                {
+                    "command": "intentRouter.pipelines.delete",
+                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+                    "group": "navigation@4"
                 }
             ]
         },

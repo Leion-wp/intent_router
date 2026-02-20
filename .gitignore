@@ -28,8 +28,10 @@ Thumbs.db
 history.json
 PR*.md
 *.intent.json
+pipeline/.intent-router.clusters.json
 ROADMAP.md
 reports/
 *internal*.*
 *memory*.*
 /scripts/
+docs/

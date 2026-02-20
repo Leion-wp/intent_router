@@ -4,7 +4,7 @@ import { Intent, RegisterCapabilitiesArgs } from './types';
 import { registerCapabilities } from './registry';
 import { generateSecureNonce } from './security';
 import { createSoftwareFactoryBranchPreset, createSoftwareFactoryPreset, PipelineBuilder } from './pipelineBuilder';
-import { PipelinesTreeDataProvider } from './pipelinesView';
+import { ClusterTreeNode, PipelineTreeNode, PipelinesTreeDataProvider, PipelinesTreeNode } from './pipelinesView';
 import { ensurePipelineFolder, readPipelineFromUri, runPipelineFromActiveEditor, runPipelineFromData, runPipelineFromUri, writePipelineToUri, cancelCurrentPipeline, pauseCurrentPipeline, resumeCurrentPipeline } from './pipelineRunner';
 import { registerGitProvider } from './providers/gitAdapter';
 import { registerDockerProvider } from './providers/dockerAdapter';
@@ -17,6 +17,8 @@ import { executeGitHubOpenPr, executeGitHubPrChecks, executeGitHubPrComment, exe
 import { StatusBarManager } from './statusBar';
 import { historyManager } from './historyManager';
 import { RuntimeTriggerManager } from './runtimeTriggerManager';
+import { ChromeBridge } from './chromeBridge';
+import { ChromePanelView } from './chromePanelView';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
@@ -35,7 +37,9 @@ export function activate(context: vscode.ExtensionContext) {
     const pipelineBuilder = new PipelineBuilder(context.extensionUri);
     const pipelinesProvider = new PipelinesTreeDataProvider();
     const pipelinesView = vscode.window.createTreeView('intentRouterPipelines', {
-        treeDataProvider: pipelinesProvider
+        treeDataProvider: pipelinesProvider,
+        dragAndDropController: pipelinesProvider,
+        canSelectMany: false
     });
 
     const statusBarManager = new StatusBarManager();
@@ -44,6 +48,24 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(runtimeTriggerManager);
     void runtimeTriggerManager.start().catch((error) => {
         console.warn('[Intent Router] Runtime trigger manager failed to start:', error);
+    });
+
+    const chromeBridge = new ChromeBridge(context);
+    context.subscriptions.push(chromeBridge);
+    void chromeBridge.start().catch((error) => {
+        console.warn('[Intent Router] Chrome bridge failed to start:', error);
+    });
+
+    const chromePanelView = new ChromePanelView(context.extensionUri, chromeBridge);
+    context.subscriptions.push(chromePanelView);
+
+    // Wire live tab updates from Chrome → WebView panel
+    chromeBridge.onTabsUpdate((msg) => {
+        chromePanelView.postMessage(msg);
+    });
+
+    let openChromeTabsDisposable = vscode.commands.registerCommand('intentRouter.openChromeTabs', () => {
+        chromePanelView.open();
     });
 
     let disposable = vscode.commands.registerCommand('intentRouter.route', async (args: any) => {
@@ -120,55 +142,10 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let createPipelineDisposable = vscode.commands.registerCommand('intentRouter.createPipeline', async () => {
-        const name = await vscode.window.showInputBox({
-            prompt: 'Pipeline name (used for the file name)',
-            placeHolder: 'deploy-app'
-        });
-        if (!name) {
-            return;
+        const uri = await createPipelineFileWithPrompt();
+        if (uri) {
+            pipelinesProvider.refresh();
         }
-
-        const profiles = vscode.workspace.getConfiguration('intentRouter').get<any[]>('profiles', []);
-        const profileNames = Array.isArray(profiles)
-            ? profiles.map(profile => profile?.name).filter((value: any) => typeof value === 'string')
-            : [];
-
-        const profile = await vscode.window.showQuickPick(
-            ['(none)', ...profileNames],
-            { placeHolder: 'Select a profile (optional)' }
-        );
-        if (!profile) {
-            return;
-        }
-
-        const fileName = name.endsWith('.intent.json') ? name : `${name}.intent.json`;
-        const folder = await ensurePipelineFolder();
-        if (!folder) {
-            vscode.window.showErrorMessage('Open a workspace folder to create a pipeline file.');
-            return;
-        }
-
-        const defaultUri = vscode.Uri.joinPath(folder, fileName);
-        const targetUri = await vscode.window.showSaveDialog({
-            defaultUri,
-            filters: { 'Intent Pipeline': ['intent.json'] }
-        });
-        if (!targetUri) {
-            return;
-        }
-
-        const pipeline: any = {
-            name,
-            steps: []
-        };
-        if (profile !== '(none)') {
-            pipeline.profile = profile;
-        }
-
-        const content = JSON.stringify(pipeline, null, 2) + '\n';
-        await vscode.workspace.fs.writeFile(targetUri, Buffer.from(content, 'utf8'));
-        const doc = await vscode.workspace.openTextDocument(targetUri);
-        await vscode.window.showTextDocument(doc, { preview: false });
     });
 
     let runPipelineDisposable = vscode.commands.registerCommand('intentRouter.runPipeline', async () => {
@@ -230,7 +207,8 @@ export function activate(context: vscode.ExtensionContext) {
         await pipelineBuilder.open(createSoftwareFactoryBranchPreset());
     });
 
-    let openPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.openBuilder', async (uri?: vscode.Uri) => {
+    let openPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.openBuilder', async (input?: vscode.Uri | PipelineTreeNode) => {
+        const uri = input instanceof vscode.Uri ? input : (input?.kind === 'pipeline' ? input.item.uri : undefined);
         if (!uri) {
             return;
         }
@@ -239,6 +217,162 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
         await pipelineBuilder.open(pipeline, uri);
+    });
+
+    let addClusterDisposable = vscode.commands.registerCommand('intentRouter.pipelines.addCluster', async () => {
+        const name = await vscode.window.showInputBox({
+            prompt: 'Cluster name',
+            placeHolder: 'backend, release, onboarding...'
+        });
+        if (!name) {
+            return;
+        }
+        await pipelinesProvider.createCluster(name);
+    });
+
+    let renameClusterDisposable = vscode.commands.registerCommand('intentRouter.pipelines.renameCluster', async (node?: ClusterTreeNode) => {
+        const clusterNode = node?.kind === 'cluster' ? node : getSelectedClusterNode(pipelinesView);
+        if (!clusterNode || clusterNode.isUncategorized) {
+            return;
+        }
+        const nextName = await vscode.window.showInputBox({
+            prompt: 'Rename cluster',
+            value: clusterNode.name
+        });
+        if (!nextName) {
+            return;
+        }
+        await pipelinesProvider.renameCluster(clusterNode.id, nextName);
+    });
+
+    let deleteClusterDisposable = vscode.commands.registerCommand('intentRouter.pipelines.deleteCluster', async (node?: ClusterTreeNode) => {
+        const clusterNode = node?.kind === 'cluster' ? node : getSelectedClusterNode(pipelinesView);
+        if (!clusterNode || clusterNode.isUncategorized) {
+            return;
+        }
+        const confirm = await vscode.window.showWarningMessage(
+            `Delete cluster "${clusterNode.name}"? Pipelines will remain on disk.`,
+            { modal: true },
+            'Delete'
+        );
+        if (confirm !== 'Delete') {
+            return;
+        }
+        await pipelinesProvider.deleteCluster(clusterNode.id);
+    });
+
+    let addPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.addPipeline', async (node?: ClusterTreeNode) => {
+        const clusterNode = node?.kind === 'cluster' ? node : getSelectedClusterNode(pipelinesView);
+        const uri = await createPipelineFileWithPrompt(clusterNode?.isUncategorized ? undefined : clusterNode?.name);
+        if (!uri) {
+            return;
+        }
+        if (clusterNode && !clusterNode.isUncategorized) {
+            await pipelinesProvider.addPipelineUriToCluster(uri, clusterNode.id);
+        } else {
+            pipelinesProvider.refresh();
+        }
+    });
+
+    let assignClusterDisposable = vscode.commands.registerCommand('intentRouter.pipelines.assignCluster', async (node?: PipelineTreeNode) => {
+        const pipelineNode = node?.kind === 'pipeline' ? node : getSelectedPipelineNode(pipelinesView);
+        if (!pipelineNode) {
+            return;
+        }
+        const clusters = await pipelinesProvider.listClusters();
+        const quickPickItems: Array<vscode.QuickPickItem & { clusterId: string | null }> = [
+            ...clusters.map((cluster) => ({
+                label: cluster.name,
+                description: cluster.id,
+                clusterId: cluster.id
+            })),
+            {
+                label: '$(add) Create new cluster',
+                description: '',
+                clusterId: null
+            }
+        ];
+        const picked = await vscode.window.showQuickPick(quickPickItems, {
+            placeHolder: 'Assign pipeline to cluster'
+        });
+        if (!picked) {
+            return;
+        }
+        let clusterId = picked.clusterId;
+        if (!clusterId) {
+            const clusterName = await vscode.window.showInputBox({
+                prompt: 'New cluster name'
+            });
+            if (!clusterName) {
+                return;
+            }
+            const created = await pipelinesProvider.createCluster(clusterName);
+            clusterId = created?.id ?? null;
+        }
+        if (!clusterId) {
+            return;
+        }
+        await pipelinesProvider.addPipelineUriToCluster(pipelineNode.item.uri, clusterId);
+    });
+
+    let removeClusterDisposable = vscode.commands.registerCommand('intentRouter.pipelines.removeCluster', async (node?: PipelineTreeNode) => {
+        const pipelineNode = node?.kind === 'pipeline' ? node : getSelectedPipelineNode(pipelinesView);
+        if (!pipelineNode || pipelineNode.clusterId === '__uncategorized__') {
+            return;
+        }
+        await pipelinesProvider.removePipelineFromCluster(pipelineNode.item.relativePath, pipelineNode.clusterId);
+    });
+
+    let renamePipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.rename', async (node?: PipelineTreeNode) => {
+        const pipelineNode = node?.kind === 'pipeline' ? node : getSelectedPipelineNode(pipelinesView);
+        if (!pipelineNode) {
+            return;
+        }
+        const currentName = pipelineNode.item.uri.path.split('/').pop() || pipelineNode.item.relativePath;
+        const nextNameRaw = await vscode.window.showInputBox({
+            prompt: 'Rename pipeline file',
+            value: currentName.replace('.intent.json', '')
+        });
+        if (!nextNameRaw) {
+            return;
+        }
+        const nextFileName = nextNameRaw.endsWith('.intent.json') ? nextNameRaw : `${nextNameRaw}.intent.json`;
+        const parent = pipelineNode.item.uri.with({ path: pipelineNode.item.uri.path.replace(/\/[^/]+$/, '') });
+        const nextUri = vscode.Uri.joinPath(parent, nextFileName);
+        if (await fileExists(nextUri)) {
+            vscode.window.showErrorMessage(`Cannot rename: ${nextFileName} already exists.`);
+            return;
+        }
+        await vscode.workspace.fs.rename(pipelineNode.item.uri, nextUri);
+        await pipelinesProvider.syncPipelinePathAfterRename(pipelineNode.item.uri, nextUri);
+    });
+
+    let deletePipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.delete', async (node?: PipelineTreeNode) => {
+        const pipelineNode = node?.kind === 'pipeline' ? node : getSelectedPipelineNode(pipelinesView);
+        if (!pipelineNode) {
+            return;
+        }
+        const fileName = pipelineNode.item.uri.path.split('/').pop() || pipelineNode.item.relativePath;
+        const confirm = await vscode.window.showWarningMessage(
+            `Delete pipeline "${fileName}"?`,
+            { modal: true },
+            'Delete'
+        );
+        if (confirm !== 'Delete') {
+            return;
+        }
+        await vscode.workspace.fs.delete(pipelineNode.item.uri, { useTrash: true });
+        await pipelinesProvider.removePipelineFromAllClusters(pipelineNode.item.uri);
+    });
+
+    let sortUpdatedDisposable = vscode.commands.registerCommand('intentRouter.pipelines.sortByUpdated', async () => {
+        await pipelinesProvider.setSortMode('updated');
+        vscode.window.showInformationMessage('Pipeline sort: updated date.');
+    });
+
+    let sortManualDisposable = vscode.commands.registerCommand('intentRouter.pipelines.sortManual', async () => {
+        await pipelinesProvider.setSortMode('manual');
+        vscode.window.showInformationMessage('Pipeline sort: manual.');
     });
 
     let runSelectedPipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.run', async () => {
@@ -334,6 +468,16 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(internalCommitMessageDisposable);
     context.subscriptions.push(internalCreatePRDisposable);
     context.subscriptions.push(newPipelineDisposable);
+    context.subscriptions.push(addPipelineDisposable);
+    context.subscriptions.push(addClusterDisposable);
+    context.subscriptions.push(renameClusterDisposable);
+    context.subscriptions.push(deleteClusterDisposable);
+    context.subscriptions.push(assignClusterDisposable);
+    context.subscriptions.push(removeClusterDisposable);
+    context.subscriptions.push(renamePipelineDisposable);
+    context.subscriptions.push(deletePipelineDisposable);
+    context.subscriptions.push(sortUpdatedDisposable);
+    context.subscriptions.push(sortManualDisposable);
     context.subscriptions.push(loadSoftwareFactoryTemplateDisposable);
     context.subscriptions.push(loadSoftwareFactoryBranchTemplateDisposable);
     context.subscriptions.push(openPipelineDisposable);
@@ -347,20 +491,22 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(pausePipelineDisposable);
     context.subscriptions.push(resumePipelineDisposable);
     context.subscriptions.push(clearHistoryDisposable);
+    context.subscriptions.push(pipelinesProvider);
     context.subscriptions.push(pipelinesView);
+    context.subscriptions.push(openChromeTabsDisposable);
 }
 
 export function deactivate() { }
 
 async function getPipelineUriFromSelectionOrPrompt(
-    pipelinesView: vscode.TreeView<any>
+    pipelinesView: vscode.TreeView<PipelinesTreeNode>
 ): Promise<vscode.Uri | undefined> {
-    const selected = pipelinesView.selection[0];
-    if (selected?.uri instanceof vscode.Uri) {
-        return selected.uri;
+    const selected = getSelectedPipelineNode(pipelinesView);
+    if (selected?.item?.uri instanceof vscode.Uri) {
+        return selected.item.uri;
     }
 
-    const files = await vscode.workspace.findFiles('pipeline/*.intent.json');
+    const files = await vscode.workspace.findFiles('pipeline/**/*.intent.json');
     if (files.length === 0) {
         vscode.window.showErrorMessage('No pipelines found in /pipeline.');
         return undefined;
@@ -368,6 +514,7 @@ async function getPipelineUriFromSelectionOrPrompt(
 
     const picks = files.map(uri => ({
         label: uri.path.split('/').pop() || 'pipeline',
+        description: uri.path.split('/pipeline/')[1] || '',
         uri
     }));
 
@@ -375,6 +522,83 @@ async function getPipelineUriFromSelectionOrPrompt(
         placeHolder: 'Select a pipeline'
     });
     return picked?.uri;
+}
+
+function getSelectedPipelineNode(
+    pipelinesView: vscode.TreeView<PipelinesTreeNode>
+): PipelineTreeNode | undefined {
+    const selected = pipelinesView.selection[0];
+    if (selected?.kind === 'pipeline') {
+        return selected;
+    }
+    return undefined;
+}
+
+function getSelectedClusterNode(
+    pipelinesView: vscode.TreeView<PipelinesTreeNode>
+): ClusterTreeNode | undefined {
+    const selected = pipelinesView.selection[0];
+    if (selected?.kind === 'cluster') {
+        return selected;
+    }
+    return undefined;
+}
+
+async function createPipelineFileWithPrompt(defaultClusterName?: string): Promise<vscode.Uri | undefined> {
+    const name = await vscode.window.showInputBox({
+        prompt: 'Pipeline name (used for the file name)',
+        placeHolder: 'deploy-app'
+    });
+    if (!name) {
+        return undefined;
+    }
+
+    const profiles = vscode.workspace.getConfiguration('intentRouter').get<any[]>('profiles', []);
+    const profileNames = Array.isArray(profiles)
+        ? profiles.map(profile => profile?.name).filter((value: any) => typeof value === 'string')
+        : [];
+
+    const profile = await vscode.window.showQuickPick(
+        ['(none)', ...profileNames],
+        { placeHolder: 'Select a profile (optional)' }
+    );
+    if (!profile) {
+        return undefined;
+    }
+
+    const fileName = name.endsWith('.intent.json') ? name : `${name}.intent.json`;
+    const folder = await ensurePipelineFolder();
+    if (!folder) {
+        vscode.window.showErrorMessage('Open a workspace folder to create a pipeline file.');
+        return undefined;
+    }
+
+    const normalizedCluster = String(defaultClusterName || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
+    const defaultUri = normalizedCluster
+        ? vscode.Uri.joinPath(folder, normalizedCluster, fileName)
+        : vscode.Uri.joinPath(folder, fileName);
+    const targetUri = await vscode.window.showSaveDialog({
+        defaultUri,
+        filters: { 'Intent Pipeline': ['intent.json'] }
+    });
+    if (!targetUri) {
+        return undefined;
+    }
+    const parentUri = targetUri.with({ path: targetUri.path.replace(/\/[^/]+$/, '') });
+    await vscode.workspace.fs.createDirectory(parentUri);
+
+    const pipeline: any = {
+        name,
+        steps: []
+    };
+    if (profile !== '(none)') {
+        pipeline.profile = profile;
+    }
+
+    await writePipelineToUri(targetUri, pipeline);
+    const doc = await vscode.workspace.openTextDocument(targetUri);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    return targetUri;
 }
 
 async function generatePipelinePrompt(): Promise<string | undefined> {

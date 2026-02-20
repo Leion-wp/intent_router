@@ -158,7 +158,7 @@ export class RuntimeTriggerManager implements vscode.Disposable {
     }
 
     private registerWatchers(): void {
-        const fsWatcher = vscode.workspace.createFileSystemWatcher('**/pipeline/*.intent.json');
+        const fsWatcher = vscode.workspace.createFileSystemWatcher('**/pipeline/**/*.intent.json');
         const scheduleRefresh = () => {
             void this.refresh();
         };
@@ -191,7 +191,7 @@ export class RuntimeTriggerManager implements vscode.Disposable {
     private async loadRegistrations(): Promise<void> {
         const folder = await ensurePipelineFolder();
         if (!folder) return;
-        const files = await vscode.workspace.findFiles('pipeline/*.intent.json');
+        const files = await vscode.workspace.findFiles('pipeline/**/*.intent.json');
         for (const uri of files) {
             const pipeline = await readPipelineFromUri(uri);
             if (!pipeline?.steps?.length) continue;

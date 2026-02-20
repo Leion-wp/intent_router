@@ -142,6 +142,11 @@ declare global {
 // Acquire VS Code API (safe singleton)
 const vscode = window.vscode || (window.vscode = (window as any).acquireVsCodeApi ? (window as any).acquireVsCodeApi() : null);
 
+// ── Chrome Tabs panel mode ────────────────────────────────────────────────
+// When launched via chromePanelView.ts, initialData.mode === 'chromeTabs'.
+// Import lazily so the heavy ReactFlow graph is NOT bundled into this path.
+import ChromeTabsPanel from './components/ChromeTabsPanel';
+
 const initialNodes: Node[] = [
   {
     id: 'start',
@@ -1331,6 +1336,11 @@ function Flow({
  }
 
 export default function App() {
+  // Chrome Tabs panel — early return before any ReactFlow state is initialised
+  if (window.initialData?.mode === 'chromeTabs') {
+    return <ChromeTabsPanel />;
+  }
+
   const {
     commandGroups,
     history,
