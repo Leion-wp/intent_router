@@ -4,6 +4,8 @@ const path = require('path');
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1200;
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const WEBVIEW_ROOT = path.resolve(PROJECT_ROOT, 'webview-ui');
 
 function sleep(ms) {
   const end = Date.now() + ms;
@@ -13,10 +15,23 @@ function sleep(ms) {
 }
 
 function runBuildOnce() {
+  const viteCliCandidates = [
+    path.resolve(WEBVIEW_ROOT, 'node_modules', 'vite', 'bin', 'vite.js'),
+    path.resolve(WEBVIEW_ROOT, 'node_modules', 'vite', 'bin', 'vite.mjs')
+  ];
+
+  const viteCli = viteCliCandidates.find((candidate) => fs.existsSync(candidate));
+  if (viteCli) {
+    return spawnSync(process.execPath, [viteCli, 'build'], {
+      encoding: 'utf8',
+      cwd: WEBVIEW_ROOT
+    });
+  }
+
   const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  return spawnSync(npmCommand, ['run', 'build:webview:raw'], {
+  return spawnSync(npmCommand, ['--prefix', 'webview-ui', 'run', 'build'], {
     encoding: 'utf8',
-    cwd: path.resolve(__dirname, '..')
+    cwd: PROJECT_ROOT
   });
 }
 

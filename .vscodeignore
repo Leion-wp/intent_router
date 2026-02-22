@@ -1,15 +1,17 @@
 **/.git/**
 **/.vscode/**
 **/.github/**
-**/node_modules/**
 **/tsconfig.tsbuildinfo
 **/*.map
 **/*.log
+
+# Exclure sources
 **/src/**
 **/webview-ui/src/**
 **/webview-ui/node_modules/**
-**/webview-ui/dist/**
-**/webview-ui/**
+
+
+
 **/test/**
 **/tests/**
 **/coverage/**
