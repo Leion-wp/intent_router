@@ -13,8 +13,10 @@ function sleep(ms) {
 }
 
 function runBuildOnce() {
-  return spawnSync('cmd.exe', ['/d', '/s', '/c', 'npm run build:webview:raw'], {
-    encoding: 'utf8'
+  const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  return spawnSync(npmCommand, ['run', 'build:webview:raw'], {
+    encoding: 'utf8',
+    cwd: path.resolve(__dirname, '..')
   });
 }
 
