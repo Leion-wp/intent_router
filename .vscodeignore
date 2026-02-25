@@ -7,8 +7,7 @@
 
 # Exclure sources
 **/src/**
-**/webview-ui/src/**
-**/webview-ui/node_modules/**
+**/webview-ui/**
 
 
 
@@ -23,8 +22,13 @@
 **/.Jules/**
 **/.atom8n/**
 **/.thorclient/**
+**/.intent-router/**
+**/docs/**
+**/scripts/**
 PR_PROMPT.md
+PR_PROMPT_FINISHED.md
 VISION.md
 SECURITY.md
+ROADMAP.md
 .gitignore
 tsconfig.json
