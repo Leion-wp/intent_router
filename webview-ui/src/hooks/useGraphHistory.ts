@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  canRedoGraph,
+  canUndoGraph,
+  pushGraphSnapshot as pushGraphSnapshotState
+} from '../utils/graphHistoryUtils';
 
 type Snapshot = {
   nodes: any[];
@@ -32,30 +37,20 @@ export function useGraphHistory({
   const updateUndoRedoFlags = useCallback(() => {
     const index = graphHistoryIndexRef.current;
     const length = graphHistoryRef.current.length;
-    setCanUndo(index > 0);
-    setCanRedo(index >= 0 && index < length - 1);
+    setCanUndo(canUndoGraph(index));
+    setCanRedo(canRedoGraph(index, length));
   }, []);
 
   const pushGraphSnapshot = useCallback((nextNodes: any[], nextEdges: any[]) => {
-    const snapshot: Snapshot = {
-      nodes: JSON.parse(JSON.stringify(nextNodes || [])),
-      edges: JSON.parse(JSON.stringify(nextEdges || [])),
-      signature: JSON.stringify({ nodes: nextNodes || [], edges: nextEdges || [] })
-    };
-
-    const current = graphHistoryRef.current;
-    const currentIndex = graphHistoryIndexRef.current;
-    const currentSignature = current[currentIndex]?.signature;
-    if (snapshot.signature === currentSignature) {
-      updateUndoRedoFlags();
-      return;
-    }
-
-    const head = currentIndex >= 0 ? current.slice(0, currentIndex + 1) : [];
-    const trimmed = [...head, snapshot];
-    const bounded = trimmed.length > maxSnapshots ? trimmed.slice(trimmed.length - maxSnapshots) : trimmed;
-    graphHistoryRef.current = bounded;
-    graphHistoryIndexRef.current = bounded.length - 1;
+    const nextState = pushGraphSnapshotState({
+      history: graphHistoryRef.current,
+      index: graphHistoryIndexRef.current,
+      nextNodes,
+      nextEdges,
+      maxSnapshots
+    });
+    graphHistoryRef.current = nextState.history as Snapshot[];
+    graphHistoryIndexRef.current = nextState.index;
     updateUndoRedoFlags();
   }, [maxSnapshots, updateUndoRedoFlags]);
 

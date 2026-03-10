@@ -23,28 +23,33 @@ const StartNode = ({ data, id }: NodeProps) => {
     }
   }, []);
 
+  const themeColor = '#007acc';
+
+  const handleStyle = {
+    width: '12px',
+    height: '12px',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 0 8px rgba(0,0,0,0.5)',
+    zIndex: 10,
+    background: themeColor,
+    right: '-6px',
+    transition: 'all 0.2s ease'
+  };
+
   return (
-    <div
-      style={{
-        position: 'relative',
-        padding: '10px',
-        borderRadius: '6px',
-        background: 'var(--vscode-editor-background)',
-        border: '2px solid var(--vscode-focusBorder)',
-        minWidth: '260px',
-        color: 'var(--vscode-editor-foreground)',
-        fontFamily: 'var(--vscode-font-family)',
-      }}
-    >
-      <div style={{ marginBottom: '8px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span className="codicon codicon-run-all"></span>
-        <span>Start</span>
+    <div className="glass-node" style={{ minWidth: '280px' }}>
+      <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}22 0%, transparent 100%)` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+          <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #00a2ff 100%)` }}>
+            <span className="codicon codicon-run-all" style={{ color: '#fff', fontSize: '16px' }}></span>
+          </div>
+          <span style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.4px' }}>PIPELINE START</span>
+        </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <IoSpec inputs={[]} outputs={['success']} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          <label style={{ fontSize: '0.75em', opacity: 0.9 }}>Pipeline name</label>
+      <div className="glass-node-body">
+        <div className="glass-node-input-group">
+          <label className="glass-node-input-label">Pipeline Name</label>
           <input
             className="nodrag"
             type="text"
@@ -55,17 +60,11 @@ const StartNode = ({ data, id }: NodeProps) => {
               updateNodeData(id, { label: v });
             }}
             placeholder="My Pipeline"
-            style={{
-              background: 'var(--vscode-input-background)',
-              color: 'var(--vscode-input-foreground)',
-              border: '1px solid var(--vscode-input-border)',
-              padding: '4px',
-            }}
           />
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          <label style={{ fontSize: '0.75em', opacity: 0.9 }}>Description</label>
+        <div className="glass-node-input-group">
+          <label className="glass-node-input-label">Description</label>
           <textarea
             className="nodrag"
             value={description}
@@ -74,24 +73,13 @@ const StartNode = ({ data, id }: NodeProps) => {
               setDescription(v);
               updateNodeData(id, { description: v });
             }}
-            placeholder="Optional…"
-            rows={3}
-            style={{
-              width: '100%',
-              resize: 'vertical',
-              background: 'var(--vscode-input-background)',
-              color: 'var(--vscode-input-foreground)',
-              border: '1px solid var(--vscode-input-border)',
-              padding: '6px',
-              fontFamily: 'var(--vscode-font-family)',
-              fontSize: '12px',
-            }}
+            placeholder="Optional description…"
+            rows={2}
           />
         </div>
       </div>
 
-      <Handle type="source" position={Position.Right} id="success" />
-      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
+      <Handle type="source" position={Position.Right} id="success" style={handleStyle} />
     </div>
   );
 };

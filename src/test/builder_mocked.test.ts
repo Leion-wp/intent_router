@@ -77,11 +77,12 @@ suite('Pipeline Builder Tests (Mocked)', () => {
             index: 0
         });
 
-        assert.strictEqual(receivedMessages.length, 1);
-        assert.strictEqual(receivedMessages[0].type, 'executionStatus');
-        assert.strictEqual(receivedMessages[0].status, 'running');
-        assert.strictEqual(receivedMessages[0].index, 0);
-        assert.strictEqual(receivedMessages[0].intentId, 'a'); // Verify intentId
+        const executionStatusMessages = receivedMessages.filter(m => m.type === 'executionStatus');
+        assert.ok(executionStatusMessages.length >= 1);
+        const message = executionStatusMessages[executionStatusMessages.length - 1];
+        assert.strictEqual(message.status, 'running');
+        assert.strictEqual(message.index, 0);
+        assert.strictEqual(message.intentId, 'a');
     });
 
     test('Log forwarding to Webview', async () => {
@@ -102,10 +103,11 @@ suite('Pipeline Builder Tests (Mocked)', () => {
             stream: 'stdout'
         });
 
-        assert.strictEqual(receivedMessages.length, 1);
-        assert.strictEqual(receivedMessages[0].type, 'stepLog');
-        assert.strictEqual(receivedMessages[0].intentId, 'a');
-        assert.strictEqual(receivedMessages[0].text, 'log line');
+        const logMessages = receivedMessages.filter(m => m.type === 'stepLog');
+        assert.ok(logMessages.length >= 1);
+        const message = logMessages[logMessages.length - 1];
+        assert.strictEqual(message.intentId, 'a');
+        assert.strictEqual(message.text, 'log line');
     });
 
     test('Clear History message clears history and notifies webview', async () => {
@@ -126,5 +128,91 @@ suite('Pipeline Builder Tests (Mocked)', () => {
 
         assert.strictEqual(historyManager.getHistory().length, 0);
         assert.ok(receivedMessages.some(m => m.type === 'historyUpdate' && Array.isArray(m.history) && m.history.length === 0));
+    });
+
+    test('openExternal message opens allowed URL', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        if (panel.postMessageCallback) {
+            await panel.postMessageCallback({ type: 'openExternal', url: 'https://github.com/acme/repo/pull/1' });
+        }
+        assert.strictEqual(mockVscode.__mock.openedExternalUris.length, 1);
+        assert.strictEqual(String(mockVscode.__mock.openedExternalUris[0].scheme), 'https');
+    });
+
+    test('copyToClipboard message writes clipboard text', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        if (panel.postMessageCallback) {
+            await panel.postMessageCallback({ type: 'copyToClipboard', text: 'https://github.com/acme/repo/pull/2' });
+        }
+        assert.strictEqual(mockVscode.__mock.clipboardWrites.length, 1);
+        assert.strictEqual(mockVscode.__mock.clipboardWrites[0], 'https://github.com/acme/repo/pull/2');
+    });
+
+    test('runPipeline forwards startStepId to command', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        const calls: any[] = [];
+        const originalExecute = mockVscode.commands.executeCommand;
+        mockVscode.commands.executeCommand = async (id: string, ...args: any[]) => {
+            if (id === 'intentRouter.runPipelineFromData') {
+                calls.push(args);
+                return undefined;
+            }
+            return originalExecute(id, ...args);
+        };
+        const pipelineData = { name: 'resume-test', steps: [{ id: 'step.alpha' }] };
+        try {
+            if (panel.postMessageCallback) {
+                await panel.postMessageCallback({ type: 'runPipeline', pipeline: pipelineData, dryRun: false, startStepId: 'step.alpha' });
+            }
+        } finally {
+            mockVscode.commands.executeCommand = originalExecute;
+        }
+        assert.strictEqual(calls.length, 1);
+        assert.deepStrictEqual(calls[0], [pipelineData, false, 'step.alpha']);
+    });
+
+    test('exportRunAudit copies JSON to clipboard', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        const { historyManager } = require('../../out/historyManager');
+        historyManager.getHistory().length = 0;
+        historyManager.getHistory().push({
+            id: 'run-1',
+            name: 'run',
+            timestamp: Date.now(),
+            status: 'success',
+            steps: [],
+            audit: { timeline: [], hitl: [], reviews: [], cost: { estimatedTotal: 0, byIntent: {} } }
+        });
+        if (panel.postMessageCallback) {
+            await panel.postMessageCallback({ type: 'exportRunAudit', runId: 'run-1' });
+        }
+        assert.strictEqual(mockVscode.__mock.clipboardWrites.length > 0, true);
+        const last = mockVscode.__mock.clipboardWrites[mockVscode.__mock.clipboardWrites.length - 1];
+        assert.strictEqual(String(last).includes('"runId": "run-1"'), true);
+    });
+
+    test('githubPrChecks message executes command and copies output', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        const originalExecute = mockVscode.commands.executeCommand;
+        mockVscode.commands.executeCommand = async (id: string, ..._args: any[]) => {
+            if (id === 'intentRouter.internal.githubPrChecks') {
+                return { output: 'check-a: pass' };
+            }
+            return originalExecute(id, ..._args);
+        };
+        try {
+            if (panel.postMessageCallback) {
+                await panel.postMessageCallback({ type: 'githubPrChecks', url: 'https://github.com/acme/repo/pull/9' });
+            }
+        } finally {
+            mockVscode.commands.executeCommand = originalExecute;
+        }
+        const last = mockVscode.__mock.clipboardWrites[mockVscode.__mock.clipboardWrites.length - 1];
+        assert.strictEqual(String(last).includes('check-a'), true);
     });
 });

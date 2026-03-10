@@ -6,9 +6,16 @@ export type QuickAddNodeType =
   | 'customNode'
   | 'formNode'
   | 'switchNode'
-  | 'scriptNode';
+  | 'ifNode'
+  | 'scriptNode'
+  | 'subPipelineNode'
+  | 'loopNode'
+  | 'agentNode'
+  | 'teamNode'
+  | 'approvalNode'
+  | 'httpNode';
 
-export type QuickAddCategory = 'context' | 'providers' | 'custom';
+export type QuickAddCategory = 'context' | 'providers' | 'custom' | 'ai';
 
 export type QuickAddItem = {
   id: string;

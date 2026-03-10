@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { QuickAddItem } from '../types/quickAdd';
+import { getNextQuickAddIndex, resolveQuickAddSubmitIndex } from '../utils/quickAddNavigationUtils';
 
 type QuickAddPaletteProps = {
   quickAddOpen: boolean;
@@ -18,7 +19,7 @@ type QuickAddPaletteProps = {
   setQuickAddEdge: (value: any | null) => void;
 };
 
-export default function QuickAddPalette(props: QuickAddPaletteProps) {
+function QuickAddPalette(props: QuickAddPaletteProps) {
   const {
     quickAddOpen,
     quickAddAnchor,
@@ -36,11 +37,21 @@ export default function QuickAddPalette(props: QuickAddPaletteProps) {
     setQuickAddEdge
   } = props;
 
+  const flatItems = useMemo(() => filteredQuickAddItems.map((entry) => entry.id), [filteredQuickAddItems]);
+  const [activeIndex, setActiveIndex] = useState<number>(0);
+
+  useEffect(() => {
+    if (!quickAddOpen) return;
+    setActiveIndex(0);
+  }, [quickAddOpen, quickAddQuery]);
+
   if (!quickAddOpen || !quickAddAnchor) return null;
 
   return (
     <div
       className="nodrag quick-add-palette"
+      role="dialog"
+      aria-label="Quick add nodes palette"
       style={{
         position: 'fixed',
         left: paletteLeft,
@@ -62,13 +73,24 @@ export default function QuickAddPalette(props: QuickAddPaletteProps) {
         className="nodrag"
         autoFocus
         placeholder="Search nodes…"
+        aria-label="Search nodes to add"
         value={quickAddQuery}
         onChange={(event) => setQuickAddQuery(event.target.value)}
         onKeyDown={(event) => {
+          const nextIndex = getNextQuickAddIndex(activeIndex, event.key, flatItems.length);
+          if (nextIndex !== null) {
+            event.preventDefault();
+            setActiveIndex(nextIndex);
+            return;
+          }
           if (event.key === 'Enter' && filteredQuickAddItems.length > 0) {
-            addNodeFromItem(filteredQuickAddItems[0], quickAddPos || undefined, quickAddEdge);
+            const targetIndex = resolveQuickAddSubmitIndex(activeIndex, filteredQuickAddItems.length);
+            const targetItem = targetIndex === null ? null : filteredQuickAddItems[targetIndex];
+            if (!targetItem) return;
+            addNodeFromItem(targetItem, quickAddPos || undefined, quickAddEdge);
             setQuickAddOpen(false);
             setQuickAddEdge(null);
+            return;
           }
           if (event.key === 'Escape') {
             setQuickAddOpen(false);
@@ -83,7 +105,7 @@ export default function QuickAddPalette(props: QuickAddPaletteProps) {
           color: 'var(--vscode-input-foreground)'
         }}
       />
-      <div style={{ maxHeight: '220px', overflow: 'auto' }}>
+      <div style={{ maxHeight: '220px', overflow: 'auto' }} role="listbox" aria-label="Matching nodes">
         {filteredQuickAddItems.length === 0 && (
           <div style={{ fontSize: '12px', opacity: 0.7, padding: '6px' }}>No results</div>
         )}
@@ -93,14 +115,32 @@ export default function QuickAddPalette(props: QuickAddPaletteProps) {
               {categoryTitleMap.get(category) || category}
             </div>
             {items.map((item) => (
-              <div
+              <button
+                type="button"
                 key={item.id}
                 className="quick-add-item"
+                role="option"
+                aria-selected={filteredQuickAddItems[activeIndex]?.id === item.id}
                 style={{
                   padding: '6px 8px',
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: '12px'
+                  fontSize: '12px',
+                  width: '100%',
+                  textAlign: 'left',
+                  border: 'none',
+                  background: filteredQuickAddItems[activeIndex]?.id === item.id
+                    ? 'var(--vscode-list-activeSelectionBackground)'
+                    : 'transparent',
+                  color: filteredQuickAddItems[activeIndex]?.id === item.id
+                    ? 'var(--vscode-list-activeSelectionForeground)'
+                    : 'var(--vscode-foreground)'
+                }}
+                onMouseEnter={() => {
+                  const nextIndex = filteredQuickAddItems.findIndex((entry) => entry.id === item.id);
+                  if (nextIndex >= 0) {
+                    setActiveIndex(nextIndex);
+                  }
                 }}
                 onClick={() => {
                   addNodeFromItem(item, quickAddPos || undefined, quickAddEdge);
@@ -109,7 +149,7 @@ export default function QuickAddPalette(props: QuickAddPaletteProps) {
                 }}
               >
                 {item.label}
-              </div>
+              </button>
             ))}
           </div>
         ))}
@@ -117,3 +157,5 @@ export default function QuickAddPalette(props: QuickAddPaletteProps) {
     </div>
   );
 }
+
+export default React.memo(QuickAddPalette);

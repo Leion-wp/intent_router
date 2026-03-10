@@ -6,35 +6,66 @@ import SchemaArgsForm from '../components/SchemaArgsForm';
 import IoSpec from '../components/IoSpec';
 
 const STATUS_COLORS = {
-  idle: 'var(--vscode-editor-foreground)',
-  running: 'var(--ir-status-running)',
-  success: 'var(--ir-status-success)',
-  failure: 'var(--ir-status-error)',
-  error: 'var(--ir-status-error)'
+  idle: '#888',
+  running: '#f2c94c',
+  success: '#4caf50',
+  failure: '#f44336',
+  error: '#f44336'
 };
 
-// Fallback if registry is empty (during loading or error)
-const FALLBACK_CAPS: any[] = [];
+const PROVIDER_THEMES: Record<string, { color: string, icon: string }> = {
+  terminal: { color: '#007acc', icon: 'terminal' },
+  git: { color: '#f05032', icon: 'source-control' },
+  docker: { color: '#2496ed', icon: 'container' },
+  system: { color: '#6a737d', icon: 'settings-gear' },
+  vscode: { color: '#007acc', icon: 'vscode' },
+  default: { color: '#8a2be2', icon: 'gear' }
+};
+
+function parseCronIntervalMs(args: Record<string, any>): number | null {
+  const intervalMs = Number(args?.intervalMs);
+  if (Number.isFinite(intervalMs) && intervalMs > 0) return Math.floor(intervalMs);
+
+  const everyMinutes = Number(args?.everyMinutes);
+  if (Number.isFinite(everyMinutes) && everyMinutes > 0) return Math.floor(everyMinutes * 60_000);
+
+  const everyHours = Number(args?.everyHours);
+  if (Number.isFinite(everyHours) && everyHours > 0) return Math.floor(everyHours * 60 * 60_000);
+
+  const cron = String(args?.cron || '').trim();
+  const minuteMatch = cron.match(/^\*\/(\d+)\s+\*\s+\*\s+\*\s+\*$/);
+  if (minuteMatch) return Math.max(1, Number(minuteMatch[1])) * 60_000;
+  const hourMatch = cron.match(/^0\s+\*\/(\d+)\s+\*\s+\*\s+\*$/);
+  if (hourMatch) return Math.max(1, Number(hourMatch[1])) * 60 * 60_000;
+
+  return null;
+}
+
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 
 const ActionNode = ({ data, id }: NodeProps) => {
   const { commandGroups } = useContext(RegistryContext);
   const { getAvailableVars, isRunPreviewNode } = useContext(FlowRuntimeContext);
   const { updateNodeData } = useContext(FlowEditorContext);
+  
   const [provider, setProvider] = useState<string>((data.provider as string) || 'terminal');
   const [capability, setCapability] = useState<string>((data.capability as string) || '');
   const [args, setArgs] = useState<Record<string, any>>((data.args as Record<string, any>) || {});
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
   const [label, setLabel] = useState<string>((data.label as string) || '');
+  const [nowTick, setNowTick] = useState<number>(Date.now());
   const [editingLabel, setEditingLabel] = useState(false);
-  const [expandedHelp, setExpandedHelp] = useState<Record<string, boolean>>({});
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
-  const [dynamicOptions, setDynamicOptions] = useState<Record<string, string[]>>({});
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
-  const [varPickerOpen, setVarPickerOpen] = useState<Record<string, boolean>>({});
   const logsRef = useRef<HTMLDivElement>(null);
   const collapsed = !!data.collapsed;
 
-  // Sync from props if data changes externally
   useEffect(() => {
     if (data.provider) setProvider(data.provider as string);
     if (data.capability) setCapability(data.capability as string);
@@ -42,7 +73,6 @@ const ActionNode = ({ data, id }: NodeProps) => {
     if (data.status) setStatus(data.status as string);
     if (data.label !== undefined) setLabel((data.label as string) || '');
 
-    // Auto-open console if logs exist and we just started running or got logs
     if (data.logs && (data.logs as any[]).length > 0 && !isConsoleOpen) {
         setIsConsoleOpen(true);
     }
@@ -50,27 +80,20 @@ const ActionNode = ({ data, id }: NodeProps) => {
 
   const logs = (data.logs as any[]) || [];
 
-  // Auto-scroll logs
   useEffect(() => {
     if (isConsoleOpen && logsRef.current) {
         logsRef.current.scrollTop = logsRef.current.scrollHeight;
     }
   }, [logs, isConsoleOpen]);
 
-  // Find capabilities for current provider
   const currentProviderGroup = commandGroups?.find((g: any) => g.provider === provider);
-  const currentCaps = currentProviderGroup?.commands || FALLBACK_CAPS;
-
-  // Default capability selection
-  useEffect(() => {
-    // If capability is empty, select a default
-    if (!capability && currentCaps.length > 0) {
-       // Try to find 'run' or just take first
-       const defaultCap = currentCaps.find((c: any) => c.capability.endsWith('.run'))?.capability || currentCaps[0].capability;
-       setCapability(defaultCap);
-       updateNodeData(id, { provider, capability: defaultCap });
-    }
-  }, [provider, currentCaps]);
+  const currentCaps = currentProviderGroup?.commands || [];
+  const cronIntervalMs = useMemo(
+    () => (capability === 'system.trigger.cron' ? parseCronIntervalMs(args || {}) : null),
+    [capability, args]
+  );
+  const cronEnabled = String((args as any)?.enabled ?? 'true').toLowerCase() !== 'false';
+  const initialCronAnchorRef = useRef<number>(Date.now());
 
   const handleArgChange = (key: string, value: any) => {
     const newArgs = { ...args, [key]: value };
@@ -79,82 +102,39 @@ const ActionNode = ({ data, id }: NodeProps) => {
   };
 
   const availableVars = useMemo(() => {
-    try {
-      return getAvailableVars();
-    } catch {
-      return [];
-    }
+    try { return getAvailableVars(); } catch { return []; }
   }, [getAvailableVars]);
 
-  const insertVariable = (key: string, varName?: string) => {
-    const current = args[key] || '';
-    const name = (varName || '').trim();
-    if (!name) {
-      return;
-    }
-    handleArgChange(key, current + `\${var:${name}}`);
-  };
-
-  const openVarPicker = (argName: string) => {
-    setVarPickerOpen(prev => ({ ...prev, [argName]: true }));
-  };
-
-  const closeVarPicker = (argName: string) => {
-    setVarPickerOpen(prev => ({ ...prev, [argName]: false }));
-  };
-
-	  const handleBrowse = (key: string) => {
-	      // Send message to extension
-	      if (window.vscode) {
-	          const msg: WebviewOutboundMessage = {
-	              type: 'selectPath',
-	              id: id,
-	              argName: key
-	          };
-	          window.vscode.postMessage(msg);
-
-	          // Listen for the response
-	          const handleMessage = (event: MessageEvent) => {
-	              const message = event.data;
-	              if (!isInboundMessage(message)) {
-	                  return;
-	              }
-	              if (message.type === 'pathSelected' && message.id === id && message.argName === key) {
-	                  handleArgChange(key, message.path);
-	                  window.removeEventListener('message', handleMessage);
-	              }
-	          };
-	          window.addEventListener('message', handleMessage);
-	      } else {
-          console.log('Browse clicked (Mock):', key);
-          // Mock for browser dev
-          const mockPath = '/mock/path/to/folder';
-          handleArgChange(key, mockPath);
-      }
-  };
-
-  const toggleHelp = (key: string) => {
-      setExpandedHelp(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  // Find the selected capability configuration
-  // We need to handle cases where capability might be just suffix (legacy) or full string
   let selectedCapConfig = currentCaps.find((c: any) => c.capability === capability);
   if (!selectedCapConfig && capability) {
-      // Fallback: try to match by suffix if user manually edited JSON or old format
       selectedCapConfig = currentCaps.find((c: any) => c.capability.endsWith(`.${capability}`));
   }
 
-  // Default args include 'description' which is standard for all steps
+  useEffect(() => {
+    if (!currentCaps.length) return;
+    if (!capability) {
+      const nextCapability = String(currentCaps[0]?.capability || '').trim();
+      if (!nextCapability) return;
+      setCapability(nextCapability);
+      updateNodeData(id, { provider, capability: nextCapability });
+      return;
+    }
+    if (!selectedCapConfig) {
+      const nextCapability = String(currentCaps[0]?.capability || '').trim();
+      if (!nextCapability || nextCapability === capability) return;
+      setCapability(nextCapability);
+      updateNodeData(id, { provider, capability: nextCapability });
+    }
+  }, [currentCaps, capability, selectedCapConfig, id, provider, updateNodeData]);
+
   const schemaArgs = selectedCapConfig?.args || [];
   const displayArgs = [
      ...schemaArgs,
      { name: 'description', type: 'string', description: 'Step description for logs' }
   ];
-  const useSharedForm = true;
+
   const inputHandles = useMemo(() => {
-    const argsList = Array.isArray(schemaArgs) ? schemaArgs : [];
-    const names = argsList
+    const names = (Array.isArray(schemaArgs) ? schemaArgs : [])
       .map((arg: any) => String(arg?.name || '').trim())
       .filter((name: string) => name.length > 0);
     return ['in', ...names];
@@ -164,511 +144,169 @@ const ActionNode = ({ data, id }: NodeProps) => {
     if (total <= 1) return '50%';
     const min = 24;
     const max = 82;
-    const value = min + ((max - min) * index) / (total - 1);
-    return `${value}%`;
+    return `${min + ((max - min) * index) / (total - 1)}%`;
   };
 
-  // Initialize Defaults & Validate & Fetch Dynamic Options
+  const theme = PROVIDER_THEMES[provider] || PROVIDER_THEMES.default;
+  const themeColor = theme.color;
+  const isRunning = status === 'running';
+  const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || themeColor;
+  const cronCountdownLabel = useMemo(() => {
+    if (capability !== 'system.trigger.cron' || !cronEnabled || !cronIntervalMs || cronIntervalMs <= 0) return '';
+    const elapsed = (nowTick - initialCronAnchorRef.current) % cronIntervalMs;
+    const remaining = cronIntervalMs - elapsed;
+    return formatCountdown(remaining);
+  }, [capability, cronEnabled, cronIntervalMs, nowTick]);
+
   useEffect(() => {
-      if (useSharedForm) {
-          return;
-      }
-      const newArgs = { ...args };
-      let changed = false;
-      const newErrors: Record<string, boolean> = {};
+    if (capability !== 'system.trigger.cron' || !cronEnabled || !cronIntervalMs || cronIntervalMs <= 0) {
+      return;
+    }
+    const handle = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(handle);
+  }, [capability, cronEnabled, cronIntervalMs]);
 
-      displayArgs.forEach((arg: any) => {
-          // Initialize default if undefined
-          if (newArgs[arg.name] === undefined && arg.default !== undefined) {
-              newArgs[arg.name] = arg.default;
-              changed = true;
-          }
-
-          // Validate required
-          if (arg.required && (newArgs[arg.name] === undefined || newArgs[arg.name] === '')) {
-              newErrors[arg.name] = true;
-          }
-
-	          // Fetch dynamic options
-	          if (arg.type === 'enum' && typeof arg.options === 'string' && !dynamicOptions[arg.name]) {
-	             if (window.vscode) {
-	                 const msg: WebviewOutboundMessage = {
-	                     type: 'fetchOptions',
-	                     command: arg.options,
-	                     argName: arg.name
-	                 };
-	                 window.vscode.postMessage(msg);
-	             }
-	          }
-      });
-
-      if (changed) {
-          setArgs(newArgs);
-          updateNodeData(id, { args: newArgs });
-      }
-      setErrors(newErrors);
-
-  }, [capability, args, selectedCapConfig]);
-
-	  // Listen for option responses
-	  useEffect(() => {
-        if (useSharedForm) {
-            return;
-        }
-	      const handleMessage = (event: MessageEvent) => {
-	          const message = event.data;
-	          if (!isInboundMessage(message)) {
-	              return;
-	          }
-	          if (message.type === 'optionsFetched') {
-	              setDynamicOptions(prev => ({
-	                  ...prev,
-	                  [message.argName]: message.options
-	              }));
-	          }
-	      };
-      window.addEventListener('message', handleMessage);
-      return () => window.removeEventListener('message', handleMessage);
-  }, []);
-
-
-  const isPause = provider === 'system' && capability === 'system.pause';
-  const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
-  const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : 'none';
-  const determinism: 'deterministic' | 'interactive' =
-    selectedCapConfig?.determinism === 'interactive' ? 'interactive' : 'deterministic';
-  const determinismBadge = determinism === 'interactive' ? '👤' : '⚙';
-
-  const fallbackTitle = `${provider} · ${selectedCapConfig?.capability || capability}`.trim();
-  const ioInputs = useMemo(() => {
-    const argsList = Array.isArray(schemaArgs) ? schemaArgs : [];
-    const names = argsList.map((arg: any) => {
-      const name = String(arg?.name || '').trim();
-      if (!name) return '';
-      return arg?.required ? `${name}*` : name;
-    }).filter(Boolean);
-    return names.length ? names : ['payload'];
-  }, [schemaArgs]);
-  const ioOutputs = ['success', 'error'];
+  const handleStyle = {
+    width: '12px',
+    height: '12px',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 0 8px rgba(0,0,0,0.5)',
+    zIndex: 10,
+    transition: 'all 0.2s ease'
+  };
 
   return (
-    <div style={{
-      position: 'relative',
-      padding: '10px',
-      borderRadius: '5px',
-      background: 'var(--vscode-editor-background)',
-      border: `2px solid ${isPause ? '#e6c300' : borderColor}`, // Gold for pause
-      boxShadow: status === 'running' ? `0 0 10px ${borderColor}, ${previewGlow}` : previewGlow,
-      minWidth: '250px',
-      color: 'var(--vscode-editor-foreground)',
-      fontFamily: 'var(--vscode-font-family)'
-    }}>
+    <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '280px' }}>
+      {/* Target Handles */}
       {inputHandles.map((inputName, index) => (
-        <div key={`in-${inputName}`}>
-          <Handle
-            type="target"
-            position={Position.Left}
-            id={inputName === 'in' ? 'in' : `in_${inputName}`}
-            style={{ top: handleTop(index, inputHandles.length) }}
-          />
-          <span
-            style={{
-              position: 'absolute',
-              left: '-2px',
-              top: handleTop(index, inputHandles.length),
-              transform: 'translate(-100%, -50%)',
-              fontSize: '10px',
-              opacity: inputName === 'in' ? 0.8 : 0.65,
-              whiteSpace: 'nowrap'
+        <Handle
+          key={index}
+          type="target"
+          position={Position.Left}
+          id={inputName === 'in' ? 'in' : `in_${inputName}`}
+          style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-6px', background: theme.color }}
+        />
+      ))}
+      
+      {/* Source Handles */}
+      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '30%', right: '-6px', background: '#ff4d4d' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-6px', background: '#00ff88' }} />
+
+      <div>
+        {/* Header */}
+        <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}15 0%, transparent 100%)` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+            <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${theme.color} 0%, ${theme.color}cc 100%)` }}>
+              <span className={`codicon codicon-${theme.icon}`} style={{ color: '#fff', fontSize: '16px' }}></span>
+            </div>
+            {editingLabel ? (
+              <input
+                className="nodrag"
+                value={label}
+                autoFocus
+                onChange={(e) => { setLabel(e.target.value); updateNodeData(id, { label: e.target.value }); }}
+                onBlur={() => setEditingLabel(false)}
+                onKeyDown={(e) => { if (e.key === 'Enter') setEditingLabel(false); }}
+                style={{ width: '100%' }}
+              />
+            ) : (
+              <span onClick={() => setEditingLabel(true)} className="glass-node-label">
+                {label || `${provider.toUpperCase()} ACTION`}
+                {cronCountdownLabel ? ` (${cronCountdownLabel})` : ''}
+              </span>
+            )}
+          </div>
+          <button
+            className="nodrag"
+            onClick={() => updateNodeData(id, { collapsed: !collapsed })}
+            style={{ 
+              background: 'rgba(255,255,255,0.05)', 
+              border: 'none', 
+              color: '#aaa', 
+              cursor: 'pointer',
+              borderRadius: '6px',
+              width: '24px',
+              height: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}
           >
-            {inputName}
-          </span>
+            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`} style={{ fontSize: '12px' }}></span>
+          </button>
         </div>
-      ))}
 
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="failure"
-        title="On Failure"
-        style={{ top: '30%', background: 'var(--ir-status-error)' }}
-      />
-      <span style={{ position: 'absolute', right: '-2px', top: '30%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>error</span>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontWeight: 'bold', alignItems: 'center', gap: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-          <span className="codicon codicon-gear"></span>
-          <span
-            title={determinism === 'interactive' ? 'Interactive (requires human / UI)' : 'Deterministic'}
-            style={{ fontSize: '12px', opacity: determinism === 'interactive' ? 1 : 0.85 }}
-          >
-            {determinismBadge}
-          </span>
-          {editingLabel ? (
-            <input
-              className="nodrag"
-              value={label}
-              autoFocus
-              onChange={(e) => {
-                const v = e.target.value;
-                setLabel(v);
-                updateNodeData(id, { label: v });
-              }}
-              onBlur={() => setEditingLabel(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') setEditingLabel(false);
-              }}
-              style={{
-                flex: 1,
-                background: 'var(--vscode-input-background)',
-                color: 'var(--vscode-input-foreground)',
-                border: '1px solid var(--vscode-input-border)',
-                padding: '2px 4px',
-                borderRadius: '4px'
-              }}
-            />
-          ) : (
-            <span
-              title="Click to rename"
-              onClick={() => setEditingLabel(true)}
-              style={{ cursor: 'text', userSelect: 'none' }}
-            >
-              {label || fallbackTitle}
-            </span>
-          )}
-        </div>
-        {status !== 'idle' && <span className={`status-badge ${status}`}>{status}</span>}
-        <button
-          className="nodrag"
-          onClick={() => updateNodeData(id, { collapsed: !collapsed })}
-          title={collapsed ? 'Expand' : 'Collapse'}
-          style={{
-            background: 'transparent',
-            color: 'var(--vscode-foreground)',
-            border: '1px solid var(--vscode-editorWidget-border)',
-            borderRadius: '4px',
-            width: '20px',
-            height: '20px',
-            cursor: 'pointer'
-          }}
-        >
-          {collapsed ? '▸' : '▾'}
-        </button>
-      </div>
-
-      {!collapsed && (
-      <>
-      <IoSpec inputs={ioInputs} outputs={ioOutputs} />
-      <div style={{ marginBottom: '8px' }}>
-        <select
-          aria-label="Select capability"
-          className="nodrag"
-          value={selectedCapConfig?.capability || capability}
-          onChange={(e) => {
-            setCapability(e.target.value);
-            // We keep args that match names, but effectively "reset" behavior is complex.
-            // For now, keeping overlap is fine, defaults will fill in.
-            updateNodeData(id, { capability: e.target.value });
-          }}
-          style={{
-            width: '100%',
-            background: 'var(--vscode-input-background)',
-            color: 'var(--vscode-input-foreground)',
-            border: '1px solid var(--vscode-input-border)',
-            padding: '4px'
-          }}
-        >
-          {currentCaps.map((c: any) => (
-            <option key={c.capability} value={c.capability}>
-                {c.capability.split('.').pop()}
-            </option>
-          ))}
-        </select>
-        {selectedCapConfig?.description && (
-            <div style={{ fontSize: '0.7em', opacity: 0.7, marginTop: '4px' }}>
-                {selectedCapConfig.description}
+        {!collapsed && (
+          <div className="glass-node-body">
+            <div className="glass-node-input-group">
+                <label className="glass-node-input-label">Capability</label>
+                <select
+                    className="nodrag"
+                    value={selectedCapConfig?.capability || capability}
+                    onChange={(e) => {
+                      const nextCapability = e.target.value;
+                      setCapability(nextCapability);
+                      updateNodeData(id, { capability: nextCapability });
+                    }}
+                >
+                    {currentCaps.map((c: any) => (
+                        <option
+                          key={c.capability}
+                          value={c.capability}
+                          style={{ background: '#1a1a20' }}
+                        >
+                          {c.capability.split('.').pop()}
+                        </option>
+                    ))}
+                </select>
             </div>
+
+            <SchemaArgsForm nodeId={id} fields={displayArgs as any} values={args} onChange={handleArgChange} availableVars={availableVars} />
+          </div>
         )}
       </div>
 
-      <SchemaArgsForm nodeId={id} fields={displayArgs as any} values={args} onChange={handleArgChange} availableVars={availableVars} />
-
-      {/* Legacy inline renderer kept for reference (disabled) */}
-      {false && (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {displayArgs.map((arg: any) => {
-          const inputId = `input-${id}-${arg.name}`;
-          const isRequired = arg.required;
-          const showHelp = expandedHelp[arg.name];
-          const hasError = errors[arg.name];
-          const inputBorderColor = hasError ? 'var(--vscode-inputValidation-errorBorder)' : 'var(--vscode-input-border)';
-
-          return (
-            <div key={arg.name} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label htmlFor={inputId} style={{ fontSize: '0.75em', opacity: 0.9, display: 'flex', alignItems: 'center', color: hasError ? 'var(--vscode-inputValidation-errorForeground)' : 'inherit' }}>
-                      {arg.name}
-                      {isRequired && <span style={{ color: 'var(--ir-status-error)', marginLeft: '2px' }}>*</span>}
-                  </label>
-                  {arg.description && (
-                      <button
-                          onClick={() => toggleHelp(arg.name)}
-                          title="Toggle description"
-                          className="nodrag"
-                          style={{
-                              background: 'none',
-                              border: 'none',
-                              color: showHelp ? 'var(--vscode-textLink-foreground)' : 'var(--vscode-descriptionForeground)',
-                              cursor: 'pointer',
-                              fontSize: '0.9em',
-                              padding: '0 4px'
-                          }}
-                      >
-                          ⓘ
-                      </button>
-                  )}
-              </div>
-
-              {showHelp && arg.description && (
-                  <div style={{
-                      fontSize: '0.7em',
-                      color: 'var(--vscode-descriptionForeground)',
-                      marginBottom: '2px',
-                      fontStyle: 'italic',
-                      padding: '2px 4px',
-                      background: 'rgba(255,255,255,0.05)',
-                      borderRadius: '2px'
-                  }}>
-                      {arg.description}
-                  </div>
-              )}
-
-              {arg.type === 'boolean' ? (
-                   <input
-                       id={inputId}
-                       type="checkbox"
-                       className="nodrag"
-                       checked={!!args[arg.name]}
-                       onChange={(e) => handleArgChange(arg.name, e.target.checked)}
-                       style={{
-                         alignSelf: 'flex-start',
-                         outline: hasError ? `1px solid ${inputBorderColor}` : 'none'
-                       }}
-                   />
-              ) : arg.type === 'enum' ? (
-                   <select
-                       id={inputId}
-                       className="nodrag"
-                       value={args[arg.name] || ''}
-                       onChange={(e) => handleArgChange(arg.name, e.target.value)}
-                       style={{
-                           width: '100%',
-                           background: 'var(--vscode-input-background)',
-                           color: 'var(--vscode-input-foreground)',
-                           border: `1px solid ${inputBorderColor}`,
-                           padding: '4px'
-                       }}
-                   >
-                       <option value="">(Select)</option>
-                       {(Array.isArray(arg.options) ? arg.options : (dynamicOptions[arg.name] || [])).map((opt: string) => (
-                           <option key={opt} value={opt}>{opt}</option>
-                       ))}
-                   </select>
-	              ) : arg.type === 'path' ? (
-	                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <input
-                      id={inputId}
-                      className="nodrag"
-                      type="text"
-                      value={args[arg.name] || ''}
-                      onChange={(e) => handleArgChange(arg.name, e.target.value)}
-                      placeholder={arg.default !== undefined ? `${arg.default} (default)` : ''}
-                      style={{
-                        flex: 1,
-                        background: 'var(--vscode-input-background)',
-                        color: 'var(--vscode-input-foreground)',
-                        border: `1px solid ${inputBorderColor}`,
-                        padding: '4px',
-                        fontSize: '0.9em'
-                      }}
-                    />
-                    <button
-                        className="nodrag"
-                        onClick={() => handleBrowse(arg.name)}
-                        title="Browse..."
-                        style={{
-                            background: 'var(--vscode-button-secondaryBackground)',
-                            color: 'var(--vscode-button-secondaryForeground)',
-                            border: 'none',
-                            cursor: 'pointer',
-                            padding: '0 8px',
-                            display: 'flex',
-                            alignItems: 'center'
-                        }}
-                    >
-                        <span className="codicon codicon-folder-opened"></span>
-                    </button>
-	                    <button
-	                      className="nodrag"
-	                      onClick={() => openVarPicker(arg.name)}
-	                      title="Insert variable (${var:...})"
-	                      style={{
-	                        background: 'var(--vscode-button-background)',
-	                        color: 'var(--vscode-button-foreground)',
-	                        border: 'none',
-	                        cursor: 'pointer',
-	                        width: '24px',
-	                        display: 'flex',
-	                        alignItems: 'center',
-	                        justifyContent: 'center'
-	                      }}
-	                    >
-	                      {'{ }'}
-	                    </button>
-	                    {varPickerOpen[arg.name] && (
-	                      <select
-	                        className="nodrag"
-	                        autoFocus
-	                        value=""
-	                        onBlur={() => closeVarPicker(arg.name)}
-	                        onChange={(e) => {
-	                          const selected = e.target.value;
-	                          if (selected) {
-	                            insertVariable(arg.name, selected);
-	                          }
-	                          closeVarPicker(arg.name);
-	                        }}
-	                        style={{
-	                          maxWidth: '160px',
-	                          background: 'var(--vscode-input-background)',
-	                          color: 'var(--vscode-input-foreground)',
-	                          border: '1px solid var(--vscode-input-border)',
-	                          padding: '4px',
-	                          fontSize: '0.9em'
-	                        }}
-	                      >
-	                        <option value="">Select var…</option>
-	                        {availableVars.map((v) => (
-	                          <option key={v} value={v}>{v}</option>
-	                        ))}
-	                      </select>
-	                    )}
-	                  </div>
-	              ) : (
-	                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <input
-                      id={inputId}
-                      className="nodrag"
-                      type="text"
-                      value={args[arg.name] || ''}
-                      onChange={(e) => handleArgChange(arg.name, e.target.value)}
-                      placeholder={arg.default !== undefined ? `${arg.default} (default)` : ''}
-                      style={{
-                        flex: 1,
-                        background: 'var(--vscode-input-background)',
-                        color: 'var(--vscode-input-foreground)',
-                        border: `1px solid ${inputBorderColor}`,
-                        padding: '4px',
-                        fontSize: '0.9em'
-                      }}
-                    />
-	                    <button
-	                      className="nodrag"
-	                      onClick={() => openVarPicker(arg.name)}
-	                      title="Insert variable (${var:...})"
-	                      aria-label={`Insert variable for ${arg.name}`}
-	                      style={{
-	                        background: 'var(--vscode-button-background)',
-	                        color: 'var(--vscode-button-foreground)',
-	                        border: 'none',
-	                        cursor: 'pointer',
-	                        width: '24px',
-	                        display: 'flex',
-	                        alignItems: 'center',
-	                        justifyContent: 'center'
-	                      }}
-	                    >
-	                      {'{ }'}
-	                    </button>
-	                    {varPickerOpen[arg.name] && (
-	                      <select
-	                        className="nodrag"
-	                        autoFocus
-	                        value=""
-	                        onBlur={() => closeVarPicker(arg.name)}
-	                        onChange={(e) => {
-	                          const selected = e.target.value;
-	                          if (selected) {
-	                            insertVariable(arg.name, selected);
-	                          }
-	                          closeVarPicker(arg.name);
-	                        }}
-	                        style={{
-	                          maxWidth: '160px',
-	                          background: 'var(--vscode-input-background)',
-	                          color: 'var(--vscode-input-foreground)',
-	                          border: '1px solid var(--vscode-input-border)',
-	                          padding: '4px',
-	                          fontSize: '0.9em'
-	                        }}
-	                      >
-	                        <option value="">Select var…</option>
-	                        {availableVars.map((v) => (
-	                          <option key={v} value={v}>{v}</option>
-	                        ))}
-	                      </select>
-	                    )}
-	                  </div>
-	              )}
-            </div>
-          );
-        })}
-      </div>
-      )}
-      </>
-      )}
-
-      <Handle type="source" position={Position.Right} id="success" />
-      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
-
-      {/* Mini-Console */}
       {!collapsed && logs.length > 0 && (
-        <div className="nodrag" style={{ marginTop: '8px', borderTop: '1px solid var(--vscode-widget-border)' }}>
+        <div className="nodrag" style={{ padding: '0 16px 16px 16px' }}>
             <div
                 onClick={() => setIsConsoleOpen(!isConsoleOpen)}
-                style={{
-                    fontSize: '0.8em',
-                    padding: '4px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    background: 'var(--vscode-editor-background)',
-                    opacity: 0.8
-                }}>
-                <span>Output ({logs.length})</span>
-                <span>{isConsoleOpen ? '▼' : '▶'}</span>
+                style={{ 
+                  fontSize: '10px', 
+                  fontWeight: 600,
+                  padding: '6px 10px', 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  background: 'rgba(255,255,255,0.03)', 
+                  color: 'rgba(255,255,255,0.5)', 
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  transition: 'all 0.2s ease'
+                }}
+            >
+                <span>LOGS ({logs.length})</span>
+                <span className={`codicon codicon-chevron-${isConsoleOpen ? 'up' : 'down'}`} style={{ fontSize: '10px' }}></span>
             </div>
             {isConsoleOpen && (
                 <div
                     ref={logsRef}
-                    style={{
-                        maxHeight: '150px',
-                        overflowY: 'auto',
-                        background: '#1e1e1e', // Hardcoded dark background for console look
-                        color: '#cccccc',
-                        padding: '4px',
-                        fontSize: '0.75em',
-                        fontFamily: 'monospace',
-                        whiteSpace: 'pre-wrap',
-                        borderBottomLeftRadius: '4px',
-                        borderBottomRightRadius: '4px'
-                    }}>
+                    style={{ 
+                      maxHeight: '140px', 
+                      overflowY: 'auto', 
+                      background: 'rgba(0,0,0,0.3)', 
+                      color: 'rgba(255,255,255,0.7)', 
+                      padding: '10px', 
+                      fontSize: '11px', 
+                      fontFamily: 'monospace', 
+                      whiteSpace: 'pre-wrap', 
+                      marginTop: '8px', 
+                      borderRadius: '8px', 
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      lineHeight: '1.4'
+                    }}
+                >
                     {logs.map((log: any, i: number) => (
-                        <span key={i} style={{ color: log.stream === 'stderr' ? 'var(--ir-status-error)' : 'inherit', display: 'block' }}>
-                            {log.text}
-                        </span>
+                        <div key={i} style={{ color: log.stream === 'stderr' ? '#ff4d4d' : 'inherit', marginBottom: '4px' }}>{log.text}</div>
                     ))}
                 </div>
             )}
@@ -679,4 +317,3 @@ const ActionNode = ({ data, id }: NodeProps) => {
 };
 
 export default memo(ActionNode);
-

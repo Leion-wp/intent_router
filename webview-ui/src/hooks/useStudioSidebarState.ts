@@ -1,6 +1,7 @@
-import { Dispatch, SetStateAction, useEffect, useMemo, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { SchemaField } from '../components/SchemaArgsForm';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
+import { formatUiError, formatUiInfo } from '../utils/uiMessageUtils';
 
 type CustomNodeDefinition = {
   id: string;
@@ -41,6 +42,9 @@ type UseStudioSidebarStateResult = {
   exportSelectedOrAll: (scope: 'one' | 'all') => void;
   importFromPaste: () => void;
   importFromFile: () => void;
+  retryLastAction: () => void;
+  clearFeedback: () => void;
+  canRetryLastAction: boolean;
 };
 
 function toCustomNodeDefinition(input: any): CustomNodeDefinition {
@@ -66,6 +70,8 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
   const [studioExportJson, setStudioExportJson] = useState<string>('');
   const [studioImportJson, setStudioImportJson] = useState<string>('');
   const [studioImportSummary, setStudioImportSummary] = useState<string>('');
+  const [lastFailedAction, setLastFailedAction] = useState<'save' | 'importPaste' | 'importFile' | null>(null);
+  const lastImportSourceRef = useRef<'paste' | 'file' | null>(null);
 
   const allCapabilities = useMemo(() => {
     const groups = (window.initialData?.commandGroups as any[]) || [];
@@ -94,12 +100,20 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
         const renames = (event.data as any).renames || {};
         const renamedCount = Object.keys(renames).length;
         const importedCount = ((event.data as any).imported || []).length;
+        setLastFailedAction(null);
         setStudioImportSummary(
-          `Imported ${importedCount} node(s).` + (renamedCount ? ` Renamed ${renamedCount} due to ID conflicts.` : '')
+          formatUiInfo(
+            `Imported ${importedCount} node(s).` + (renamedCount ? ` Renamed ${renamedCount} due to ID conflicts.` : ''),
+            { context: 'Node Studio', action: 'Review imported nodes before publishing.' }
+          )
         );
       }
       if (event.data.type === 'customNodesImportError') {
-        setStudioImportSummary(`Import failed: ${String((event.data as any).message || '')}`);
+        setLastFailedAction(lastImportSourceRef.current === 'file' ? 'importFile' : 'importPaste');
+        setStudioImportSummary(formatUiError((event.data as any).message, {
+          context: 'Node Studio import',
+          action: 'Fix JSON payload and retry.'
+        }));
       }
     };
     window.addEventListener('message', handleMessage);
@@ -143,7 +157,11 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
     const title = String(studioDraft.title || '').trim();
     const intent = String(studioDraft.intent || '').trim();
     if (!id || !title || !intent) {
-      setStudioError('id, title, intent are required.');
+      setLastFailedAction('save');
+      setStudioError(formatUiError('id, title, intent are required.', {
+        context: 'Node Studio validation',
+        action: 'Fill all required fields.'
+      }));
       return;
     }
 
@@ -151,7 +169,11 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
     try {
       mapping = studioMappingJson.trim() ? JSON.parse(studioMappingJson) : {};
     } catch (error: any) {
-      setStudioError(`Invalid mapping JSON: ${error?.message || error}`);
+      setLastFailedAction('save');
+      setStudioError(formatUiError(`Invalid mapping JSON: ${error?.message || error}`, {
+        context: 'Node Studio validation',
+        action: 'Provide valid JSON for mapping.'
+      }));
       return;
     }
 
@@ -164,6 +186,7 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
     };
 
     setStudioError('');
+    setLastFailedAction(null);
     if (window.vscode) {
       const message: WebviewOutboundMessage = { type: 'customNodes.upsert', node };
       window.vscode.postMessage(message);
@@ -196,14 +219,38 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
 
   const importFromPaste = () => {
     if (!window.vscode) return;
+    lastImportSourceRef.current = 'paste';
+    setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'customNodes.import', source: 'paste', jsonText: studioImportJson };
     window.vscode.postMessage(message);
   };
 
   const importFromFile = () => {
     if (!window.vscode) return;
+    lastImportSourceRef.current = 'file';
+    setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'customNodes.import', source: 'file' };
     window.vscode.postMessage(message);
+  };
+
+  const retryLastAction = () => {
+    if (lastFailedAction === 'save') {
+      saveDraft();
+      return;
+    }
+    if (lastFailedAction === 'importPaste') {
+      importFromPaste();
+      return;
+    }
+    if (lastFailedAction === 'importFile') {
+      importFromFile();
+    }
+  };
+
+  const clearFeedback = () => {
+    setStudioError('');
+    setStudioImportSummary('');
+    setLastFailedAction(null);
   };
 
   return {
@@ -228,6 +275,9 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
     deleteDraft,
     exportSelectedOrAll,
     importFromPaste,
-    importFromFile
+    importFromFile,
+    retryLastAction,
+    clearFeedback,
+    canRetryLastAction: lastFailedAction !== null
   };
 }

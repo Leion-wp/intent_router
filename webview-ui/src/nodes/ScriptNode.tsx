@@ -96,18 +96,28 @@ const ScriptNode = ({ data, id }: NodeProps) => {
     fontSize: '11px'
   };
 
+  const handleStyle = {
+    width: '10px',
+    height: '10px',
+    border: '2px solid rgba(30, 30, 35, 0.85)',
+    boxShadow: '0 0 5px rgba(0,0,0,0.4)',
+    zIndex: 10
+  };
+
   return (
     <div
       style={{
         position: 'relative',
-        padding: '10px',
-        borderRadius: '5px',
-        background: 'var(--vscode-editor-background)',
-        border: `2px solid ${borderColor}`,
-        boxShadow: status === 'running' ? `0 0 10px ${borderColor}, ${previewGlow}` : previewGlow,
-        minWidth: '290px',
-        color: 'var(--vscode-editor-foreground)',
-        fontFamily: 'var(--vscode-font-family)'
+        padding: '0px',
+        borderRadius: '12px',
+        background: 'rgba(30, 30, 35, 0.85)',
+        backdropFilter: 'blur(12px)',
+        border: `1.5px solid ${status === 'running' ? '#ffcc00' : 'rgba(255, 165, 0, 0.4)'}`,
+        boxShadow: status === 'running' ? `0 0 20px rgba(255, 204, 0, 0.4)` : `0 8px 32px rgba(0, 0, 0, 0.45)`,
+        minWidth: '300px',
+        color: '#e0e0e0',
+        fontFamily: 'var(--vscode-font-family)',
+        transition: 'all 0.3s ease'
       }}
     >
       {inputHandles.map((inputName, index) => (
@@ -116,134 +126,122 @@ const ScriptNode = ({ data, id }: NodeProps) => {
             type="target"
             position={Position.Left}
             id={inputName === 'in' ? 'in' : `in_${inputName}`}
-            style={{ top: handleTop(index, inputHandles.length) }}
+            style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-5px', background: '#ffa500' }}
           />
-          <span
-            style={{
-              position: 'absolute',
-              left: '-2px',
-              top: handleTop(index, inputHandles.length),
-              transform: 'translate(-100%, -50%)',
-              fontSize: '10px',
-              opacity: inputName === 'in' ? 0.8 : 0.65,
-              whiteSpace: 'nowrap'
-            }}
-          >
-            {inputName}
-          </span>
         </div>
       ))}
-      <Handle type="source" position={Position.Right} id="failure" style={{ top: '30%', background: 'var(--ir-status-error)' }} />
-      <span style={{ position: 'absolute', right: '-2px', top: '30%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>error</span>
-      <Handle type="source" position={Position.Right} id="success" />
-      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
+      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '30%', right: '-5px', background: 'var(--ir-status-error)' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-5px', background: 'var(--ir-status-success)' }} />
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
-          <span className="codicon codicon-file-code"></span>
-          <span>Script</span>
+      <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
+        <div style={{ 
+          padding: '10px 12px', 
+          background: 'rgba(255, 165, 0, 0.15)', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
+            <div style={{ 
+              width: '24px', height: '24px', borderRadius: '50%', 
+              background: '#ffa500',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              <span className="codicon codicon-file-code" style={{ color: '#fff', fontSize: '14px' }}></span>
+            </div>
+            <span style={{ fontSize: '13px', letterSpacing: '0.4px' }}>SCRIPT</span>
+          </div>
+          <button
+            className="nodrag"
+            onClick={() => updateNodeData(id, { collapsed: !collapsed })}
+            style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer' }}
+          >
+            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`}></span>
+          </button>
         </div>
-        <button
-          className="nodrag"
-          onClick={() => updateNodeData(id, { collapsed: !collapsed })}
-          style={{
-            background: 'none',
-            border: '1px solid var(--vscode-panel-border)',
-            color: 'var(--vscode-foreground)',
-            cursor: 'pointer',
-            borderRadius: '4px',
-            fontSize: '11px',
-            padding: '2px 6px'
-          }}
-        >
-          {collapsed ? 'Expand' : 'Collapse'}
-        </button>
-      </div>
 
-      {!collapsed && (
-        <>
-          <IoSpec inputs={['scriptPath*', 'args', 'cwd', 'interpreter']} outputs={['success', 'error']} />
-          <div style={{ marginBottom: '8px' }}>
-            <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '4px' }}>Script path</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '6px' }}>
+        {!collapsed && (
+          <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Script path</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '6px' }}>
+                <input
+                  className="nodrag"
+                  value={scriptPath}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setScriptPath(next);
+                    updateNodeData(id, { scriptPath: next });
+                  }}
+                  placeholder="./scripts/build.ps1"
+                  style={{ ...sharedInputStyle, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px' }}
+                />
+                <button
+                  className="nodrag"
+                  onClick={browseScript}
+                  style={{
+                    padding: '0 10px',
+                    background: 'rgba(255,255,255,0.05)',
+                    color: '#ccc',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    cursor: 'pointer',
+                    fontSize: '11px',
+                    borderRadius: '4px'
+                  }}
+                >
+                  Browse
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Args</label>
               <input
                 className="nodrag"
-                value={scriptPath}
+                value={args}
                 onChange={(e) => {
                   const next = e.target.value;
-                  setScriptPath(next);
-                  updateNodeData(id, { scriptPath: next });
+                  setArgs(next);
+                  updateNodeData(id, { args: next });
                 }}
-                placeholder="./scripts/build.ps1"
-                style={sharedInputStyle}
+                placeholder="--flag value"
+                style={{ ...sharedInputStyle, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px' }}
               />
-              <button
+            </div>
+
+            <div style={{ opacity: 0.6 }}>
+              <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Working directory</label>
+              <input
                 className="nodrag"
-                onClick={browseScript}
-                style={{
-                  padding: '0 10px',
-                  background: 'var(--vscode-button-secondaryBackground)',
-                  color: 'var(--vscode-button-secondaryForeground)',
-                  border: '1px solid var(--vscode-button-border)',
-                  cursor: 'pointer',
-                  fontSize: '11px',
-                  borderRadius: '4px'
+                value={cwd}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCwd(next);
+                  updateNodeData(id, { cwd: next });
                 }}
-              >
-                Browse
-              </button>
+                placeholder="."
+                style={{ ...sharedInputStyle, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: '10px', fontWeight: 600, color: '#888', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Interpreter</label>
+              <input
+                className="nodrag"
+                value={interpreter}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setInterpreter(next);
+                  updateNodeData(id, { interpreter: next });
+                }}
+                placeholder={inferredInterpreter || 'Auto'}
+                style={{ ...sharedInputStyle, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px' }}
+              />
             </div>
           </div>
-
-          <div style={{ marginBottom: '8px' }}>
-            <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '4px' }}>Args</div>
-            <input
-              className="nodrag"
-              value={args}
-              onChange={(e) => {
-                const next = e.target.value;
-                setArgs(next);
-                updateNodeData(id, { args: next });
-              }}
-              placeholder="--flag value"
-              style={sharedInputStyle}
-            />
-          </div>
-
-          <div style={{ marginBottom: '8px' }}>
-            <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '4px' }}>Working directory (optional)</div>
-            <input
-              className="nodrag"
-              value={cwd}
-              onChange={(e) => {
-                const next = e.target.value;
-                setCwd(next);
-                updateNodeData(id, { cwd: next });
-              }}
-              placeholder="."
-              style={sharedInputStyle}
-            />
-          </div>
-
-          <div>
-            <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '4px' }}>Interpreter override (optional)</div>
-            <input
-              className="nodrag"
-              value={interpreter}
-              onChange={(e) => {
-                const next = e.target.value;
-                setInterpreter(next);
-                updateNodeData(id, { interpreter: next });
-              }}
-              placeholder={inferredInterpreter || 'Auto by extension'}
-              style={sharedInputStyle}
-            />
-            <div style={{ fontSize: '10px', opacity: 0.65, marginTop: '4px' }}>
-              Inferred: {effectiveInterpreter || 'unknown extension (set override)'}
-            </div>
-          </div>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 };

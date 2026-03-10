@@ -5,7 +5,7 @@ type NodeInspectorDrawerProps = {
   setDrawerNodeId: (id: string | null) => void;
 };
 
-export default function NodeInspectorDrawer(props: NodeInspectorDrawerProps) {
+function NodeInspectorDrawer(props: NodeInspectorDrawerProps) {
   const { drawerNode, setDrawerNodeId } = props;
   if (!drawerNode) return null;
 
@@ -23,6 +23,8 @@ export default function NodeInspectorDrawer(props: NodeInspectorDrawerProps) {
   return (
     <div
       className="nodrag"
+      role="dialog"
+      aria-label="Node inspector"
       style={{
         position: 'absolute',
         top: 0,
@@ -56,6 +58,7 @@ export default function NodeInspectorDrawer(props: NodeInspectorDrawerProps) {
         </div>
         <div style={{ display: 'flex', gap: '6px' }}>
           <button
+            type="button"
             className="nodrag"
             onClick={async () => {
               try {
@@ -78,6 +81,7 @@ export default function NodeInspectorDrawer(props: NodeInspectorDrawerProps) {
             Copy JSON
           </button>
           <button
+            type="button"
             className="nodrag"
             onClick={() => setDrawerNodeId(null)}
             title="Close"
@@ -152,3 +156,5 @@ export default function NodeInspectorDrawer(props: NodeInspectorDrawerProps) {
     </div>
   );
 }
+
+export default React.memo(NodeInspectorDrawer);

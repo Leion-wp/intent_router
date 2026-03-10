@@ -115,21 +115,24 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
         const showVarInsert = field.type === 'string' || field.type === 'path';
 
         return (
-          <div key={field.name} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <div key={field.name} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <label
                 htmlFor={inputId}
                 style={{
-                  fontSize: '0.75em',
-                  opacity: field.required ? 0.95 : 0.65,
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  opacity: field.required ? 0.95 : 0.4,
                   display: 'flex',
                   alignItems: 'center',
-                  color: hasError ? 'var(--vscode-inputValidation-errorForeground)' : 'inherit'
+                  color: hasError ? 'var(--ir-accent-error)' : '#ffffff',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.4px'
                 }}
               >
                 {field.name}
-                {field.required && <span style={{ color: 'var(--ir-status-error)', marginLeft: '2px' }}>*</span>}
-                {!field.required && <span style={{ marginLeft: '4px', fontSize: '0.9em' }}>(optional)</span>}
+                {field.required && <span style={{ color: 'var(--ir-accent-error)', marginLeft: '4px' }}>*</span>}
+                {!field.required && <span style={{ marginLeft: '6px', fontSize: '10px', textTransform: 'lowercase', fontWeight: 400 }}>(opt)</span>}
               </label>
               {field.description && (
                 <button
@@ -139,13 +142,17 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: showHelp ? 'var(--vscode-textLink-foreground)' : 'var(--vscode-descriptionForeground)',
+                    color: showHelp ? 'var(--ir-accent-primary)' : 'rgba(255,255,255,0.3)',
                     cursor: 'pointer',
-                    fontSize: '0.9em',
-                    padding: '0 4px'
+                    fontSize: '12px',
+                    padding: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s ease'
                   }}
                 >
-                  ⓘ
+                  <span className={`codicon codicon-${showHelp ? 'info' : 'question'}`}></span>
                 </button>
               )}
             </div>
@@ -153,13 +160,14 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
             {showHelp && field.description && (
               <div
                 style={{
-                  fontSize: '0.7em',
-                  color: 'var(--vscode-descriptionForeground)',
-                  marginBottom: '2px',
-                  fontStyle: 'italic',
-                  padding: '2px 4px',
-                  background: 'rgba(255,255,255,0.05)',
-                  borderRadius: '2px'
+                  fontSize: '11px',
+                  color: 'rgba(255,255,255,0.5)',
+                  marginBottom: '4px',
+                  padding: '8px 10px',
+                  background: 'rgba(255,255,255,0.03)',
+                  borderRadius: '8px',
+                  borderLeft: '2px solid var(--ir-accent-primary)',
+                  lineHeight: '1.4'
                 }}
               >
                 {field.description}
@@ -167,17 +175,16 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
             )}
 
             {field.type === 'boolean' ? (
-              <input
-                id={inputId}
-                type="checkbox"
-                className="nodrag"
-                checked={!!values[field.name]}
-                onChange={(e) => onChange(field.name, e.target.checked)}
-                style={{
-                  alignSelf: 'flex-start',
-                  outline: hasError ? `1px solid ${inputBorderColor}` : 'none'
-                }}
-              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
+                <input
+                  id={inputId}
+                  type="checkbox"
+                  className="nodrag"
+                  checked={!!values[field.name]}
+                  onChange={(e) => onChange(field.name, e.target.checked)}
+                />
+                <span style={{ fontSize: '12px', opacity: 0.7 }}>Enabled</span>
+              </div>
             ) : field.type === 'enum' ? (
               <select
                 id={inputId}
@@ -186,35 +193,28 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
                 onChange={(e) => onChange(field.name, e.target.value)}
                 style={{
                   width: '100%',
-                  background: 'var(--vscode-input-background)',
-                  color: 'var(--vscode-input-foreground)',
-                  border: `1px solid ${inputBorderColor}`,
-                  padding: '4px'
+                  borderColor: hasError ? 'var(--ir-accent-error)' : 'rgba(255,255,255,0.1)'
                 }}
               >
-                <option value="">(Select)</option>
+                <option value="" style={{ background: '#1a1a20' }}>(Select)</option>
                 {(Array.isArray(field.options) ? field.options : dynamicOptions[field.name] || []).map((opt: string) => (
-                  <option key={opt} value={opt}>
+                  <option key={opt} value={opt} style={{ background: '#1a1a20' }}>
                     {opt}
                   </option>
                 ))}
               </select>
             ) : field.type === 'path' ? (
-              <div style={{ display: 'flex', gap: '4px' }}>
+              <div style={{ display: 'flex', gap: '6px' }}>
                 <input
                   id={inputId}
                   className="nodrag"
                   type="text"
                   value={values[field.name] || ''}
                   onChange={(e) => onChange(field.name, e.target.value)}
-                  placeholder={field.default !== undefined ? `${field.default} (default)` : ''}
+                  placeholder={field.default !== undefined ? `${field.default}` : 'Enter path...'}
                   style={{
                     flex: 1,
-                    background: 'var(--vscode-input-background)',
-                    color: 'var(--vscode-input-foreground)',
-                    border: `1px solid ${inputBorderColor}`,
-                    padding: '4px',
-                    fontSize: '0.9em'
+                    borderColor: hasError ? 'var(--ir-accent-error)' : 'rgba(255,255,255,0.1)'
                   }}
                 />
                 <button
@@ -222,30 +222,34 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
                   onClick={() => handleBrowse(field.name)}
                   title="Browse..."
                   style={{
-                    background: 'var(--vscode-button-secondaryBackground)',
-                    color: 'var(--vscode-button-secondaryForeground)',
-                    border: 'none',
+                    background: 'rgba(255,255,255,0.05)',
+                    color: '#fff',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '8px',
                     cursor: 'pointer',
-                    padding: '0 8px',
+                    width: '32px',
                     display: 'flex',
-                    alignItems: 'center'
+                    alignItems: 'center',
+                    justifyContent: 'center'
                   }}
                 >
-                  <span className="codicon codicon-folder-opened"></span>
+                  <span className="codicon codicon-folder-opened" style={{ fontSize: '14px' }}></span>
                 </button>
                 {showVarInsert && (
-                  <>
+                  <div style={{ position: 'relative', display: 'flex', gap: '4px' }}>
                     <button
                       className="nodrag"
                       onClick={() => openVarPicker(field.name)}
-                      title="Insert variable (${var:...})"
-                      aria-label={`Insert variable for ${field.name}`}
+                      title="Insert variable"
                       style={{
-                        background: 'var(--vscode-button-background)',
-                        color: 'var(--vscode-button-foreground)',
-                        border: 'none',
+                        background: 'rgba(255,255,255,0.05)',
+                        color: 'var(--ir-accent-primary)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '8px',
                         cursor: 'pointer',
-                        width: '24px',
+                        width: '32px',
+                        fontWeight: 700,
+                        fontSize: '12px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center'
@@ -265,56 +269,56 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
                           closeVarPicker(field.name);
                         }}
                         style={{
-                          maxWidth: '160px',
-                          background: 'var(--vscode-input-background)',
-                          color: 'var(--vscode-input-foreground)',
-                          border: '1px solid var(--vscode-input-border)',
-                          padding: '4px',
-                          fontSize: '0.9em'
+                          position: 'absolute',
+                          right: 0,
+                          top: '36px',
+                          zIndex: 100,
+                          minWidth: '160px',
+                          background: 'rgba(25, 25, 30, 0.95)',
+                          backdropFilter: 'blur(10px)',
+                          boxShadow: '0 8px 20px rgba(0,0,0,0.4)'
                         }}
                       >
-                        <option value="">Select var…</option>
+                        <option value="" style={{ background: '#1a1a20' }}>Select var…</option>
                         {availableVars.map((v) => (
-                          <option key={v} value={v}>
+                          <option key={v} value={v} style={{ background: '#1a1a20' }}>
                             {v}
                           </option>
                         ))}
                       </select>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             ) : (
-              <div style={{ display: 'flex', gap: '4px' }}>
+              <div style={{ display: 'flex', gap: '6px' }}>
                 <input
                   id={inputId}
                   className="nodrag"
                   type="text"
                   value={values[field.name] || ''}
                   onChange={(e) => onChange(field.name, e.target.value)}
-                  placeholder={field.default !== undefined ? `${field.default} (default)` : ''}
+                  placeholder={field.default !== undefined ? `${field.default}` : `Enter ${field.name}...`}
                   style={{
                     flex: 1,
-                    background: 'var(--vscode-input-background)',
-                    color: 'var(--vscode-input-foreground)',
-                    border: `1px solid ${inputBorderColor}`,
-                    padding: '4px',
-                    fontSize: '0.9em'
+                    borderColor: hasError ? 'var(--ir-accent-error)' : 'rgba(255,255,255,0.1)'
                   }}
                 />
                 {showVarInsert && (
-                  <>
+                  <div style={{ position: 'relative', display: 'flex', gap: '4px' }}>
                     <button
                       className="nodrag"
                       onClick={() => openVarPicker(field.name)}
-                      title="Insert variable (${var:...})"
-                      aria-label={`Insert variable for ${field.name}`}
+                      title="Insert variable"
                       style={{
-                        background: 'var(--vscode-button-background)',
-                        color: 'var(--vscode-button-foreground)',
-                        border: 'none',
+                        background: 'rgba(255,255,255,0.05)',
+                        color: 'var(--ir-accent-primary)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '8px',
                         cursor: 'pointer',
-                        width: '24px',
+                        width: '32px',
+                        fontWeight: 700,
+                        fontSize: '12px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center'
@@ -334,23 +338,25 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
                           closeVarPicker(field.name);
                         }}
                         style={{
-                          maxWidth: '160px',
-                          background: 'var(--vscode-input-background)',
-                          color: 'var(--vscode-input-foreground)',
-                          border: '1px solid var(--vscode-input-border)',
-                          padding: '4px',
-                          fontSize: '0.9em'
+                          position: 'absolute',
+                          right: 0,
+                          top: '36px',
+                          zIndex: 100,
+                          minWidth: '160px',
+                          background: 'rgba(25, 25, 30, 0.95)',
+                          backdropFilter: 'blur(10px)',
+                          boxShadow: '0 8px 20px rgba(0,0,0,0.4)'
                         }}
                       >
-                        <option value="">Select var…</option>
+                        <option value="" style={{ background: '#1a1a20' }}>Select var…</option>
                         {availableVars.map((v) => (
-                          <option key={v} value={v}>
+                          <option key={v} value={v} style={{ background: '#1a1a20' }}>
                             {v}
                           </option>
                         ))}
                       </select>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             )}

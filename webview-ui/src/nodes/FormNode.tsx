@@ -77,258 +77,144 @@ const FormNode = ({ data, id }: NodeProps) => {
     updateNodeData(id, { fields: next });
   };
 
+  const isRunning = status === 'running';
+  const themeColor = '#4caf50';
+
+  const handleStyle = {
+    width: '12px',
+    height: '12px',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 0 8px rgba(0,0,0,0.5)',
+    zIndex: 10,
+    transition: 'all 0.2s ease'
+  };
+
   return (
-    <div
-      style={{
-        position: 'relative',
-        padding: '10px',
-        borderRadius: '5px',
-        background: 'var(--vscode-editor-background)',
-        border: `2px solid ${borderColor}`,
-        minWidth: '280px',
-        color: 'var(--vscode-editor-foreground)',
-        fontFamily: 'var(--vscode-font-family)'
-      }}
-    >
+    <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '300px' }}>
       {inputHandles.map((inputName, index) => (
         <div key={`in-${inputName}-${index}`}>
           <Handle
             type="target"
             position={Position.Left}
             id={inputName === 'in' ? 'in' : `in_${inputName}`}
-            style={{ top: handleTop(index, inputHandles.length) }}
+            style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-6px', background: themeColor }}
           />
-          <span
-            style={{
-              position: 'absolute',
-              left: '-2px',
-              top: handleTop(index, inputHandles.length),
-              transform: 'translate(-100%, -50%)',
-              fontSize: '10px',
-              opacity: inputName === 'in' ? 0.8 : 0.65,
-              whiteSpace: 'nowrap'
-            }}
-          >
-            {inputName}
-          </span>
         </div>
       ))}
-      <Handle type="source" position={Position.Right} id="success" />
-      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
-      <Handle type="source" position={Position.Right} id="out_values" style={{ top: '76%', background: '#ff9800' }} />
-      <span style={{ position: 'absolute', right: '-2px', top: '76%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.75, whiteSpace: 'nowrap' }}>values</span>
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-6px', background: themeColor }} />
+      <Handle type="source" position={Position.Right} id="out_values" style={{ ...handleStyle, top: '76%', right: '-6px', background: '#ff9800' }} />
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
-          <span className="codicon codicon-list-selection"></span>
-          <span>Form</span>
-        </div>
-        <button
-          className="nodrag"
-          onClick={() => {
-            setCollapsed((v) => !v);
-            updateNodeData(id, { collapsed: !collapsed });
-          }}
-          style={{
-            background: 'none',
-            border: '1px solid var(--vscode-panel-border)',
-            color: 'var(--vscode-foreground)',
-            cursor: 'pointer',
-            borderRadius: '4px',
-            fontSize: '11px',
-            padding: '2px 6px'
-          }}
-        >
-          {collapsed ? 'Expand' : 'Collapse'}
-        </button>
-      </div>
-
-      {!collapsed && (
-        <>
-          <IoSpec
-            inputs={fields.length ? fields.map((field) => `${String(field.key || field.label || 'field')}${field.required ? '*' : ''}`) : ['form values']}
-            outputs={fields.length ? fields.map((field) => String(field.key || field.label || 'field')) : ['vars']}
-          />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {fields.length === 0 && (
-              <div style={{ fontSize: '11px', opacity: 0.7 }}>No fields yet. Add one below.</div>
-            )}
-            {fields.map((f, i) => (
-              <div key={i} style={{ border: '1px solid var(--vscode-widget-border)', borderRadius: '4px', padding: '8px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 24px', gap: '6px', alignItems: 'center' }}>
-                  <input
-                    className="nodrag"
-                    placeholder="label"
-                    value={String(f.label || '')}
-                    onChange={(e) => updateField(i, { label: e.target.value })}
-                    style={{
-                      background: 'var(--vscode-input-background)',
-                      color: 'var(--vscode-input-foreground)',
-                      border: '1px solid var(--vscode-input-border)',
-                      padding: '4px',
-                      fontSize: '11px'
-                    }}
-                  />
-                  <select
-                    className="nodrag"
-                    value={f.type}
-                    onChange={(e) => updateField(i, { type: e.target.value as FieldType })}
-                    style={{
-                      background: 'var(--vscode-input-background)',
-                      color: 'var(--vscode-input-foreground)',
-                      border: '1px solid var(--vscode-input-border)',
-                      padding: '4px',
-                      fontSize: '11px'
-                    }}
-                  >
-                    <option value="text">text</option>
-                    <option value="textarea">textarea</option>
-                    <option value="select">select</option>
-                    <option value="checkbox">checkbox</option>
-                  </select>
-                  <button
-                    className="nodrag"
-                    onClick={() => removeField(i)}
-                    title="Remove"
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-errorForeground)' }}
-                  >
-                    ×
-                  </button>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginTop: '6px' }}>
-                  <input
-                    className="nodrag"
-                    placeholder="key (var name)"
-                    value={String(f.key || '')}
-                    onChange={(e) => updateField(i, { key: e.target.value })}
-                    style={{
-                      background: 'var(--vscode-input-background)',
-                      color: 'var(--vscode-input-foreground)',
-                      border: '1px solid var(--vscode-input-border)',
-                      padding: '4px',
-                      fontSize: '11px'
-                    }}
-                  />
-                  <input
-                    className="nodrag"
-                    placeholder="default"
-                    value={String(f.default || '')}
-                    onChange={(e) => updateField(i, { default: e.target.value })}
-                    style={{
-                      background: 'var(--vscode-input-background)',
-                      color: 'var(--vscode-input-foreground)',
-                      border: '1px solid var(--vscode-input-border)',
-                      padding: '4px',
-                      fontSize: '11px'
-                    }}
-                  />
-                </div>
-
-                {f.type === 'select' && (
-                  <input
-                    className="nodrag"
-                    placeholder="options (comma-separated)"
-                    value={String(f.options || '')}
-                    onChange={(e) => updateField(i, { options: e.target.value })}
-                    style={{
-                      marginTop: '6px',
-                      width: '100%',
-                      background: 'var(--vscode-input-background)',
-                      color: 'var(--vscode-input-foreground)',
-                      border: '1px solid var(--vscode-input-border)',
-                      padding: '4px',
-                      fontSize: '11px'
-                    }}
-                  />
-                )}
-
-                <div style={{ display: 'flex', gap: '12px', marginTop: '6px', fontSize: '11px', opacity: 0.9 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <input
-                      className="nodrag"
-                      type="checkbox"
-                      checked={!!f.required}
-                      onChange={(e) => updateField(i, { required: e.target.checked })}
-                    />
-                    required
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <input
-                      className="nodrag"
-                      type="checkbox"
-                      checked={!!f.secret}
-                      onChange={(e) => updateField(i, { secret: e.target.checked })}
-                    />
-                    secret
-                  </label>
-                </div>
-              </div>
-            ))}
+      <div>
+        <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}15 0%, transparent 100%)` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+            <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #45b39d 100%)` }}>
+              <span className="codicon codicon-list-selection" style={{ color: '#fff', fontSize: '16px' }}></span>
+            </div>
+            <span className="glass-node-label">USER FORM</span>
           </div>
-
           <button
             className="nodrag"
-            onClick={addField}
-            style={{
-              marginTop: '10px',
-              width: '100%',
-              padding: '6px',
-              background: 'var(--vscode-button-secondaryBackground)',
-              color: 'var(--vscode-button-secondaryForeground)',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '11px'
+            onClick={() => {
+              setCollapsed((v) => !v);
+              updateNodeData(id, { collapsed: !collapsed });
             }}
-          >
-            + Add Field
-          </button>
-        </>
-      )}
-
-      {!collapsed && logs.length > 0 && (
-        <div className="nodrag" style={{ marginTop: '8px', borderTop: '1px solid var(--vscode-widget-border)' }}>
-          <div
-            onClick={() => setIsConsoleOpen(!isConsoleOpen)}
-            style={{
-              fontSize: '0.8em',
-              padding: '4px',
+            style={{ 
+              background: 'rgba(255,255,255,0.05)', 
+              border: 'none', 
+              color: '#aaa', 
               cursor: 'pointer',
+              borderRadius: '6px',
+              width: '24px',
+              height: '24px',
               display: 'flex',
-              justifyContent: 'space-between',
               alignItems: 'center',
-              background: 'var(--vscode-editor-background)',
-              opacity: 0.8
+              justifyContent: 'center'
             }}
           >
-            <span>Output ({logs.length})</span>
-            <span>{isConsoleOpen ? '▼' : '▶'}</span>
-          </div>
-          {isConsoleOpen && (
-            <div
-              ref={logsRef}
-              style={{
-                maxHeight: '150px',
-                overflowY: 'auto',
-                background: '#1e1e1e',
-                color: '#cccccc',
-                padding: '4px',
-                fontSize: '0.75em',
-                fontFamily: 'monospace',
-                whiteSpace: 'pre-wrap',
-                borderBottomLeftRadius: '4px',
-                borderBottomRightRadius: '4px'
-              }}
-            >
-              {logs.map((log: any, i: number) => (
-                <span key={i} style={{ color: log.stream === 'stderr' ? 'var(--ir-status-error)' : 'inherit', display: 'block' }}>
-                  {log.text}
-                </span>
+            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`} style={{ fontSize: '12px' }}></span>
+          </button>
+        </div>
+
+        {!collapsed && (
+          <div className="glass-node-body">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <label className="glass-node-input-label">Form Fields</label>
+              <button
+                className="nodrag"
+                onClick={addField}
+                style={{
+                  background: 'var(--ir-accent-primary)',
+                  border: 'none',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  boxShadow: '0 4px 10px rgba(0, 162, 255, 0.2)'
+                }}
+              >
+                + Add Field
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {fields.length === 0 && <div style={{ fontSize: '12px', opacity: 0.3, textAlign: 'center', padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px dashed rgba(255,255,255,0.1)' }}>No fields defined.</div>}
+              {fields.map((f, i) => (
+                <div key={i} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <input
+                      className="nodrag"
+                      placeholder="Label"
+                      value={String(f.label || '')}
+                      onChange={(e) => updateField(i, { label: e.target.value })}
+                      style={{ fontSize: '11px', padding: '6px 10px' }}
+                    />
+                    <select
+                      className="nodrag"
+                      value={f.type}
+                      onChange={(e) => updateField(i, { type: e.target.value as FieldType })}
+                      style={{ fontSize: '11px', padding: '6px' }}
+                    >
+                      <option value="text" style={{ background: '#1a1a20' }}>text</option>
+                      <option value="textarea" style={{ background: '#1a1a20' }}>textarea</option>
+                      <option value="select" style={{ background: '#1a1a20' }}>select</option>
+                      <option value="checkbox" style={{ background: '#1a1a20' }}>checkbox</option>
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      className="nodrag"
+                      placeholder="Key (variable name)"
+                      value={String(f.key || '')}
+                      onChange={(e) => updateField(i, { key: e.target.value })}
+                      style={{ flex: 1, fontSize: '11px', padding: '6px 10px' }}
+                    />
+                    <button
+                      className="nodrag"
+                      onClick={() => removeField(i)}
+                      style={{ 
+                        background: 'rgba(255, 77, 77, 0.1)', 
+                        border: 'none', 
+                        cursor: 'pointer', 
+                        color: '#ff4d4d', 
+                        borderRadius: '6px',
+                        width: '28px',
+                        height: '28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <span className="codicon codicon-trash" style={{ fontSize: '14px' }}></span>
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

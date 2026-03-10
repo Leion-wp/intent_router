@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { listPublicCapabilities } from './registry';
-import { PipelineFile, ensurePipelineFolder, writePipelineToUri } from './pipelineRunner';
+import { PipelineFile, ensurePipelineFolder, writePipelineToUri, resolveDecision } from './pipelineRunner';
 import { gitTemplates } from './providers/gitAdapter';
 import { dockerTemplates } from './providers/dockerAdapter';
 import { terminalTemplates } from './providers/terminalAdapter';
@@ -20,6 +20,7 @@ import {
     writeEmbeddedUiPreset,
     writeUiDraftToWorkspace
 } from './uiPresetStore';
+import { clearSessionMemory, exportSessionMemory, importSessionMemory, summarizeSessionMemory } from './sessionMemoryStore';
 
 type CommandGroup = {
     provider: string;
@@ -132,18 +133,56 @@ export class PipelineBuilder {
 	                   });
 	               }
 
-	               if (e.type === 'stepLog') {
-	                   this.panel.webview.postMessage({
-	                       type: 'stepLog',
-	                       runId: e.runId,
+               if (e.type === 'stepLog') {
+                   this.panel.webview.postMessage({
+                       type: 'stepLog',
+                       runId: e.runId,
 	                       intentId: e.intentId,
 	                       stepId: e.stepId,
 	                       text: e.text,
-	                       stream: e.stream
-	                   });
-	               }
+                       stream: e.stream
+                   });
+               }
+
+               if (e.type === 'approvalReviewReady') {
+                   this.panel.webview.postMessage({
+                       type: 'approvalReviewReady',
+                       runId: e.runId,
+                       intentId: e.intentId,
+                       stepId: e.stepId,
+                       files: e.files,
+                       totalAdded: e.totalAdded,
+                       totalRemoved: e.totalRemoved,
+                       diffSignature: e.diffSignature,
+                       policyMode: e.policyMode,
+                       policyBlocked: e.policyBlocked,
+                       policyViolations: e.policyViolations
+                   });
+               }
+
+               if (e.type === 'teamRunSummary') {
+                   this.panel.webview.postMessage({
+                       type: 'teamRunSummary',
+                       runId: e.runId,
+                       intentId: e.intentId,
+                       stepId: e.stepId,
+                       strategy: e.strategy,
+                       winnerMember: e.winnerMember,
+                       winnerReason: e.winnerReason,
+                       voteScoreByMember: e.voteScoreByMember,
+                       members: e.members,
+                       totalFiles: e.totalFiles
+                   });
+               }
 
                if (e.type === 'pipelineStart' || e.type === 'pipelineEnd') {
+                    this.panel.webview.postMessage({
+                        type: 'historyUpdate',
+                        history: historyManager.getHistory()
+                    });
+                }
+
+               if (e.type === 'githubPullRequestCreated') {
                    this.panel.webview.postMessage({
                        type: 'historyUpdate',
                        history: historyManager.getHistory()
@@ -258,8 +297,22 @@ export class PipelineBuilder {
                 await vscode.commands.executeCommand(
                     'intentRouter.runPipelineFromData',
                     message.pipeline as PipelineFile,
-                    !!message.dryRun
+                    !!message.dryRun,
+                    message.startStepId ? String(message.startStepId) : undefined
                 );
+                return;
+            }
+            if (message?.type === 'pipelineDecision') {
+                resolveDecision(message.nodeId, message.decision, message.runId, message.approvedPaths);
+                return;
+            }
+            if (message?.type === 'pipelineReviewOpenDiff') {
+                pipelineEventBus.emit({
+                    type: 'pipelineReviewOpenDiff',
+                    nodeId: message.nodeId,
+                    runId: message.runId,
+                    path: message.path
+                } as any);
                 return;
             }
             if (message?.type === 'saveEnvironment') {
@@ -317,6 +370,141 @@ export class PipelineBuilder {
                     }
                 } catch (error) {
                     console.error(`Failed to fetch dynamic options for ${command}:`, error);
+                }
+                return;
+            }
+            if (message?.type === 'openExternal') {
+                try {
+                    const raw = String(message.url || '').trim();
+                    const uri = vscode.Uri.parse(raw);
+                    if (uri.scheme !== 'http' && uri.scheme !== 'https') {
+                        throw new Error('Only http/https links are allowed.');
+                    }
+                    await vscode.env.openExternal(uri);
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to open link: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'copyToClipboard') {
+                try {
+                    await vscode.env.clipboard.writeText(String(message.text || ''));
+                    vscode.window.showInformationMessage('Copied to clipboard.');
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to copy: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'exportRunAudit') {
+                try {
+                    const runId = String(message.runId || '').trim();
+                    if (!runId) {
+                        throw new Error('Missing runId.');
+                    }
+                    const payload = historyManager.buildRunAuditExport(runId);
+                    if (!payload) {
+                        throw new Error(`Run not found: ${runId}`);
+                    }
+                    const json = JSON.stringify(payload, null, 2);
+                    await vscode.env.clipboard.writeText(json);
+                    vscode.window.showInformationMessage('Run audit copied to clipboard.');
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to export run audit: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'githubPrChecks') {
+                try {
+                    const url = String(message.url || '').trim();
+                    if (!url) throw new Error('Missing PR URL.');
+                    const result = await vscode.commands.executeCommand('intentRouter.internal.githubPrChecks', { url });
+                    const output = String((result as any)?.output || '').trim();
+                    if (output) {
+                        await vscode.env.clipboard.writeText(output);
+                        vscode.window.showInformationMessage('PR checks summary copied to clipboard.');
+                    } else {
+                        vscode.window.showInformationMessage('PR checks fetched.');
+                    }
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to fetch PR checks: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'githubPrRerunFailed') {
+                try {
+                    const url = String(message.url || '').trim();
+                    if (!url) throw new Error('Missing PR URL.');
+                    await vscode.commands.executeCommand('intentRouter.internal.githubPrRerunFailedChecks', { url });
+                    vscode.window.showInformationMessage('Requested re-run of failed PR checks.');
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to re-run PR checks: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'githubPrComment') {
+                try {
+                    const url = String(message.url || '').trim();
+                    const body = String(message.body || '').trim();
+                    if (!url) throw new Error('Missing PR URL.');
+                    if (!body) throw new Error('Missing PR comment body.');
+                    await vscode.commands.executeCommand('intentRouter.internal.githubPrComment', { url, body });
+                    vscode.window.showInformationMessage('PR comment posted.');
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to comment PR: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'sessionMemory.export') {
+                try {
+                    const sessionId = String(message.sessionId || '').trim() || undefined;
+                    const json = exportSessionMemory(sessionId);
+                    await vscode.env.clipboard.writeText(json);
+                    vscode.window.showInformationMessage(sessionId ? `Session memory "${sessionId}" copied.` : 'All session memory copied.');
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to export session memory: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'sessionMemory.clear') {
+                try {
+                    const sessionId = String(message.sessionId || '').trim() || undefined;
+                    const result = clearSessionMemory(sessionId);
+                    vscode.window.showInformationMessage(
+                        sessionId
+                            ? `Session "${sessionId}" cleared (${result.clearedEntries} entries).`
+                            : `All session memory cleared (${result.clearedSessions} sessions, ${result.clearedEntries} entries).`
+                    );
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to clear session memory: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'sessionMemory.import') {
+                try {
+                    const jsonText = String(message.jsonText || '');
+                    const mode = message.mode === 'replace' ? 'replace' : 'merge';
+                    const result = importSessionMemory(jsonText, mode);
+                    vscode.window.showInformationMessage(`Imported session memory: ${result.sessions} session(s), ${result.entries} entries.`);
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to import session memory: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'sessionMemory.inspect') {
+                try {
+                    const nodeId = String(message.nodeId || '').trim();
+                    const sessionId = String(message.sessionId || '').trim() || undefined;
+                    const summaries = summarizeSessionMemory(sessionId);
+                    const primary = summaries[0];
+                    this.panel?.webview.postMessage({
+                        type: 'sessionMemoryStatus',
+                        nodeId,
+                        sessionId: primary?.sessionId || sessionId || '',
+                        entries: Number(primary?.entries || 0),
+                        lastTimestamp: Number(primary?.lastTimestamp || 0)
+                    });
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to inspect session memory: ${error?.message || error}`);
                 }
                 return;
             }
@@ -523,7 +711,7 @@ export class PipelineBuilder {
                     vscode.window.showWarningMessage('Dev mode is disabled. Enable "Intent Router: Dev Mode" in workspace settings.');
                     return;
                 }
-                const preset = buildDevPackagerPreset();
+                const preset = createDevPackagerPreset();
                 this.panel?.webview.postMessage({ type: 'loadPipeline', pipeline: preset });
                 vscode.window.showInformationMessage('Loaded Dev Packager preset in the builder.');
                 return;
@@ -642,7 +830,7 @@ export class PipelineBuilder {
     }
 }
 
-function buildDevPackagerPreset(): PipelineFile {
+export function createDevPackagerPreset(): PipelineFile {
     // Keep the output VSIX path stable (no parsing output).
     // Use relative path for install step; vscode.installVsix resolves relative to workspace root.
     return {
@@ -690,6 +878,503 @@ function buildDevPackagerPreset(): PipelineFile {
                 intent: 'vscode.runCommand',
                 description: 'Reload window',
                 payload: { commandId: 'workbench.action.reloadWindow', argsJson: '' }
+            }
+        ]
+    };
+}
+
+export function createSoftwareFactoryPreset(): PipelineFile {
+    return {
+        name: 'Software Factory Template',
+        description: 'Brainstorm → PRD → Architecture → PR Split with HITL review at every artifact.',
+        steps: [
+            {
+                id: 'team.brainstorm',
+                intent: 'ai.team',
+                description: 'Team Brainstorm (idea.md -> brainstorm.md)',
+                payload: {
+                    strategy: 'reviewer_gate',
+                    members: [
+                        {
+                            name: 'brainstorm_writer',
+                            role: 'writer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-flash',
+                            instruction: 'Create a concise brainstorming artifact from idea.md. Output only brainstorm.md content.',
+                            contextFiles: ['docs/idea.md']
+                        },
+                        {
+                            name: 'brainstorm_reviewer',
+                            role: 'reviewer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Review and improve the brainstorm output. Return only final brainstorm.md content.',
+                            contextFiles: ['docs/idea.md']
+                        }
+                    ],
+                    contextFiles: ['docs/idea.md'],
+                    agentSpecFiles: ['AGENTS.md', '**/SKILL.md'],
+                    outputContract: 'path_result',
+                    outputVar: 'brainstorm_result',
+                    outputVarPath: 'brainstorm_path',
+                    outputVarChanges: 'brainstorm_changes'
+                }
+            },
+            {
+                id: 'approve.brainstorm',
+                intent: 'vscode.reviewDiff',
+                description: 'Review brainstorm artifact',
+                payload: {
+                    path: '${var:brainstorm_path}',
+                    proposal: '${var:brainstorm_result}'
+                }
+            },
+            {
+                id: 'team.prd',
+                intent: 'ai.team',
+                description: 'Team PRD (brainstorm.md -> prd.md)',
+                payload: {
+                    strategy: 'sequential',
+                    members: [
+                        {
+                            name: 'prd_writer',
+                            role: 'writer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-flash',
+                            instruction: 'Generate a structured PRD from brainstorm.md. Output only prd.md content.',
+                            contextFiles: ['docs/brainstorm.md']
+                        },
+                        {
+                            name: 'prd_reviewer',
+                            role: 'reviewer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Refine the PRD for implementation readiness. Output only prd.md content.',
+                            contextFiles: ['docs/brainstorm.md']
+                        }
+                    ],
+                    contextFiles: ['docs/brainstorm.md'],
+                    outputContract: 'path_result',
+                    outputVar: 'prd_result',
+                    outputVarPath: 'prd_path',
+                    outputVarChanges: 'prd_changes'
+                }
+            },
+            {
+                id: 'approve.prd',
+                intent: 'vscode.reviewDiff',
+                description: 'Review PRD artifact',
+                payload: {
+                    path: '${var:prd_path}',
+                    proposal: '${var:prd_result}'
+                }
+            },
+            {
+                id: 'team.architecture',
+                intent: 'ai.team',
+                description: 'Team Architecture (brainstorm+prd -> architecture.md)',
+                payload: {
+                    strategy: 'vote',
+                    members: [
+                        {
+                            name: 'architect_writer_a',
+                            role: 'writer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-pro',
+                            instruction: 'Create architecture.md from brainstorm + PRD.',
+                            contextFiles: ['docs/brainstorm.md', 'docs/prd.md']
+                        },
+                        {
+                            name: 'architect_writer_b',
+                            role: 'writer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Create an alternative architecture.md from brainstorm + PRD.',
+                            contextFiles: ['docs/brainstorm.md', 'docs/prd.md']
+                        },
+                        {
+                            name: 'architect_reviewer',
+                            role: 'reviewer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-pro',
+                            instruction: 'Choose/refine best architecture outcome and output final architecture.md.',
+                            contextFiles: ['docs/brainstorm.md', 'docs/prd.md']
+                        }
+                    ],
+                    contextFiles: ['docs/brainstorm.md', 'docs/prd.md'],
+                    outputContract: 'path_result',
+                    outputVar: 'architecture_result',
+                    outputVarPath: 'architecture_path',
+                    outputVarChanges: 'architecture_changes'
+                }
+            },
+            {
+                id: 'approve.architecture',
+                intent: 'vscode.reviewDiff',
+                description: 'Review architecture artifact',
+                payload: {
+                    path: '${var:architecture_path}',
+                    proposal: '${var:architecture_result}'
+                }
+            },
+            {
+                id: 'team.pr_split',
+                intent: 'ai.team',
+                description: 'PR Split Plan (frontend/backend atomic PRs)',
+                payload: {
+                    strategy: 'sequential',
+                    members: [
+                        {
+                            name: 'split_writer',
+                            role: 'writer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Produce pr_split.md with FE/BE atomic PR plan and branch names.',
+                            contextFiles: ['docs/prd.md', 'docs/architecture.md']
+                        },
+                        {
+                            name: 'split_reviewer',
+                            role: 'reviewer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-flash',
+                            instruction: 'Review and finalize pr_split.md.',
+                            contextFiles: ['docs/prd.md', 'docs/architecture.md']
+                        }
+                    ],
+                    contextFiles: ['docs/prd.md', 'docs/architecture.md'],
+                    outputContract: 'path_result',
+                    outputVar: 'split_result',
+                    outputVarPath: 'split_path',
+                    outputVarChanges: 'split_changes'
+                }
+            },
+            {
+                id: 'approve.pr_split',
+                intent: 'vscode.reviewDiff',
+                description: 'Review PR split artifact',
+                payload: {
+                    path: '${var:split_path}',
+                    proposal: '${var:split_result}'
+                }
+            },
+            {
+                id: 'team.frontend',
+                intent: 'ai.team',
+                description: 'Team Frontend implementation (atomic FE PR scope)',
+                payload: {
+                    strategy: 'vote',
+                    reviewerVoteWeight: 3,
+                    members: [
+                        {
+                            name: 'frontend_writer',
+                            role: 'writer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Implement frontend scope from pr_split.md. Output only FE files and content.',
+                            contextFiles: ['docs/pr_split.md', 'docs/prd.md', 'docs/architecture.md']
+                        },
+                        {
+                            name: 'frontend_reviewer',
+                            role: 'reviewer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-pro',
+                            instruction: 'Review/refine FE proposal and return final FE changes.',
+                            contextFiles: ['docs/pr_split.md', 'docs/prd.md', 'docs/architecture.md']
+                        }
+                    ],
+                    outputContract: 'path_result',
+                    outputVar: 'fe_result',
+                    outputVarPath: 'fe_path',
+                    outputVarChanges: 'fe_changes'
+                }
+            },
+            {
+                id: 'approve.frontend',
+                intent: 'vscode.reviewDiff',
+                description: 'Review frontend implementation changes',
+                payload: {
+                    path: '${var:fe_path}',
+                    proposal: '${var:fe_result}'
+                }
+            },
+            {
+                id: 'team.backend',
+                intent: 'ai.team',
+                description: 'Team Backend implementation (atomic BE PR scope)',
+                payload: {
+                    strategy: 'vote',
+                    reviewerVoteWeight: 3,
+                    members: [
+                        {
+                            name: 'backend_writer',
+                            role: 'writer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Implement backend scope from pr_split.md. Output only BE files and content.',
+                            contextFiles: ['docs/pr_split.md', 'docs/prd.md', 'docs/architecture.md']
+                        },
+                        {
+                            name: 'backend_reviewer',
+                            role: 'reviewer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-pro',
+                            instruction: 'Review/refine BE proposal and return final BE changes.',
+                            contextFiles: ['docs/pr_split.md', 'docs/prd.md', 'docs/architecture.md']
+                        }
+                    ],
+                    outputContract: 'path_result',
+                    outputVar: 'be_result',
+                    outputVarPath: 'be_path',
+                    outputVarChanges: 'be_changes'
+                }
+            },
+            {
+                id: 'approve.backend',
+                intent: 'vscode.reviewDiff',
+                description: 'Review backend implementation changes',
+                payload: {
+                    path: '${var:be_path}',
+                    proposal: '${var:be_result}'
+                }
+            },
+            {
+                id: 'factory.capture_pr_targets',
+                intent: 'system.form',
+                description: 'Capture PR targets (optional publish handoff)',
+                payload: {
+                    fields: [
+                        { type: 'text', key: 'baseBranch', label: 'Base branch', default: 'main', required: true },
+                        { type: 'text', key: 'feBranch', label: 'Frontend branch', default: 'feature/frontend', required: true },
+                        { type: 'text', key: 'beBranch', label: 'Backend branch', default: 'feature/backend', required: true }
+                    ]
+                }
+            },
+            {
+                id: 'factory.open_frontend_pr',
+                intent: 'github.openPr',
+                description: 'Open frontend PR (after branch push)',
+                payload: {
+                    cwd: '${workspaceRoot}',
+                    head: '${var:feBranch}',
+                    base: '${var:baseBranch}',
+                    title: 'feat(frontend): factory delivery',
+                    bodyFile: 'docs/pr_split.md'
+                }
+            },
+            {
+                id: 'factory.open_backend_pr',
+                intent: 'github.openPr',
+                description: 'Open backend PR (after branch push)',
+                payload: {
+                    cwd: '${workspaceRoot}',
+                    head: '${var:beBranch}',
+                    base: '${var:baseBranch}',
+                    title: 'feat(backend): factory delivery',
+                    bodyFile: 'docs/pr_split.md'
+                }
+            }
+        ]
+    };
+}
+
+export function createSoftwareFactoryBranchPreset(): PipelineFile {
+    return {
+        name: 'Software Factory FE-BE Branch Mode',
+        description: 'Factory template with FE/BE dedicated branches and PR placeholders.',
+        steps: [
+            {
+                id: 'factory.set_repo_cwd',
+                intent: 'system.setCwd',
+                description: 'Set repository root',
+                payload: { path: '${workspaceRoot}' }
+            },
+            {
+                id: 'factory.capture_release_config',
+                intent: 'system.form',
+                description: 'Capture branch and ticket configuration',
+                payload: {
+                    fields: [
+                        { type: 'text', key: 'ticketId', label: 'Ticket ID', default: 'TICKET-001', required: true },
+                        { type: 'text', key: 'baseBranch', label: 'Base branch', default: 'main', required: true }
+                    ]
+                }
+            },
+            {
+                id: 'factory.checkout_base',
+                intent: 'terminal.run',
+                description: 'Checkout base branch and pull latest',
+                payload: {
+                    cwd: '${workspaceRoot}',
+                    command: 'git checkout ${var:baseBranch} && git pull'
+                }
+            },
+            {
+                id: 'factory.team_split_plan',
+                intent: 'ai.team',
+                description: 'Create FE/BE implementation split plan',
+                payload: {
+                    strategy: 'reviewer_gate',
+                    members: [
+                        {
+                            name: 'split_writer',
+                            role: 'writer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Produce implementation split for FE/BE with explicit file ownership and testing notes.',
+                            contextFiles: ['docs/prd.md', 'docs/architecture.md']
+                        },
+                        {
+                            name: 'split_reviewer',
+                            role: 'reviewer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-flash',
+                            instruction: 'Review and finalize split plan into docs/pr_split.md.',
+                            contextFiles: ['docs/prd.md', 'docs/architecture.md']
+                        }
+                    ],
+                    outputContract: 'path_result',
+                    outputVar: 'split_result',
+                    outputVarPath: 'split_path',
+                    outputVarChanges: 'split_changes'
+                }
+            },
+            {
+                id: 'factory.review_split',
+                intent: 'vscode.reviewDiff',
+                description: 'Review split plan',
+                payload: {
+                    path: '${var:split_path}',
+                    proposal: '${var:split_result}'
+                }
+            },
+            {
+                id: 'factory.team_frontend',
+                intent: 'ai.team',
+                description: 'Frontend team implementation proposal',
+                payload: {
+                    strategy: 'vote',
+                    members: [
+                        {
+                            name: 'fe_writer',
+                            role: 'writer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Generate frontend implementation changes according to pr_split.md.',
+                            contextFiles: ['docs/pr_split.md']
+                        },
+                        {
+                            name: 'fe_reviewer',
+                            role: 'reviewer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-pro',
+                            instruction: 'Review frontend proposal and output final result.',
+                            contextFiles: ['docs/pr_split.md']
+                        }
+                    ],
+                    outputContract: 'path_result',
+                    outputVar: 'fe_result',
+                    outputVarPath: 'fe_path',
+                    outputVarChanges: 'fe_changes'
+                }
+            },
+            {
+                id: 'factory.review_frontend',
+                intent: 'vscode.reviewDiff',
+                description: 'Review frontend changes',
+                payload: {
+                    path: '${var:fe_path}',
+                    proposal: '${var:fe_result}'
+                }
+            },
+            {
+                id: 'factory.push_frontend_branch',
+                intent: 'terminal.run',
+                description: 'Create/push frontend branch + commit placeholder',
+                payload: {
+                    cwd: '${workspaceRoot}',
+                    command: 'git checkout -B feature/${var:ticketId}-frontend && git add ${var:fe_path} && git commit -m \"feat(frontend): ${var:ticketId}\" && git push -u origin feature/${var:ticketId}-frontend'
+                }
+            },
+            {
+                id: 'factory.open_frontend_pr',
+                intent: 'github.openPr',
+                description: 'Open frontend PR',
+                payload: {
+                    cwd: '${workspaceRoot}',
+                    head: 'feature/${var:ticketId}-frontend',
+                    base: '${var:baseBranch}',
+                    title: 'feat(frontend): ${var:ticketId}',
+                    bodyFile: 'docs/pr_split.md'
+                }
+            },
+            {
+                id: 'factory.checkout_base_again',
+                intent: 'terminal.run',
+                description: 'Return to base branch',
+                payload: {
+                    cwd: '${workspaceRoot}',
+                    command: 'git checkout ${var:baseBranch}'
+                }
+            },
+            {
+                id: 'factory.team_backend',
+                intent: 'ai.team',
+                description: 'Backend team implementation proposal',
+                payload: {
+                    strategy: 'vote',
+                    members: [
+                        {
+                            name: 'be_writer',
+                            role: 'writer',
+                            agent: 'codex',
+                            model: 'gpt-5-codex',
+                            instruction: 'Generate backend implementation changes according to pr_split.md.',
+                            contextFiles: ['docs/pr_split.md']
+                        },
+                        {
+                            name: 'be_reviewer',
+                            role: 'reviewer',
+                            agent: 'gemini',
+                            model: 'gemini-2.5-pro',
+                            instruction: 'Review backend proposal and output final result.',
+                            contextFiles: ['docs/pr_split.md']
+                        }
+                    ],
+                    outputContract: 'path_result',
+                    outputVar: 'be_result',
+                    outputVarPath: 'be_path',
+                    outputVarChanges: 'be_changes'
+                }
+            },
+            {
+                id: 'factory.review_backend',
+                intent: 'vscode.reviewDiff',
+                description: 'Review backend changes',
+                payload: {
+                    path: '${var:be_path}',
+                    proposal: '${var:be_result}'
+                }
+            },
+            {
+                id: 'factory.push_backend_branch',
+                intent: 'terminal.run',
+                description: 'Create/push backend branch + commit placeholder',
+                payload: {
+                    cwd: '${workspaceRoot}',
+                    command: 'git checkout -B feature/${var:ticketId}-backend && git add ${var:be_path} && git commit -m \"feat(backend): ${var:ticketId}\" && git push -u origin feature/${var:ticketId}-backend'
+                }
+            },
+            {
+                id: 'factory.open_backend_pr',
+                intent: 'github.openPr',
+                description: 'Open backend PR',
+                payload: {
+                    cwd: '${workspaceRoot}',
+                    head: 'feature/${var:ticketId}-backend',
+                    base: '${var:baseBranch}',
+                    title: 'feat(backend): ${var:ticketId}',
+                    bodyFile: 'docs/pr_split.md'
+                }
             }
         ]
     };

@@ -9,11 +9,16 @@
         "sourceMap": true,
         "rootDir": "src",
         "strict": true,
-        "moduleResolution": "node"
+        "moduleResolution": "node",
+        "skipLibCheck": true
     },
     "exclude": [
         "node_modules",
         ".vscode-test",
-        "webview-ui"
+        "webview-ui",
+        "scripts"
+    ],
+    "include": [
+        "src/**/*.ts"
     ]
 }

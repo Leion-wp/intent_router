@@ -29,6 +29,9 @@ type StudioNodesPanelProps = {
   exportSelectedOrAll: (scope: 'one' | 'all') => void;
   importFromFile: () => void;
   importFromPaste: () => void;
+  retryLastAction: () => void;
+  clearFeedback: () => void;
+  canRetryLastAction: boolean;
   selectDraft: (id: string) => void;
   deleteDraft: (id: string) => void;
   onDragStartCustomNode: (event: React.DragEvent, customNodeId: string) => void;
@@ -54,6 +57,9 @@ export default function StudioNodesPanel({
   exportSelectedOrAll,
   importFromFile,
   importFromPaste,
+  retryLastAction,
+  clearFeedback,
+  canRetryLastAction,
   selectDraft,
   deleteDraft,
   onDragStartCustomNode
@@ -133,6 +139,41 @@ export default function StudioNodesPanel({
       {studioError && (
         <div style={{ color: 'var(--vscode-errorForeground)', fontSize: '11px', marginBottom: '8px' }}>
           {studioError}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            <button
+              type="button"
+              className="nodrag"
+              onClick={retryLastAction}
+              disabled={!canRetryLastAction}
+              style={{
+                padding: '4px 8px',
+                background: canRetryLastAction ? 'var(--vscode-button-secondaryBackground)' : 'transparent',
+                color: canRetryLastAction ? 'var(--vscode-button-secondaryForeground)' : 'var(--vscode-descriptionForeground)',
+                border: '1px solid var(--vscode-panel-border)',
+                borderRadius: '4px',
+                cursor: canRetryLastAction ? 'pointer' : 'not-allowed',
+                fontSize: '11px'
+              }}
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              className="nodrag"
+              onClick={clearFeedback}
+              style={{
+                padding: '4px 8px',
+                background: 'transparent',
+                color: 'var(--vscode-foreground)',
+                border: '1px solid var(--vscode-panel-border)',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '11px'
+              }}
+            >
+              Clear
+            </button>
+          </div>
         </div>
       )}
       {studioImportSummary && (
@@ -153,8 +194,17 @@ export default function StudioNodesPanel({
             <div
               key={nodeId}
               onClick={() => selectDraft(nodeId)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  selectDraft(nodeId);
+                }
+              }}
               draggable
               onDragStart={(event) => onDragStartCustomNode(event, nodeId)}
+              tabIndex={0}
+              role="button"
+              aria-label={`Select custom node ${String(node?.title || nodeId)}`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -180,6 +230,7 @@ export default function StudioNodesPanel({
                   deleteDraft(nodeId);
                 }}
                 title="Delete"
+                aria-label={`Delete custom node ${String(node?.title || nodeId)}`}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-errorForeground)' }}
               >
                 <span className="codicon codicon-trash"></span>
@@ -199,6 +250,7 @@ export default function StudioNodesPanel({
               placeholder="id (unique)"
               value={String(studioDraft.id || '')}
               onChange={(event) => setStudioDraft({ ...studioDraft, id: event.target.value })}
+              aria-label="Custom node id"
               style={{
                 width: '100%',
                 background: 'var(--vscode-input-background)',
@@ -213,6 +265,7 @@ export default function StudioNodesPanel({
               placeholder="title"
               value={String(studioDraft.title || '')}
               onChange={(event) => setStudioDraft({ ...studioDraft, title: event.target.value })}
+              aria-label="Custom node title"
               style={{
                 width: '100%',
                 background: 'var(--vscode-input-background)',
@@ -231,6 +284,7 @@ export default function StudioNodesPanel({
                 placeholder="intent (e.g. git.checkout)"
                 value={String(studioDraft.intent || '')}
                 onChange={(event) => setStudioDraft({ ...studioDraft, intent: event.target.value })}
+                aria-label="Custom node intent"
                 style={{
                   width: '100%',
                   background: 'var(--vscode-input-background)',
@@ -278,6 +332,7 @@ export default function StudioNodesPanel({
                       next[index] = { ...next[index], name: event.target.value };
                       setStudioDraft({ ...studioDraft, schema: next });
                     }}
+                    aria-label={`Schema field name ${index + 1}`}
                     style={{
                       background: 'var(--vscode-input-background)',
                       color: 'var(--vscode-input-foreground)',
@@ -294,6 +349,7 @@ export default function StudioNodesPanel({
                       next[index] = { ...next[index], type: event.target.value as SchemaField['type'] };
                       setStudioDraft({ ...studioDraft, schema: next });
                     }}
+                    aria-label={`Schema field type ${index + 1}`}
                     style={{
                       background: 'var(--vscode-input-background)',
                       color: 'var(--vscode-input-foreground)',
@@ -328,6 +384,7 @@ export default function StudioNodesPanel({
                         ? (Array.isArray(field?.options) ? field.options.join(',') : String(field?.options || ''))
                         : (field?.default !== undefined ? String(field.default) : '')
                     }
+                    aria-label={`Schema field default/options ${index + 1}`}
                     onChange={(event) => {
                       const next = [...(studioDraft.schema || [])];
                       if (String(next[index]?.type) === 'enum') {
@@ -354,6 +411,7 @@ export default function StudioNodesPanel({
                       setStudioDraft({ ...studioDraft, schema: next });
                     }}
                     title="Remove"
+                    aria-label={`Remove schema field ${index + 1}`}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--vscode-errorForeground)' }}
                   >
                     ×
@@ -370,6 +428,7 @@ export default function StudioNodesPanel({
                 value={studioMappingJson}
                 onChange={(event) => setStudioMappingJson(event.target.value)}
                 placeholder='{ "payloadKey": "fieldName" }'
+                aria-label="Custom node mapping JSON"
                 style={{
                   width: '100%',
                   minHeight: '90px',
@@ -390,6 +449,7 @@ export default function StudioNodesPanel({
                 value={studioImportJson}
                 onChange={(event) => setStudioImportJson(event.target.value)}
                 placeholder='{"version":1,"nodes":[...]}'
+                aria-label="Custom node import JSON"
                 style={{
                   width: '100%',
                   minHeight: '90px',
@@ -426,6 +486,7 @@ export default function StudioNodesPanel({
                   className="nodrag"
                   readOnly
                   value={studioExportJson}
+                  aria-label="Custom node export JSON"
                   style={{
                     width: '100%',
                     minHeight: '90px',

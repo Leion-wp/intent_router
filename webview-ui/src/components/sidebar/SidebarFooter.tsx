@@ -5,12 +5,14 @@ type SidebarFooterProps = {
   clearHistory: () => void;
 };
 
-export default function SidebarFooter({ activeView, clearHistory }: SidebarFooterProps) {
+function SidebarFooter({ activeView, clearHistory }: SidebarFooterProps) {
   return (
     <div className="sidebar-footer">
       {activeView === 'history' && (
         <button
+          type="button"
           onClick={clearHistory}
+          aria-label="Clear execution history"
           style={{
             background: 'none',
             border: 'none',
@@ -35,3 +37,5 @@ export default function SidebarFooter({ activeView, clearHistory }: SidebarFoote
     </div>
   );
 }
+
+export default React.memo(SidebarFooter);

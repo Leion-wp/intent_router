@@ -1,4 +1,10 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import {
+  canDeleteContextNode,
+  canDisconnectContextNode,
+  canRunFromContextNode,
+  canToggleCollapseContextNode
+} from '../utils/nodeContextMenuUtils';
 
 type NodeContextMenuProps = {
   contextMenu: { x: number; y: number; nodeId: string } | null;
@@ -25,7 +31,7 @@ const MENU_BUTTON_STYLE: React.CSSProperties = {
   cursor: 'pointer'
 };
 
-export default function NodeContextMenu(props: NodeContextMenuProps) {
+function NodeContextMenu(props: NodeContextMenuProps) {
   const {
     contextMenu,
     canPaste,
@@ -41,12 +47,27 @@ export default function NodeContextMenu(props: NodeContextMenuProps) {
     onClose
   } = props;
 
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const firstButton = menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    firstButton?.focus();
+  }, [contextMenu]);
+
   if (!contextMenu) return null;
 
-  const isStartNode = contextMenu.nodeId === 'start';
+  const canRunFromNode = canRunFromContextNode(contextMenu.nodeId);
+  const canDeleteNode = canDeleteContextNode(contextMenu.nodeId);
+  const canToggleCollapse = canToggleCollapseContextNode(contextMenu.nodeId);
+  const canDisconnectLinks = canDisconnectContextNode(contextMenu.nodeId);
 
   return (
     <div
+      ref={menuRef}
+      role="menu"
+      aria-label="Node context actions"
+      tabIndex={-1}
       className="nodrag"
       style={{
         position: 'fixed',
@@ -61,8 +82,16 @@ export default function NodeContextMenu(props: NodeContextMenuProps) {
         minWidth: '160px'
       }}
       onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onClose();
+        }
+      }}
     >
       <button
+        type="button"
+        role="menuitem"
         className="nodrag"
         onClick={() => {
           onOpenNode(contextMenu.nodeId);
@@ -73,6 +102,8 @@ export default function NodeContextMenu(props: NodeContextMenuProps) {
         Open node
       </button>
       <button
+        type="button"
+        role="menuitem"
         className="nodrag"
         onClick={() => {
           onCopyNode(contextMenu.nodeId);
@@ -83,6 +114,8 @@ export default function NodeContextMenu(props: NodeContextMenuProps) {
         Copy node
       </button>
       <button
+        type="button"
+        role="menuitem"
         className="nodrag"
         onClick={() => {
           onPasteNode({ x: contextMenu.x, y: contextMenu.y });
@@ -98,6 +131,8 @@ export default function NodeContextMenu(props: NodeContextMenuProps) {
         Paste node
       </button>
       <button
+        type="button"
+        role="menuitem"
         className="nodrag"
         onClick={() => {
           onDuplicateNode(contextMenu.nodeId);
@@ -108,56 +143,76 @@ export default function NodeContextMenu(props: NodeContextMenuProps) {
         Duplicate node
       </button>
       <button
+        type="button"
+        role="menuitem"
         className="nodrag"
         onClick={() => {
           onToggleCollapse(contextMenu.nodeId);
           onClose();
         }}
-        style={MENU_BUTTON_STYLE}
+        disabled={!canToggleCollapse}
+        style={{
+          ...MENU_BUTTON_STYLE,
+          color: canToggleCollapse ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
+          cursor: canToggleCollapse ? 'pointer' : 'not-allowed'
+        }}
       >
         Toggle collapse
       </button>
       <button
+        type="button"
+        role="menuitem"
         className="nodrag"
         onClick={() => {
           onDisconnectNodeLinks(contextMenu.nodeId);
           onClose();
         }}
-        style={MENU_BUTTON_STYLE}
+        disabled={!canDisconnectLinks}
+        style={{
+          ...MENU_BUTTON_STYLE,
+          color: canDisconnectLinks ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
+          cursor: canDisconnectLinks ? 'pointer' : 'not-allowed'
+        }}
       >
         Disconnect links
       </button>
       <button
+        type="button"
+        role="menuitem"
         className="nodrag"
         onClick={() => {
           onRunFromNode(contextMenu.nodeId, false);
           onClose();
         }}
-        disabled={isStartNode}
+        disabled={!canRunFromNode}
         style={{
           ...MENU_BUTTON_STYLE,
-          color: isStartNode ? 'var(--vscode-descriptionForeground)' : 'var(--vscode-foreground)',
-          cursor: isStartNode ? 'not-allowed' : 'pointer'
+          color: canRunFromNode ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
+          cursor: canRunFromNode ? 'pointer' : 'not-allowed'
         }}
       >
         Run from here
       </button>
       <button
+        type="button"
+        role="menuitem"
         className="nodrag"
         onClick={() => {
           onRunFromNode(contextMenu.nodeId, true);
           onClose();
         }}
-        disabled={isStartNode}
+        disabled={!canRunFromNode}
         style={{
           ...MENU_BUTTON_STYLE,
-          color: isStartNode ? 'var(--vscode-descriptionForeground)' : 'var(--vscode-foreground)',
-          cursor: isStartNode ? 'not-allowed' : 'pointer'
+          color: canRunFromNode ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
+          cursor: canRunFromNode ? 'pointer' : 'not-allowed'
         }}
       >
         Dry run from here
       </button>
       <button
+        type="button"
+        role="menuitem"
         className="nodrag"
         onClick={() => {
           onClearHighlight();
@@ -171,16 +226,18 @@ export default function NodeContextMenu(props: NodeContextMenuProps) {
         Clear highlight
       </button>
       <button
+        type="button"
+        role="menuitem"
         className="nodrag"
         onClick={() => {
           onDeleteNode(contextMenu.nodeId);
           onClose();
         }}
-        disabled={isStartNode}
+        disabled={!canDeleteNode}
         style={{
           ...MENU_BUTTON_STYLE,
-          color: isStartNode ? 'var(--vscode-descriptionForeground)' : 'var(--vscode-errorForeground)',
-          cursor: isStartNode ? 'not-allowed' : 'pointer'
+          color: canDeleteNode ? 'var(--vscode-errorForeground)' : 'var(--vscode-descriptionForeground)',
+          cursor: canDeleteNode ? 'pointer' : 'not-allowed'
         }}
       >
         Delete node
@@ -188,3 +245,5 @@ export default function NodeContextMenu(props: NodeContextMenuProps) {
     </div>
   );
 }
+
+export default React.memo(NodeContextMenu);

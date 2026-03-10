@@ -58,14 +58,14 @@
             "status": "idle"
           },
           "position": {
-            "x": 250,
-            "y": 50
+            "x": 135,
+            "y": -210
           },
           "sourcePosition": "right",
           "deletable": false,
           "measured": {
-            "width": 283,
-            "height": 234
+            "width": 282,
+            "height": 213
           },
           "selected": false,
           "dragging": false
@@ -74,8 +74,8 @@
           "id": "node_1",
           "type": "actionNode",
           "position": {
-            "x": 540,
-            "y": -30
+            "x": 390,
+            "y": -315
           },
           "data": {
             "provider": "terminal",
@@ -90,8 +90,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 273,
-            "height": 319
+            "width": 427,
+            "height": 549
           },
           "selected": false,
           "dragging": false
@@ -100,8 +100,8 @@
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 810,
-            "y": -30
+            "x": 840,
+            "y": -315
           },
           "data": {
             "provider": "terminal",
@@ -112,22 +112,22 @@
             },
             "kind": "action",
             "label": "compilation",
-            "collapsed": false,
+            "collapsed": true,
             "status": "idle"
           },
           "measured": {
-            "width": 273,
-            "height": 319
+            "width": 282,
+            "height": 55
           },
-          "selected": false,
+          "selected": true,
           "dragging": false
         },
         {
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 1080,
-            "y": -30
+            "x": 1155,
+            "y": -180
           },
           "data": {
             "provider": "terminal",
@@ -138,12 +138,12 @@
             },
             "kind": "action",
             "label": "package vsix",
-            "collapsed": false,
+            "collapsed": true,
             "status": "idle"
           },
           "measured": {
-            "width": 273,
-            "height": 319
+            "width": 282,
+            "height": 55
           },
           "selected": false,
           "dragging": false
@@ -152,8 +152,8 @@
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1350,
-            "y": 30
+            "x": 1515,
+            "y": -15
           },
           "data": {
             "commandId": "workbench.extensions.action.installVSIX",
@@ -164,8 +164,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 283,
-            "height": 51
+            "width": 282,
+            "height": 47
           },
           "selected": false,
           "dragging": false
@@ -174,7 +174,7 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1350,
+            "x": 1890,
             "y": 75
           },
           "data": {
@@ -186,10 +186,10 @@
             "status": "idle"
           },
           "measured": {
-            "width": 283,
-            "height": 51
+            "width": 282,
+            "height": 47
           },
-          "selected": true,
+          "selected": false,
           "dragging": false
         }
       ],
@@ -233,7 +233,8 @@
           "target": "node_9",
           "markerEnd": {
             "type": "arrowclosed"
-          }
+          },
+          "className": "ir-edge-running"
         },
         {
           "source": "node_5",
@@ -241,7 +242,8 @@
           "markerEnd": {
             "type": "arrowclosed"
           },
-          "id": "xy-edge__node_5-node_7"
+          "id": "xy-edge__node_5-node_7",
+          "className": "ir-edge-running"
         }
       ]
     }

@@ -46,160 +46,109 @@ const PromptNode = ({ data, id }: NodeProps) => {
     }
   }, []);
 
-  const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
-  const runningGlow = status === 'running' ? `0 0 10px ${borderColor}` : '';
-  const previewGlow = isRunPreviewNode(id) ? '0 0 0 3px rgba(0, 153, 255, 0.35)' : '';
-  const boxShadow = [runningGlow, previewGlow].filter(Boolean).join(', ') || 'none';
+  const isRunning = status === 'running';
+  const themeColor = '#ff00ff';
+
+  const handleStyle = {
+    width: '12px',
+    height: '12px',
+    border: '2px solid rgba(255, 255, 255, 0.2)',
+    boxShadow: '0 0 8px rgba(0,0,0,0.5)',
+    zIndex: 10,
+    transition: 'all 0.2s ease'
+  };
 
   return (
-    <div style={{
-      position: 'relative',
-      padding: '10px',
-      borderRadius: '5px',
-      background: 'var(--vscode-editor-background)',
-      border: `2px solid ${borderColor}`,
-      boxShadow,
-      minWidth: '200px',
-      color: 'var(--vscode-editor-foreground)',
-      fontFamily: 'var(--vscode-font-family)'
-    }}>
+    <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '280px' }}>
       {inputHandles.map((inputName, index) => (
         <div key={`in-${inputName}`}>
           <Handle
             type="target"
             position={Position.Left}
             id={inputName === 'in' ? 'in' : `in_${inputName}`}
-            style={{ top: handleTop(index, inputHandles.length) }}
+            style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-6px', background: themeColor }}
           />
-          <span
-            style={{
-              position: 'absolute',
-              left: '-2px',
-              top: handleTop(index, inputHandles.length),
-              transform: 'translate(-100%, -50%)',
-              fontSize: '10px',
-              opacity: inputName === 'in' ? 0.8 : 0.65,
-              whiteSpace: 'nowrap'
-            }}
-          >
-            {inputName}
-          </span>
         </div>
       ))}
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-6px', background: themeColor }} />
+      <Handle type="source" position={Position.Right} id="out_value" style={{ ...handleStyle, top: '74%', right: '-6px', background: '#7e57c2' }} />
 
-      <div style={{ marginBottom: '8px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-          <span className="codicon codicon-symbol-string"></span>
-          {editingLabel ? (
-            <input
-              className="nodrag"
-              value={label}
-              autoFocus
-              onChange={(e) => {
-                const v = e.target.value;
-                setLabel(v);
-                updateNodeData(id, { label: v });
-              }}
-              onBlur={() => setEditingLabel(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') setEditingLabel(false);
-              }}
-              style={{
-                flex: 1,
-                background: 'var(--vscode-input-background)',
-                color: 'var(--vscode-input-foreground)',
-                border: '1px solid var(--vscode-input-border)',
-                padding: '2px 4px',
-                borderRadius: '4px'
-              }}
-            />
-          ) : (
-            <span
-              title="Click to rename"
-              onClick={() => setEditingLabel(true)}
-              style={{ cursor: 'text', userSelect: 'none' }}
-            >
-              {label || 'Prompt / Set Var'}
-            </span>
-          )}
-          {status !== 'idle' && <span className={`status-badge ${status}`}>{status}</span>}
-        </div>
-        <button
-          className="nodrag"
-          onClick={() => updateNodeData(id, { collapsed: !collapsed })}
-          title={collapsed ? 'Expand' : 'Collapse'}
-          style={{
-            background: 'transparent',
-            color: 'var(--vscode-foreground)',
-            border: '1px solid var(--vscode-editorWidget-border)',
-            borderRadius: '4px',
-            width: '20px',
-            height: '20px',
-            cursor: 'pointer'
-          }}
-        >
-          {collapsed ? '▸' : '▾'}
-        </button>
-      </div>
-
-      {!collapsed && (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <IoSpec
-          inputs={['name*', 'default']}
-          outputs={[name ? `var:${name}` : 'var']}
-        />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          <label style={{ fontSize: '0.75em', opacity: 0.9 }}>
-            Variable Name <span style={{ color: 'var(--ir-status-error)' }}>*</span>
-          </label>
-          <input
+      <div>
+        <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}15 0%, transparent 100%)` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+            <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #e000e0 100%)` }}>
+              <span className="codicon codicon-symbol-string" style={{ color: '#fff', fontSize: '14px' }}></span>
+            </div>
+            {editingLabel ? (
+              <input
+                className="nodrag"
+                value={label}
+                autoFocus
+                onChange={(e) => { setLabel(e.target.value); updateNodeData(id, { label: e.target.value }); }}
+                onBlur={() => setEditingLabel(false)}
+                onKeyDown={(e) => { if (e.key === 'Enter') setEditingLabel(false); }}
+                style={{ width: '100%' }}
+              />
+            ) : (
+              <span onClick={() => setEditingLabel(true)} className="glass-node-label">
+                {label || 'Prompt / Set Var'}
+              </span>
+            )}
+          </div>
+          <button
             className="nodrag"
-            type="text"
-            value={name}
-            onChange={(e) => {
-              const v = e.target.value;
-              setName(v);
-              updateNodeData(id, { name: v });
+            onClick={() => updateNodeData(id, { collapsed: !collapsed })}
+            style={{ 
+              background: 'rgba(255,255,255,0.05)', 
+              border: 'none', 
+              color: '#aaa', 
+              cursor: 'pointer',
+              borderRadius: '6px',
+              width: '24px',
+              height: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}
-            placeholder="e.g. branchName"
-            style={{
-              background: 'var(--vscode-input-background)',
-              color: 'var(--vscode-input-foreground)',
-              border: '1px solid var(--vscode-input-border)',
-              padding: '4px'
-            }}
-          />
+          >
+            <span className={`codicon codicon-chevron-${collapsed ? 'down' : 'up'}`} style={{ fontSize: '12px' }}></span>
+          </button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          <label style={{ fontSize: '0.75em', opacity: 0.9 }}>
-            Default Value
-          </label>
-          <input
-            className="nodrag"
-            type="text"
-            value={defaultValue}
-            onChange={(e) => {
-              const v = e.target.value;
-              setDefaultValue(v);
-              updateNodeData(id, { value: v });
-            }}
-            placeholder="Default value"
-            style={{
-              background: 'var(--vscode-input-background)',
-              color: 'var(--vscode-input-foreground)',
-              border: '1px solid var(--vscode-input-border)',
-              padding: '4px'
-            }}
-          />
-        </div>
+        {!collapsed && (
+          <div className="glass-node-body">
+            <div className="glass-node-input-group">
+              <label className="glass-node-input-label">Variable Name</label>
+              <input
+                className="nodrag"
+                type="text"
+                value={name}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setName(v);
+                  updateNodeData(id, { name: v });
+                }}
+                placeholder="e.g. branchName"
+              />
+            </div>
+
+            <div className="glass-node-input-group">
+              <label className="glass-node-input-label">Default Value</label>
+              <input
+                className="nodrag"
+                type="text"
+                value={defaultValue}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setDefaultValue(v);
+                  updateNodeData(id, { value: v });
+                }}
+                placeholder="Default value"
+              />
+            </div>
+          </div>
+        )}
       </div>
-      )}
-
-      <Handle type="source" position={Position.Right} id="success" />
-      <span style={{ position: 'absolute', right: '-2px', top: '50%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.85, whiteSpace: 'nowrap' }}>success</span>
-      <Handle type="source" position={Position.Right} id="out_value" style={{ top: '74%', background: '#7e57c2' }} />
-      <span style={{ position: 'absolute', right: '-2px', top: '74%', transform: 'translate(100%, -50%)', fontSize: '10px', opacity: 0.75, whiteSpace: 'nowrap' }}>value</span>
     </div>
   );
 };

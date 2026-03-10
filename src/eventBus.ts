@@ -3,9 +3,50 @@ import * as vscode from 'vscode';
 export type PipelineEvent =
     | { type: 'pipelineStart'; runId: string; timestamp: number; totalSteps?: number; name?: string; pipeline?: any }
     | { type: 'pipelineEnd'; runId: string; timestamp: number; success: boolean; status?: 'success' | 'failure' | 'cancelled' }
-    | { type: 'stepStart'; runId: string; intentId: string; timestamp: number; description?: string; index?: number; stepId?: string }
+    | { type: 'stepStart'; runId: string; intentId: string; timestamp: number; description?: string; intent?: string; index?: number; stepId?: string }
     | { type: 'stepEnd'; runId: string; intentId: string; timestamp: number; success: boolean; index?: number; stepId?: string }
     | { type: 'stepLog'; runId: string; intentId: string; stepId?: string; text: string; stream: 'stdout' | 'stderr' }
+    | {
+        type: 'approvalReviewReady';
+        runId: string;
+        intentId: string;
+        stepId?: string;
+        files: Array<{ path: string; added: number; removed: number }>;
+        totalAdded: number;
+        totalRemoved: number;
+        diffSignature?: string;
+        policyMode?: 'warn' | 'block';
+        policyBlocked?: boolean;
+        policyViolations?: string[];
+    }
+    | {
+        type: 'teamRunSummary';
+        runId: string;
+        intentId: string;
+        stepId?: string;
+        strategy: 'sequential' | 'reviewer_gate' | 'vote';
+        winnerMember?: string;
+        winnerReason?: string;
+        voteScoreByMember?: Array<{ member: string; role: 'writer' | 'reviewer'; weight: number; score: number }>;
+        members: Array<{ name: string; role: 'writer' | 'reviewer'; path: string; files: number }>;
+        totalFiles: number;
+    }
+    | {
+        type: 'githubPullRequestCreated';
+        runId?: string;
+        intentId?: string;
+        stepId?: string;
+        provider: 'github';
+        url: string;
+        number?: number;
+        state?: 'open' | 'closed' | 'merged';
+        isDraft?: boolean;
+        head: string;
+        base: string;
+        title: string;
+    }
+    | { type: 'pipelineDecision'; nodeId?: string; runId?: string; approvedPaths?: string[]; decision: 'approve' | 'reject' }
+    | { type: 'pipelineReviewOpenDiff'; nodeId?: string; runId?: string; path?: string }
     | { type: 'pipelinePause'; runId: string; timestamp: number }
     | { type: 'pipelineResume'; runId: string; timestamp: number };
 

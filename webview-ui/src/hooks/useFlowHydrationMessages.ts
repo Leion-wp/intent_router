@@ -99,6 +99,80 @@ export function useFlowHydrationMessages(options: UseFlowHydrationMessagesOption
             stream: typed.stream
           }, maxLogLines));
           break;
+
+        case 'approvalReviewReady':
+          if (!typed.stepId) {
+            break;
+          }
+          setNodes((nodes: any[]) => nodes.map((node: any) => {
+            if (node.id !== typed.stepId) {
+              return node;
+            }
+            return {
+              ...node,
+              data: {
+                ...(node.data || {}),
+                reviewRunId: typed.runId,
+                reviewFiles: Array.isArray(typed.files) ? typed.files : [],
+                reviewTotals: {
+                  added: Number(typed.totalAdded || 0),
+                  removed: Number(typed.totalRemoved || 0)
+                },
+                reviewPolicyMode: typed.policyMode || 'warn',
+                reviewPolicyBlocked: !!typed.policyBlocked,
+                reviewPolicyViolations: Array.isArray(typed.policyViolations) ? typed.policyViolations : []
+              }
+            };
+          }));
+          break;
+
+        case 'teamRunSummary':
+          if (!typed.stepId) {
+            break;
+          }
+          setNodes((nodes: any[]) => nodes.map((node: any) => {
+            if (node.id !== typed.stepId) {
+              return node;
+            }
+            return {
+              ...node,
+              data: {
+                ...(node.data || {}),
+                teamSummary: {
+                  runId: typed.runId,
+                  strategy: typed.strategy,
+                  winnerMember: typed.winnerMember,
+                  winnerReason: typed.winnerReason,
+                  voteScoreByMember: Array.isArray(typed.voteScoreByMember) ? typed.voteScoreByMember : [],
+                  members: Array.isArray(typed.members) ? typed.members : [],
+                  totalFiles: Number(typed.totalFiles || 0)
+                }
+              }
+            };
+          }));
+          break;
+
+        case 'sessionMemoryStatus':
+          if (!typed.nodeId) {
+            break;
+          }
+          setNodes((nodes: any[]) => nodes.map((node: any) => {
+            if (node.id !== typed.nodeId) {
+              return node;
+            }
+            return {
+              ...node,
+              data: {
+                ...(node.data || {}),
+                sessionMemoryStatus: {
+                  sessionId: typed.sessionId || '',
+                  entries: Number(typed.entries || 0),
+                  lastTimestamp: Number(typed.lastTimestamp || 0)
+                }
+              }
+            };
+          }));
+          break;
       }
     };
 

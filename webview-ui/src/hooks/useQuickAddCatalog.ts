@@ -40,9 +40,22 @@ export function useQuickAddCatalog(options: UseQuickAddCatalogOptions) {
   } = options;
 
   const presetItems: QuickAddItem[] = useMemo(() => ([
+    { id: 'preset-agent', label: 'AI Agent', nodeType: 'agentNode', category: 'ai' },
+    { id: 'preset-team', label: 'AI Team', nodeType: 'teamNode', category: 'ai' },
+    { id: 'preset-approval', label: 'Diff Approval', nodeType: 'approvalNode', category: 'context' },
+    { id: 'preset-http', label: 'HTTP Request', nodeType: 'httpNode', category: 'providers' },
     { id: 'preset-prompt', label: 'Prompt', nodeType: 'promptNode', category: 'context' },
     { id: 'preset-form', label: 'Form', nodeType: 'formNode', category: 'context' },
+    { id: 'preset-if', label: 'If / Else', nodeType: 'ifNode', category: 'context' },
     { id: 'preset-switch', label: 'Switch', nodeType: 'switchNode', category: 'context' },
+    { id: 'preset-subpipeline', label: 'Sub-pipeline', nodeType: 'subPipelineNode', category: 'context' },
+    { id: 'preset-loop', label: 'Loop', nodeType: 'loopNode', category: 'context' },
+    { id: 'preset-trigger-cron', label: 'Cron Trigger', nodeType: 'actionNode', category: 'context', provider: 'system', capability: 'system.trigger.cron' },
+    { id: 'preset-trigger-webhook', label: 'Webhook Trigger', nodeType: 'actionNode', category: 'context', provider: 'system', capability: 'system.trigger.webhook' },
+    { id: 'preset-trigger-watch', label: 'Watch Trigger', nodeType: 'actionNode', category: 'context', provider: 'system', capability: 'system.trigger.watch' },
+    { id: 'preset-memory-save', label: 'Memory Save', nodeType: 'actionNode', category: 'context', provider: 'system', capability: 'memory.save' },
+    { id: 'preset-memory-recall', label: 'Memory Recall', nodeType: 'actionNode', category: 'context', provider: 'system', capability: 'memory.recall' },
+    { id: 'preset-memory-clear', label: 'Memory Clear', nodeType: 'actionNode', category: 'context', provider: 'system', capability: 'memory.clear' },
     { id: 'preset-script', label: 'Script', nodeType: 'scriptNode', category: 'context' },
     { id: 'preset-repo', label: 'Repo', nodeType: 'repoNode', category: 'context' },
     { id: 'preset-terminal', label: 'Terminal', nodeType: 'actionNode', category: 'providers', provider: 'terminal', capability: getDefaultCapability('terminal') },

@@ -27,7 +27,54 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
   if (item.nodeType === 'actionNode') {
     data.provider = item.provider || 'terminal';
     data.capability = item.capability || getDefaultCapability(item.provider || 'terminal');
-    data.args = {};
+    if (data.capability === 'system.trigger.cron') {
+      data.args = {
+        everyHours: '1',
+        enabled: true,
+        cooldownMs: '5000'
+      };
+    } else if (data.capability === 'system.trigger.webhook') {
+      data.args = {
+        path: '/factory/trigger',
+        method: 'POST',
+        enabled: true,
+        cooldownMs: '2000'
+      };
+    } else if (data.capability === 'system.trigger.watch') {
+      data.args = {
+        glob: 'idea.md',
+        events: 'change',
+        enabled: true,
+        debounceMs: '800',
+        cooldownMs: '1500'
+      };
+    } else if (data.capability === 'memory.save') {
+      data.args = {
+        sessionId: 'default',
+        key: 'entry',
+        scope: 'variables',
+        variableKeys: '',
+        tags: ''
+      };
+    } else if (data.capability === 'memory.recall') {
+      data.args = {
+        sessionId: 'default',
+        key: '',
+        limit: '5',
+        mode: 'latest',
+        outputVar: 'memory_recall',
+        injectVars: false,
+        injectPrefix: ''
+      };
+    } else if (data.capability === 'memory.clear') {
+      data.args = {
+        sessionId: 'default',
+        key: '',
+        keepLast: '0'
+      };
+    } else {
+      data.args = {};
+    }
   } else if (item.nodeType === 'customNode') {
     return buildCustomNodeData(String(item.customNodeId || ''), customNodesById);
   } else if (item.nodeType === 'formNode') {
@@ -38,16 +85,86 @@ export function buildQuickAddNodeData(item: any, options: NodeBuilderOptions): a
     data.variableKey = '';
     data.routes = [];
     data.kind = 'switch';
+  } else if (item.nodeType === 'ifNode') {
+    data.label = 'If / Else';
+    data.variableKey = '';
+    data.condition = 'equals';
+    data.value = '';
+    data.kind = 'ifelse';
   } else if (item.nodeType === 'scriptNode') {
     data.scriptPath = '';
     data.args = '';
     data.cwd = '';
     data.interpreter = '';
     data.kind = 'script';
+  } else if (item.nodeType === 'subPipelineNode') {
+    data.label = 'Sub-pipeline';
+    data.pipelinePath = '';
+    data.dryRunChild = false;
+    data.inputJson = '';
+    data.outputVar = 'subpipeline_result';
+    data.kind = 'subpipeline';
+  } else if (item.nodeType === 'loopNode') {
+    data.label = 'Loop';
+    data.executionMode = 'child_pipeline';
+    data.items = '';
+    data.bodyStepIds = '';
+    data.pipelinePath = '';
+    data.itemVar = 'loop_item';
+    data.indexVar = 'loop_index';
+    data.maxIterations = 20;
+    data.repeatCount = 1;
+    data.dryRunChild = false;
+    data.continueOnChildError = false;
+    data.errorStrategy = 'fail_fast';
+    data.errorThreshold = 1;
+    data.outputVar = 'loop_result';
+    data.kind = 'loop';
   } else if (item.nodeType === 'promptNode') {
     data.name = '';
     data.value = '';
     data.kind = 'prompt';
+  } else if (item.nodeType === 'agentNode') {
+    data.label = 'AI Agent';
+    data.agent = 'gemini';
+    data.model = 'gemini-2.5-flash';
+    data.role = 'architect';
+    data.reasoningEffort = 'medium';
+    data.cwd = '';
+    data.systemPrompt = '';
+    data.instruction = '';
+    data.instructionTemplate = '';
+    data.contextFiles = ['src/**/*.ts'];
+    data.agentSpecFiles = ['AGENTS.md', '**/SKILL.md'];
+    data.outputContract = 'path_result';
+    data.outputVar = 'ai_result';
+    data.outputVarPath = 'ai_path';
+    data.outputVarChanges = 'ai_changes';
+    data.sessionId = '';
+    data.sessionMode = 'read_write';
+    data.sessionResetBeforeRun = false;
+    data.sessionRecallLimit = 12;
+    data.kind = 'agent';
+  } else if (item.nodeType === 'teamNode') {
+    data.label = 'AI Team';
+    data.strategy = 'sequential';
+    data.cwd = '';
+    data.systemPrompt = '';
+    data.members = [
+      { name: 'member_1', role: 'writer', agent: 'gemini', model: 'gemini-2.5-flash', instruction: '' }
+    ];
+    data.contextFiles = [];
+    data.agentSpecFiles = ['AGENTS.md', '**/SKILL.md'];
+    data.outputContract = 'path_result';
+    data.outputVar = 'team_result';
+    data.outputVarPath = 'team_path';
+    data.outputVarChanges = 'team_changes';
+    data.reviewerVoteWeight = 2;
+    data.sessionId = '';
+    data.sessionMode = 'read_write';
+    data.sessionResetBeforeRun = false;
+    data.sessionRecallLimit = 12;
+    data.kind = 'team';
   } else if (item.nodeType === 'repoNode') {
     data.path = '';
     data.kind = 'repo';
@@ -83,11 +200,84 @@ export function buildDropNodeData(
   if (type === 'switchNode') {
     return { label: 'Switch', variableKey: '', routes: [], status: 'idle', kind: 'switch' };
   }
+  if (type === 'ifNode') {
+    return { label: 'If / Else', variableKey: '', condition: 'equals', value: '', status: 'idle', kind: 'ifelse' };
+  }
   if (type === 'scriptNode') {
     return { scriptPath: '', args: '', cwd: '', interpreter: '', status: 'idle', kind: 'script' };
   }
+  if (type === 'subPipelineNode') {
+    return { label: 'Sub-pipeline', pipelinePath: '', dryRunChild: false, inputJson: '', outputVar: 'subpipeline_result', status: 'idle', kind: 'subpipeline' };
+  }
+  if (type === 'loopNode') {
+    return {
+      label: 'Loop',
+      executionMode: 'child_pipeline',
+      items: '',
+      bodyStepIds: '',
+      pipelinePath: '',
+      itemVar: 'loop_item',
+      indexVar: 'loop_index',
+      maxIterations: 20,
+      repeatCount: 1,
+      dryRunChild: false,
+      continueOnChildError: false,
+      errorStrategy: 'fail_fast',
+      errorThreshold: 1,
+      outputVar: 'loop_result',
+      status: 'idle',
+      kind: 'loop'
+    };
+  }
   if (type === 'promptNode') {
     return { name: '', value: '', kind: 'prompt' };
+  }
+  if (type === 'agentNode') {
+    return {
+      label: 'AI Agent',
+      agent: 'gemini',
+      model: 'gemini-2.5-flash',
+      role: 'architect',
+      reasoningEffort: 'medium',
+      cwd: '',
+      systemPrompt: '',
+      instruction: '',
+      instructionTemplate: '',
+      contextFiles: ['src/**/*.ts'],
+      agentSpecFiles: ['AGENTS.md', '**/SKILL.md'],
+      outputContract: 'path_result',
+      outputVar: 'ai_result',
+      outputVarPath: 'ai_path',
+      outputVarChanges: 'ai_changes',
+      sessionId: '',
+      sessionMode: 'read_write',
+      sessionResetBeforeRun: false,
+      sessionRecallLimit: 12,
+      status: 'idle',
+      kind: 'agent'
+    };
+  }
+  if (type === 'teamNode') {
+    return {
+      label: 'AI Team',
+      strategy: 'sequential',
+      cwd: '',
+      systemPrompt: '',
+      members: [{ name: 'member_1', role: 'writer', agent: 'gemini', model: 'gemini-2.5-flash', instruction: '' }],
+      contextFiles: [],
+      agentSpecFiles: ['AGENTS.md', '**/SKILL.md'],
+      outputContract: 'path_result',
+      outputVar: 'team_result',
+      outputVarPath: 'team_path',
+      outputVarChanges: 'team_changes',
+      reviewerVoteWeight: 2,
+      sessionId: '',
+      sessionMode: 'read_write',
+      sessionResetBeforeRun: false,
+      sessionRecallLimit: 12,
+      status: 'idle',
+      kind: 'team'
+    };
   }
   if (type === 'repoNode') {
     return { path: '${workspaceRoot}', kind: 'repo' };

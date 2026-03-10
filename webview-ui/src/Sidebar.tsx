@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useDeferredValue, useMemo, useState, useEffect, useRef } from 'react';
 import { WebviewOutboundMessage } from './types/messages';
 import { normalizeUiPreset, SidebarTabPreset, SidebarTabType, UiPreset } from './types/theme';
 import ProvidersPanel from './components/sidebar/ProvidersPanel';
@@ -12,11 +12,14 @@ import { useStudioSidebarState } from './hooks/useStudioSidebarState';
 import { useUiPresetSidebarState } from './hooks/useUiPresetSidebarState';
 import { useSidebarEnvironmentState } from './hooks/useSidebarEnvironmentState';
 import { useProvidersCatalogState } from './hooks/useProvidersCatalogState';
+import { computeHistoryWindow, filterHistoryRuns } from './utils/historyListUtils';
 
 type SidebarProps = {
   history?: any[];
   onSelectHistory?: (run: any) => void;
   onRestoreHistory?: (run: any) => void;
+  onResumeHistory?: (run: any, startStepId: string) => void;
+  onExportRunAudit?: (runId: string) => void;
   adminMode?: boolean;
   tab?: string;
   onTabChange?: (tab: string) => void;
@@ -25,7 +28,6 @@ type SidebarProps = {
   uiPresetRelease?: UiPreset;
 };
 
-// Acquire VS Code API (safe singleton) - reuse from App or get from global
 declare global {
   interface Window {
     vscode: any;
@@ -40,7 +42,19 @@ function resolveSidebarView(type: SidebarTabType | string | undefined): 'provide
   return 'providers';
 }
 
-export default function Sidebar({ history = [], onSelectHistory, onRestoreHistory, adminMode = false, tab: tabProp, onTabChange, tabs = [], uiPreset, uiPresetRelease }: SidebarProps) {
+function Sidebar({
+  history = [],
+  onSelectHistory,
+  onRestoreHistory,
+  onResumeHistory,
+  onExportRunAudit,
+  adminMode = false,
+  tab: tabProp,
+  onTabChange,
+  tabs = [],
+  uiPreset,
+  uiPresetRelease
+}: SidebarProps) {
   const [internalTab, setInternalTab] = useState<string>('nodes');
   const tab = tabProp ?? internalTab;
   const setTab = (next: string) => {
@@ -76,7 +90,10 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     deleteDraft,
     exportSelectedOrAll,
     importFromPaste,
-    importFromFile
+    importFromFile,
+    retryLastAction: retryStudioAction,
+    clearFeedback: clearStudioFeedback,
+    canRetryLastAction: canRetryStudioAction
   } = useStudioSidebarState();
   const {
     uiPresetDraft,
@@ -101,12 +118,19 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     updatePinnedList,
     uiDraftValidationErrors,
     uiDraftDiff,
-    canPropagate
+    canPropagate,
+    retryLastAction: retryThemeAction,
+    clearFeedback: clearThemeFeedback,
+    canRetryLastAction: canRetryThemeAction
   } = useUiPresetSidebarState({ uiPreset, uiPresetRelease, adminMode });
   const [historySearch, setHistorySearch] = useState<string>('');
   const [historyScrollTop, setHistoryScrollTop] = useState<number>(0);
   const [historyViewportHeight, setHistoryViewportHeight] = useState<number>(360);
+  const historyScrollRafRef = useRef<number | null>(null);
+  const historySearchPersistTimerRef = useRef<number | null>(null);
+  const pendingHistoryScrollTopRef = useRef<number>(0);
   const historyContainerRef = useRef<HTMLDivElement | null>(null);
+  const deferredHistorySearch = useDeferredValue(historySearch);
   const devMode = !!window.initialData?.devMode;
 
   const onDragStart = (event: React.DragEvent, nodeType: string, provider?: string) => {
@@ -127,8 +151,6 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     providersSearchRef,
     providersSearch,
     setProvidersSearch,
-    providersFilter,
-    setProvidersFilter,
     catalogBySection,
     renderCatalogSection
   } = useProvidersCatalogState({
@@ -163,14 +185,26 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
 
   useEffect(() => {
     try {
-      const prev = window.vscode?.getState?.() || {};
-      window.vscode?.setState?.({
-        ...prev,
-        historySearch
-      });
+      if (historySearchPersistTimerRef.current !== null) {
+        clearTimeout(historySearchPersistTimerRef.current);
+      }
+      historySearchPersistTimerRef.current = window.setTimeout(() => {
+        const prev = window.vscode?.getState?.() || {};
+        window.vscode?.setState?.({
+          ...prev,
+          historySearch
+        });
+        historySearchPersistTimerRef.current = null;
+      }, 120);
     } catch {
       // ignore
     }
+    return () => {
+      if (historySearchPersistTimerRef.current !== null) {
+        clearTimeout(historySearchPersistTimerRef.current);
+        historySearchPersistTimerRef.current = null;
+      }
+    };
   }, [historySearch]);
 
   useEffect(() => {
@@ -191,44 +225,104 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
     }
   }, [effectiveTabs, tab]);
 
-	  const clearHistory = () => {
-	    if (window.vscode) {
-	        const msg: WebviewOutboundMessage = { type: 'clearHistory' };
-	        window.vscode.postMessage(msg);
-	    }
-	  };
+  const clearHistory = () => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'clearHistory' };
+    window.vscode.postMessage(msg);
+  };
 
-  const filteredHistory = useMemo(() => {
-    const q = historySearch.trim().toLowerCase();
-    if (!q) return history;
-    return history.filter((run: any) => {
-      const name = String(run?.name || '').toLowerCase();
-      const status = String(run?.status || '').toLowerCase();
-      const time = new Date(run?.timestamp || 0).toLocaleTimeString().toLowerCase();
-      return `${name} ${status} ${time}`.includes(q);
+  const openExternal = (url: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'openExternal', url };
+    window.vscode.postMessage(msg);
+  };
+
+  const copyToClipboard = (text: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'copyToClipboard', text };
+    window.vscode.postMessage(msg);
+  };
+
+  const exportRunAudit = (runId: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'exportRunAudit', runId };
+    window.vscode.postMessage(msg);
+    onExportRunAudit?.(runId);
+  };
+
+  const fetchPrChecks = (url: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'githubPrChecks', url };
+    window.vscode.postMessage(msg);
+  };
+
+  const rerunPrChecks = (url: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'githubPrRerunFailed', url };
+    window.vscode.postMessage(msg);
+  };
+
+  const commentPr = (url: string) => {
+    const body = window.prompt('PR comment');
+    if (!body || !window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'githubPrComment', url, body };
+    window.vscode.postMessage(msg);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (historyScrollRafRef.current !== null) {
+        cancelAnimationFrame(historyScrollRafRef.current);
+        historyScrollRafRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleHistoryScroll = (top: number) => {
+    pendingHistoryScrollTopRef.current = top;
+    if (historyScrollRafRef.current !== null) return;
+    historyScrollRafRef.current = requestAnimationFrame(() => {
+      historyScrollRafRef.current = null;
+      setHistoryScrollTop(pendingHistoryScrollTopRef.current);
     });
-  }, [history, historySearch]);
+  };
 
-  const HISTORY_ROW_HEIGHT = 92;
+  const filteredHistory = useMemo(
+    () => filterHistoryRuns(history, deferredHistorySearch),
+    [deferredHistorySearch, history]
+  );
+
+  const HISTORY_ROW_HEIGHT = 176;
   const HISTORY_OVERSCAN = 6;
   const historyTotalHeight = filteredHistory.length * HISTORY_ROW_HEIGHT;
-  const historyStartIndex = Math.max(0, Math.floor(historyScrollTop / HISTORY_ROW_HEIGHT) - HISTORY_OVERSCAN);
-  const historyVisibleCount = Math.max(1, Math.ceil(historyViewportHeight / HISTORY_ROW_HEIGHT) + HISTORY_OVERSCAN * 2);
-  const historyEndIndex = Math.min(filteredHistory.length, historyStartIndex + historyVisibleCount);
+  const {
+    startIndex: historyStartIndex,
+    endIndex: historyEndIndex
+  } = computeHistoryWindow({
+    total: filteredHistory.length,
+    scrollTop: historyScrollTop,
+    viewportHeight: historyViewportHeight,
+    rowHeight: HISTORY_ROW_HEIGHT,
+    overscan: HISTORY_OVERSCAN
+  });
   const historyWindow = filteredHistory.slice(historyStartIndex, historyEndIndex);
 
   return (
     <aside className="sidebar">
       <SidebarTabs effectiveTabs={effectiveTabs} activeTabId={tab} onSelectTab={setTab} />
 
-	      <div className="sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+      <div
+        id={`panel-${tab}`}
+        role="tabpanel"
+        aria-labelledby={`tab-${tab}`}
+        className="sidebar-content"
+        style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}
+      >
         {activeView === 'providers' && (
           <ProvidersPanel
             providersSearchRef={providersSearchRef}
             providersSearch={providersSearch}
             onProvidersSearchChange={setProvidersSearch}
-            providersFilter={providersFilter}
-            onProvidersFilterChange={setProvidersFilter}
             catalogBySection={catalogBySection}
             renderCatalogSection={renderCatalogSection}
             devMode={devMode}
@@ -239,26 +333,33 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
           />
         )}
 
-	        {activeView === 'history' && (
-            <HistoryPanel
-              historySearch={historySearch}
-              onHistorySearchChange={setHistorySearch}
-              filteredHistory={filteredHistory}
-              historyContainerRef={historyContainerRef}
-              onHistoryViewportUpdate={(el) => {
-                if (el) {
-                  setHistoryViewportHeight(Math.max(180, el.clientHeight || 360));
-                }
-              }}
-              onHistoryScroll={setHistoryScrollTop}
-              historyTotalHeight={historyTotalHeight}
-              historyStartIndex={historyStartIndex}
-              historyWindow={historyWindow}
-              historyRowHeight={HISTORY_ROW_HEIGHT}
-              onSelectHistory={onSelectHistory}
-              onRestoreHistory={onRestoreHistory}
-            />
-	        )}
+        {activeView === 'history' && (
+          <HistoryPanel
+            historySearch={historySearch}
+            onHistorySearchChange={setHistorySearch}
+            filteredHistory={filteredHistory}
+            historyContainerRef={historyContainerRef}
+            onHistoryViewportUpdate={(el) => {
+              if (el) {
+                setHistoryViewportHeight(Math.max(180, el.clientHeight || 360));
+              }
+            }}
+            onHistoryScroll={handleHistoryScroll}
+            historyTotalHeight={historyTotalHeight}
+            historyStartIndex={historyStartIndex}
+            historyWindow={historyWindow}
+            historyRowHeight={HISTORY_ROW_HEIGHT}
+            onSelectHistory={onSelectHistory}
+            onRestoreHistory={onRestoreHistory}
+            onResumeHistory={onResumeHistory}
+            onOpenExternal={openExternal}
+            onCopyToClipboard={copyToClipboard}
+            onExportRunAudit={exportRunAudit}
+            onFetchPrChecks={fetchPrChecks}
+            onRerunPrChecks={rerunPrChecks}
+            onCommentPr={commentPr}
+          />
+        )}
 
         {activeView === 'studio' && (
           <div style={{ padding: '0 8px' }}>
@@ -287,6 +388,9 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
                 themeExportJson={themeExportJson}
                 themeError={themeError}
                 uiPropagateSummary={uiPropagateSummary}
+                retryLastAction={retryThemeAction}
+                clearFeedback={clearThemeFeedback}
+                canRetryLastAction={canRetryThemeAction}
               />
             )}
 
@@ -310,6 +414,9 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
               exportSelectedOrAll={exportSelectedOrAll}
               importFromFile={importFromFile}
               importFromPaste={importFromPaste}
+              retryLastAction={retryStudioAction}
+              clearFeedback={clearStudioFeedback}
+              canRetryLastAction={canRetryStudioAction}
               selectDraft={selectDraft}
               deleteDraft={deleteDraft}
               onDragStartCustomNode={onDragStartCustomNode}
@@ -334,3 +441,4 @@ export default function Sidebar({ history = [], onSelectHistory, onRestoreHistor
   );
 }
 
+export default React.memo(Sidebar);

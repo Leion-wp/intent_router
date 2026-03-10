@@ -24,7 +24,14 @@ import StartNode from './nodes/StartNode';
 import CustomNode from './nodes/CustomNode';
 import FormNode from './nodes/FormNode';
 import SwitchNode from './nodes/SwitchNode';
+import IfElseNode from './nodes/IfElseNode';
 import ScriptNode from './nodes/ScriptNode';
+import AgentNode from './nodes/AgentNode';
+import TeamNode from './nodes/TeamNode';
+import HttpNode from './nodes/HttpNode';
+import ApprovalNode from './nodes/ApprovalNode';
+import SubPipelineNode from './nodes/SubPipelineNode';
+import LoopNode from './nodes/LoopNode';
 import AppLayoutShell from './components/AppLayoutShell';
 import ChromeControlsPanel from './components/ChromeControlsPanel';
 import { edgeTypes } from './components/InsertableEdge';
@@ -68,6 +75,13 @@ import {
   validateDisconnectedNodes
 } from './utils/flowGraphUtils';
 import { buildGraphFromPipeline, restoreGraphFromPipelineSnapshot } from './utils/pipelineLoadUtils';
+import { formatUiError } from './utils/uiMessageUtils';
+import { computeSidebarWidthFromKey } from './utils/sidebarResizeUtils';
+import {
+  canDeleteContextNode,
+  canDisconnectContextNode,
+  canToggleCollapseContextNode
+} from './utils/nodeContextMenuUtils';
 
 // Context for Registry
 export const RegistryContext = createContext<any>({});
@@ -76,9 +90,11 @@ export const RegistryContext = createContext<any>({});
 export const FlowRuntimeContext = createContext<{
   getAvailableVars: () => string[];
   isRunPreviewNode: (id: string) => boolean;
+  vscode: any;
 }>({
   getAvailableVars: () => [],
-  isRunPreviewNode: () => false
+  isRunPreviewNode: () => false,
+  vscode: null
 });
 
 // Editor context for mutating nodes from within node components (single source of truth)
@@ -106,7 +122,14 @@ const nodeTypes = {
   customNode: CustomNode,
   formNode: FormNode,
   switchNode: SwitchNode,
-  scriptNode: ScriptNode
+  ifNode: IfElseNode,
+  scriptNode: ScriptNode,
+  agentNode: AgentNode,
+  teamNode: TeamNode,
+  httpNode: HttpNode,
+  approvalNode: ApprovalNode,
+  subPipelineNode: SubPipelineNode,
+  loopNode: LoopNode
 };
 
 declare global {
@@ -118,6 +141,11 @@ declare global {
 
 // Acquire VS Code API (safe singleton)
 const vscode = window.vscode || (window.vscode = (window as any).acquireVsCodeApi ? (window as any).acquireVsCodeApi() : null);
+
+// ── Chrome Tabs panel mode ────────────────────────────────────────────────
+// When launched via chromePanelView.ts, initialData.mode === 'chromeTabs'.
+// Import lazily so the heavy ReactFlow graph is NOT bundled into this path.
+import ChromeTabsPanel from './components/ChromeTabsPanel';
 
 const initialNodes: Node[] = [
   {
@@ -134,10 +162,14 @@ let idCounter = 0;
 const getId = () => `node_${idCounter++}`;
 
 function emitPipelineBuildError(message: string): null {
+  const userMessage = formatUiError(message, {
+    context: 'Pipeline build',
+    action: 'Fix the graph configuration then retry.'
+  });
   if (vscode) {
-    vscode.postMessage({ type: 'error', message });
+    vscode.postMessage({ type: 'error', message: userMessage });
   } else {
-    alert(message);
+    alert(userMessage);
   }
   return null;
 }
@@ -145,14 +177,18 @@ function emitPipelineBuildError(message: string): null {
 function Flow({
   selectedRun,
   restoreRun,
+  resumeRun,
   onRestoreHandled,
+  onResumeHandled,
   sidebarCollapsed,
   onSetSidebarCollapsed,
   uiPreset
 }: {
   selectedRun: any,
   restoreRun: any,
+  resumeRun: { run: any; startStepId: string } | null,
   onRestoreHandled: () => void,
+  onResumeHandled: () => void,
   sidebarCollapsed: boolean,
   onSetSidebarCollapsed: (next: boolean) => void,
   uiPreset: UiPreset
@@ -267,7 +303,7 @@ function Flow({
   );
 
   const flowRuntime = useMemo(
-    () => ({ getAvailableVars, isRunPreviewNode }),
+    () => ({ getAvailableVars, isRunPreviewNode, vscode }),
     [getAvailableVars, isRunPreviewNode]
   );
 
@@ -557,6 +593,9 @@ function Flow({
         let description = '';
         let payload: any = {};
         const data: any = node.data;
+        const nodeSandbox = (data && typeof data === 'object')
+          ? (data.__sandbox || data.sandbox)
+          : undefined;
 
         if (node.type === 'promptNode') {
           intent = 'system.setVar';
@@ -564,6 +603,38 @@ function Flow({
         } else if (node.type === 'formNode') {
           intent = 'system.form';
           payload = { fields: Array.isArray(data.fields) ? data.fields : [] };
+        } else if (node.type === 'ifNode') {
+          intent = 'system.switch';
+          description = String(data.label || 'If / Else');
+          const outgoing = effectiveEdges.filter((e: any) => e.source === node.id);
+          const trueEdge = outgoing.find((e: any) => String(e.sourceHandle || '') === 'true');
+          const falseEdge = outgoing.find((e: any) => String(e.sourceHandle || '') === 'false');
+          if (!trueEdge?.target) {
+            stepBuildError = 'If / Else node must have a connected "true" output.';
+            return;
+          }
+          if (!falseEdge?.target) {
+            stepBuildError = 'If / Else node must have a connected "false" output.';
+            return;
+          }
+          const condition = String(data.condition || 'equals').trim().toLowerCase();
+          const value = String(data.value ?? '').trim();
+          if (condition !== 'exists' && !value) {
+            stepBuildError = `If / Else node "${String(data.label || node.id)}" requires a value for condition "${condition}".`;
+            return;
+          }
+          payload = {
+            __kind: 'ifelse',
+            variableKey: String(data.variableKey || '').trim(),
+            routes: [{
+              label: 'true',
+              condition,
+              value,
+              equalsValue: condition === 'equals' ? value : '',
+              targetStepId: trueEdge.target
+            }],
+            defaultStepId: falseEdge.target
+          };
         } else if (node.type === 'switchNode') {
           intent = 'system.switch';
           description = String(data.label || '');
@@ -619,11 +690,12 @@ function Flow({
           const interpreter = String(data.interpreter || '').trim();
           const inferred = inferScriptInterpreter(scriptPath);
           const effectiveInterpreter = interpreter || inferred;
-          if (!effectiveInterpreter) {
+          const isTemplatedPath = /\$\{var:[^}]+\}/.test(scriptPath);
+          if (!effectiveInterpreter && !isTemplatedPath) {
             stepBuildError = `Script node "${node.id}" has unsupported extension. Set interpreter override.`;
             return;
           }
-          const command = buildScriptCommand(scriptPath, args, effectiveInterpreter);
+          const command = buildScriptCommand(scriptPath, args, effectiveInterpreter || undefined);
           const cwd = String(data.cwd || '').trim();
           payload = {
             command,
@@ -637,6 +709,142 @@ function Flow({
         } else if (node.type === 'repoNode') {
           intent = 'system.setCwd';
           payload = { path: data.path };
+        } else if (node.type === 'subPipelineNode') {
+          intent = 'system.subPipeline';
+          const pipelinePath = String(data.pipelinePath || '').trim();
+          if (!pipelinePath) {
+            stepBuildError = 'Sub-pipeline node must define "pipelinePath".';
+            return;
+          }
+          payload = {
+            pipelinePath,
+            dryRunChild: data.dryRunChild === true,
+            inputJson: String(data.inputJson || '').trim() || undefined,
+            outputVar: String(data.outputVar || '').trim() || 'subpipeline_result'
+          };
+          description = String(data.label || 'Sub-pipeline');
+        } else if (node.type === 'loopNode') {
+          intent = 'system.loop';
+          const pipelinePath = String(data.pipelinePath || '').trim();
+          const rawExecutionMode = String(data.executionMode || '').trim().toLowerCase();
+          const items = String(data.items || '').trim();
+          if (!items) {
+            stepBuildError = 'Loop node must define "items".';
+            return;
+          }
+          const outgoing = effectiveEdges.filter((e: any) => e.source === node.id);
+          const bodyTargets = outgoing
+            .filter((e: any) => String(e.sourceHandle || '') === 'body')
+            .map((e: any) => String(e.target || '').trim())
+            .filter(Boolean);
+          const doneTarget = outgoing.find((e: any) => String(e.sourceHandle || '') === 'done')?.target
+            || outgoing.find((e: any) => String(e.sourceHandle || '') === 'success')?.target;
+          const incomingSources = effectiveEdges
+            .filter((e: any) => e.target === node.id && String(e.targetHandle || 'in') === 'in')
+            .map((e: any) => String(e.source || '').trim())
+            .filter((sourceId: string) => sourceId && sourceId !== 'start' && sourceId !== node.id);
+          const legacyBodyTargets = bodyTargets.length > 0 ? bodyTargets : incomingSources;
+          const bodyStepIdsOverride = String(data.bodyStepIds || '').trim()
+            .split(',')
+            .map((entry: string) => entry.trim())
+            .filter(Boolean);
+          const inferLegacyGraphMode = !rawExecutionMode
+            && !pipelinePath
+            && (legacyBodyTargets.length > 0 || bodyStepIdsOverride.length > 0);
+          const executionMode = rawExecutionMode === 'graph_segment'
+            ? 'graph_segment'
+            : (rawExecutionMode === 'child_pipeline'
+              ? 'child_pipeline'
+              : (inferLegacyGraphMode ? 'graph_segment' : 'child_pipeline'));
+          if (executionMode === 'child_pipeline' && !pipelinePath) {
+            stepBuildError = 'Loop node must define "pipelinePath".';
+            return;
+          }
+          if (executionMode === 'graph_segment' && legacyBodyTargets.length === 0 && bodyStepIdsOverride.length === 0) {
+            stepBuildError = 'Loop node in graph_segment mode needs body steps (body handle or legacy incoming source).';
+            return;
+          }
+          const bodyStepIds = executionMode === 'graph_segment'
+            ? (bodyStepIdsOverride.length > 0 ? bodyStepIdsOverride : legacyBodyTargets)
+            : [];
+          payload = {
+            executionMode: executionMode === 'graph_segment' ? 'graph_segment' : 'child_pipeline',
+            items,
+            bodyStepIds: String(data.bodyStepIds || '').trim() || undefined,
+            pipelinePath: pipelinePath || undefined,
+            itemVar: String(data.itemVar || 'loop_item').trim() || 'loop_item',
+            indexVar: String(data.indexVar || 'loop_index').trim() || 'loop_index',
+            maxIterations: Number(data.maxIterations || 20),
+            repeatCount: Number(data.repeatCount || 1),
+            dryRunChild: data.dryRunChild === true,
+            continueOnChildError: data.continueOnChildError === true,
+            errorStrategy: String(data.errorStrategy || '').trim() || undefined,
+            errorThreshold: Number(data.errorThreshold || 1),
+            outputVar: String(data.outputVar || 'loop_result').trim() || 'loop_result',
+            graphStepIds: bodyStepIds,
+            doneStepId: doneTarget || undefined
+          };
+          description = String(data.label || 'Loop');
+        } else if (node.type === 'agentNode') {
+          intent = 'ai.generate';
+          payload = {
+            agent: data.agent,
+            model: data.model,
+            role: data.role || 'architect',
+            reasoningEffort: String(data.reasoningEffort || 'medium'),
+            cwd: String(data.cwd || '').trim() || undefined,
+            systemPrompt: String(data.systemPrompt || '').trim() || undefined,
+            instruction: data.instruction,
+            instructionTemplate: data.instructionTemplate || undefined,
+            contextFiles: data.contextFiles,
+            agentSpecFiles: data.agentSpecFiles,
+            outputContract: data.outputContract || 'path_result',
+            outputVar: data.outputVar || 'ai_msg',
+            outputVarPath: data.outputVarPath || 'ai_path',
+            outputVarChanges: data.outputVarChanges || 'ai_changes',
+            sessionId: String(data.sessionId || '').trim() || undefined,
+            sessionMode: String(data.sessionMode || 'read_write'),
+            sessionResetBeforeRun: data.sessionResetBeforeRun === true,
+            sessionRecallLimit: Number(data.sessionRecallLimit || 12)
+          };
+          description = String(data.label || 'AI Task');
+        } else if (node.type === 'teamNode') {
+          intent = 'ai.team';
+          payload = {
+            strategy: data.strategy || 'sequential',
+            cwd: String(data.cwd || '').trim() || undefined,
+            systemPrompt: String(data.systemPrompt || '').trim() || undefined,
+            members: Array.isArray(data.members) ? data.members : [],
+            contextFiles: Array.isArray(data.contextFiles) ? data.contextFiles : [],
+            agentSpecFiles: Array.isArray(data.agentSpecFiles) ? data.agentSpecFiles : [],
+             outputContract: data.outputContract || 'path_result',
+             outputVar: data.outputVar || 'team_result',
+             outputVarPath: data.outputVarPath || 'team_path',
+             outputVarChanges: data.outputVarChanges || 'team_changes',
+             reviewerVoteWeight: Number(data.reviewerVoteWeight || 2),
+             sessionId: String(data.sessionId || '').trim() || undefined,
+             sessionMode: String(data.sessionMode || 'read_write'),
+             sessionResetBeforeRun: data.sessionResetBeforeRun === true,
+             sessionRecallLimit: Number(data.sessionRecallLimit || 12)
+            };
+          description = String(data.label || 'AI Team');
+        } else if (node.type === 'approvalNode') {
+          intent = 'vscode.reviewDiff';
+          payload = {
+            path: data.filePath,
+            proposal: data.proposal
+          };
+          description = String(data.label || 'Review Change');
+        } else if (node.type === 'httpNode') {
+          intent = 'http.request';
+          payload = {
+            url: data.url,
+            method: data.method,
+            headers: data.headers,
+            body: data.body,
+            outputVar: data.outputVar
+          };
+          description = String(data.label || 'HTTP Request');
         } else if (node.type === 'vscodeCommandNode') {
           intent = 'vscode.runCommand';
           payload = { commandId: data.commandId, argsJson: data.argsJson };
@@ -678,6 +886,12 @@ function Flow({
             description,
             payload
           };
+          if (nodeSandbox && typeof nodeSandbox === 'object') {
+            stepObj.payload = {
+              ...(stepObj.payload || {}),
+              __sandbox: nodeSandbox
+            };
+          }
 
           if (failureMap.has(node.id) && nodeMap.has(failureMap.get(node.id)!)) {
             stepObj.onFailure = failureMap.get(node.id);
@@ -769,14 +983,6 @@ function Flow({
     setChromePanelPos
   });
 
-  useRunPlaybackEffects({
-    restoreRun,
-    selectedRun,
-    loadPipeline,
-    onRestoreHandled,
-    setNodes
-  });
-
   useReactiveEdgeStyles({
     nodes,
     setEdges
@@ -801,6 +1007,7 @@ function Flow({
     savePipeline,
     runPipeline,
     runPipelineFromHere,
+    runPipelineFromSnapshotStep,
     resetRuntimeUiState
   } = usePipelineRunActions({
     vscode,
@@ -809,6 +1016,17 @@ function Flow({
     setRunPreviewIds,
     setRunPillStatus,
     setRunMenuOpen,
+    setNodes
+  });
+
+  useRunPlaybackEffects({
+    restoreRun,
+    resumeRun,
+    selectedRun,
+    loadPipeline,
+    onRestoreHandled,
+    onResumeHandled,
+    runPipelineFromSnapshotStep,
     setNodes
   });
 
@@ -904,17 +1122,23 @@ function Flow({
   }, [reactFlowInstance, setNodes]);
 
   const toggleContextNodeCollapse = useCallback((nodeId: string) => {
+    if (!canToggleCollapseContextNode(nodeId)) {
+      return;
+    }
     setNodes((nodes) => nodes.map((entry: any) => (
       entry.id === nodeId ? { ...entry, data: { ...(entry.data || {}), collapsed: !entry?.data?.collapsed } } : entry
     )));
   }, []);
 
   const disconnectContextNodeLinks = useCallback((nodeId: string) => {
+    if (!canDisconnectContextNode(nodeId)) {
+      return;
+    }
     setEdges((edges) => edges.filter((edge: any) => edge.source !== nodeId && edge.target !== nodeId));
   }, []);
 
   const deleteNodeFromContextMenu = useCallback((nodeId: string) => {
-    if (nodeId === 'start') {
+    if (!canDeleteContextNode(nodeId)) {
       return;
     }
     setNodes((nodes) => nodes.filter((node: any) => node.id !== nodeId));
@@ -946,15 +1170,24 @@ function Flow({
               onNodeContextMenu={onNodeContextMenu}
               >
                 {showControls && <Controls style={{ opacity: chromeOpacity }} />}
-                <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
-                {showMiniMap && <MiniMap style={{ opacity: chromeOpacity }} />}
+                <Background 
+                  variant={BackgroundVariant.Lines} 
+                  gap={40} 
+                  size={1} 
+                  color="rgba(255, 255, 255, 0.03)" 
+                />
+                {showMiniMap && <MiniMap 
+                  style={{ opacity: chromeOpacity }} 
+                  pannable 
+                  zoomable 
+                />}
               </ReactFlow>
               </CustomNodesContext.Provider>
               </FlowEditorContext.Provider>
   	        </FlowRuntimeContext.Provider>
   	      </div>
 
-        <FlowToasts connectionError={connectionError} graphToast={graphToast} />
+        <FlowToasts connectionError={connectionError} setConnectionError={setConnectionError} graphToast={graphToast} />
 
         <NodeContextMenu
           contextMenu={contextMenu}
@@ -1018,22 +1251,33 @@ function Flow({
         />
 
         <button
+          type="button"
           onClick={autoLayout}
+          aria-label="Auto layout graph"
           style={{
            position: 'absolute',
-           top: '10px',
-           right: '260px',
-           padding: '10px 14px',
-           background: 'var(--vscode-button-secondaryBackground)',
-           color: 'var(--vscode-button-secondaryForeground)',
-           border: 'none',
-           borderRadius: '4px',
+           top: '20px',
+           right: '180px',
+           padding: '10px 18px',
+           background: 'var(--ir-glass-bg)',
+           backdropFilter: 'var(--ir-glass-blur)',
+           color: '#fff',
+           border: '1px solid var(--ir-glass-border)',
+           borderRadius: '10px',
            cursor: 'pointer',
            zIndex: 5,
+           fontSize: '13px',
+           fontWeight: 600,
+           display: 'flex',
+           alignItems: 'center',
+           gap: '8px',
+           boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+           transition: 'all 0.2s ease',
            opacity: chromeOpacity
          }}
        >
-         Auto layout
+         <span className="codicon codicon-layout" style={{ fontSize: '14px' }}></span>
+         Auto Layout
        </button>
 
         <ChromeControlsPanel
@@ -1060,21 +1304,31 @@ function Flow({
         />
 
        <button
+         type="button"
          onClick={savePipeline}
+         aria-label="Save pipeline"
          style={{
            position: 'absolute',
-           top: '10px',
-           right: '10px',
-           padding: '10px 20px',
-           background: 'var(--vscode-button-background)',
-           color: 'var(--vscode-button-foreground)',
+           top: '20px',
+           right: '20px',
+           padding: '10px 22px',
+           background: 'var(--ir-accent-primary)',
+           color: '#fff',
            border: 'none',
-           borderRadius: '4px',
+           borderRadius: '10px',
            cursor: 'pointer',
            zIndex: 5,
+           fontSize: '13px',
+           fontWeight: 700,
+           display: 'flex',
+           alignItems: 'center',
+           gap: '8px',
+           boxShadow: '0 8px 20px rgba(0, 162, 255, 0.4)',
+           transition: 'all 0.2s ease',
            opacity: chromeOpacity
          }}
        >
+         <span className="codicon codicon-save" style={{ fontSize: '16px' }}></span>
          Save Pipeline
        </button>
      </div>
@@ -1082,12 +1336,18 @@ function Flow({
  }
 
 export default function App() {
+  // Chrome Tabs panel — early return before any ReactFlow state is initialised
+  if (window.initialData?.mode === 'chromeTabs') {
+    return <ChromeTabsPanel />;
+  }
+
   const {
     commandGroups,
     history,
     selectedRun,
     setSelectedRun,
     restoreRun,
+    resumeRun,
     uiPreset,
     uiPresetRelease,
     adminMode,
@@ -1100,6 +1360,8 @@ export default function App() {
     visibleSidebarTabs,
     onRestoreHistory,
     onRestoreHandled,
+    onResumeHistory,
+    onResumeHandled,
     sidebarResizeRef,
     defaultSidebarWidth,
     minSidebarWidth,
@@ -1119,6 +1381,19 @@ export default function App() {
           sidebarResizeRef.current = { startX: event.clientX, startWidth: sidebarWidth };
         }}
         onSidebarResizerDoubleClick={() => setSidebarWidth(defaultSidebarWidth)}
+        onSidebarResizerKeyDown={(event) => {
+          const next = computeSidebarWidthFromKey({
+            currentWidth: sidebarWidth,
+            key: event.key,
+            minWidth: minSidebarWidth,
+            maxWidth: maxSidebarWidth,
+            defaultWidth: defaultSidebarWidth
+          });
+          if (next !== null) {
+            event.preventDefault();
+            setSidebarWidth(next);
+          }
+        }}
         sidebar={
           <Sidebar
             tab={sidebarTab}
@@ -1130,6 +1405,7 @@ export default function App() {
             adminMode={adminMode}
             onSelectHistory={setSelectedRun}
             onRestoreHistory={onRestoreHistory}
+            onResumeHistory={onResumeHistory}
           />
         }
         canvas={(
@@ -1137,10 +1413,12 @@ export default function App() {
             <Flow
               selectedRun={selectedRun}
               restoreRun={restoreRun}
+              resumeRun={resumeRun}
               uiPreset={uiPreset}
               sidebarCollapsed={sidebarCollapsed}
               onSetSidebarCollapsed={setSidebarCollapsed}
               onRestoreHandled={onRestoreHandled}
+              onResumeHandled={onResumeHandled}
             />
           </ReactFlowProvider>
         )}

@@ -6,13 +6,59 @@ export type PipelineRun = {
   timestamp: number;
   status: 'running' | 'success' | 'failure' | 'cancelled';
   steps: Array<any>;
+  pullRequests?: Array<{
+    provider: 'github';
+    url: string;
+    number?: number;
+    state?: 'open' | 'closed' | 'merged';
+    isDraft?: boolean;
+    head: string;
+    base: string;
+    title: string;
+    stepId?: string;
+    timestamp: number;
+  }>;
   pipelineSnapshot?: any;
+  audit?: {
+    timeline?: Array<any>;
+    hitl?: Array<any>;
+    reviews?: Array<any>;
+    cost?: {
+      estimatedTotal?: number;
+      byIntent?: Record<string, number>;
+    };
+  };
 };
 
 // Extension -> Webview
 export type WebviewInboundMessage =
   | { type: 'executionStatus'; index?: number; stepId?: string; status: ExecutionStatus; intentId: string }
   | { type: 'stepLog'; runId: string; intentId: string; stepId?: string; text: string; stream: 'stdout' | 'stderr' }
+  | {
+      type: 'approvalReviewReady';
+      runId: string;
+      intentId: string;
+      stepId?: string;
+      files: Array<{ path: string; added: number; removed: number }>;
+      totalAdded: number;
+      totalRemoved: number;
+      diffSignature?: string;
+      policyMode?: 'warn' | 'block';
+      policyBlocked?: boolean;
+      policyViolations?: string[];
+    }
+  | {
+      type: 'teamRunSummary';
+      runId: string;
+      intentId: string;
+      stepId?: string;
+      strategy: 'sequential' | 'reviewer_gate' | 'vote';
+      winnerMember?: string;
+      winnerReason?: string;
+      voteScoreByMember?: Array<{ member: string; role: 'writer' | 'reviewer'; weight: number; score: number }>;
+      members: Array<{ name: string; role: 'writer' | 'reviewer'; path: string; files: number }>;
+      totalFiles: number;
+    }
   | { type: 'historyUpdate'; history: PipelineRun[] }
   | { type: 'environmentUpdate'; environment: Record<string, string> }
   | { type: 'customNodesUpdate'; nodes: Array<any> }
@@ -24,6 +70,7 @@ export type WebviewInboundMessage =
   | { type: 'adminModeUpdate'; adminMode: boolean }
   | { type: 'uiPresetExported'; json: string }
   | { type: 'uiPresetPropagated'; summary: string; releasePath: string }
+  | { type: 'sessionMemoryStatus'; nodeId?: string; sessionId?: string; entries: number; lastTimestamp?: number }
   | { type: 'loadPipeline'; pipeline: any }
   | { type: 'pathSelected'; id: string; argName: string; path: string }
   | { type: 'optionsFetched'; argName: string; options: string[] }
@@ -32,7 +79,9 @@ export type WebviewInboundMessage =
 // Webview -> Extension
 export type WebviewOutboundMessage =
   | { type: 'savePipeline'; pipeline: any; silent?: boolean }
-  | { type: 'runPipeline'; pipeline: any; dryRun?: boolean }
+  | { type: 'runPipeline'; pipeline: any; dryRun?: boolean; startStepId?: string }
+  | { type: 'pipelineDecision'; nodeId: string; runId?: string; decision: 'approve' | 'reject'; approvedPaths?: string[] }
+  | { type: 'pipelineReviewOpenDiff'; nodeId: string; runId?: string; path?: string }
   | { type: 'saveEnvironment'; environment: Record<string, string> }
   | { type: 'clearHistory' }
   | { type: 'customNodes.upsert'; node: any }
@@ -45,6 +94,16 @@ export type WebviewOutboundMessage =
   | { type: 'uiPreset.importDraft'; source: 'paste' | 'file'; jsonText?: string }
   | { type: 'uiPreset.resetToDefaults' }
   | { type: 'uiPreset.propagateDraft' }
+  | { type: 'openExternal'; url: string }
+  | { type: 'copyToClipboard'; text: string }
+  | { type: 'exportRunAudit'; runId: string }
+  | { type: 'githubPrChecks'; url: string }
+  | { type: 'githubPrRerunFailed'; url: string }
+  | { type: 'githubPrComment'; url: string; body: string }
+  | { type: 'sessionMemory.export'; sessionId?: string }
+  | { type: 'sessionMemory.clear'; sessionId?: string }
+  | { type: 'sessionMemory.import'; jsonText: string; mode?: 'merge' | 'replace' }
+  | { type: 'sessionMemory.inspect'; nodeId?: string; sessionId?: string }
   | { type: 'devPackager.loadPreset' }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };
