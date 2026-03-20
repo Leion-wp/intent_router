@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { registerCapabilities } from '../registry';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as crypto from 'crypto';
 import { pipelineEventBus } from '../eventBus';
 
@@ -116,7 +117,7 @@ export async function reviewDiff(payload: any): Promise<boolean> {
     }
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const tempDir = workspaceRoot || process.env.TEMP || process.env.TMP || '/tmp';
+    const tempDir = resolveReviewTempDir();
     const tempFiles: string[] = [];
     
     try {
@@ -258,6 +259,10 @@ export async function reviewDiff(payload: any): Promise<boolean> {
             }
         }
     }
+}
+
+function resolveReviewTempDir(): string {
+    return path.join(os.tmpdir(), 'intent-router', 'review-diff');
 }
 
 function normalizeApprovedPaths(rawApproved: string[], fallbackAll: string[]): string[] {

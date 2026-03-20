@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import { validateSafeRelativePath, validateStrictShellArg, sanitizeShellArg } from '../security';
+import { validateSafeRelativePath, validateStrictShellArg, sanitizeShellArg, resolveShellFlavor } from '../security';
 
 suite('Security Tests', () => {
 
@@ -17,11 +17,18 @@ suite('Security Tests', () => {
     });
 
     test('sanitizeShellArg', () => {
-        assert.strictEqual(sanitizeShellArg('abc'), '"abc"');
-        assert.strictEqual(sanitizeShellArg('abc def'), '"abc def"');
-        assert.strictEqual(sanitizeShellArg('abc"def'), '"abc\\"def"');
-        assert.strictEqual(sanitizeShellArg('abc$def'), '"abc\\$def"');
-        assert.strictEqual(sanitizeShellArg('abc`def'), '"abc\\`def"');
+        assert.strictEqual(sanitizeShellArg('abc', 'posix'), '"abc"');
+        assert.strictEqual(sanitizeShellArg('abc def', 'posix'), '"abc def"');
+        assert.strictEqual(sanitizeShellArg('abc"def', 'posix'), '"abc\\"def"');
+        assert.strictEqual(sanitizeShellArg('abc$def', 'posix'), '"abc\\$def"');
+        assert.strictEqual(sanitizeShellArg('abc`def', 'posix'), '"abc\\`def"');
+        assert.strictEqual(sanitizeShellArg("abc'def", 'powershell'), "'abc''def'");
+        assert.strictEqual(sanitizeShellArg('abc$def', 'powershell'), "'abc$def'");
+    });
+
+    test('resolveShellFlavor', () => {
+        assert.strictEqual(resolveShellFlavor('win32'), 'powershell');
+        assert.strictEqual(resolveShellFlavor('linux'), 'posix');
     });
 
     test('validateSafeRelativePath - Basic Relative', () => {

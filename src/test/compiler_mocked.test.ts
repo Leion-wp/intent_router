@@ -13,10 +13,15 @@ Module.prototype.require = function (request: string) {
 };
 
 // Import module under test
-const { compileStep } = require('../../out/pipelineRunner');
+const pipelineRunner = require('../../out/pipelineRunner');
+const { compileStep } = pipelineRunner;
 Module.prototype.require = originalRequire;
 
 suite('Compiler Mocked Test', () => {
+
+    setup(() => {
+        pipelineRunner.__test__?.setPlatformOverride?.('linux');
+    });
 
     test('Variable Resolution', async () => {
         const store = new Map<string, any>();
@@ -52,7 +57,7 @@ suite('Compiler Mocked Test', () => {
 
         assert.strictEqual(compiled.intent, 'terminal.run');
         assert.strictEqual(compiled.capabilities?.[0], 'terminal.run');
-        assert.strictEqual(compiled.payload.command, 'git checkout -b feature-branch');
+        assert.strictEqual(compiled.payload.command, 'git checkout -b "feature-branch"');
         assert.strictEqual(compiled.payload.cwd, cwd);
     });
 
@@ -88,7 +93,7 @@ suite('Compiler Mocked Test', () => {
 
         const compiled = await compileStep(intent, store, cwd, '/');
 
-        assert.strictEqual(compiled.payload.command, 'docker build -t my-image:latest .');
+        assert.strictEqual(compiled.payload.command, 'docker build -t "my-image:latest" "."');
         assert.strictEqual(compiled.payload.cwd, cwd);
     });
 
@@ -106,7 +111,26 @@ suite('Compiler Mocked Test', () => {
 
         const compiled = await compileStep(intent, store, cwd, '/');
 
-        assert.strictEqual(compiled.payload.command, 'docker run -d my-image:latest');
+        assert.strictEqual(compiled.payload.command, 'docker run -d "my-image:latest"');
+        assert.strictEqual(compiled.payload.cwd, cwd);
+    });
+
+    test('Git Commit Compilation on Windows uses PowerShell quoting', async () => {
+        pipelineRunner.__test__?.setPlatformOverride?.('win32');
+        const store = new Map<string, any>();
+        const cwd = 'D:/workspace/repo';
+
+        const intent = {
+            intent: 'git.commit',
+            payload: {
+                message: "fix: user's env stays literal $HOME",
+                amend: false
+            }
+        };
+
+        const compiled = await compileStep(intent, store, cwd, cwd);
+
+        assert.strictEqual(compiled.payload.command, "git commit -m 'fix: user''s env stays literal $HOME'");
         assert.strictEqual(compiled.payload.cwd, cwd);
     });
 

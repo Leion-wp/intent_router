@@ -1,9 +1,19 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import { pipelineEventBus } from '../eventBus';
 import { registerCapabilities } from '../registry';
 import { validateSafeRelativePath } from '../security';
+
+type WindowsShellConfig = {
+    executable: string;
+    interactiveArgs: string[];
+    commandArgs: string[];
+};
+
+const TERMINAL_NAME = 'Intent Router';
+let platformOverride: NodeJS.Platform | undefined;
 
 export function registerTerminalProvider(context: vscode.ExtensionContext) {
     // Terminal is a built-in feature, so we always register it.
@@ -66,6 +76,10 @@ function getOrCreateTerminal(): { terminal: vscode.Terminal, write: (data: strin
     };
 }
 
+function getRuntimePlatform(): NodeJS.Platform {
+    return platformOverride || process.platform;
+}
+
 export async function executeTerminalCommand(args: any): Promise<void> {
     const commandText = args?.command;
     const cwd = normalizeExecutionCwd(args?.cwd);
@@ -82,27 +96,21 @@ export async function executeTerminalCommand(args: any): Promise<void> {
     }
 
     // Legacy mode (Interactive / Fire-and-forget)
-    const TERMINAL_NAME = 'Intent Router';
     let term = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
     const env = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
+    const terminalOptions = buildInteractiveTerminalOptions(TERMINAL_NAME, env);
 
-    if (term) {
-        // Check if environment matches
-        const currentEnv = (term.creationOptions as vscode.TerminalOptions).env || {};
-        if (!isEnvEqual(env, currentEnv as Record<string, string>)) {
-            term.dispose();
-            term = undefined;
-        }
+    if (term && shouldRecreateInteractiveTerminal(term, terminalOptions, env)) {
+        term.dispose();
+        term = undefined;
     }
 
     if (!term) {
-        term = vscode.window.createTerminal({ name: TERMINAL_NAME, env });
+        term = vscode.window.createTerminal(terminalOptions);
     }
 
     term.show();
 
-    // Avoid shell-specific chaining tokens (PowerShell 5.1 doesn't support `&&`).
-    // `pushd` works across PowerShell/cmd/bash/zsh and also switches drives on Windows.
     if (typeof cwd === 'string' && cwd.trim() && cwd.trim() !== '.') {
         const trustedRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || path.resolve('.');
         try {
@@ -111,7 +119,7 @@ export async function executeTerminalCommand(args: any): Promise<void> {
             vscode.window.showErrorMessage(`Security Error: ${e.message}`);
             return;
         }
-        term.sendText(`pushd "${cwd.trim()}"`);
+        sendTerminalCwd(term, cwd.trim());
     }
 
     term.sendText(commandText);
@@ -151,6 +159,133 @@ function normalizeExecutionCwd(rawCwd: any): string {
     return path.resolve(workspaceRoot, raw);
 }
 
+function buildInteractiveTerminalOptions(
+    name: string,
+    env: Record<string, string>,
+    platform: NodeJS.Platform = getRuntimePlatform()
+): vscode.TerminalOptions {
+    if (platform !== 'win32') {
+        return { name, env };
+    }
+
+    const shell = resolveWindowsShellConfig();
+    return {
+        name,
+        env,
+        shellPath: shell.executable,
+        shellArgs: shell.interactiveArgs
+    };
+}
+
+function shouldRecreateInteractiveTerminal(
+    terminal: vscode.Terminal,
+    expectedOptions: vscode.TerminalOptions,
+    env: Record<string, string>
+): boolean {
+    const currentOptions = (terminal.creationOptions as vscode.TerminalOptions) || {};
+    const currentEnv = (currentOptions.env || {}) as Record<string, string>;
+
+    if (!isEnvEqual(env, currentEnv)) {
+        return true;
+    }
+
+    if (getRuntimePlatform() !== 'win32') {
+        return false;
+    }
+
+    const currentShellPath = String(currentOptions.shellPath || '').trim().toLowerCase();
+    const expectedShellPath = String(expectedOptions.shellPath || '').trim().toLowerCase();
+    if (currentShellPath !== expectedShellPath) {
+        return true;
+    }
+
+    return normalizeShellArgs(currentOptions.shellArgs) !== normalizeShellArgs(expectedOptions.shellArgs);
+}
+
+function normalizeShellArgs(args: string[] | string | undefined): string {
+    if (Array.isArray(args)) {
+        return args.join('\u0000');
+    }
+    return typeof args === 'string' ? args : '';
+}
+
+function sendTerminalCwd(term: vscode.Terminal, cwd: string): void {
+    if (getRuntimePlatform() === 'win32') {
+        term.sendText(`Set-Location -LiteralPath ${quotePowerShellLiteral(cwd)}`);
+        return;
+    }
+
+    term.sendText(`pushd "${cwd.replace(/"/g, '\\"')}"`);
+}
+
+function quotePowerShellLiteral(value: string): string {
+    return `'${String(value || '').replace(/'/g, "''")}'`;
+}
+
+function resolveWindowsShellConfig(): WindowsShellConfig {
+    const executable = resolveWindowsPowerShellExecutable();
+    const lowerBase = path.basename(executable).toLowerCase();
+    const isPwsh = lowerBase === 'pwsh.exe' || lowerBase === 'pwsh';
+
+    return {
+        executable,
+        interactiveArgs: ['-NoLogo'],
+        commandArgs: isPwsh
+            ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand']
+            : ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-OutputFormat', 'Text', '-EncodedCommand']
+    };
+}
+
+function buildWindowsCommandScript(command: string): string {
+    return [
+        "$ProgressPreference = 'SilentlyContinue'",
+        "$InformationPreference = 'Continue'",
+        command
+    ].join(';\r\n');
+}
+
+function sanitizeCapturedOutput(text: string, platform: NodeJS.Platform = getRuntimePlatform()): string {
+    if (platform !== 'win32' || !text) {
+        return text;
+    }
+
+    return text
+        .replace(/#< CLIXML\r?\n?/g, '')
+        .replace(/<Objs Version="1\.1\.0\.1" xmlns="http:\/\/schemas\.microsoft\.com\/powershell\/2004\/04">[\s\S]*?<\/Objs>/g, '')
+        .replace(/^(?:\r?\n)+/, '')
+        .replace(/(?:\r?\n){3,}/g, '\n\n');
+}
+
+function resolveWindowsPowerShellExecutable(): string {
+    const candidates: string[] = [];
+    const programFilesRoots = [
+        process.env.ProgramW6432,
+        process.env.ProgramFiles,
+        process.env['ProgramFiles(x86)']
+    ];
+
+    for (const root of programFilesRoots) {
+        if (!root) {
+            continue;
+        }
+        candidates.push(path.join(root, 'PowerShell', '7', 'pwsh.exe'));
+        candidates.push(path.join(root, 'PowerShell', '7-preview', 'pwsh.exe'));
+    }
+
+    const systemRoot = process.env.SystemRoot || process.env.WINDIR;
+    if (systemRoot) {
+        candidates.push(path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
+    }
+
+    for (const candidate of candidates) {
+        if (candidate && fs.existsSync(candidate)) {
+            return candidate;
+        }
+    }
+
+    return 'powershell.exe';
+}
+
 export function cancelTerminalRun(runId: string | undefined | null): void {
     if (!runId) {
         return;
@@ -167,7 +302,7 @@ export function cancelTerminalRun(runId: string | undefined | null): void {
         }
 
         try {
-            if (process.platform === 'win32') {
+            if (getRuntimePlatform() === 'win32') {
                 cp.spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
             } else {
                 child.kill('SIGTERM');
@@ -199,16 +334,17 @@ function runCommand(command: string, cwd: string | undefined, runId: string, int
             }
         }
 
-        const child = (process.platform === 'win32')
-            ? cp.spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], { cwd: safeCwd, env })
-            : cp.spawn(command, { cwd: safeCwd, env, shell: true });
+        const child = spawnCapturedCommand(command, safeCwd, env);
 
         const running = runningProcessesByRunId.get(runId) ?? new Set<cp.ChildProcess>();
         running.add(child);
         runningProcessesByRunId.set(runId, running);
 
-        child.stdout.on('data', (data) => {
-            const text = data.toString();
+        child.stdout?.on('data', (data) => {
+            const text = sanitizeCapturedOutput(data.toString());
+            if (!text) {
+                return;
+            }
             write(text);
             pipelineEventBus.emit({
                 type: 'stepLog',
@@ -220,8 +356,11 @@ function runCommand(command: string, cwd: string | undefined, runId: string, int
             });
         });
 
-        child.stderr.on('data', (data) => {
-            const text = data.toString();
+        child.stderr?.on('data', (data) => {
+            const text = sanitizeCapturedOutput(data.toString());
+            if (!text) {
+                return;
+            }
             write(`\x1b[31m${text}\x1b[0m`);
             pipelineEventBus.emit({
                 type: 'stepLog',
@@ -259,3 +398,29 @@ function runCommand(command: string, cwd: string | undefined, runId: string, int
         });
     });
 }
+
+function spawnCapturedCommand(command: string, cwd: string | undefined, env: NodeJS.ProcessEnv): cp.ChildProcess {
+    if (getRuntimePlatform() === 'win32') {
+        const shell = resolveWindowsShellConfig();
+        const encodedCommand = Buffer.from(buildWindowsCommandScript(command), 'utf16le').toString('base64');
+        return cp.spawn(shell.executable, [...shell.commandArgs, encodedCommand], {
+            cwd,
+            env,
+            windowsHide: true
+        });
+    }
+
+    return cp.spawn(command, { cwd, env, shell: true });
+}
+
+export const __test = {
+    buildInteractiveTerminalOptions,
+    resolveWindowsPowerShellExecutable,
+    resolveWindowsShellConfig,
+    buildWindowsCommandScript,
+    sanitizeCapturedOutput,
+    getWindowsPowerShellExecutable: resolveWindowsPowerShellExecutable,
+    setPlatformOverride: (platform: NodeJS.Platform | undefined) => {
+        platformOverride = platform;
+    }
+};

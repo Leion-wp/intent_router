@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import * as path from 'path';
 
 // Mock vscode
 const mockVscode = require('./vscode-mock');
@@ -16,23 +17,28 @@ Module.prototype.require = function (request: string) {
 // Import modules under test via require to trigger the mock
 const { runPipelineFromData } = require('../../out/pipelineRunner');
 const { pipelineEventBus } = require('../../out/eventBus');
-const { executeTerminalCommand } = require('../../out/providers/terminalAdapter');
+const { executeTerminalCommand, __test: terminalAdapterTestApi } = require('../../out/providers/terminalAdapter');
 Module.prototype.require = originalRequire;
 
 suite('Environment Injection Test (Mocked)', () => {
     let originalGetConfiguration: any;
+    let originalWorkspaceFolders: any;
 
     suiteSetup(() => {
         originalGetConfiguration = mockVscode.workspace.getConfiguration;
+        originalWorkspaceFolders = mockVscode.workspace.workspaceFolders;
     });
 
     suiteTeardown(() => {
         mockVscode.workspace.getConfiguration = originalGetConfiguration;
+        mockVscode.workspace.workspaceFolders = originalWorkspaceFolders;
         Module.prototype.require = originalRequire;
     });
 
     setup(() => {
         mockVscode.window.terminals.length = 0;
+        mockVscode.workspace.workspaceFolders = originalWorkspaceFolders;
+        terminalAdapterTestApi?.setPlatformOverride?.(undefined);
     });
 
     test('Env Vars in Pipeline Resolution', async () => {
@@ -108,6 +114,55 @@ suite('Environment Injection Test (Mocked)', () => {
 
         const options = term.creationOptions;
         assert.strictEqual(options.env?.["TERM_VAR"], "123", "Terminal env should contain TERM_VAR");
+    });
+
+    test('Windows terminal uses PowerShell profile and PowerShell cwd command', async () => {
+        terminalAdapterTestApi.setPlatformOverride('win32');
+
+        let envConfig: any = { "TERM_VAR": "123" };
+        mockVscode.workspace.getConfiguration = (section: string) => ({
+            get: (key: string, def: any) => {
+                if (key === 'environment') return envConfig || def;
+                return def;
+            },
+            update: async (key: string, value: any) => {
+                if (key === 'environment') envConfig = value;
+            }
+        });
+
+        const workspaceRoot = path.resolve('D:/intent_router');
+        mockVscode.workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot, path: workspaceRoot } }];
+
+        await executeTerminalCommand({ command: 'echo hello', cwd: 'nested dir' });
+
+        const term = mockVscode.window.terminals[0];
+        assert.ok(term, 'Terminal should be created on Windows');
+        assert.strictEqual(term.creationOptions.shellPath, terminalAdapterTestApi.getWindowsPowerShellExecutable());
+        assert.deepStrictEqual(term.creationOptions.shellArgs, ['-NoLogo']);
+        assert.strictEqual(term.creationOptions.env?.["TERM_VAR"], "123");
+
+        const expectedCwd = path.resolve(workspaceRoot, 'nested dir');
+        assert.strictEqual(term.sentText[0], `Set-Location -LiteralPath '${expectedCwd}'`);
+        assert.strictEqual(term.sentText[1], 'echo hello');
+    });
+
+    test('Windows captured terminal strips CLIXML noise and suppresses progress serialization', () => {
+        terminalAdapterTestApi.setPlatformOverride('win32');
+
+        const script = terminalAdapterTestApi.buildWindowsCommandScript('echo "hello"');
+        assert.ok(script.includes("$ProgressPreference = 'SilentlyContinue'"));
+
+        const shell = terminalAdapterTestApi.resolveWindowsShellConfig();
+        const lowerCommandArgs = shell.commandArgs.map((entry: string) => String(entry).toLowerCase());
+        if (String(shell.executable).toLowerCase().endsWith('powershell.exe')) {
+            assert.ok(lowerCommandArgs.includes('-outputformat'));
+            assert.ok(lowerCommandArgs.includes('text'));
+        }
+
+        const raw = '#< CLIXML\r\n'
+            + '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress"></Obj></Objs>\r\n'
+            + 'hello\r\n';
+        assert.strictEqual(terminalAdapterTestApi.sanitizeCapturedOutput(raw), 'hello\r\n');
     });
 
     test('Terminal Re-creation on Env Change', async () => {

@@ -20,21 +20,24 @@ suite('Extension Test Suite', () => {
         }
     };
 
-    suiteSetup(async () => {
+    suiteSetup(async function () {
+        this.timeout(10000);
         const config = vscode.workspace.getConfiguration('intentRouter');
         originalMappings = config.get('mappings');
         originalProfiles = config.get('profiles');
         originalActiveProfile = config.get('activeProfile');
     });
 
-    setup(async () => {
+    setup(async function () {
+        this.timeout(10000);
         const config = vscode.workspace.getConfiguration('intentRouter');
         await updateConfigSafe(config, 'mappings', []);
         await updateConfigSafe(config, 'profiles', []);
         await updateConfigSafe(config, 'activeProfile', '');
     });
 
-    suiteTeardown(async () => {
+    suiteTeardown(async function () {
+        this.timeout(10000);
         const config = vscode.workspace.getConfiguration('intentRouter');
         await updateConfigSafe(config, 'mappings', originalMappings);
         await updateConfigSafe(config, 'profiles', originalProfiles);
@@ -152,28 +155,51 @@ suite('Extension Test Suite', () => {
 
     test('Extension - Profile Mappings Override Global', async () => {
         resetRegistry();
-        const config = vscode.workspace.getConfiguration('intentRouter');
-
-        await updateConfigSafe(config, 'mappings', [
-            { capability: 'profile.cap', command: 'intentRouter.test.profileGlobal', type: 'unknown' as any }
-        ]);
-        await updateConfigSafe(config, 'profiles', [
-            {
-                name: 'demo',
-                mappings: [
-                    { capability: 'profile.cap', command: 'intentRouter.test.profileLocal', type: 'vscode' as any }
-                ]
+        const originalGetConfiguration = vscode.workspace.getConfiguration.bind(vscode.workspace);
+        (vscode.workspace as any).getConfiguration = (section?: string) => {
+            if (section === 'intentRouter') {
+                return {
+                    get: (key: string, defaultValue?: any) => {
+                        if (key === 'mappings') {
+                            return [{ capability: 'profile.cap', command: 'intentRouter.test.profileGlobal', type: 'unknown' as any }];
+                        }
+                        if (key === 'profiles') {
+                            return [
+                                {
+                                    name: 'demo',
+                                    mappings: [
+                                        { capability: 'profile.cap', command: 'intentRouter.test.profileLocal', type: 'vscode' as any }
+                                    ]
+                                }
+                            ];
+                        }
+                        if (key === 'activeProfile') {
+                            return 'demo';
+                        }
+                        if (key === 'logLevel') {
+                            return 'info';
+                        }
+                        if (key === 'debug') {
+                            return false;
+                        }
+                        return defaultValue;
+                    }
+                };
             }
-        ]);
-        await updateConfigSafe(config, 'activeProfile', 'demo');
+            return originalGetConfiguration(section as any);
+        };
 
-        const ok = await routeIntent({
-            intent: 'profile test',
-            capabilities: ['profile.cap'],
-            meta: { dryRun: true }
-        });
+        try {
+            const ok = await routeIntent({
+                intent: 'profile test',
+                capabilities: ['profile.cap'],
+                meta: { dryRun: true }
+            });
 
-        assert.strictEqual(ok, true);
+            assert.strictEqual(ok, true);
+        } finally {
+            (vscode.workspace as any).getConfiguration = originalGetConfiguration;
+        }
     });
 
     test('Extension - Profile Enabled Providers Filter', async () => {
@@ -227,7 +253,7 @@ suite('Extension Test Suite', () => {
                 meta: { dryRun: true }
             });
 
-            assert.strictEqual(ok, true);
+            assert.strictEqual(ok, false);
         } finally {
             (vscode.workspace as any).getConfiguration = originalGetConfiguration;
         }

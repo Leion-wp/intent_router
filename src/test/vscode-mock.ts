@@ -1,3 +1,4 @@
+const fs = require('fs');
 const terminals: any[] = [];
 let webviewPanel: any = null;
 const outputLines: string[] = [];
@@ -61,8 +62,11 @@ module.exports = {
       const t: any = {
           name,
           creationOptions,
+          sentText: [] as string[],
           show: () => {},
-          sendText: () => {},
+          sendText: (text: string) => {
+              t.sentText.push(String(text));
+          },
           dispose: () => {
               const idx = terminals.indexOf(t);
               if (idx !== -1) terminals.splice(idx, 1);
@@ -163,9 +167,23 @@ module.exports = {
       },
       workspaceFolders: [{ uri: { path: '/root' } }],
       fs: {
-          createDirectory: async () => {},
-          writeFile: async () => {},
-          readFile: async () => Buffer.from('[]')
+          createDirectory: async (uri: any) => {
+              const target = String(uri?.fsPath || uri?.path || '');
+              if (!target) return;
+              fs.mkdirSync(target, { recursive: true });
+          },
+          writeFile: async (uri: any, data: Uint8Array) => {
+              const target = String(uri?.fsPath || uri?.path || '');
+              if (!target) return;
+              fs.writeFileSync(target, Buffer.from(data));
+          },
+          readFile: async (uri: any) => {
+              const target = String(uri?.fsPath || uri?.path || '');
+              if (target && fs.existsSync(target)) {
+                  return fs.readFileSync(target);
+              }
+              return Buffer.from('[]');
+          }
       }
   },
   env: {

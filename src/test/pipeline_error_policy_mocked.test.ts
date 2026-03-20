@@ -17,6 +17,7 @@ Module.prototype.require = function (request: string) {
 const { runPipelineFromData } = require('../../out/pipelineRunner');
 const { pipelineEventBus } = require('../../out/eventBus');
 const { queryRunMemory } = require('../../out/runMemoryStore');
+const { registerCapabilities, resetRegistry } = require('../../out/registry');
 Module.prototype.require = originalRequire;
 
 suite('Pipeline Error Policy (Mocked)', () => {
@@ -35,6 +36,7 @@ suite('Pipeline Error Policy (Mocked)', () => {
     mockVscode.__mock.configStore.set('intentRouter.memory.maxPayloadChars', 120000);
     mockVscode.__mock.configStore.set('intentRouter.runtime.sandbox.allowNetwork', true);
     mockVscode.__mock.configStore.set('intentRouter.runtime.sandbox.allowFileWrite', true);
+    resetRegistry();
   });
 
   teardown(() => {
@@ -45,6 +47,18 @@ suite('Pipeline Error Policy (Mocked)', () => {
   });
 
   test('retry fixed emits retry logs then fails', async () => {
+    await mockVscode.commands.registerCommand('intentRouter.test.failCommand', async () => false);
+    registerCapabilities({
+      provider: 'test',
+      type: 'vscode',
+      capabilities: [
+        {
+          capability: 'test.fail',
+          command: 'intentRouter.test.failCommand'
+        }
+      ]
+    });
+
     const retryLogs: string[] = [];
     const disposable = pipelineEventBus.on((event: any) => {
       if (event?.type === 'stepLog' && String(event?.text || '').includes('[retry]')) {
@@ -58,12 +72,13 @@ suite('Pipeline Error Policy (Mocked)', () => {
         steps: [
           {
             id: 'broken_1',
-            intent: 'nonexistent.capability',
+            intent: 'test.fail',
+            capabilities: ['test.fail'],
             retry: { mode: 'fixed', maxAttempts: 3, delayMs: 1 }
           }
         ]
       };
-      const result = await runPipelineFromData(pipeline as any, true);
+      const result = await runPipelineFromData(pipeline as any, false);
       assert.strictEqual(result.success, false);
       assert.strictEqual(result.status, 'failure');
       assert.ok(retryLogs.length >= 2, `Expected at least 2 retry logs, got ${retryLogs.length}`);
@@ -73,12 +88,25 @@ suite('Pipeline Error Policy (Mocked)', () => {
   });
 
   test('continueOnError captures error variable and continues flow', async () => {
+    await mockVscode.commands.registerCommand('intentRouter.test.failCommand', async () => false);
+    registerCapabilities({
+      provider: 'test',
+      type: 'vscode',
+      capabilities: [
+        {
+          capability: 'test.fail',
+          command: 'intentRouter.test.failCommand'
+        }
+      ]
+    });
+
     const pipeline = {
       name: 'continue-capture',
       steps: [
         {
           id: 'broken_1',
-          intent: 'nonexistent.capability',
+          intent: 'test.fail',
+          capabilities: ['test.fail'],
           continueOnError: true,
           captureErrorVar: 'last_error'
         },
@@ -120,7 +148,7 @@ suite('Pipeline Error Policy (Mocked)', () => {
       ]
     };
 
-    const result = await runPipelineFromData(pipeline as any, true);
+    const result = await runPipelineFromData(pipeline as any, false);
     assert.strictEqual(result.success, true);
     assert.strictEqual(result.status, 'success');
 
@@ -128,6 +156,6 @@ suite('Pipeline Error Policy (Mocked)', () => {
     assert.strictEqual(records.length, 1);
     const vars = records[0]?.data?.variables || {};
     assert.strictEqual(vars.verdict, 'continued');
-    assert.ok(String(vars.last_error || '').includes('nonexistent.capability'));
+    assert.ok(String(vars.last_error || '').includes('unsuccessful result'));
   });
 });

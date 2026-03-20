@@ -28,6 +28,7 @@ suite('Flow Logic Tests (Mocked)', () => {
             mockVscode.__mock.reset();
         }
         mockVscode.window.terminals.length = 0;
+        terminalAdapter.__test?.setPlatformOverride?.(undefined);
     });
 
     test('Terminal reuse logic (Integration)', async () => {

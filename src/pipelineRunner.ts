@@ -3,7 +3,7 @@ import * as path from 'path';
 import { Intent } from './types';
 import { routeIntent } from './router';
 import { pipelineEventBus } from './eventBus';
-import { generateSecureToken, validateStrictShellArg, sanitizeShellArg, validateSafeRelativePath } from './security';
+import { generateSecureToken, sanitizeShellArg, validateSafeRelativePath, resolveShellFlavor } from './security';
 import { listPublicCapabilities } from './registry';
 import { Determinism } from './types';
 import { clearRunMemory, isRunMemoryEnabled, queryRunMemory, saveRunMemory } from './runMemoryStore';
@@ -64,6 +64,12 @@ type ErrorPolicy = {
     continueOnError: boolean;
     captureErrorVar?: string;
 };
+
+let platformOverride: NodeJS.Platform | undefined;
+
+function getRuntimePlatform(): NodeJS.Platform {
+    return platformOverride || process.platform;
+}
 
 function parseCsvList(raw: any): string[] {
     if (Array.isArray(raw)) {
@@ -488,14 +494,15 @@ function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): 
     const { intent: name, payload } = intent;
     if (!name.startsWith('git.') && !name.startsWith('docker.')) return intent;
 
+    const shellFlavor = resolveShellFlavor(getRuntimePlatform());
     let command = '';
     switch (name) {
-        case 'git.checkout': command = `git checkout ${payload?.create ? '-b ' : ''}${payload?.branch}`; break;
-        case 'git.commit': command = `git commit ${payload?.amend ? '--amend ' : ''}-m ${sanitizeShellArg(payload?.message)}`; break;
+        case 'git.checkout': command = `git checkout ${payload?.create ? '-b ' : ''}${sanitizeShellArg(String(payload?.branch ?? ''), shellFlavor)}`; break;
+        case 'git.commit': command = `git commit ${payload?.amend ? '--amend ' : ''}-m ${sanitizeShellArg(String(payload?.message ?? ''), shellFlavor)}`; break;
         case 'git.pull': command = 'git pull'; break;
         case 'git.push': command = 'git push'; break;
-        case 'docker.build': command = `docker build -t ${payload?.tag} ${payload?.path || '.'}`; break;
-        case 'docker.run': command = `docker run ${payload?.detach ? '-d ' : ''}${payload?.image}`; break;
+        case 'docker.build': command = `docker build -t ${sanitizeShellArg(String(payload?.tag ?? ''), shellFlavor)} ${sanitizeShellArg(String(payload?.path ?? '.'), shellFlavor)}`; break;
+        case 'docker.run': command = `docker run ${payload?.detach ? '-d ' : ''}${sanitizeShellArg(String(payload?.image ?? ''), shellFlavor)}`; break;
         default: return intent;
     }
 
@@ -544,6 +551,12 @@ export async function compileStep(step: Intent, variableStore: Map<string, strin
     const resolvedStep = { ...step, payload: resolvedPayload };
     return transformToTerminal(resolvedStep, cwd, trustedRoot);
 }
+
+export const __test__ = {
+    setPlatformOverride(platform: NodeJS.Platform | undefined) {
+        platformOverride = platform;
+    }
+};
 
 function buildStepAdjacency(pipeline: PipelineFile): Map<string, Set<string>> {
     const stepIds = new Set((pipeline.steps || []).map((s: any) => String(s?.id || '').trim()).filter(Boolean));
@@ -1283,6 +1296,7 @@ async function runPipeline(
                 runId,
                 stepId: compiledStep.id,
                 cwd: currentCwd,
+                dryRun,
                 subPipelineDepth
             };
             const sandboxPolicy = resolveRuntimeSandboxPolicy(compiledStep);

@@ -238,7 +238,9 @@ async function executeResolution(
 
     log(output, intent, minLevel, 'info', 'IR007', `step=execute command=${entry.command} dryRun=${meta.dryRun}`);
 
-    if (meta.dryRun) return true;
+    if (meta.dryRun) {
+        return await validateDryRunResolution(entry);
+    }
 
     try {
         const result = await adapter.invoke(entry, payload, intent);
@@ -254,6 +256,13 @@ let outputChannel: vscode.OutputChannel | undefined;
 function getOutputChannel(): vscode.OutputChannel {
     if (!outputChannel) outputChannel = vscode.window.createOutputChannel('Intent Router');
     return outputChannel;
+}
+
+async function validateDryRunResolution(entry: Resolution): Promise<boolean> {
+    if (entry.source === 'fallback') {
+        return false;
+    }
+    return true;
 }
 
 function log(output: vscode.OutputChannel, intent: Intent, minLevel: any, level: any, code: string, message: string): void {

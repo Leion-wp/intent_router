@@ -1,6 +1,8 @@
 import * as crypto from 'crypto';
 import * as path from 'path';
 
+export type ShellFlavor = 'posix' | 'powershell';
+
 /**
  * Generates a cryptographically secure nonce (alphanumeric).
  * Suitable for CSP nonces.
@@ -30,13 +32,24 @@ export function validateStrictShellArg(arg: string, context: string): void {
 }
 
 /**
- * Sanitizes a shell argument by escaping dangerous characters and wrapping in double quotes.
- * Escapes: " $ `
+ * Resolves the shell flavor for the current runtime platform.
  */
-export function sanitizeShellArg(arg: string): string {
-    if (arg === undefined || arg === null) return '""';
-    // Escape backslash, double quote, dollar, and backtick
-    const escaped = arg.replace(/([\\"$`])/g, '\\$1');
+export function resolveShellFlavor(platform: NodeJS.Platform = process.platform): ShellFlavor {
+    return platform === 'win32' ? 'powershell' : 'posix';
+}
+
+/**
+ * Sanitizes a shell argument by wrapping it in a shell-safe quoted literal.
+ */
+export function sanitizeShellArg(arg: string, shellFlavor: ShellFlavor = resolveShellFlavor()): string {
+    if (arg === undefined || arg === null) {
+        return shellFlavor === 'powershell' ? "''" : '""';
+    }
+    if (shellFlavor === 'powershell') {
+        return `'${String(arg).replace(/'/g, "''")}'`;
+    }
+    // POSIX shell escaping inside double quotes.
+    const escaped = String(arg).replace(/([\\"$`])/g, '\\$1');
     return `"${escaped}"`;
 }
 
