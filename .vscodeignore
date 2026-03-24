@@ -1,7 +1,6 @@
 **/.git/**
 **/.vscode/**
 **/.github/**
-**/node_modules/**
 **/tsconfig.tsbuildinfo
 **/*.map
 **/*.log
@@ -26,3 +25,4 @@ VISION.md
 SECURITY.md
 .gitignore
 tsconfig.json
+.vsce-files.txt

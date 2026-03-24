@@ -4,6 +4,8 @@ let webviewPanel: any = null;
 const outputLines: string[] = [];
 const openedExternalUris: any[] = [];
 const clipboardWrites: string[] = [];
+const openedTextDocuments: any[] = [];
+const shownTextDocuments: any[] = [];
 const commandHandlers = new Map<string, (...args: any[]) => any>();
 const configurationChangeListeners: Array<(event: { affectsConfiguration: (section: string) => boolean }) => void> = [];
 
@@ -80,6 +82,10 @@ module.exports = {
         return 'mocked-value';
     },
     showInformationMessage: async () => {},
+    showTextDocument: async (doc: any, options?: any) => {
+      shownTextDocuments.push({ doc, options });
+      return doc;
+    },
     createOutputChannel: () => ({
       appendLine: (line: string) => outputLines.push(String(line)),
       clear: () => { outputLines.length = 0; }
@@ -184,6 +190,11 @@ module.exports = {
               }
               return Buffer.from('[]');
           }
+      },
+      openTextDocument: async (uri: any) => {
+          const doc = { uri };
+          openedTextDocuments.push(doc);
+          return doc;
       }
   },
   env: {
@@ -202,6 +213,8 @@ module.exports = {
     outputLines,
     openedExternalUris,
     clipboardWrites,
+    openedTextDocuments,
+    shownTextDocuments,
     commandHandlers,
     configStore,
     reset: () => {
@@ -209,6 +222,8 @@ module.exports = {
       outputLines.length = 0;
       openedExternalUris.length = 0;
       clipboardWrites.length = 0;
+      openedTextDocuments.length = 0;
+      shownTextDocuments.length = 0;
       commandHandlers.clear();
       configurationChangeListeners.length = 0;
       configStore.clear();

@@ -75,7 +75,7 @@ function SidebarTabs({ effectiveTabs, activeTabId, onSelectTab }: SidebarTabsPro
           }}
         >
           <span className={`codicon ${entry.icon || 'codicon-symbol-misc'}`} style={{ fontSize: '14px' }} />
-          <span style={{ display: effectiveTabs.length > 3 ? 'none' : 'inline' }}>{entry.title}</span>
+          <span style={{ display: effectiveTabs.length > 4 && activeTabId !== entry.id ? 'none' : 'inline' }}>{entry.title}</span>
         </button>
       ))}
     </div>

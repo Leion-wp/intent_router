@@ -20,51 +20,91 @@ import { RuntimeTriggerManager } from './runtimeTriggerManager';
 import { ChromeBridge } from './chromeBridge';
 import { ChromePanelView } from './chromePanelView';
 
+function logActivationWarning(scope: string, error: unknown): void {
+    const message = error instanceof Error ? error.stack || error.message : String(error);
+    console.warn(`[Intent Router] Activation warning in ${scope}: ${message}`);
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('Intent Router extension is now active!');
     console.log('HistoryManager initialized', !!historyManager);
 
     // V1 Providers: Strict discovery
-    registerGitProvider(context);
-    registerDockerProvider(context);
-    registerTerminalProvider(context);
-    registerSystemProvider(context);
-    registerVSCodeProvider(context);
-    registerAiProvider(context);
-    registerHttpProvider(context);
-    registerGitHubProvider(context);
+    for (const [scope, register] of [
+        ['gitProvider', () => registerGitProvider(context)],
+        ['dockerProvider', () => registerDockerProvider(context)],
+        ['terminalProvider', () => registerTerminalProvider(context)],
+        ['systemProvider', () => registerSystemProvider(context)],
+        ['vscodeProvider', () => registerVSCodeProvider(context)],
+        ['aiProvider', () => registerAiProvider(context)],
+        ['httpProvider', () => registerHttpProvider(context)],
+        ['githubProvider', () => registerGitHubProvider(context)]
+    ] as const) {
+        try {
+            register();
+        } catch (error) {
+            logActivationWarning(scope, error);
+        }
+    }
 
     const pipelineBuilder = new PipelineBuilder(context.extensionUri);
-    const pipelinesProvider = new PipelinesTreeDataProvider();
-    const pipelinesView = vscode.window.createTreeView('intentRouterPipelines', {
-        treeDataProvider: pipelinesProvider,
-        dragAndDropController: pipelinesProvider,
-        canSelectMany: false
-    });
+    let pipelinesProvider: PipelinesTreeDataProvider | undefined;
+    let pipelinesView: vscode.TreeView<PipelinesTreeNode> | undefined;
+    try {
+        pipelinesProvider = new PipelinesTreeDataProvider();
+        pipelinesView = vscode.window.createTreeView('intentRouterPipelines', {
+            treeDataProvider: pipelinesProvider,
+            dragAndDropController: pipelinesProvider,
+            canSelectMany: false
+        });
+        context.subscriptions.push(pipelinesProvider, pipelinesView);
+    } catch (error) {
+        logActivationWarning('pipelinesView', error);
+    }
 
-    const statusBarManager = new StatusBarManager();
-    context.subscriptions.push(statusBarManager);
-    const runtimeTriggerManager = new RuntimeTriggerManager(context);
-    context.subscriptions.push(runtimeTriggerManager);
-    void runtimeTriggerManager.start().catch((error) => {
-        console.warn('[Intent Router] Runtime trigger manager failed to start:', error);
-    });
+    try {
+        const statusBarManager = new StatusBarManager();
+        context.subscriptions.push(statusBarManager);
+    } catch (error) {
+        logActivationWarning('statusBar', error);
+    }
 
-    const chromeBridge = new ChromeBridge(context);
-    context.subscriptions.push(chromeBridge);
-    void chromeBridge.start().catch((error) => {
-        console.warn('[Intent Router] Chrome bridge failed to start:', error);
-    });
+    let runtimeTriggerManager: RuntimeTriggerManager | undefined;
+    try {
+        runtimeTriggerManager = new RuntimeTriggerManager(context);
+        context.subscriptions.push(runtimeTriggerManager);
+        void runtimeTriggerManager.start().catch((error) => {
+            logActivationWarning('runtimeTriggerManager.start', error);
+        });
+    } catch (error) {
+        logActivationWarning('runtimeTriggerManager', error);
+    }
 
-    const chromePanelView = new ChromePanelView(context.extensionUri, chromeBridge);
-    context.subscriptions.push(chromePanelView);
+    let chromeBridge: ChromeBridge | undefined;
+    let chromePanelView: ChromePanelView | undefined;
+    try {
+        chromeBridge = new ChromeBridge(context);
+        context.subscriptions.push(chromeBridge);
+        void chromeBridge.start().catch((error) => {
+            logActivationWarning('chromeBridge.start', error);
+        });
 
-    // Wire live tab updates from Chrome → WebView panel
-    chromeBridge.onTabsUpdate((msg) => {
-        chromePanelView.postMessage(msg);
-    });
+        chromePanelView = new ChromePanelView(context.extensionUri, chromeBridge);
+        context.subscriptions.push(chromePanelView);
+
+        // Wire live tab updates from Chrome → WebView panel
+        chromeBridge.onTabsUpdate((msg) => {
+            chromePanelView?.postMessage(msg);
+        });
+    } catch (error) {
+        logActivationWarning('chromePanel', error);
+    }
 
     let openChromeTabsDisposable = vscode.commands.registerCommand('intentRouter.openChromeTabs', () => {
+        if (!chromePanelView) {
+            vscode.window.showErrorMessage('Chrome panel is unavailable. Check the Extension Host logs.');
+            return;
+        }
         chromePanelView.open();
     });
 
@@ -144,7 +184,7 @@ export function activate(context: vscode.ExtensionContext) {
     let createPipelineDisposable = vscode.commands.registerCommand('intentRouter.createPipeline', async () => {
         const uri = await createPipelineFileWithPrompt();
         if (uri) {
-            pipelinesProvider.refresh();
+            pipelinesProvider?.refresh();
         }
     });
 
@@ -166,7 +206,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     let importFromClipboardDisposable = vscode.commands.registerCommand('intentRouter.importPipelineFromClipboard', async () => {
         await importPipelineFromClipboard();
-        pipelinesProvider.refresh();
+        pipelinesProvider?.refresh();
     });
 
     let openCodexDisposable = vscode.commands.registerCommand('intentRouter.openCodex', async () => {
@@ -185,7 +225,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (!uri) {
             return;
         }
-        pipelinesProvider.refresh();
+        pipelinesProvider?.refresh();
         await runPipelineFromUri(uri, false);
     });
 
@@ -220,6 +260,10 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let addClusterDisposable = vscode.commands.registerCommand('intentRouter.pipelines.addCluster', async () => {
+        if (!pipelinesProvider) {
+            vscode.window.showErrorMessage('Pipelines view is unavailable. Reload the window and try again.');
+            return;
+        }
         const name = await vscode.window.showInputBox({
             prompt: 'Cluster name',
             placeHolder: 'backend, release, onboarding...'
@@ -231,6 +275,10 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let renameClusterDisposable = vscode.commands.registerCommand('intentRouter.pipelines.renameCluster', async (node?: ClusterTreeNode) => {
+        if (!pipelinesProvider) {
+            vscode.window.showErrorMessage('Pipelines view is unavailable. Reload the window and try again.');
+            return;
+        }
         const clusterNode = node?.kind === 'cluster' ? node : getSelectedClusterNode(pipelinesView);
         if (!clusterNode || clusterNode.isUncategorized) {
             return;
@@ -246,6 +294,10 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let deleteClusterDisposable = vscode.commands.registerCommand('intentRouter.pipelines.deleteCluster', async (node?: ClusterTreeNode) => {
+        if (!pipelinesProvider) {
+            vscode.window.showErrorMessage('Pipelines view is unavailable. Reload the window and try again.');
+            return;
+        }
         const clusterNode = node?.kind === 'cluster' ? node : getSelectedClusterNode(pipelinesView);
         if (!clusterNode || clusterNode.isUncategorized) {
             return;
@@ -268,13 +320,21 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
         if (clusterNode && !clusterNode.isUncategorized) {
+            if (!pipelinesProvider) {
+                vscode.window.showErrorMessage('Pipelines view is unavailable. Reload the window and try again.');
+                return;
+            }
             await pipelinesProvider.addPipelineUriToCluster(uri, clusterNode.id);
         } else {
-            pipelinesProvider.refresh();
+            pipelinesProvider?.refresh();
         }
     });
 
     let assignClusterDisposable = vscode.commands.registerCommand('intentRouter.pipelines.assignCluster', async (node?: PipelineTreeNode) => {
+        if (!pipelinesProvider) {
+            vscode.window.showErrorMessage('Pipelines view is unavailable. Reload the window and try again.');
+            return;
+        }
         const pipelineNode = node?.kind === 'pipeline' ? node : getSelectedPipelineNode(pipelinesView);
         if (!pipelineNode) {
             return;
@@ -316,6 +376,10 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let removeClusterDisposable = vscode.commands.registerCommand('intentRouter.pipelines.removeCluster', async (node?: PipelineTreeNode) => {
+        if (!pipelinesProvider) {
+            vscode.window.showErrorMessage('Pipelines view is unavailable. Reload the window and try again.');
+            return;
+        }
         const pipelineNode = node?.kind === 'pipeline' ? node : getSelectedPipelineNode(pipelinesView);
         if (!pipelineNode || pipelineNode.clusterId === '__uncategorized__') {
             return;
@@ -324,6 +388,10 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let renamePipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.rename', async (node?: PipelineTreeNode) => {
+        if (!pipelinesProvider) {
+            vscode.window.showErrorMessage('Pipelines view is unavailable. Reload the window and try again.');
+            return;
+        }
         const pipelineNode = node?.kind === 'pipeline' ? node : getSelectedPipelineNode(pipelinesView);
         if (!pipelineNode) {
             return;
@@ -348,6 +416,10 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let deletePipelineDisposable = vscode.commands.registerCommand('intentRouter.pipelines.delete', async (node?: PipelineTreeNode) => {
+        if (!pipelinesProvider) {
+            vscode.window.showErrorMessage('Pipelines view is unavailable. Reload the window and try again.');
+            return;
+        }
         const pipelineNode = node?.kind === 'pipeline' ? node : getSelectedPipelineNode(pipelinesView);
         if (!pipelineNode) {
             return;
@@ -366,11 +438,19 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let sortUpdatedDisposable = vscode.commands.registerCommand('intentRouter.pipelines.sortByUpdated', async () => {
+        if (!pipelinesProvider) {
+            vscode.window.showErrorMessage('Pipelines view is unavailable. Reload the window and try again.');
+            return;
+        }
         await pipelinesProvider.setSortMode('updated');
         vscode.window.showInformationMessage('Pipeline sort: updated date.');
     });
 
     let sortManualDisposable = vscode.commands.registerCommand('intentRouter.pipelines.sortManual', async () => {
+        if (!pipelinesProvider) {
+            vscode.window.showErrorMessage('Pipelines view is unavailable. Reload the window and try again.');
+            return;
+        }
         await pipelinesProvider.setSortMode('manual');
         vscode.window.showInformationMessage('Pipeline sort: manual.');
     });
@@ -401,9 +481,13 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     let refreshPipelinesDisposable = vscode.commands.registerCommand('intentRouter.pipelines.refresh', async () => {
-        pipelinesProvider.refresh();
+        pipelinesProvider?.refresh();
     });
     let refreshRuntimeTriggersDisposable = vscode.commands.registerCommand('intentRouter.runtime.refreshTriggers', async () => {
+        if (!runtimeTriggerManager) {
+            vscode.window.showErrorMessage('Runtime trigger manager is unavailable. Check the Extension Host logs.');
+            return;
+        }
         await runtimeTriggerManager.refresh();
         vscode.window.showInformationMessage('Runtime triggers refreshed.');
     });
@@ -491,15 +575,13 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(pausePipelineDisposable);
     context.subscriptions.push(resumePipelineDisposable);
     context.subscriptions.push(clearHistoryDisposable);
-    context.subscriptions.push(pipelinesProvider);
-    context.subscriptions.push(pipelinesView);
     context.subscriptions.push(openChromeTabsDisposable);
 }
 
 export function deactivate() { }
 
 async function getPipelineUriFromSelectionOrPrompt(
-    pipelinesView: vscode.TreeView<PipelinesTreeNode>
+    pipelinesView?: vscode.TreeView<PipelinesTreeNode>
 ): Promise<vscode.Uri | undefined> {
     const selected = getSelectedPipelineNode(pipelinesView);
     if (selected?.item?.uri instanceof vscode.Uri) {
@@ -525,8 +607,11 @@ async function getPipelineUriFromSelectionOrPrompt(
 }
 
 function getSelectedPipelineNode(
-    pipelinesView: vscode.TreeView<PipelinesTreeNode>
+    pipelinesView?: vscode.TreeView<PipelinesTreeNode>
 ): PipelineTreeNode | undefined {
+    if (!pipelinesView) {
+        return undefined;
+    }
     const selected = pipelinesView.selection[0];
     if (selected?.kind === 'pipeline') {
         return selected;
@@ -535,8 +620,11 @@ function getSelectedPipelineNode(
 }
 
 function getSelectedClusterNode(
-    pipelinesView: vscode.TreeView<PipelinesTreeNode>
+    pipelinesView?: vscode.TreeView<PipelinesTreeNode>
 ): ClusterTreeNode | undefined {
+    if (!pipelinesView) {
+        return undefined;
+    }
     const selected = pipelinesView.selection[0];
     if (selected?.kind === 'cluster') {
         return selected;

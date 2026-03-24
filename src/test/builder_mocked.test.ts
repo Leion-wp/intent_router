@@ -150,6 +150,59 @@ suite('Pipeline Builder Tests (Mocked)', () => {
         assert.strictEqual(mockVscode.__mock.clipboardWrites[0], 'https://github.com/acme/repo/pull/2');
     });
 
+    test('openWorkspaceFile opens a workspace-relative document', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        if (panel.postMessageCallback) {
+            await panel.postMessageCallback({ type: 'openWorkspaceFile', path: 'docs/offers/leion-delivery-pricing.md' });
+        }
+        assert.strictEqual(mockVscode.__mock.openedTextDocuments.length, 1);
+        assert.strictEqual(String(mockVscode.__mock.openedTextDocuments[0].uri.path).includes('docs/offers/leion-delivery-pricing.md'), true);
+        assert.strictEqual(mockVscode.__mock.shownTextDocuments.length, 1);
+    });
+
+    test('salesCockpit.save writes workspace cockpit state and pushes update', async () => {
+        await builder.open();
+        const panel = mockVscode.window.getLastWebviewPanel();
+        const receivedMessages: any[] = [];
+        panel.onMessageReceived = (msg: any) => {
+            receivedMessages.push(msg);
+        };
+        if (panel.postMessageCallback) {
+            await panel.postMessageCallback({
+                type: 'salesCockpit.save',
+                salesCockpit: {
+                    version: 1,
+                    lastUpdatedAt: '2026-03-24T10:00:00.000Z',
+                    notes: 'Focus on agencies with GitHub review bottlenecks',
+                    weeklyTargets: {
+                        outbound: 100,
+                        discovery: 10,
+                        demos: 4,
+                        proposals: 2
+                    },
+                    leads: [
+                        {
+                            id: 'lead-1',
+                            company: 'Agency One',
+                            contactName: 'Alice',
+                            role: 'CTO',
+                            status: 'contacted',
+                            pain: 'Repeated GitHub delivery work',
+                            nextAction: 'Send pilot scope',
+                            owner: 'founder'
+                        }
+                    ],
+                    tasks: [],
+                    campaigns: [],
+                    templates: []
+                }
+            });
+        }
+        assert.strictEqual(writtenFiles.some((entry) => String(entry.uri.path).includes('.intent-router/sales-cockpit.json')), true);
+        assert.strictEqual(receivedMessages.some((msg) => msg.type === 'salesCockpitUpdate' && msg.salesCockpit?.leads?.[0]?.company === 'Agency One'), true);
+    });
+
     test('runPipeline forwards startStepId to command', async () => {
         await builder.open();
         const panel = mockVscode.window.getLastWebviewPanel();

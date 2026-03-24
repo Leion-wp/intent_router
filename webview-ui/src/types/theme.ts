@@ -57,6 +57,7 @@ export const defaultThemeTokens: ThemeTokens = {
 
 export const defaultSidebarTabs: SidebarTabPreset[] = [
   { id: 'nodes', title: 'NODES', icon: 'codicon-symbol-misc', type: 'pipelines', visible: true },
+  { id: 'delivery', title: 'COCKPIT', icon: 'codicon-dashboard', type: 'catalog', visible: true },
   { id: 'history', title: 'HISTORY', icon: 'codicon-history', type: 'history', visible: true },
   { id: 'env', title: 'ENV', icon: 'codicon-symbol-constant', type: 'settings', visible: true },
   { id: 'studio', title: 'STUDIO', icon: 'codicon-tools', type: 'studio', visible: true }

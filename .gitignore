@@ -35,3 +35,17 @@ reports/
 *memory*.*
 /scripts/
 docs/
+!docs/
+docs/*
+!docs/control-plane/
+docs/control-plane/*
+!docs/control-plane/leion-delivery-control-plane-v1.md
+!docs/offers/
+docs/offers/*
+!docs/offers/leion-delivery-*.md
+!docs/sales/
+docs/sales/*
+!docs/sales/leion-delivery-*.md
+!docs/proof/
+docs/proof/*
+!docs/proof/leion-delivery-*.md

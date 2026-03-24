@@ -71,6 +71,7 @@ export type WebviewInboundMessage =
   | { type: 'uiPresetExported'; json: string }
   | { type: 'uiPresetPropagated'; summary: string; releasePath: string }
   | { type: 'sessionMemoryStatus'; nodeId?: string; sessionId?: string; entries: number; lastTimestamp?: number }
+  | { type: 'salesCockpitUpdate'; salesCockpit: any }
   | { type: 'loadPipeline'; pipeline: any }
   | { type: 'pathSelected'; id: string; argName: string; path: string }
   | { type: 'optionsFetched'; argName: string; options: string[] }
@@ -105,6 +106,8 @@ export type WebviewOutboundMessage =
   | { type: 'sessionMemory.import'; jsonText: string; mode?: 'merge' | 'replace' }
   | { type: 'sessionMemory.inspect'; nodeId?: string; sessionId?: string }
   | { type: 'devPackager.loadPreset' }
+  | { type: 'openWorkspaceFile'; path: string }
+  | { type: 'salesCockpit.save'; salesCockpit: any }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };
 

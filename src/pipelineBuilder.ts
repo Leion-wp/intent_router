@@ -21,6 +21,8 @@ import {
     writeUiDraftToWorkspace
 } from './uiPresetStore';
 import { clearSessionMemory, exportSessionMemory, importSessionMemory, summarizeSessionMemory } from './sessionMemoryStore';
+import { LEION_DELIVERY_CATALOG } from './controlPlane/leionDeliveryCatalog';
+import { readSalesCockpitFromWorkspace, writeSalesCockpitToWorkspace } from './salesCockpitStore';
 
 type CommandGroup = {
     provider: string;
@@ -196,6 +198,7 @@ export class PipelineBuilder {
             const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
             const uiPreset = await resolveUiPreset(this.extensionUri, adminMode);
             const uiPresetRelease = await readEmbeddedUiPreset(this.extensionUri);
+            const salesCockpit = await readSalesCockpitFromWorkspace();
             this.panel?.webview.postMessage({ type: 'adminModeUpdate', adminMode });
             this.panel?.webview.postMessage({ type: 'uiPresetUpdate', uiPreset });
             this.panel?.webview.postMessage({ type: 'uiPresetReleaseUpdate', uiPreset: uiPresetRelease });
@@ -238,6 +241,7 @@ export class PipelineBuilder {
             const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
             const uiPreset = await resolveUiPreset(this.extensionUri, adminMode);
             const uiPresetRelease = await readEmbeddedUiPreset(this.extensionUri);
+            const salesCockpit = await readSalesCockpitFromWorkspace();
 
         const webviewUri = panel.webview.asWebviewUri(
             vscode.Uri.joinPath(this.extensionUri, 'out', 'webview-bundle', 'index.js')
@@ -261,7 +265,9 @@ export class PipelineBuilder {
             devMode,
             adminMode,
             uiPreset,
-            uiPresetRelease
+            uiPresetRelease,
+            controlPlaneCatalog: LEION_DELIVERY_CATALOG,
+            salesCockpit
         });
 
         // Keep custom nodes in sync while builder is open
@@ -284,6 +290,20 @@ export class PipelineBuilder {
         uiDraftWatcher.onDidCreate(() => void pushUiPreset());
         uiDraftWatcher.onDidDelete(() => void pushUiPreset());
         this.disposables.push(uiDraftWatcher);
+
+        const salesCockpitWatcher = vscode.workspace.createFileSystemWatcher('**/.intent-router/sales-cockpit.json');
+        const pushSalesCockpit = async () => {
+            try {
+                const salesCockpit = await readSalesCockpitFromWorkspace();
+                this.panel?.webview.postMessage({ type: 'salesCockpitUpdate', salesCockpit });
+            } catch {
+                // best-effort
+            }
+        };
+        salesCockpitWatcher.onDidChange(() => void pushSalesCockpit());
+        salesCockpitWatcher.onDidCreate(() => void pushSalesCockpit());
+        salesCockpitWatcher.onDidDelete(() => void pushSalesCockpit());
+        this.disposables.push(salesCockpitWatcher);
 
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message?.type === 'savePipeline') {
@@ -383,6 +403,40 @@ export class PipelineBuilder {
                     await vscode.env.openExternal(uri);
                 } catch (error: any) {
                     vscode.window.showErrorMessage(`Failed to open link: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'openWorkspaceFile') {
+                try {
+                    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+                    if (!workspaceRoot) {
+                        throw new Error('Open a workspace folder first.');
+                    }
+                    const rawPath = String(message.path || '').trim().replace(/\\/g, '/');
+                    if (!rawPath) {
+                        throw new Error('Missing workspace-relative path.');
+                    }
+                    if (rawPath.startsWith('/') || rawPath.includes('..')) {
+                        throw new Error('Only safe workspace-relative paths are allowed.');
+                    }
+                    const parts = rawPath.split('/').map(part => part.trim()).filter(Boolean);
+                    const uri = vscode.Uri.joinPath(workspaceRoot, ...parts);
+                    const doc = await vscode.workspace.openTextDocument(uri);
+                    await vscode.window.showTextDocument(doc, { preview: false });
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to open workspace file: ${error?.message || error}`);
+                }
+                return;
+            }
+            if (message?.type === 'salesCockpit.save') {
+                try {
+                    const salesCockpit = await writeSalesCockpitToWorkspace(message.salesCockpit);
+                    this.panel?.webview.postMessage({
+                        type: 'salesCockpitUpdate',
+                        salesCockpit
+                    });
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Failed to save sales cockpit: ${error?.message || error}`);
                 }
                 return;
             }

@@ -5,6 +5,7 @@ import ProvidersPanel from './components/sidebar/ProvidersPanel';
 import HistoryPanel from './components/sidebar/HistoryPanel';
 import SidebarTabs from './components/sidebar/SidebarTabs';
 import EnvironmentPanel from './components/sidebar/EnvironmentPanel';
+import ControlPlanePanel from './components/sidebar/ControlPlanePanel';
 import SidebarFooter from './components/sidebar/SidebarFooter';
 import StudioAdminPanel from './components/sidebar/StudioAdminPanel';
 import StudioNodesPanel from './components/sidebar/StudioNodesPanel';
@@ -12,6 +13,7 @@ import { useStudioSidebarState } from './hooks/useStudioSidebarState';
 import { useUiPresetSidebarState } from './hooks/useUiPresetSidebarState';
 import { useSidebarEnvironmentState } from './hooks/useSidebarEnvironmentState';
 import { useProvidersCatalogState } from './hooks/useProvidersCatalogState';
+import { useSalesCockpitState } from './hooks/useSalesCockpitState';
 import { computeHistoryWindow, filterHistoryRuns } from './utils/historyListUtils';
 
 type SidebarProps = {
@@ -35,9 +37,10 @@ declare global {
   }
 }
 
-function resolveSidebarView(type: SidebarTabType | string | undefined): 'providers' | 'history' | 'environment' | 'studio' {
+function resolveSidebarView(type: SidebarTabType | string | undefined): 'providers' | 'history' | 'environment' | 'studio' | 'catalog' {
   if (type === 'history') return 'history';
   if (type === 'settings') return 'environment';
+  if (type === 'catalog') return 'catalog';
   if (type === 'studio' || type === 'importExport') return 'studio';
   return 'providers';
 }
@@ -132,6 +135,7 @@ function Sidebar({
   const historyContainerRef = useRef<HTMLDivElement | null>(null);
   const deferredHistorySearch = useDeferredValue(historySearch);
   const devMode = !!window.initialData?.devMode;
+  const controlPlaneCatalog = (window.initialData?.controlPlaneCatalog || null) as any;
 
   const onDragStart = (event: React.DragEvent, nodeType: string, provider?: string) => {
     event.dataTransfer.setData('application/reactflow/type', nodeType);
@@ -158,6 +162,7 @@ function Sidebar({
     onDragStart,
     onDragStartCustomNode
   });
+  const { salesCockpit, saveSalesCockpit } = useSalesCockpitState();
 
   const effectiveTabs = useMemo(() => {
     if (Array.isArray(tabs) && tabs.length > 0) {
@@ -240,6 +245,12 @@ function Sidebar({
   const copyToClipboard = (text: string) => {
     if (!window.vscode) return;
     const msg: WebviewOutboundMessage = { type: 'copyToClipboard', text };
+    window.vscode.postMessage(msg);
+  };
+
+  const openWorkspaceFile = (filePath: string) => {
+    if (!window.vscode) return;
+    const msg: WebviewOutboundMessage = { type: 'openWorkspaceFile', path: filePath };
     window.vscode.postMessage(msg);
   };
 
@@ -358,6 +369,18 @@ function Sidebar({
             onFetchPrChecks={fetchPrChecks}
             onRerunPrChecks={rerunPrChecks}
             onCommentPr={commentPr}
+          />
+        )}
+
+        {activeView === 'catalog' && (
+          <ControlPlanePanel
+            history={history as any[]}
+            catalog={controlPlaneCatalog}
+            salesCockpit={salesCockpit}
+            onSaveSalesCockpit={saveSalesCockpit}
+            onOpenWorkspaceFile={openWorkspaceFile}
+            onCopyToClipboard={copyToClipboard}
+            onOpenExternal={openExternal}
           />
         )}
 

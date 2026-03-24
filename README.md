@@ -16,6 +16,31 @@ Leion Roots is designed to support a clear “Review & Merge” workflow where A
 
 If Leion Roots becomes magical, opaque, or autonomous, the project has failed.
 
+## First Sellable Product
+
+The runtime stays open-core. The first commercial product on top of it is:
+
+- `Leion Delivery`
+  - governed `Issue -> PR`
+  - governed `PR Review -> Fix / Improve`
+  - governed `Release / QA / Security Gate`
+- `Leion Delivery Control Plane`
+  - hosted organization, repo, template, run, and policy metadata
+  - local execution through VS Code or a lightweight CLI/agent
+  - explicit approval, audit, and proof loops instead of opaque autonomy
+
+This repo is therefore both:
+
+- the open local runtime and builder (`Leion Roots`)
+- the source of truth for the first commercial workflow pack (`Leion Delivery`)
+
+Key commercial artifacts live under:
+
+- `docs/control-plane/`
+- `docs/offers/`
+- `docs/sales/`
+- `docs/proof/`
+
 ## Key Features
 
 ### 1. Visual Pipeline Builder (The Cockpit)

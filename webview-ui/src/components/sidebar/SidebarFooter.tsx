@@ -1,7 +1,7 @@
 import React from 'react';
 
 type SidebarFooterProps = {
-  activeView: 'providers' | 'history' | 'environment' | 'studio';
+  activeView: 'providers' | 'history' | 'environment' | 'studio' | 'catalog';
   clearHistory: () => void;
 };
 
@@ -32,6 +32,12 @@ function SidebarFooter({ activeView, clearHistory }: SidebarFooterProps) {
         <>
           <span className="codicon codicon-info"></span>
           <span>Drag items · Ctrl+Shift+S focus search</span>
+        </>
+      )}
+      {activeView === 'catalog' && (
+        <>
+          <span className="codicon codicon-dashboard"></span>
+          <span>Sales cockpit · local-first CRM, outreach and proof assets</span>
         </>
       )}
     </div>
