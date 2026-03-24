@@ -247,11 +247,12 @@ html, body, #root {
 /* Form Elements Styling */
 input[type="text"], 
 input[type="password"], 
-input[type="number"], 
+input[type="number"],
+input[type="date"],
 select, 
 textarea {
   background: rgba(255, 255, 255, 0.03) !important;
-  color: #ffffff !important;
+  color: #e0e0e0 !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
   border-radius: 8px !important;
   padding: 8px 12px !important;
@@ -259,6 +260,11 @@ textarea {
   font-size: 12px !important;
   outline: none !important;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgba(255, 255, 255, 0.4) !important;
 }
 
 input[type="text"]:focus, 
@@ -292,6 +298,49 @@ button:active {
 .nodrag:focus-visible {
   outline: 2px solid var(--ir-accent-primary) !important;
   outline-offset: 2px !important;
+}
+
+/* Cockpit UI Utilities */
+.cp-card-hover {
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.cp-card-hover:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.cp-btn-secondary {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e0e0e0;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.cp-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.cp-btn-primary {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 162, 255, 0.3);
+  background: rgba(0, 162, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(0, 162, 255, 0.15);
+  transition: all 0.2s ease;
+}
+.cp-btn-primary:hover {
+  background: rgba(0, 162, 255, 0.25);
+  border-color: rgba(0, 162, 255, 0.5);
+  box-shadow: 0 4px 16px rgba(0, 162, 255, 0.25);
 }
 
 /* Handle animations */

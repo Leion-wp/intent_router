@@ -4,7 +4,7 @@
     "description": "Human-centric visual orchestration runtime for VS Code",
     "publisher": "LeionCorp",
     "icon": "media/leion_roots_icon.png",
-    "version": "0.1.5",
+    "version": "0.1.8",
     "license": "MIT",
     "repository": {
         "type": "git",
@@ -43,6 +43,7 @@
         "onCommand:intentRouter.generatePromptAndOpenCodex",
         "onCommand:intentRouter.importPipelineFromClipboardAndRun",
         "onView:intentRouterPipelines",
+        "onView:intentRouterCockpit",
         "onCommand:intentRouter.openChromeTabs"
     ],
     "contributes": {
@@ -199,6 +200,11 @@
                     "id": "intentRouter",
                     "title": "Leion Roots",
                     "icon": "media/leion_roots_icon.png"
+                },
+                {
+                    "id": "leionCockpit",
+                    "title": "Leion Cockpit",
+                    "icon": "media/leion_cockpit_icon.svg"
                 }
             ]
         },
@@ -207,6 +213,13 @@
                 {
                     "id": "intentRouterPipelines",
                     "name": "Intent Pipelines"
+                }
+            ],
+            "leionCockpit": [
+                {
+                    "id": "intentRouterCockpit",
+                    "name": "Sales Cockpit",
+                    "type": "webview"
                 }
             ]
         },
@@ -290,6 +303,26 @@
                 {
                     "command": "intentRouter.openChromeTabs",
                     "when": "view == intentRouterPipelines",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.new",
+                    "when": "view == intentRouterCockpit",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.loadSoftwareFactoryTemplate",
+                    "when": "view == intentRouterCockpit",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.pipelines.loadSoftwareFactoryBranchTemplate",
+                    "when": "view == intentRouterCockpit",
+                    "group": "navigation"
+                },
+                {
+                    "command": "intentRouter.openChromeTabs",
+                    "when": "view == intentRouterCockpit",
                     "group": "navigation"
                 }
             ],

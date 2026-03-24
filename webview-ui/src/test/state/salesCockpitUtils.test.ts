@@ -76,6 +76,10 @@ export function run() {
 
   const model = buildSalesCockpitModel(cockpit);
 
+  assert.strictEqual(cockpit.offer.name.length > 0, true);
+  assert.strictEqual(cockpit.funnel.acquisition.length > 0, true);
+  assert.strictEqual(cockpit.providerAccounts.length >= 6, true);
+  assert.strictEqual(model.providerSummary.total >= 6, true);
   assert.strictEqual(model.metrics.find((metric) => metric.key === 'outbound')?.current, 3);
   assert.strictEqual(model.metrics.find((metric) => metric.key === 'discovery')?.current, 2);
   assert.strictEqual(model.metrics.find((metric) => metric.key === 'demos')?.current, 2);

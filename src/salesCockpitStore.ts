@@ -4,6 +4,9 @@ export type SalesLeadStage = 'target' | 'contacted' | 'discovery' | 'demo' | 'pr
 export type SalesTaskStatus = 'todo' | 'done';
 export type SalesTaskKind = 'outreach' | 'follow_up' | 'demo' | 'proposal' | 'proof';
 export type SalesChannel = 'email' | 'linkedin';
+export type SalesProviderId = 'email' | 'google_sheets' | 'crm' | 'linkedin' | 'reddit' | 'product_hunt';
+export type SalesProviderStatus = 'not_connected' | 'configured' | 'connected';
+export type SalesProviderMode = 'draft_only' | 'manual_handoff' | 'sync_only';
 
 export type SalesCockpitLead = {
     id: string;
@@ -46,10 +49,42 @@ export type SalesCockpitTemplate = {
     body: string;
 };
 
+export type SalesProviderAccount = {
+    id: string;
+    provider: SalesProviderId;
+    label: string;
+    status: SalesProviderStatus;
+    mode: SalesProviderMode;
+    accountRef?: string;
+    endpointUrl?: string;
+    notes?: string;
+    capabilities: string[];
+    lastValidatedAt?: string;
+};
+
+export type SalesCockpitOffer = {
+    name: string;
+    audience: string;
+    problem: string;
+    promise: string;
+    proof: string;
+    callToAction: string;
+};
+
+export type SalesCockpitFunnel = {
+    acquisition: string;
+    qualification: string;
+    demo: string;
+    proposal: string;
+    close: string;
+};
+
 export type SalesCockpitState = {
     version: 1;
     lastUpdatedAt: string;
     notes: string;
+    offer: SalesCockpitOffer;
+    funnel: SalesCockpitFunnel;
     weeklyTargets: {
         outbound: number;
         discovery: number;
@@ -60,9 +95,13 @@ export type SalesCockpitState = {
     tasks: SalesCockpitTask[];
     campaigns: SalesCockpitCampaign[];
     templates: SalesCockpitTemplate[];
+    providerAccounts: SalesProviderAccount[];
 };
 
 const FILE_VERSION = 1 as const;
+const SALES_PROVIDER_IDS: SalesProviderId[] = ['email', 'google_sheets', 'crm', 'linkedin', 'reddit', 'product_hunt'];
+const SALES_PROVIDER_STATUSES: SalesProviderStatus[] = ['not_connected', 'configured', 'connected'];
+const SALES_PROVIDER_MODES: SalesProviderMode[] = ['draft_only', 'manual_handoff', 'sync_only'];
 
 function getWorkspaceRoot(): vscode.Uri | undefined {
     return vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -94,11 +133,105 @@ function timestamp(): string {
     return new Date().toISOString();
 }
 
+function createDefaultOffer(): SalesCockpitOffer {
+    return {
+        name: 'Leion Delivery Founding Pilot',
+        audience: 'Agencies and software factories with repeated GitHub delivery work.',
+        problem: 'Repeated GitHub delivery work stays manual, opaque, and hard to govern.',
+        promise: 'Turn issue-to-PR, PR fix, and release gates into governed AI workflows with explicit human approval.',
+        proof: 'Show 3 delivery flows running on one repo with traceable approvals and reusable run history.',
+        callToAction: 'Book a 30-minute pilot scoping call on one target repository.'
+    };
+}
+
+function createDefaultFunnel(): SalesCockpitFunnel {
+    return {
+        acquisition: 'Founder outbound to 100 qualified agencies and software factories.',
+        qualification: 'Confirm repeated GitHub delivery pain, approval needs, and a repo suitable for a pilot.',
+        demo: 'Run the 3 delivery workflows live on a target repo or a realistic demo repo.',
+        proposal: 'Offer a fixed-fee founding pilot with one org, five repos max, and three workflows.',
+        close: 'Convert the pilot into monthly governance and control-plane subscription.'
+    };
+}
+
+function createDefaultProviderAccounts(): SalesProviderAccount[] {
+    return [
+        {
+            id: 'email',
+            provider: 'email',
+            label: 'Email',
+            status: 'not_connected',
+            mode: 'draft_only',
+            accountRef: '',
+            endpointUrl: '',
+            notes: '',
+            capabilities: ['draft message', 'manual send', 'reply tracking']
+        },
+        {
+            id: 'google_sheets',
+            provider: 'google_sheets',
+            label: 'Google Sheets',
+            status: 'not_connected',
+            mode: 'sync_only',
+            accountRef: '',
+            endpointUrl: '',
+            notes: '',
+            capabilities: ['target list', 'manual sync', 'export rows']
+        },
+        {
+            id: 'crm',
+            provider: 'crm',
+            label: 'CRM',
+            status: 'not_connected',
+            mode: 'sync_only',
+            accountRef: '',
+            endpointUrl: '',
+            notes: '',
+            capabilities: ['deal sync', 'manual update', 'contact lookup']
+        },
+        {
+            id: 'linkedin',
+            provider: 'linkedin',
+            label: 'LinkedIn',
+            status: 'not_connected',
+            mode: 'manual_handoff',
+            accountRef: '',
+            endpointUrl: '',
+            notes: '',
+            capabilities: ['draft connection', 'draft follow-up', 'manual send']
+        },
+        {
+            id: 'reddit',
+            provider: 'reddit',
+            label: 'Reddit',
+            status: 'not_connected',
+            mode: 'manual_handoff',
+            accountRef: '',
+            endpointUrl: '',
+            notes: '',
+            capabilities: ['draft post', 'draft reply', 'manual publish']
+        },
+        {
+            id: 'product_hunt',
+            provider: 'product_hunt',
+            label: 'Product Hunt',
+            status: 'not_connected',
+            mode: 'manual_handoff',
+            accountRef: '',
+            endpointUrl: '',
+            notes: '',
+            capabilities: ['launch checklist', 'draft launch copy', 'manual publish']
+        }
+    ];
+}
+
 export function createDefaultSalesCockpitState(): SalesCockpitState {
     return {
         version: FILE_VERSION,
         lastUpdatedAt: timestamp(),
         notes: 'Use this cockpit to track agency outreach, next actions, and reusable messaging from inside VS Code.',
+        offer: createDefaultOffer(),
+        funnel: createDefaultFunnel(),
         weeklyTargets: {
             outbound: 100,
             discovery: 10,
@@ -176,7 +309,8 @@ export function createDefaultSalesCockpitState(): SalesCockpitState {
                     'Si tu veux, je peux te montrer le flow sur un repo de demo.'
                 ].join('\n')
             }
-        ]
+        ],
+        providerAccounts: createDefaultProviderAccounts()
     };
 }
 
@@ -242,17 +376,70 @@ function sanitizeTemplate(raw: any): SalesCockpitTemplate | null {
     };
 }
 
+function sanitizeProviderAccount(raw: any, fallback: SalesProviderAccount): SalesProviderAccount {
+    const provider = SALES_PROVIDER_IDS.includes(raw?.provider) ? raw.provider : fallback.provider;
+    const status = SALES_PROVIDER_STATUSES.includes(raw?.status) ? raw.status : fallback.status;
+    const mode = SALES_PROVIDER_MODES.includes(raw?.mode) ? raw.mode : fallback.mode;
+    const capabilities = Array.isArray(raw?.capabilities)
+        ? raw.capabilities.map((entry: unknown) => String(entry || '').trim()).filter(Boolean)
+        : fallback.capabilities;
+
+    return {
+        id: String(raw?.id || fallback.id).trim() || fallback.id,
+        provider,
+        label: String(raw?.label || fallback.label).trim() || fallback.label,
+        status,
+        mode,
+        accountRef: raw?.accountRef ? String(raw.accountRef).trim() : fallback.accountRef,
+        endpointUrl: raw?.endpointUrl ? String(raw.endpointUrl).trim() : fallback.endpointUrl,
+        notes: raw?.notes ? String(raw.notes) : fallback.notes,
+        capabilities,
+        lastValidatedAt: raw?.lastValidatedAt ? String(raw.lastValidatedAt).trim() : fallback.lastValidatedAt
+    };
+}
+
+function sanitizeOffer(raw: any, defaults: SalesCockpitOffer): SalesCockpitOffer {
+    return {
+        name: String(raw?.name || defaults.name).trim() || defaults.name,
+        audience: String(raw?.audience || defaults.audience).trim() || defaults.audience,
+        problem: String(raw?.problem || defaults.problem).trim() || defaults.problem,
+        promise: String(raw?.promise || defaults.promise).trim() || defaults.promise,
+        proof: String(raw?.proof || defaults.proof).trim() || defaults.proof,
+        callToAction: String(raw?.callToAction || defaults.callToAction).trim() || defaults.callToAction
+    };
+}
+
+function sanitizeFunnel(raw: any, defaults: SalesCockpitFunnel): SalesCockpitFunnel {
+    return {
+        acquisition: String(raw?.acquisition || defaults.acquisition).trim() || defaults.acquisition,
+        qualification: String(raw?.qualification || defaults.qualification).trim() || defaults.qualification,
+        demo: String(raw?.demo || defaults.demo).trim() || defaults.demo,
+        proposal: String(raw?.proposal || defaults.proposal).trim() || defaults.proposal,
+        close: String(raw?.close || defaults.close).trim() || defaults.close
+    };
+}
+
 function coerceState(raw: any): SalesCockpitState {
     const defaults = createDefaultSalesCockpitState();
     const leads = Array.isArray(raw?.leads) ? raw.leads.map(sanitizeLead).filter(Boolean) as SalesCockpitLead[] : defaults.leads;
     const tasks = Array.isArray(raw?.tasks) ? raw.tasks.map(sanitizeTask).filter(Boolean) as SalesCockpitTask[] : defaults.tasks;
     const campaigns = Array.isArray(raw?.campaigns) ? raw.campaigns.map(sanitizeCampaign).filter(Boolean) as SalesCockpitCampaign[] : defaults.campaigns;
     const templates = Array.isArray(raw?.templates) ? raw.templates.map(sanitizeTemplate).filter(Boolean) as SalesCockpitTemplate[] : defaults.templates;
+    const incomingProviders = Array.isArray(raw?.providerAccounts) ? raw.providerAccounts : [];
+    const providerAccounts = defaults.providerAccounts.map((fallback) => {
+        const candidate = incomingProviders.find((entry: any) => {
+            const id = String(entry?.id || entry?.provider || '').trim();
+            return id === fallback.id || id === fallback.provider;
+        });
+        return sanitizeProviderAccount(candidate, fallback);
+    });
 
     return {
         version: FILE_VERSION,
         lastUpdatedAt: String(raw?.lastUpdatedAt || timestamp()),
         notes: String(raw?.notes || defaults.notes),
+        offer: sanitizeOffer(raw?.offer, defaults.offer),
+        funnel: sanitizeFunnel(raw?.funnel, defaults.funnel),
         weeklyTargets: {
             outbound: Number(raw?.weeklyTargets?.outbound || defaults.weeklyTargets.outbound),
             discovery: Number(raw?.weeklyTargets?.discovery || defaults.weeklyTargets.discovery),
@@ -262,7 +449,8 @@ function coerceState(raw: any): SalesCockpitState {
         leads,
         tasks,
         campaigns,
-        templates
+        templates,
+        providerAccounts
     };
 }
 

@@ -19,6 +19,7 @@ import { historyManager } from './historyManager';
 import { RuntimeTriggerManager } from './runtimeTriggerManager';
 import { ChromeBridge } from './chromeBridge';
 import { ChromePanelView } from './chromePanelView';
+import { CockpitViewProvider } from './cockpitViewProvider';
 
 function logActivationWarning(scope: string, error: unknown): void {
     const message = error instanceof Error ? error.stack || error.message : String(error);
@@ -50,6 +51,7 @@ export function activate(context: vscode.ExtensionContext) {
     const pipelineBuilder = new PipelineBuilder(context.extensionUri);
     let pipelinesProvider: PipelinesTreeDataProvider | undefined;
     let pipelinesView: vscode.TreeView<PipelinesTreeNode> | undefined;
+    let cockpitViewProvider: CockpitViewProvider | undefined;
     try {
         pipelinesProvider = new PipelinesTreeDataProvider();
         pipelinesView = vscode.window.createTreeView('intentRouterPipelines', {
@@ -60,6 +62,20 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(pipelinesProvider, pipelinesView);
     } catch (error) {
         logActivationWarning('pipelinesView', error);
+    }
+
+    try {
+        cockpitViewProvider = new CockpitViewProvider(context);
+        context.subscriptions.push(
+            cockpitViewProvider,
+            vscode.window.registerWebviewViewProvider(CockpitViewProvider.viewType, cockpitViewProvider, {
+                webviewOptions: {
+                    retainContextWhenHidden: true
+                }
+            })
+        );
+    } catch (error) {
+        logActivationWarning('cockpitView', error);
     }
 
     try {

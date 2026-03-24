@@ -108,6 +108,9 @@ export type WebviewOutboundMessage =
   | { type: 'devPackager.loadPreset' }
   | { type: 'openWorkspaceFile'; path: string }
   | { type: 'salesCockpit.save'; salesCockpit: any }
+  | { type: 'salesCockpit.connectProvider'; providerId: string }
+  | { type: 'salesCockpit.validateProvider'; providerId: string }
+  | { type: 'salesCockpit.disconnectProvider'; providerId: string }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };
 

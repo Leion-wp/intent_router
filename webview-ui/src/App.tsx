@@ -16,6 +16,7 @@ import '@xyflow/react/dist/style.css';
 import './index.css';
 
 import Sidebar from './Sidebar';
+import CockpitApp from './CockpitApp';
 import ActionNode from './nodes/ActionNode';
 import PromptNode from './nodes/PromptNode';
 import RepoNode from './nodes/RepoNode';
@@ -1339,6 +1340,10 @@ export default function App() {
   // Chrome Tabs panel — early return before any ReactFlow state is initialised
   if (window.initialData?.mode === 'chromeTabs') {
     return <ChromeTabsPanel />;
+  }
+
+  if (window.initialData?.mode === 'cockpit') {
+    return <CockpitApp />;
   }
 
   const {
