@@ -20,9 +20,15 @@
 **/.Jules/**
 **/.atom8n/**
 **/.thorclient/**
+**/.intent-router/**
+**/.gemini/**
+scripts/**
 PR_PROMPT.md
+PR_PROMPT_FINISHED.md
+GEMINI.md
 VISION.md
 SECURITY.md
+ROADMAP.md
 .gitignore
 tsconfig.json
 .vsce-files.txt

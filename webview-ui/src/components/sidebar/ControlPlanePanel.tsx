@@ -3,19 +3,20 @@ import { PipelineRun } from '../../types/messages';
 import { buildControlPlaneDashboardModel, DeliveryCatalogRecord } from '../../utils/controlPlaneDashboardUtils';
 import {
   buildSalesCockpitModel,
+  normalizeSalesCockpitState,
   renderSalesTemplate,
   SALES_LEAD_STAGES,
   SALES_PROVIDER_DEFINITIONS,
   SALES_PROVIDER_MODES,
-  SALES_PROVIDER_STATUSES,
   SALES_TASK_KINDS,
   SalesCockpitFunnel,
   SalesCockpitLead,
   SalesCockpitOffer,
+  SalesCockpitProofAsset,
   SalesProviderAccount,
   SalesProviderMode,
-  SalesProviderStatus,
   SalesCockpitState,
+  SalesCockpitMcpServer,
   SalesTaskKind,
   slugify
 } from '../../utils/salesCockpitUtils';
@@ -86,12 +87,15 @@ type ControlPlanePanelProps = {
   onConnectProvider?: (providerId: string) => void;
   onValidateProvider?: (providerId: string) => void;
   onDisconnectProvider?: (providerId: string) => void;
+  onCreateGmailDraft?: (to: string, subject: string, body: string) => void;
+  onSyncGoogleSheet?: (direction: 'export' | 'import', sheetUrl: string, offer?: any, leads?: any[]) => void;
 };
 
 type LeadDraft = {
   company: string;
   contactName: string;
   role: string;
+  email: string;
   pain: string;
   nextAction: string;
   dueDate: string;
@@ -161,6 +165,11 @@ function formatStageLabel(value: string): string {
   return value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function formatValidationTimestamp(value?: string): string {
+  if (!value) return 'Not checked yet';
+  return new Date(value).toLocaleString();
+}
+
 function statusTone(status: string): { label: string; color: string; background: string; border: string } {
   if (status === 'success') return { label: 'Success', color: '#4caf50', background: 'rgba(76, 175, 80, 0.12)', border: 'rgba(76, 175, 80, 0.3)' };
   if (status === 'failure') return { label: 'Failure', color: '#f44336', background: 'rgba(244, 67, 54, 0.12)', border: 'rgba(244, 67, 54, 0.3)' };
@@ -174,6 +183,7 @@ function createLeadDraft(): LeadDraft {
     company: '',
     contactName: '',
     role: '',
+    email: '',
     pain: '',
     nextAction: '',
     dueDate: '',
@@ -194,6 +204,7 @@ function mergeLeadPatch(lead: SalesCockpitLead, patch: Partial<SalesCockpitLead>
   return {
     ...lead,
     ...patch,
+    email: patch.email === '' ? undefined : patch.email ?? lead.email,
     dueDate: patch.dueDate === '' ? undefined : patch.dueDate ?? lead.dueDate,
     profileUrl: patch.profileUrl === '' ? undefined : patch.profileUrl ?? lead.profileUrl,
     notes: patch.notes === '' ? undefined : patch.notes ?? lead.notes
@@ -224,6 +235,30 @@ function buildFunnelBrief(funnel: SalesCockpitFunnel): string {
   ].join('\n');
 }
 
+function buildProofBrief(asset: SalesCockpitProofAsset): string {
+  return [
+    asset.title,
+    '',
+    `Kind: ${formatStageLabel(asset.kind)}`,
+    `Status: ${formatStageLabel(asset.status)}`,
+    `Summary: ${asset.summary || 'n/a'}`,
+    `Source: ${asset.sourceLabel || asset.sourceRef || 'manual'}`,
+    `Created: ${formatValidationTimestamp(asset.createdAt)}`
+  ].join('\n');
+}
+
+function buildMcpBrief(server: SalesCockpitMcpServer): string {
+  return [
+    server.name,
+    '',
+    `Transport: ${server.transport}`,
+    `Status: ${formatStageLabel(server.status)}`,
+    `Endpoint: ${server.endpointUrl || 'n/a'}`,
+    `Command: ${server.command || 'n/a'}`,
+    `Tools: ${server.toolSummary.join(', ') || 'n/a'}`
+  ].join('\n');
+}
+
 export default function ControlPlanePanel({
   history,
   catalog,
@@ -237,7 +272,9 @@ export default function ControlPlanePanel({
   onSelectModule,
   onConnectProvider,
   onValidateProvider,
-  onDisconnectProvider
+  onDisconnectProvider,
+  onCreateGmailDraft,
+  onSyncGoogleSheet
 }: ControlPlanePanelProps) {
   const [leadDraft, setLeadDraft] = useState<LeadDraft>(() => createLeadDraft());
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(() => createTaskDraft());
@@ -259,7 +296,7 @@ export default function ControlPlanePanel({
     );
   }
 
-  const updateCockpit = (next: SalesCockpitState) => onSaveSalesCockpit(next);
+  const updateCockpit = (next: SalesCockpitState) => onSaveSalesCockpit(normalizeSalesCockpitState(next));
 
   const updateNotes = (notes: string) => {
     updateCockpit({ ...salesCockpit, notes });
@@ -309,6 +346,7 @@ export default function ControlPlanePanel({
           company,
           contactName: leadDraft.contactName.trim(),
           role: leadDraft.role.trim(),
+          email: leadDraft.email.trim() || undefined,
           status: 'target',
           pain: leadDraft.pain.trim(),
           nextAction: leadDraft.nextAction.trim(),
@@ -426,6 +464,102 @@ export default function ControlPlanePanel({
     });
   };
 
+  const addPipelinePath = () => {
+    const raw = window.prompt('Pipeline workspace path');
+    const path = String(raw || '').trim().replace(/\\/g, '/');
+    if (!path) return;
+    if (salesCockpit.pipelinePaths.includes(path)) return;
+    updateCockpit({
+      ...salesCockpit,
+      pipelinePaths: [...salesCockpit.pipelinePaths, path]
+    });
+  };
+
+  const removePipelinePath = (path: string) => {
+    updateCockpit({
+      ...salesCockpit,
+      pipelinePaths: salesCockpit.pipelinePaths.filter((entry) => entry !== path)
+    });
+  };
+
+  const captureRecentProof = (run: PipelineRun) => {
+    const title = run.name || `Run ${run.id}`;
+    const nextAsset: SalesCockpitProofAsset = {
+      id: slugify(`proof-${title}-${run.timestamp}`),
+      title,
+      kind: 'run',
+      status: run.status === 'success' ? 'ready' : 'draft',
+      summary: `Run ${run.status} with ${run.pullRequests?.length || 0} PR link(s).`,
+      sourceLabel: 'Pipeline run',
+      sourceRef: run.id,
+      createdAt: new Date(run.timestamp || Date.now()).toISOString()
+    };
+    updateCockpit({
+      ...salesCockpit,
+      proofAssets: [nextAsset, ...salesCockpit.proofAssets.filter((asset) => asset.id !== nextAsset.id)]
+    });
+  };
+
+  const removeProofAsset = (proofId: string) => {
+    updateCockpit({
+      ...salesCockpit,
+      proofAssets: salesCockpit.proofAssets.filter((asset) => asset.id !== proofId)
+    });
+  };
+
+  const addMcpServer = () => {
+    const name = window.prompt('MCP server name');
+    if (!name?.trim()) return;
+    const endpointUrl = window.prompt('HTTP/SSE endpoint or leave empty for stdio') || '';
+    const command = endpointUrl ? '' : (window.prompt('Command for stdio transport') || '');
+    const nextServer: SalesCockpitMcpServer = {
+      id: slugify(`mcp-${name}`),
+      name: name.trim(),
+      transport: endpointUrl ? 'http' : 'stdio',
+      endpointUrl: endpointUrl.trim() || undefined,
+      command: command.trim() || undefined,
+      args: [],
+      status: endpointUrl.trim() || command.trim() ? 'configured' : 'not_configured',
+      toolSummary: [],
+      notes: '',
+      assignedProductIds: [salesCockpit.activeProductId]
+    };
+    updateCockpit({
+      ...salesCockpit,
+      mcpServers: [...salesCockpit.mcpServers.filter((server) => server.id !== nextServer.id), nextServer]
+    });
+  };
+
+  const updateMcpServer = (serverId: string, patch: Partial<SalesCockpitMcpServer>) => {
+    updateCockpit({
+      ...salesCockpit,
+      mcpServers: salesCockpit.mcpServers.map((server) => server.id === serverId ? { ...server, ...patch } : server)
+    });
+  };
+
+  const removeMcpServer = (serverId: string) => {
+    updateCockpit({
+      ...salesCockpit,
+      mcpServers: salesCockpit.mcpServers.filter((server) => server.id !== serverId)
+    });
+  };
+
+  const createDraftForLead = (lead: SalesCockpitLead) => {
+    const template = salesCockpit.templates.find((entry) => entry.channel === 'email');
+    if (!template || !onCreateGmailDraft || !lead.email) {
+      return;
+    }
+    const rendered = renderSalesTemplate(template, lead);
+    onCreateGmailDraft(lead.email, rendered.subject || template.subject || salesCockpit.offer.name, rendered.body);
+  };
+
+  const syncSheet = (direction: 'export' | 'import') => {
+    if (!onSyncGoogleSheet || !salesCockpit.defaultSheetUrl) {
+      return;
+    }
+    onSyncGoogleSheet(direction, salesCockpit.defaultSheetUrl, salesCockpit.offer, salesCockpit.leads);
+  };
+
   const buildProviderBrief = (provider: SalesProviderAccount): string => {
     const definition = providerDefinitionMap.get(provider.provider);
     return [
@@ -436,6 +570,7 @@ export default function ControlPlanePanel({
       `Account: ${provider.accountRef || 'not set'}`,
       `Endpoint: ${provider.endpointUrl || 'not set'}`,
       `Capabilities: ${(provider.capabilities || []).join(', ') || 'none'}`,
+      `Last checked: ${formatValidationTimestamp(provider.lastValidatedAt)}`,
       `Notes: ${provider.notes || 'none'}`
     ].join('\n');
   };
@@ -463,12 +598,47 @@ export default function ControlPlanePanel({
     { key: 'outboundPlan', label: 'Outbound plan', path: 'docs/sales/leion-delivery-outbound-plan.md' }
   ];
 
+  const renderActionCenterSection = () => (
+    <section key="actionCenter" style={sectionStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 700 }}>Action Center</div>
+          <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '4px' }}>
+            One product, one next move. Keep the cockpit operational, not passive.
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
+            Stage: {formatStageLabel(salesCockpit.productStage)}
+          </span>
+          <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
+            Products: {salesModel.productSummary.total}
+          </span>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
+        {salesModel.actionCenter.map((action) => (
+          <div key={action.id} className="cp-card-hover" style={cardStyle}>
+            <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', opacity: 0.62 }}>{action.kind}</div>
+            <div style={{ fontSize: '13px', fontWeight: 700, marginTop: '6px' }}>{action.title}</div>
+            <div style={{ fontSize: '11px', opacity: 0.78, marginTop: '6px', lineHeight: 1.5 }}>{action.detail}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => salesCockpit.ideaPath && onOpenWorkspaceFile(salesCockpit.ideaPath)} style={buttonStyle}>Open idea.md</button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => salesCockpit.implementPath && onOpenWorkspaceFile(salesCockpit.implementPath)} style={buttonStyle}>Open implement.md</button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={addPipelinePath} style={buttonStyle}>Attach pipeline</button>
+      </div>
+    </section>
+  );
+
   const renderOverviewSection = () => (
     <section key="overview" style={sectionStyle}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
         <div>
           <div style={{ fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.7 }}>Sales Cockpit</div>
-          <div style={{ fontSize: '16px', fontWeight: 700, marginTop: '4px' }}>{catalog.controlPlaneName}</div>
+          <div style={{ fontSize: '16px', fontWeight: 700, marginTop: '4px' }}>{salesCockpit.offer.name}</div>
         </div>
         <span style={{ fontSize: '11px', padding: '6px 8px', borderRadius: '999px', background: 'rgba(14, 99, 156, 0.2)', color: '#9ad4ff' }}>
           founder-led
@@ -675,6 +845,9 @@ export default function ControlPlanePanel({
             <textarea className="nodrag" value={lead.notes || ''} onChange={(event) => updateLead(lead.id, { notes: event.target.value })} placeholder="Objections, context, or call notes" style={{ ...textareaStyle, marginTop: '8px', minHeight: '54px' }} />
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
               <button type="button" className="nodrag cp-btn-secondary" onClick={() => copyTemplate('tpl-founder-email', lead)} style={buttonStyle}>Copy email</button>
+              {!!lead.email && !!onCreateGmailDraft && (
+                <button type="button" className="nodrag cp-btn-secondary" onClick={() => createDraftForLead(lead)} style={buttonStyle}>Create Gmail draft</button>
+              )}
               <button type="button" className="nodrag cp-btn-secondary" onClick={() => copyTemplate('tpl-linkedin-followup', lead)} style={buttonStyle}>Copy LinkedIn</button>
               {!!lead.profileUrl && (
                 <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenExternal(lead.profileUrl!)} style={buttonStyle}>Open profile</button>
@@ -689,6 +862,7 @@ export default function ControlPlanePanel({
           <input className="nodrag" value={leadDraft.company} onChange={(event) => setLeadDraft((current) => ({ ...current, company: event.target.value }))} placeholder="Company" style={inputStyle} />
           <input className="nodrag" value={leadDraft.contactName} onChange={(event) => setLeadDraft((current) => ({ ...current, contactName: event.target.value }))} placeholder="Contact name" style={inputStyle} />
           <input className="nodrag" value={leadDraft.role} onChange={(event) => setLeadDraft((current) => ({ ...current, role: event.target.value }))} placeholder="Role" style={inputStyle} />
+          <input className="nodrag" value={leadDraft.email} onChange={(event) => setLeadDraft((current) => ({ ...current, email: event.target.value }))} placeholder="Email" style={inputStyle} />
           <input className="nodrag" type="date" value={leadDraft.dueDate} onChange={(event) => setLeadDraft((current) => ({ ...current, dueDate: event.target.value }))} style={inputStyle} />
         </div>
         <input className="nodrag" value={leadDraft.profileUrl} onChange={(event) => setLeadDraft((current) => ({ ...current, profileUrl: event.target.value }))} placeholder="Profile URL" style={{ ...inputStyle, marginTop: '8px' }} />
@@ -725,6 +899,21 @@ export default function ControlPlanePanel({
                   <button type="button" className="nodrag cp-btn-secondary" onClick={() => copyTemplate(template.id)} style={{ ...buttonStyle, marginTop: '8px' }}>
                     Copy template
                   </button>
+                  {template.channel === 'email' && !!onCreateGmailDraft && !!salesModel.openLeads.find((lead) => !!lead.email) && (
+                    <button
+                      type="button"
+                      className="nodrag cp-btn-secondary"
+                      onClick={() => {
+                        const lead = salesModel.openLeads.find((entry) => !!entry.email);
+                        if (!lead?.email) return;
+                        const rendered = renderSalesTemplate(template, lead);
+                        onCreateGmailDraft(lead.email, rendered.subject || template.subject || salesCockpit.offer.name, rendered.body);
+                      }}
+                      style={{ ...buttonStyle, marginTop: '8px' }}
+                    >
+                      Draft next email
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -807,16 +996,9 @@ export default function ControlPlanePanel({
                   placeholder="Provider label"
                   style={inputStyle}
                 />
-                <select
-                  className="nodrag"
-                  value={provider.status}
-                  onChange={(event) => updateProvider(provider.id, { status: event.target.value as SalesProviderStatus })}
-                  style={inputStyle}
-                >
-                  {SALES_PROVIDER_STATUSES.map((status) => (
-                    <option key={status} value={status}>{formatStageLabel(status)}</option>
-                  ))}
-                </select>
+                <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', opacity: 0.82 }}>
+                  Status: {formatStageLabel(provider.status)}
+                </div>
                 <select
                   className="nodrag"
                   value={provider.mode}
@@ -828,6 +1010,16 @@ export default function ControlPlanePanel({
                   ))}
                 </select>
               </div>
+              {provider.provider === 'google_sheets' && (
+                <div style={{ fontSize: '10px', lineHeight: 1.6, opacity: 0.72, marginTop: '8px' }}>
+                  Setup path: create a Desktop OAuth client in Google Cloud, enable Google Sheets API and Google Drive API, then click Connect.
+                </div>
+              )}
+              {provider.provider === 'email' && (
+                <div style={{ fontSize: '10px', lineHeight: 1.6, opacity: 0.72, marginTop: '8px' }}>
+                  Setup path: prefer Gmail OAuth with the Gmail API enabled on the same Google Cloud project. Use SMTP only as a fallback.
+                </div>
+              )}
               <textarea
                 className="nodrag"
                 value={provider.notes || ''}
@@ -835,10 +1027,33 @@ export default function ControlPlanePanel({
                 placeholder={`Notes for ${definition?.title || provider.label}`}
                 style={{ ...textareaStyle, marginTop: '8px', minHeight: '54px' }}
               />
+              <div style={{ fontSize: '10px', opacity: 0.66, marginTop: '8px' }}>
+                Last checked: {formatValidationTimestamp(provider.lastValidatedAt)}
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
                 <button type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(buildProviderBrief(provider))} style={buttonStyle}>
                   Copy provider brief
                 </button>
+                {provider.provider === 'google_sheets' && (
+                  <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile('docs/control-plane/google-workspace-oauth.md')} style={buttonStyle}>
+                    Open setup guide
+                  </button>
+                )}
+                {provider.provider === 'email' && (
+                  <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile('docs/control-plane/gmail-oauth.md')} style={buttonStyle}>
+                    Open Gmail guide
+                  </button>
+                )}
+                {provider.provider === 'google_sheets' && (
+                  <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenExternal('https://console.cloud.google.com/apis/credentials')} style={buttonStyle}>
+                    Open GCP Console
+                  </button>
+                )}
+                {provider.provider === 'email' && (
+                  <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenExternal('https://console.cloud.google.com/apis/library/gmail.googleapis.com')} style={buttonStyle}>
+                    Open Gmail API
+                  </button>
+                )}
                 {canManage && (
                   <button type="button" className="nodrag cp-btn-secondary" onClick={() => onConnectProvider?.(provider.id)} style={buttonStyle}>
                     {provider.status === 'not_connected' ? 'Connect' : 'Reconnect'}
@@ -868,6 +1083,120 @@ export default function ControlPlanePanel({
             </div>
           );
         })}
+      </div>
+    </section>
+  );
+
+  const renderProofLockerSection = () => (
+    <section key="proofLocker" style={sectionStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 700 }}>Proof Locker</div>
+          <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '4px' }}>
+            Capture reusable proof from runs, docs, screenshots, and outcome snippets.
+          </div>
+        </div>
+        <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
+          Ready: {salesModel.proofSummary.ready}/{salesModel.proofSummary.total}
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        {history.filter((run) => run.status === 'success').slice(0, 3).map((run) => (
+          <button key={run.id} type="button" className="nodrag cp-btn-secondary" onClick={() => captureRecentProof(run)} style={buttonStyle}>
+            Capture {run.name || run.id}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {salesCockpit.proofAssets.map((asset) => (
+          <div key={asset.id} className="cp-card-hover" style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 700 }}>{asset.title}</div>
+                <div style={{ fontSize: '11px', opacity: 0.72, marginTop: '4px' }}>{asset.summary || 'No summary yet.'}</div>
+              </div>
+              <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: asset.status === 'ready' ? 'rgba(76, 175, 80, 0.18)' : 'rgba(255,255,255,0.05)' }}>
+                {formatStageLabel(asset.status)}
+              </span>
+            </div>
+            <div style={{ fontSize: '10px', opacity: 0.66, marginTop: '8px' }}>
+              {formatStageLabel(asset.kind)} · {asset.sourceLabel || asset.sourceRef || 'Manual'}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(buildProofBrief(asset))} style={buttonStyle}>Copy proof brief</button>
+              {!!asset.sourceRef && (
+                <button type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(asset.sourceRef!)} style={buttonStyle}>Copy source ref</button>
+              )}
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => removeProofAsset(asset.id)} style={buttonStyle}>Remove</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
+  const renderProductSurfaceSection = () => (
+    <section key="productSurface" style={sectionStyle}>
+      <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px' }}>Product Surface</div>
+      <select className="nodrag" value={salesCockpit.productStage} onChange={(event) => updateCockpit({ ...salesCockpit, productStage: event.target.value as any })} style={inputStyle}>
+        <option value="idea">Idea</option>
+        <option value="offer">Offer</option>
+        <option value="outbound">Outbound</option>
+        <option value="pilot">Pilot</option>
+        <option value="won">Won</option>
+      </select>
+      <input className="nodrag" value={salesCockpit.ideaPath || ''} onChange={(event) => updateCockpit({ ...salesCockpit, ideaPath: event.target.value })} placeholder="idea.md path" style={inputStyle} />
+      <input className="nodrag" value={salesCockpit.implementPath || ''} onChange={(event) => updateCockpit({ ...salesCockpit, implementPath: event.target.value })} placeholder="implement.md path" style={inputStyle} />
+      <input className="nodrag" value={salesCockpit.defaultSheetUrl || ''} onChange={(event) => updateCockpit({ ...salesCockpit, defaultSheetUrl: event.target.value })} placeholder="Google Sheet URL" style={inputStyle} />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => syncSheet('export')} style={buttonStyle}>Export to Sheet</button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => syncSheet('import')} style={buttonStyle}>Import leads</button>
+        {!!salesCockpit.defaultSheetUrl && (
+          <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenExternal(salesCockpit.defaultSheetUrl!)} style={buttonStyle}>Open Sheet</button>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {salesCockpit.pipelinePaths.map((path) => (
+          <div key={path} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', ...cardStyle }}>
+            <span style={{ fontSize: '11px', opacity: 0.84 }}>{path}</span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile(path)} style={buttonStyle}>Open</button>
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => removePipelinePath(path)} style={buttonStyle}>Remove</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
+  const renderMcpRegistrySection = () => (
+    <section key="mcpRegistry" style={sectionStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 700 }}>MCP Registry</div>
+          <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '4px' }}>
+            Keep a minimal registry of MCP servers tied to the cockpit.
+          </div>
+        </div>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={addMcpServer} style={buttonStyle}>Add MCP</button>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {salesCockpit.mcpServers.map((server) => (
+          <div key={server.id} className="cp-card-hover" style={cardStyle}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <input className="nodrag" value={server.name} onChange={(event) => updateMcpServer(server.id, { name: event.target.value })} placeholder="Server name" style={inputStyle} />
+              <input className="nodrag" value={server.endpointUrl || server.command || ''} onChange={(event) => updateMcpServer(server.id, server.transport === 'stdio' ? { command: event.target.value } : { endpointUrl: event.target.value })} placeholder={server.transport === 'stdio' ? 'Command' : 'Endpoint'} style={inputStyle} />
+            </div>
+            <textarea className="nodrag" value={server.toolSummary.join(', ')} onChange={(event) => updateMcpServer(server.id, { toolSummary: event.target.value.split(',').map((entry) => entry.trim()).filter(Boolean) })} placeholder="tool-a, tool-b" style={{ ...textareaStyle, minHeight: '44px' }} />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(buildMcpBrief(server))} style={buttonStyle}>Copy MCP brief</button>
+              {!!server.endpointUrl && (
+                <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenExternal(server.endpointUrl!)} style={buttonStyle}>Open endpoint</button>
+              )}
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => removeMcpServer(server.id)} style={buttonStyle}>Remove</button>
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );
@@ -997,6 +1326,7 @@ export default function ControlPlanePanel({
 
   if (variant === 'sidebar') {
     sections.push(
+      renderActionCenterSection(),
       renderOverviewSection(),
       renderMetricsSection(),
       renderLeadPipelineSection(),
@@ -1004,23 +1334,26 @@ export default function ControlPlanePanel({
       renderProspectsSection(),
       renderProvidersSection(),
       renderCampaignSection(),
+      renderProofLockerSection(),
       renderDeliverySection(),
+      renderProductSurfaceSection(),
+      renderMcpRegistrySection(),
       renderQuickAccessSection()
     );
   } else if (activeModule === 'offer') {
-    sections.push(renderCockpitModuleBar(), renderOverviewSection(), renderOfferBuilderSection());
+    sections.push(renderCockpitModuleBar(), renderActionCenterSection(), renderOverviewSection(), renderOfferBuilderSection(), renderProductSurfaceSection());
   } else if (activeModule === 'prospects') {
-    sections.push(renderCockpitModuleBar(), renderLeadPipelineSection(), renderProspectsSection());
+    sections.push(renderCockpitModuleBar(), renderLeadPipelineSection(), renderProspectsSection(), renderProductSurfaceSection());
   } else if (activeModule === 'contact') {
-    sections.push(renderCockpitModuleBar(), renderCampaignSection());
+    sections.push(renderCockpitModuleBar(), renderCampaignSection(), renderActionCenterSection());
   } else if (activeModule === 'funnel') {
     sections.push(renderCockpitModuleBar(), renderMetricsSection(), renderFunnelSection(), renderLeadPipelineSection());
   } else if (activeModule === 'deploy') {
-    sections.push(renderCockpitModuleBar(), renderDeliverySection(), renderQuickAccessSection());
+    sections.push(renderCockpitModuleBar(), renderDeliverySection(), renderProofLockerSection(), renderQuickAccessSection());
   } else if (activeModule === 'follow_up') {
-    sections.push(renderCockpitModuleBar(), renderActionQueueSection(), renderLeadPipelineSection(), renderDeliverySection());
+    sections.push(renderCockpitModuleBar(), renderActionCenterSection(), renderActionQueueSection(), renderLeadPipelineSection(), renderProofLockerSection(), renderDeliverySection());
   } else if (activeModule === 'settings') {
-    sections.push(renderCockpitModuleBar(), renderProvidersSection(), renderQuickAccessSection());
+    sections.push(renderCockpitModuleBar(), renderProvidersSection(), renderMcpRegistrySection(), renderQuickAccessSection());
   }
 
   return (

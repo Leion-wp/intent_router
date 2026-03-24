@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "lastUpdatedAt": "2026-03-24T07:46:48.554Z",
+  "lastUpdatedAt": "2026-03-24T11:36:38.388Z",
   "notes": "Use this cockpit to track agency outreach, next actions, and reusable messaging from inside VS Code.",
+  "offer": {
+    "name": "Leion Delivery Founding Pilot",
+    "audience": "Agencies and software factories with repeated GitHub delivery work.",
+    "problem": "Repeated GitHub delivery work stays manual, opaque, and hard to govern.",
+    "promise": "Turn issue-to-PR, PR fix, and release gates into governed AI workflows with explicit human approval.",
+    "proof": "Show 3 delivery flows running on one repo with traceable approvals and reusable run history.",
+    "callToAction": "Book a 30-minute pilot scoping call on one target repository."
+  },
+  "funnel": {
+    "acquisition": "Founder outbound to 100 qualified agencies and software factories.",
+    "qualification": "Confirm repeated GitHub delivery pain, approval needs, and a repo suitable for a pilot.",
+    "demo": "Run the 3 delivery workflows live on a target repo or a realistic demo repo.",
+    "proposal": "Offer a fixed-fee founding pilot with one org, five repos max, and three workflows.",
+    "close": "Convert the pilot into monthly governance and control-plane subscription."
+  },
   "weeklyTargets": {
     "outbound": 100,
     "discovery": 10,
@@ -63,6 +78,101 @@
       "name": "LinkedIn follow-up",
       "channel": "linkedin",
       "body": "Bonjour {{name}},\nje reviens vers toi au sujet de Leion Delivery.\nOn aide les equipes a standardiser issue -> PR, PR fix et release gate avec validation humaine explicite.\nSi tu veux, je peux te montrer le flow sur un repo de demo."
+    }
+  ],
+  "providerAccounts": [
+    {
+      "id": "email",
+      "provider": "email",
+      "label": "Gmail",
+      "status": "connected",
+      "mode": "draft_only",
+      "accountRef": "matth.schwaiger@gmail.com",
+      "endpointUrl": "https://mail.google.com/",
+      "notes": "[Gmail OAuth]\nFlow: desktop OAuth with loopback callback and PKCE.\nScopes: OpenID, Gmail drafts and send, https://www.googleapis.com/auth/userinfo.email, https://www.googleapis.com/auth/userinfo.profile, https://www.googleapis.com/auth/drive.file.\nMode: draft-first and manual-first. No blind auto-send.",
+      "capabilities": [
+        "oauth connect",
+        "draft email",
+        "manual send",
+        "reply tracking"
+      ],
+      "lastValidatedAt": "2026-03-24T11:36:38.387Z"
+    },
+    {
+      "id": "google_sheets",
+      "provider": "google_sheets",
+      "label": "Google Workspace",
+      "status": "connected",
+      "mode": "manual_handoff",
+      "accountRef": "matth.schwaiger@gmail.com",
+      "endpointUrl": "",
+      "notes": "[Google OAuth]\nFlow: desktop OAuth with loopback callback and PKCE.\nScopes: https://www.googleapis.com/auth/userinfo.profile, https://www.googleapis.com/auth/userinfo.email, OpenID, Google Drive (file-level), Google Sheets.\nSurface: Google Sheets and Drive first. Gmail comes next as a separate connector.",
+      "capabilities": [
+        "oauth connect",
+        "sheet sync",
+        "drive proof locker"
+      ],
+      "lastValidatedAt": "2026-03-24T11:18:54.668Z"
+    },
+    {
+      "id": "crm",
+      "provider": "crm",
+      "label": "CRM",
+      "status": "not_connected",
+      "mode": "sync_only",
+      "accountRef": "",
+      "endpointUrl": "",
+      "notes": "",
+      "capabilities": [
+        "deal sync",
+        "manual update",
+        "contact lookup"
+      ]
+    },
+    {
+      "id": "linkedin",
+      "provider": "linkedin",
+      "label": "LinkedIn",
+      "status": "not_connected",
+      "mode": "manual_handoff",
+      "accountRef": "",
+      "endpointUrl": "",
+      "notes": "",
+      "capabilities": [
+        "draft connection",
+        "draft follow-up",
+        "manual send"
+      ]
+    },
+    {
+      "id": "reddit",
+      "provider": "reddit",
+      "label": "Reddit",
+      "status": "not_connected",
+      "mode": "manual_handoff",
+      "accountRef": "",
+      "endpointUrl": "",
+      "notes": "",
+      "capabilities": [
+        "draft post",
+        "draft reply",
+        "manual publish"
+      ]
+    },
+    {
+      "id": "product_hunt",
+      "provider": "product_hunt",
+      "label": "Product Hunt",
+      "status": "not_connected",
+      "mode": "manual_handoff",
+      "accountRef": "",
+      "endpointUrl": "",
+      "notes": "",
+      "capabilities": [
+        "launch checklist",
+        "draft launch copy",
+        "manual publish"
+      ]
     }
   ]
 }

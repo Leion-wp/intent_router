@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { buildSalesCockpitModel, coerceSalesCockpitState, renderSalesTemplate } from '../../utils/salesCockpitUtils';
+import { buildSalesCockpitModel, coerceSalesCockpitState, createSalesCockpitProduct, normalizeSalesCockpitState, renderSalesTemplate, selectSalesCockpitProduct } from '../../utils/salesCockpitUtils';
 
 export function run() {
   const cockpit = coerceSalesCockpitState({
@@ -79,7 +79,9 @@ export function run() {
   assert.strictEqual(cockpit.offer.name.length > 0, true);
   assert.strictEqual(cockpit.funnel.acquisition.length > 0, true);
   assert.strictEqual(cockpit.providerAccounts.length >= 6, true);
+  assert.strictEqual(cockpit.products.length >= 1, true);
   assert.strictEqual(model.providerSummary.total >= 6, true);
+  assert.strictEqual(model.productSummary.total >= 1, true);
   assert.strictEqual(model.metrics.find((metric) => metric.key === 'outbound')?.current, 3);
   assert.strictEqual(model.metrics.find((metric) => metric.key === 'discovery')?.current, 2);
   assert.strictEqual(model.metrics.find((metric) => metric.key === 'demos')?.current, 2);
@@ -92,4 +94,11 @@ export function run() {
 
   const rendered = renderSalesTemplate(cockpit.templates[0], cockpit.leads[0]);
   assert.strictEqual(String(rendered.body).includes('Alice'), true);
+
+  const secondProduct = createSalesCockpitProduct('Second SaaS');
+  const switched = selectSalesCockpitProduct(normalizeSalesCockpitState({
+    ...cockpit,
+    products: [...cockpit.products, secondProduct]
+  }), secondProduct.id);
+  assert.strictEqual(switched.offer.name, 'Second SaaS');
 }

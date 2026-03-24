@@ -7,12 +7,25 @@ import {
     SalesProviderId,
     writeSalesCockpitToWorkspace
 } from './salesCockpitStore';
+import {
+    connectGoogleWorkspace,
+    disconnectGoogleWorkspace,
+    GOOGLE_WORKSPACE_SECRET_KEYS,
+    validateGoogleWorkspace
+} from './googleOAuthService';
+import {
+    connectGmailProvider,
+    disconnectGmailProvider,
+    GMAIL_OAUTH_SECRET_KEYS,
+    hasGmailOAuthSession,
+    validateGmailProvider
+} from './gmailOAuthService';
 
 const SECRET_PREFIX = 'leionRoots.salesProvider';
 
 const PROVIDER_SECRET_KEYS: Record<SalesProviderId, string[]> = {
-    email: ['smtpPassword', 'smtpUsername'],
-    google_sheets: ['accessToken'],
+    email: ['smtpPassword', 'smtpUsername', ...GMAIL_OAUTH_SECRET_KEYS],
+    google_sheets: [...GOOGLE_WORKSPACE_SECRET_KEYS],
     crm: ['apiToken'],
     linkedin: [],
     reddit: [],
@@ -70,6 +83,20 @@ async function promptMode(current: SalesProviderAccount): Promise<SalesProviderA
         }
     );
     return picked?.value as SalesProviderAccount['mode'] | undefined;
+}
+
+async function promptEmailConnectionStrategy(): Promise<'gmail_oauth' | 'smtp' | undefined> {
+    const picked = await vscode.window.showQuickPick(
+        [
+            { label: 'Gmail OAuth', description: 'Recommended. Reuse the Google desktop OAuth app and keep drafts/manual send.', value: 'gmail_oauth' },
+            { label: 'SMTP / App Password', description: 'Fallback for non-Gmail inboxes or app-password based sending.', value: 'smtp' }
+        ],
+        {
+            ignoreFocusOut: true,
+            placeHolder: 'How do you want to connect the email surface?'
+        }
+    );
+    return picked?.value as 'gmail_oauth' | 'smtp' | undefined;
 }
 
 async function storeSecret(context: vscode.ExtensionContext, providerId: SalesProviderId, key: string, value: string | undefined): Promise<void> {
@@ -140,7 +167,7 @@ async function connectEmail(context: vscode.ExtensionContext, state: SalesCockpi
 async function connectTokenProvider(
     context: vscode.ExtensionContext,
     state: SalesCockpitState,
-    providerId: 'google_sheets' | 'crm',
+    providerId: 'crm',
     prompts: {
         accountPrompt: string;
         accountPlaceholder: string;
@@ -171,7 +198,7 @@ async function connectTokenProvider(
     });
     if (secret === undefined) return undefined;
 
-    await storeSecret(context, providerId, providerId === 'crm' ? 'apiToken' : 'accessToken', secret);
+    await storeSecret(context, providerId, 'apiToken', secret);
 
     return updateProvider(state, providerId, {
         accountRef,
@@ -215,57 +242,64 @@ async function connectManualProvider(
 }
 
 export async function connectSalesProvider(context: vscode.ExtensionContext, providerId: SalesProviderId): Promise<SalesCockpitState | undefined> {
-    const state = await readSalesCockpitFromWorkspace();
-    let next: SalesCockpitState | undefined;
+    try {
+        const state = await readSalesCockpitFromWorkspace();
+        const current = getProvider(state, providerId);
+        let next: SalesCockpitState | undefined;
 
-    if (providerId === 'email') {
-        next = await connectEmail(context, state);
-    } else if (providerId === 'google_sheets') {
-        next = await connectTokenProvider(context, state, 'google_sheets', {
-            accountPrompt: 'Google Sheets account or service account email',
-            accountPlaceholder: 'founder@company.com or service-account@project.iam.gserviceaccount.com',
-            endpointPrompt: 'Google Sheet URL',
-            endpointPlaceholder: 'https://docs.google.com/spreadsheets/d/...',
-            secretPrompt: 'Google Sheets token or service-account secret'
-        });
-    } else if (providerId === 'crm') {
-        next = await connectTokenProvider(context, state, 'crm', {
-            accountPrompt: 'CRM workspace or account label',
-            accountPlaceholder: 'HubSpot Workspace',
-            endpointPrompt: 'CRM URL',
-            endpointPlaceholder: 'https://app.hubspot.com/...',
-            secretPrompt: 'CRM API token'
-        });
-    } else if (providerId === 'linkedin') {
-        next = await connectManualProvider(state, 'linkedin', {
-            accountPrompt: 'LinkedIn profile URL or handle',
-            accountPlaceholder: 'https://www.linkedin.com/in/your-profile',
-            endpointPrompt: 'LinkedIn queue or search URL',
-            endpointPlaceholder: 'https://www.linkedin.com/sales/...'
-        });
-    } else if (providerId === 'reddit') {
-        next = await connectManualProvider(state, 'reddit', {
-            accountPrompt: 'Reddit account',
-            accountPlaceholder: 'u/founder-handle',
-            endpointPrompt: 'Subreddit or thread URL',
-            endpointPlaceholder: 'https://www.reddit.com/r/startups'
-        });
-    } else if (providerId === 'product_hunt') {
-        next = await connectManualProvider(state, 'product_hunt', {
-            accountPrompt: 'Product Hunt maker profile',
-            accountPlaceholder: 'https://www.producthunt.com/@your-handle',
-            endpointPrompt: 'Launch or maker URL',
-            endpointPlaceholder: 'https://www.producthunt.com/posts/...'
-        });
-    }
+        if (providerId === 'email') {
+            const strategy = await promptEmailConnectionStrategy();
+            if (strategy === 'gmail_oauth') {
+                const patch = await connectGmailProvider(context, current);
+                next = patch ? updateProvider(state, providerId, patch) : undefined;
+            } else if (strategy === 'smtp') {
+                next = await connectEmail(context, state);
+            }
+        } else if (providerId === 'google_sheets') {
+            const patch = await connectGoogleWorkspace(context, current);
+            next = patch ? updateProvider(state, providerId, patch) : undefined;
+        } else if (providerId === 'crm') {
+            next = await connectTokenProvider(context, state, 'crm', {
+                accountPrompt: 'CRM workspace or account label',
+                accountPlaceholder: 'HubSpot Workspace',
+                endpointPrompt: 'CRM URL',
+                endpointPlaceholder: 'https://app.hubspot.com/...',
+                secretPrompt: 'CRM API token'
+            });
+        } else if (providerId === 'linkedin') {
+            next = await connectManualProvider(state, 'linkedin', {
+                accountPrompt: 'LinkedIn profile URL or handle',
+                accountPlaceholder: 'https://www.linkedin.com/in/your-profile',
+                endpointPrompt: 'LinkedIn queue or search URL',
+                endpointPlaceholder: 'https://www.linkedin.com/sales/...'
+            });
+        } else if (providerId === 'reddit') {
+            next = await connectManualProvider(state, 'reddit', {
+                accountPrompt: 'Reddit account',
+                accountPlaceholder: 'u/founder-handle',
+                endpointPrompt: 'Subreddit or thread URL',
+                endpointPlaceholder: 'https://www.reddit.com/r/startups'
+            });
+        } else if (providerId === 'product_hunt') {
+            next = await connectManualProvider(state, 'product_hunt', {
+                accountPrompt: 'Product Hunt maker profile',
+                accountPlaceholder: 'https://www.producthunt.com/@your-handle',
+                endpointPrompt: 'Launch or maker URL',
+                endpointPlaceholder: 'https://www.producthunt.com/posts/...'
+            });
+        }
 
-    if (!next) {
+        if (!next) {
+            return undefined;
+        }
+
+        const saved = await writeSalesCockpitToWorkspace(next);
+        vscode.window.showInformationMessage(`${getProvider(saved, providerId).label} connected in Leion Cockpit.`);
+        return saved;
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to connect provider: ${error?.message || error}`);
         return undefined;
     }
-
-    const saved = await writeSalesCockpitToWorkspace(next);
-    vscode.window.showInformationMessage(`${getProvider(saved, providerId).label} connected in Leion Cockpit.`);
-    return saved;
 }
 
 export async function disconnectSalesProvider(context: vscode.ExtensionContext, providerId: SalesProviderId): Promise<SalesCockpitState> {
@@ -273,8 +307,17 @@ export async function disconnectSalesProvider(context: vscode.ExtensionContext, 
     const defaults = createDefaultSalesCockpitState();
     const fallback = defaults.providerAccounts.find((provider) => provider.id === providerId)!;
 
-    for (const key of PROVIDER_SECRET_KEYS[providerId] || []) {
-        await context.secrets.delete(providerSecretKey(providerId, key));
+    if (providerId === 'google_sheets') {
+        await disconnectGoogleWorkspace(context);
+    } else if (providerId === 'email') {
+        await disconnectGmailProvider(context);
+        for (const key of ['smtpPassword', 'smtpUsername']) {
+            await context.secrets.delete(providerSecretKey(providerId, key));
+        }
+    } else {
+        for (const key of PROVIDER_SECRET_KEYS[providerId] || []) {
+            await context.secrets.delete(providerSecretKey(providerId, key));
+        }
     }
 
     const next = updateProvider(state, providerId, {
@@ -287,29 +330,42 @@ export async function disconnectSalesProvider(context: vscode.ExtensionContext, 
 }
 
 export async function validateSalesProvider(context: vscode.ExtensionContext, providerId: SalesProviderId): Promise<SalesCockpitState> {
-    const state = await readSalesCockpitFromWorkspace();
-    const current = getProvider(state, providerId);
+    try {
+        const state = await readSalesCockpitFromWorkspace();
+        const current = getProvider(state, providerId);
 
-    let status: SalesProviderAccount['status'] = 'not_connected';
+        let patch: Partial<SalesProviderAccount>;
 
-    if (providerId === 'email') {
-        const hasPasswordSecret = await hasSecret(context, 'email', 'smtpPassword');
-        status = current.accountRef && current.endpointUrl && hasPasswordSecret ? 'connected' : current.accountRef || current.endpointUrl ? 'configured' : 'not_connected';
-    } else if (providerId === 'google_sheets') {
-        const hasToken = await hasSecret(context, 'google_sheets', 'accessToken');
-        status = current.accountRef && current.endpointUrl && hasToken ? 'connected' : current.accountRef || current.endpointUrl ? 'configured' : 'not_connected';
-    } else if (providerId === 'crm') {
-        const hasToken = await hasSecret(context, 'crm', 'apiToken');
-        status = current.accountRef && current.endpointUrl && hasToken ? 'connected' : current.accountRef || current.endpointUrl ? 'configured' : 'not_connected';
-    } else {
-        status = current.accountRef || current.endpointUrl ? 'configured' : 'not_connected';
+        if (providerId === 'email') {
+            if (await hasGmailOAuthSession(context)) {
+                patch = await validateGmailProvider(context, current);
+            } else {
+                const hasPasswordSecret = await hasSecret(context, 'email', 'smtpPassword');
+                patch = {
+                    status: current.accountRef && current.endpointUrl && hasPasswordSecret ? 'connected' : current.accountRef || current.endpointUrl ? 'configured' : 'not_connected',
+                    lastValidatedAt: new Date().toISOString()
+                };
+            }
+        } else if (providerId === 'google_sheets') {
+            patch = await validateGoogleWorkspace(context, current);
+        } else if (providerId === 'crm') {
+            const hasToken = await hasSecret(context, 'crm', 'apiToken');
+            patch = {
+                status: current.accountRef && current.endpointUrl && hasToken ? 'connected' : current.accountRef || current.endpointUrl ? 'configured' : 'not_connected',
+                lastValidatedAt: new Date().toISOString()
+            };
+        } else {
+            patch = {
+                status: current.accountRef || current.endpointUrl ? 'configured' : 'not_connected',
+                lastValidatedAt: new Date().toISOString()
+            };
+        }
+
+        const saved = await writeSalesCockpitToWorkspace(updateProvider(state, providerId, patch));
+        vscode.window.showInformationMessage(`${getProvider(saved, providerId).label} validation result: ${getProvider(saved, providerId).status.replace(/_/g, ' ')}.`);
+        return saved;
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Failed to validate provider: ${error?.message || error}`);
+        return readSalesCockpitFromWorkspace();
     }
-
-    const next = updateProvider(state, providerId, {
-        status,
-        lastValidatedAt: new Date().toISOString()
-    });
-    const saved = await writeSalesCockpitToWorkspace(next);
-    vscode.window.showInformationMessage(`${current.label} validation result: ${status.replace(/_/g, ' ')}.`);
-    return saved;
 }

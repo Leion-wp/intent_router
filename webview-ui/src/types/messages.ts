@@ -111,6 +111,8 @@ export type WebviewOutboundMessage =
   | { type: 'salesCockpit.connectProvider'; providerId: string }
   | { type: 'salesCockpit.validateProvider'; providerId: string }
   | { type: 'salesCockpit.disconnectProvider'; providerId: string }
+  | { type: 'salesCockpit.createGmailDraft'; to: string; subject: string; body: string }
+  | { type: 'salesCockpit.syncGoogleSheet'; direction: 'export' | 'import'; sheetUrl: string; offer?: any; leads?: any[] }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };
 

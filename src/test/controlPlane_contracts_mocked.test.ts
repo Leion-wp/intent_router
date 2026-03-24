@@ -6,6 +6,12 @@ const { PipelineSyncEnvelopeSchema, RunnerStatusUpdateSchema } = require('../../
 const { LEION_DELIVERY_CATALOG, LeionDeliveryCatalogSchema } = require('../../out/controlPlane/leionDeliveryCatalog');
 
 suite('Control Plane Contracts (Mocked)', () => {
+  function readPipeline(ref: string): any {
+    const root = path.resolve(__dirname, '..', '..');
+    const absolute = path.resolve(root, ref);
+    return JSON.parse(fs.readFileSync(absolute, 'utf8'));
+  }
+
   test('validates the Leion Delivery catalog and pricing rules', () => {
     const parsed = LeionDeliveryCatalogSchema.parse(LEION_DELIVERY_CATALOG);
 
@@ -26,6 +32,39 @@ suite('Control Plane Contracts (Mocked)', () => {
     for (const ref of [...docRefs, ...pipelineRefs]) {
       const absolute = path.resolve(root, String(ref));
       assert.ok(fs.existsSync(absolute), `Expected asset to exist: ${ref}`);
+    }
+  });
+
+  test('delivery templates keep approval ids and guarded writes aligned', () => {
+    for (const template of LEION_DELIVERY_CATALOG.templates) {
+      const pipeline = readPipeline(String(template.pipelinePath));
+      assert.ok(Array.isArray(pipeline.steps), `Expected steps array in ${template.pipelinePath}`);
+
+      const byId = new Map<string, any>((pipeline.steps || []).map((step: any) => [String(step.id || ''), step]));
+      const approvalStep: any = byId.get(String(template.humanApprovalStepId));
+      assert.ok(approvalStep, `Missing approval step ${template.humanApprovalStepId} in ${template.pipelinePath}`);
+      assert.ok(
+        approvalStep.intent === 'vscode.reviewDiff' || approvalStep.intent === 'system.pause',
+        `Approval step ${template.humanApprovalStepId} in ${template.pipelinePath} must be interactive.`
+      );
+
+      const approvalIndex = pipeline.steps.findIndex((step: any) => String(step.id || '') === String(template.humanApprovalStepId));
+      const guardedWrites = pipeline.steps.filter((step: any) => {
+        const intent = String(step.intent || '');
+        const command = String(step?.payload?.command || '');
+        if (intent === 'github.openPr') return true;
+        if (intent !== 'terminal.run') return false;
+        return /git add -A|git commit|git push|gh pr merge|gh release create/i.test(command);
+      });
+
+      for (const step of guardedWrites) {
+        const stepIndex = pipeline.steps.findIndex((candidate: any) => candidate === step);
+        assert.ok(
+          stepIndex > approvalIndex,
+          `Guarded write step ${step.id} in ${template.pipelinePath} must come after ${template.humanApprovalStepId}.`
+        );
+        assert.ok(step?.payload?.__sandbox, `Guarded write step ${step.id} in ${template.pipelinePath} must declare __sandbox.`);
+      }
     }
   });
 

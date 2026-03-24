@@ -4,6 +4,7 @@ import { useSalesCockpitState } from './hooks/useSalesCockpitState';
 import { isInboundMessage, PipelineRun, WebviewOutboundMessage } from './types/messages';
 import { applyThemeTokensToRoot, defaultThemeTokens, normalizeUiPreset, UiPreset } from './types/theme';
 import { DeliveryCatalogRecord } from './utils/controlPlaneDashboardUtils';
+import { createSalesCockpitProduct, normalizeSalesCockpitState, selectSalesCockpitProduct } from './utils/salesCockpitUtils';
 
 declare global {
   interface Window {
@@ -65,11 +66,14 @@ export default function CockpitApp() {
     const activeCampaigns = salesCockpit.campaigns.filter((campaign) => campaign.active).length;
     const overdueTasks = salesCockpit.tasks.filter((task) => task.status === 'todo' && !!task.dueDate && task.dueDate < new Date().toISOString().slice(0, 10)).length;
     const readyProviders = salesCockpit.providerAccounts.filter((provider) => provider.status === 'connected' || provider.status === 'configured').length;
+    const proofAssets = salesCockpit.proofAssets.length;
     return [
+      { label: 'Products', value: String(salesCockpit.products.length) },
       { label: 'Open leads', value: String(openLeads) },
-      { label: 'Active campaigns', value: String(activeCampaigns) },
       { label: 'Overdue tasks', value: String(overdueTasks) },
-      { label: 'Ready providers', value: String(readyProviders) }
+      { label: 'Ready providers', value: String(readyProviders) },
+      { label: 'Proof assets', value: String(proofAssets) },
+      { label: 'Active campaigns', value: String(activeCampaigns) }
     ];
   }, [salesCockpit]);
 
@@ -79,6 +83,27 @@ export default function CockpitApp() {
   const connectProvider = (providerId: string) => postMessage({ type: 'salesCockpit.connectProvider', providerId });
   const validateProvider = (providerId: string) => postMessage({ type: 'salesCockpit.validateProvider', providerId });
   const disconnectProvider = (providerId: string) => postMessage({ type: 'salesCockpit.disconnectProvider', providerId });
+  const createGmailDraft = (to: string, subject: string, body: string) => postMessage({ type: 'salesCockpit.createGmailDraft', to, subject, body });
+  const syncGoogleSheet = (direction: 'export' | 'import', sheetUrl: string, offer?: any, leads?: any[]) =>
+    postMessage({ type: 'salesCockpit.syncGoogleSheet', direction, sheetUrl, offer, leads });
+
+  const switchProduct = (productId: string) => {
+    saveSalesCockpit(selectSalesCockpitProduct(salesCockpit, productId));
+  };
+
+  const createProduct = () => {
+    const name = window.prompt('Product name');
+    if (!name?.trim()) {
+      return;
+    }
+    const nextProduct = createSalesCockpitProduct(name.trim());
+    const next = normalizeSalesCockpitState({
+      ...salesCockpit,
+      products: [...salesCockpit.products, nextProduct],
+      activeProductId: nextProduct.id
+    });
+    saveSalesCockpit(next);
+  };
 
   return (
     <div style={shellStyle}>
@@ -92,6 +117,17 @@ export default function CockpitApp() {
             </div>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' }}>
+            <select
+              className="nodrag"
+              value={salesCockpit.activeProductId}
+              onChange={(event) => switchProduct(event.target.value)}
+              style={{ ...moduleCardStyle, padding: '10px 12px', minWidth: '220px' }}
+            >
+              {salesCockpit.products.map((product) => (
+                <option key={product.id} value={product.id}>{product.name}</option>
+              ))}
+            </select>
+            <button type="button" className="nodrag cp-card-hover cp-btn-secondary" onClick={createProduct} style={{ ...moduleCardStyle, padding: '10px 12px' }}>New Product</button>
             {catalog && (
               <>
                 <button type="button" className="nodrag cp-card-hover cp-btn-secondary" onClick={() => openWorkspaceFile(catalog.docs.pricing)} style={{ ...moduleCardStyle, padding: '10px 12px' }}>Pricing</button>
@@ -102,7 +138,7 @@ export default function CockpitApp() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '10px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '10px' }}>
           {summaryCards.map((card) => (
             <div key={card.label} style={{ ...moduleCardStyle, cursor: 'default' }}>
               <div style={{ fontSize: '11px', opacity: 0.7 }}>{card.label}</div>
@@ -152,6 +188,8 @@ export default function CockpitApp() {
             onConnectProvider={connectProvider}
             onValidateProvider={validateProvider}
             onDisconnectProvider={disconnectProvider}
+            onCreateGmailDraft={createGmailDraft}
+            onSyncGoogleSheet={syncGoogleSheet}
           />
         </main>
       </div>

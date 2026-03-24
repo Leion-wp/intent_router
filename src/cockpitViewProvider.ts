@@ -5,6 +5,8 @@ import { generateSecureNonce } from './security';
 import { LEION_DELIVERY_CATALOG } from './controlPlane/leionDeliveryCatalog';
 import { readSalesCockpitFromWorkspace, writeSalesCockpitToWorkspace } from './salesCockpitStore';
 import { connectSalesProvider, disconnectSalesProvider, validateSalesProvider } from './salesProviderConnectionService';
+import { createGmailDraft, openGmailDrafts } from './gmailDraftService';
+import { exportProductToGoogleSheets, importLeadsFromGoogleSheets, openGoogleSheet } from './googleSheetsSyncService';
 import { readEmbeddedUiPreset, resolveUiPreset } from './uiPresetStore';
 
 type CockpitInitialData = {
@@ -180,6 +182,54 @@ export class CockpitViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (message.type === 'salesCockpit.disconnectProvider') {
             const next = await disconnectSalesProvider(this.extensionContext, String(message.providerId || '').trim() as any);
             await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+            return;
+        }
+
+        if (message.type === 'salesCockpit.createGmailDraft') {
+            try {
+                const result = await createGmailDraft(this.extensionContext, {
+                    to: String(message.to || '').trim(),
+                    subject: String(message.subject || '').trim(),
+                    body: String(message.body || '')
+                });
+                await openGmailDrafts();
+                vscode.window.showInformationMessage(`Gmail draft created${result.id ? ` (${result.id})` : ''}.`);
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Failed to create Gmail draft: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.syncGoogleSheet') {
+            try {
+                const direction = String(message.direction || '').trim();
+                const sheetUrl = String(message.sheetUrl || '').trim();
+                if (!sheetUrl) {
+                    throw new Error('Missing Google Sheet URL.');
+                }
+                if (direction === 'export') {
+                    await exportProductToGoogleSheets(this.extensionContext, {
+                        sheetUrl,
+                        offer: message.offer,
+                        leads: Array.isArray(message.leads) ? message.leads : []
+                    });
+                    await openGoogleSheet(sheetUrl);
+                    vscode.window.showInformationMessage('Google Sheets export completed.');
+                } else if (direction === 'import') {
+                    const importedLeads = await importLeadsFromGoogleSheets(this.extensionContext, sheetUrl);
+                    const current = await readSalesCockpitFromWorkspace();
+                    const next = await writeSalesCockpitToWorkspace({
+                        ...current,
+                        leads: importedLeads,
+                        defaultSheetUrl: sheetUrl
+                    } as any);
+                    await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+                    await openGoogleSheet(sheetUrl);
+                    vscode.window.showInformationMessage(`Imported ${importedLeads.length} leads from Google Sheets.`);
+                }
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Google Sheets sync failed: ${error?.message || error}`);
+            }
             return;
         }
 

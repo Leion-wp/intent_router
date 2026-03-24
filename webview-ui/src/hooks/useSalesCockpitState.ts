@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
-import { coerceSalesCockpitState, createDefaultSalesCockpitState, SalesCockpitState } from '../utils/salesCockpitUtils';
+import { coerceSalesCockpitState, createDefaultSalesCockpitState, normalizeSalesCockpitState, SalesCockpitState } from '../utils/salesCockpitUtils';
 
 type UseSalesCockpitStateResult = {
   salesCockpit: SalesCockpitState;
@@ -23,7 +23,7 @@ export function useSalesCockpitState(): UseSalesCockpitStateResult {
   }, []);
 
   const saveSalesCockpit = (next: SalesCockpitState) => {
-    const normalized = coerceSalesCockpitState(next);
+    const normalized = normalizeSalesCockpitState(next);
     setSalesCockpit(normalized);
     if (!window.vscode) return;
     const message: WebviewOutboundMessage = {
