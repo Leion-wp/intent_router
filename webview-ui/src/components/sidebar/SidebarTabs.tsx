@@ -29,7 +29,8 @@ function SidebarTabs({ effectiveTabs, activeTabId, onSelectTab }: SidebarTabsPro
         background: 'rgba(255, 255, 255, 0.03)',
         padding: '4px', 
         borderRadius: '12px',
-        border: '1px solid rgba(255, 255, 255, 0.05)'
+        border: '1px solid rgba(255, 255, 255, 0.05)',
+        overflowX: 'auto'
       }}
     >
       {effectiveTabs.map((entry, index) => (
@@ -63,7 +64,8 @@ function SidebarTabs({ effectiveTabs, activeTabId, onSelectTab }: SidebarTabsPro
             display: 'inline-flex', 
             alignItems: 'center', 
             gap: '8px', 
-            flex: 1, 
+            flex: '0 0 auto',
+            minWidth: '96px',
             justifyContent: 'center',
             padding: '8px 4px',
             borderRadius: '8px',
@@ -75,7 +77,7 @@ function SidebarTabs({ effectiveTabs, activeTabId, onSelectTab }: SidebarTabsPro
           }}
         >
           <span className={`codicon ${entry.icon || 'codicon-symbol-misc'}`} style={{ fontSize: '14px' }} />
-          <span style={{ display: effectiveTabs.length > 4 && activeTabId !== entry.id ? 'none' : 'inline' }}>{entry.title}</span>
+          <span>{entry.title}</span>
         </button>
       ))}
     </div>

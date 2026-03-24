@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { readPipelineFromUri } from './pipelineRunner';
 import {
     PipelineClusterEntry,
@@ -308,13 +309,21 @@ export class PipelinesTreeDataProvider implements vscode.TreeDataProvider<Pipeli
         if (!pipelineRoot) {
             return undefined;
         }
-        const pipelineRootPath = pipelineRoot.path.replace(/\/+$/, '');
-        const uriPath = uri.path.replace(/\\/g, '/');
-        if (!uriPath.startsWith(`${pipelineRootPath}/`) && uriPath !== pipelineRootPath) {
+
+        const pipelineRootFsPath = String(pipelineRoot.fsPath || pipelineRoot.path || '').trim();
+        const uriFsPath = String(uri.fsPath || uri.path || '').trim();
+        if (!pipelineRootFsPath || !uriFsPath) {
             return undefined;
         }
-        const relative = uriPath.slice(pipelineRootPath.length).replace(/^\/+/, '');
-        return sanitizePipelineRelativePath(relative);
+
+        const relativeFsPath = path.relative(pipelineRootFsPath, uriFsPath);
+        if (!relativeFsPath) {
+            return sanitizePipelineRelativePath(path.basename(uriFsPath).replace(/\\/g, '/'));
+        }
+        if (relativeFsPath.startsWith('..') || path.isAbsolute(relativeFsPath)) {
+            return undefined;
+        }
+        return sanitizePipelineRelativePath(relativeFsPath.replace(/\\/g, '/'));
     }
 
     private getLabel(item: PipelineItem): string {

@@ -122,20 +122,21 @@ function coerceThemeTokens(raw: any): ThemeTokens {
 function coerceSidebarTabs(raw: any): SidebarTabPreset[] {
     const incoming = Array.isArray(raw) ? raw : [];
     const defaults = DEFAULT_PRESET.sidebar.tabs;
-    const out: SidebarTabPreset[] = [];
-    const seen = new Set<string>();
+    if (incoming.length === 0) {
+        return defaults.map(tab => ({ ...tab }));
+    }
 
+    const byId = new Map<string, SidebarTabPreset>();
     for (let i = 0; i < incoming.length; i++) {
         const tab = incoming[i];
         const incomingType = String(tab?.type || '').trim() as SidebarTabType;
         const type = VALID_TAB_TYPES.includes(incomingType) ? incomingType : 'pipelines';
         const fallbackId = `tab-${i + 1}`;
         const id = String(tab?.id || fallbackId).trim() || fallbackId;
-        if (seen.has(id)) continue;
-        seen.add(id);
+        if (byId.has(id)) continue;
         const title = String(tab?.title || id).trim() || id;
         const icon = String(tab?.icon || 'codicon-symbol-misc').trim() || 'codicon-symbol-misc';
-        out.push({
+        byId.set(id, {
             id,
             title,
             icon,
@@ -144,9 +145,15 @@ function coerceSidebarTabs(raw: any): SidebarTabPreset[] {
         });
     }
 
-    if (out.length === 0) {
-        return defaults.map(tab => ({ ...tab }));
-    }
+    const out: SidebarTabPreset[] = defaults.map((tab) => {
+        const override = byId.get(tab.id);
+        if (override) {
+            byId.delete(tab.id);
+            return override;
+        }
+        return { ...tab };
+    });
+    out.push(...Array.from(byId.values()));
 
     if (!out.some(tab => tab.visible)) {
         out[0].visible = true;

@@ -17,6 +17,18 @@ configStore.set('intentRouter.profiles', []);
 configStore.set('intentRouter.activeProfile', '');
 configStore.set('intentRouter.environment', {});
 
+function normalizePathForUri(input: string) {
+  return String(input || '').replace(/\\/g, '/');
+}
+
+function joinFsPath(base: string, part: string) {
+  if (!base) return String(part || '');
+  const trimmedBase = String(base || '').replace(/[\\/]+$/, '');
+  const trimmedPart = String(part || '').replace(/^[\\/]+/, '');
+  const separator = trimmedBase.includes('\\') ? '\\' : '/';
+  return `${trimmedBase}${separator}${trimmedPart}`;
+}
+
 function makeDisposable(fn: () => void) {
   return { dispose: fn };
 }
@@ -38,21 +50,42 @@ function fireConfigurationChange(changedKey: string) {
 }
 
 const Uri = {
-    file: (path: string) => ({ fsPath: path, path, scheme: 'file' }),
+    file: (path: string) => ({ fsPath: path, path: normalizePathForUri(path), scheme: 'file' }),
     parse: (value: string) => {
         const raw = String(value || '');
         const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+\-.]*):/.exec(raw);
         const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : 'file';
-        return { fsPath: raw, path: raw, scheme };
+        return { fsPath: raw, path: normalizePathForUri(raw), scheme };
     },
     joinPath: (base: any, ...parts: string[]) => ({
-        path: base.path + '/' + parts.join('/'),
+        fsPath: parts.reduce((acc, part) => joinFsPath(acc, part), String(base.fsPath || base.path || '')),
+        path: parts.reduce((acc, part) => `${String(acc || '').replace(/\/+$/, '')}/${String(part || '').replace(/^\/+/, '')}`, normalizePathForUri(String(base.path || base.fsPath || ''))),
         scheme: 'file'
     })
 };
 
+class EventEmitter<T> {
+  private listeners: Array<(value: T) => void> = [];
+  event = (listener: (value: T) => void) => {
+    this.listeners.push(listener);
+    return makeDisposable(() => {
+      const index = this.listeners.indexOf(listener);
+      if (index >= 0) this.listeners.splice(index, 1);
+    });
+  };
+  fire(value: T) {
+    for (const listener of [...this.listeners]) {
+      listener(value);
+    }
+  }
+  dispose() {
+    this.listeners.length = 0;
+  }
+}
+
 module.exports = {
   Uri,
+  EventEmitter,
   window: {
     createTerminal: (nameOrOptions: any) => {
       let name = nameOrOptions;

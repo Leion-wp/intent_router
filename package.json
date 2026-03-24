@@ -4,7 +4,7 @@
     "description": "Human-centric visual orchestration runtime for VS Code",
     "publisher": "LeionCorp",
     "icon": "media/leion_roots_icon.png",
-    "version": "0.1.1",
+    "version": "0.1.5",
     "license": "MIT",
     "repository": {
         "type": "git",
@@ -786,18 +786,18 @@
         "build:webview:raw": "node ./webview-ui/node_modules/vite/bin/vite.js build --config ./webview-ui/vite.config.ts --root ./webview-ui"
     },
     "devDependencies": {
-        "@vscode/vsce": "^3.7.1",
         "@types/mocha": "^10.0.10",
         "@types/node": "16.x",
         "@types/vscode": "^1.75.0",
         "@vscode/codicons": "^0.0.44",
         "@vscode/test-electron": "^2.5.2",
-        "glob": "^13.0.0",
+        "@vscode/vsce": "^3.7.1",
         "mocha": "^11.7.5",
         "ts-node": "^10.9.2",
         "typescript": "^4.9.5"
     },
     "dependencies": {
+        "glob": "^13.0.6",
         "zod": "^3.25.76"
     }
 }

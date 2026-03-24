@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "lastUpdatedAt": "2026-03-24T07:46:48.554Z",
+  "notes": "Use this cockpit to track agency outreach, next actions, and reusable messaging from inside VS Code.",
+  "weeklyTargets": {
+    "outbound": 100,
+    "discovery": 10,
+    "demos": 4,
+    "proposals": 2
+  },
+  "leads": [],
+  "tasks": [
+    {
+      "id": "task-build-list",
+      "title": "Build first 100 agency target list",
+      "status": "todo",
+      "kind": "outreach",
+      "owner": "founder"
+    },
+    {
+      "id": "task-book-calls",
+      "title": "Book 10 discovery calls in 30 days",
+      "status": "todo",
+      "kind": "follow_up",
+      "owner": "founder"
+    },
+    {
+      "id": "task-close-pilots",
+      "title": "Convert 2 pilot proposals",
+      "status": "todo",
+      "kind": "proposal",
+      "owner": "founder"
+    }
+  ],
+  "campaigns": [
+    {
+      "id": "campaign-founder-email",
+      "name": "Founder outbound email",
+      "channel": "email",
+      "goal": "Get first discovery calls with agencies",
+      "templateId": "tpl-founder-email",
+      "active": true
+    },
+    {
+      "id": "campaign-linkedin-followup",
+      "name": "LinkedIn follow-up",
+      "channel": "linkedin",
+      "goal": "Revive conversations after first touch",
+      "templateId": "tpl-linkedin-followup",
+      "active": true
+    }
+  ],
+  "templates": [
+    {
+      "id": "tpl-founder-email",
+      "name": "Founder outbound email",
+      "channel": "email",
+      "subject": "Governed AI delivery workflows for your GitHub flow",
+      "body": "Bonjour {{name}},\n\nje travaille sur Leion Delivery: un cockpit de workflows IA gouvernes pour equipes software.\n\nL idee n est pas de laisser un agent coder seul. L idee est de transformer des etapes repetitives comme Issue -> PR, PR review/fix et release gate en flows tracables avec validation humaine.\n\nSi vous avez ce type de friction dans GitHub, je peux te montrer un pilote tres concret sur un repo cible.\n\nMatth"
+    },
+    {
+      "id": "tpl-linkedin-followup",
+      "name": "LinkedIn follow-up",
+      "channel": "linkedin",
+      "body": "Bonjour {{name}},\nje reviens vers toi au sujet de Leion Delivery.\nOn aide les equipes a standardiser issue -> PR, PR fix et release gate avec validation humaine explicite.\nSi tu veux, je peux te montrer le flow sur un repo de demo."
+    }
+  ]
+}
