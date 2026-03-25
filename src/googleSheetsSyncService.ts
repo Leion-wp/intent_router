@@ -1,6 +1,6 @@
 import * as https from 'https';
 import { getValidGoogleWorkspaceSession } from './googleOAuthService';
-import { SalesCockpitLead, SalesCockpitOffer } from './salesCockpitStore';
+import { SalesCockpitLead, SalesCockpitOffer, SalesCockpitProofAsset, SalesCockpitTask } from './salesCockpitStore';
 import * as vscode from 'vscode';
 
 type SpreadsheetSheet = {
@@ -126,12 +126,45 @@ function buildLeadRows(leads: SalesCockpitLead[]): Array<Array<string>> {
     ];
 }
 
+function buildProofRows(proofAssets: SalesCockpitProofAsset[]): Array<Array<string>> {
+    return [
+        ['Title', 'Kind', 'Status', 'Summary', 'Source Label', 'Source Ref', 'Created At'],
+        ...proofAssets.map((asset) => [
+            asset.title,
+            asset.kind,
+            asset.status,
+            asset.summary,
+            asset.sourceLabel || '',
+            asset.sourceRef || '',
+            asset.createdAt
+        ])
+    ];
+}
+
+function buildActionRows(tasks: SalesCockpitTask[]): Array<Array<string>> {
+    return [
+        ['Title', 'Kind', 'Status', 'Due Date', 'Owner', 'Lead Id', 'Detail', 'Source Ref'],
+        ...tasks.map((task) => [
+            task.title,
+            task.kind,
+            task.status,
+            task.dueDate || '',
+            task.owner,
+            task.leadId || '',
+            task.detail || '',
+            task.sourceRef || ''
+        ])
+    ];
+}
+
 export async function exportProductToGoogleSheets(
     context: vscode.ExtensionContext,
     input: {
         sheetUrl: string;
         offer: SalesCockpitOffer;
         leads: SalesCockpitLead[];
+        proofAssets?: SalesCockpitProofAsset[];
+        tasks?: SalesCockpitTask[];
     }
 ): Promise<void> {
     const session = await getValidGoogleWorkspaceSession(context);
@@ -139,7 +172,7 @@ export async function exportProductToGoogleSheets(
         throw new Error('Google Workspace is not connected.');
     }
     const spreadsheetId = extractSpreadsheetId(input.sheetUrl);
-    await ensureSheetTabs(session.accessToken, spreadsheetId, ['Offer', 'Leads']);
+    await ensureSheetTabs(session.accessToken, spreadsheetId, ['Offer', 'Leads', 'Proof', 'Actions']);
 
     await jsonRequest(
         `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
@@ -155,6 +188,14 @@ export async function exportProductToGoogleSheets(
                 {
                     range: 'Leads!A1:J500',
                     values: buildLeadRows(input.leads)
+                },
+                {
+                    range: 'Proof!A1:G500',
+                    values: buildProofRows(Array.isArray(input.proofAssets) ? input.proofAssets : [])
+                },
+                {
+                    range: 'Actions!A1:H500',
+                    values: buildActionRows(Array.isArray(input.tasks) ? input.tasks : [])
                 }
             ]
         })
@@ -164,7 +205,10 @@ export async function exportProductToGoogleSheets(
 export async function importLeadsFromGoogleSheets(
     context: vscode.ExtensionContext,
     sheetUrl: string
-): Promise<SalesCockpitLead[]> {
+): Promise<{
+    leads: SalesCockpitLead[];
+    tasks: SalesCockpitTask[];
+}> {
     const session = await getValidGoogleWorkspaceSession(context);
     if (!session.accessToken) {
         throw new Error('Google Workspace is not connected.');
@@ -177,7 +221,7 @@ export async function importLeadsFromGoogleSheets(
     );
     const rows = Array.isArray(response.values) ? response.values : [];
 
-    return rows
+    const leads = rows
         .map((row, index) => {
             const company = String(row?.[0] || '').trim();
             if (!company) {
@@ -199,6 +243,37 @@ export async function importLeadsFromGoogleSheets(
             } as SalesCockpitLead;
         })
         .filter((entry): entry is SalesCockpitLead => !!entry);
+
+    const actionResponse = await jsonRequest<ValueRange>(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Actions!A2:H500`,
+        session.accessToken,
+        'GET'
+    );
+    const actionRows = Array.isArray(actionResponse.values) ? actionResponse.values : [];
+    const tasks = actionRows
+        .map((row, index) => {
+            const title = String(row?.[0] || '').trim();
+            if (!title) {
+                return null;
+            }
+            return {
+                id: `sheet-action-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index}`,
+                title,
+                kind: (String(row?.[1] || 'outreach').trim() || 'outreach') as SalesCockpitTask['kind'],
+                status: String(row?.[2] || 'todo').trim() === 'done' ? 'done' : 'todo',
+                dueDate: String(row?.[3] || '').trim() || undefined,
+                owner: String(row?.[4] || 'founder').trim() || 'founder',
+                leadId: String(row?.[5] || '').trim() || undefined,
+                detail: String(row?.[6] || '').trim() || undefined,
+                sourceRef: String(row?.[7] || '').trim() || undefined
+            } as SalesCockpitTask;
+        })
+        .filter((entry): entry is SalesCockpitTask => !!entry);
+
+    return {
+        leads,
+        tasks
+    };
 }
 
 export async function openGoogleSheet(sheetUrl: string): Promise<void> {

@@ -21,7 +21,7 @@ import {
   slugify
 } from '../../utils/salesCockpitUtils';
 
-export type ControlPlaneModuleId = 'offer' | 'prospects' | 'contact' | 'funnel' | 'deploy' | 'follow_up' | 'settings';
+export type ControlPlaneModuleId = 'home' | 'products' | 'prospects' | 'contact' | 'funnel' | 'proof' | 'deploy' | 'follow_up' | 'providers' | 'mcp';
 
 export const CONTROL_PLANE_MODULES: Array<{
   id: ControlPlaneModuleId;
@@ -30,46 +30,64 @@ export const CONTROL_PLANE_MODULES: Array<{
   description: string;
 }> = [
   {
-    id: 'offer',
-    title: 'Offer Builder',
-    kicker: 'Define the product',
-    description: 'Shape the promise, the proof, and the call to action for one sellable SaaS.'
+    id: 'home',
+    title: 'Mission',
+    kicker: 'Piloter la journee',
+    description: 'Pars du centre de mission, vois les frictions, puis execute la meilleure action pour le produit actif.'
+  },
+  {
+    id: 'products',
+    title: 'Produit',
+    kicker: 'Structurer un SaaS',
+    description: 'Pilote l offre, idea.md, implement.md, la sheet et les 1 a 3 pipelines attaches a ce produit.'
   },
   {
     id: 'prospects',
-    title: 'Prospect Generator',
-    kicker: 'Build the list',
-    description: 'Track target accounts, pains, contacts, and next actions in one place.'
+    title: 'Prospects',
+    kicker: 'Remplir le haut de funnel',
+    description: 'Genere les angles de prospection, suis les comptes cibles et qualifie les leads au meme endroit.'
   },
   {
     id: 'contact',
-    title: 'Prospect Contact',
-    kicker: 'Run outbound',
-    description: 'Operate campaigns, reuse templates, and copy messages without leaving VS Code.'
+    title: 'Contact',
+    kicker: 'Operer l outbound',
+    description: 'Travaille les campagnes, les drafts Gmail et les messages de relance sans sortir de VS Code.'
   },
   {
     id: 'funnel',
-    title: 'Sales Funnel',
-    kicker: 'Control the motion',
-    description: 'Set weekly targets and formalize how a lead moves from first touch to pilot.'
+    title: 'Tunnel',
+    kicker: 'Controler la progression',
+    description: 'Cadre les objectifs hebdo et la facon dont un lead avance jusqu au pilote.'
+  },
+  {
+    id: 'proof',
+    title: 'Preuves',
+    kicker: 'Reutiliser les preuves',
+    description: 'Capture les runs, snippets et assets qui rendent l offre plus facile a vendre.'
   },
   {
     id: 'deploy',
-    title: 'Deployer',
-    kicker: 'Ship the surface',
-    description: 'Open pricing, proof assets, landing pages, and the delivery pipelines that back the offer.'
+    title: 'Deploiement',
+    kicker: 'Sortir la surface vendable',
+    description: 'Ouvre le pricing, les assets, les landing pages et les pipelines qui portent l offre.'
   },
   {
     id: 'follow_up',
-    title: 'Offer Follow-up',
-    kicker: 'Close the loop',
-    description: 'Work the action queue, monitor proof, and push active deals to the next stage.'
+    title: 'Suivi',
+    kicker: 'Fermer la boucle',
+    description: 'Travaille la queue d actions, les frictions, les preuves et les deals actifs.'
   },
   {
-    id: 'settings',
-    title: 'Settings',
-    kicker: 'Connect the surfaces',
-    description: 'Manage real provider connections, credentials, and safe handoff modes.'
+    id: 'providers',
+    title: 'Providers',
+    kicker: 'Connecter les surfaces',
+    description: 'Gere Google, Gmail, Sheets, CRM et les connexions reelles avec handoff prudent.'
+  },
+  {
+    id: 'mcp',
+    title: 'MCP',
+    kicker: 'Enregistrer les outils',
+    description: 'Rends les serveurs MCP visibles, rattache-les aux produits et expose leurs outils.'
   }
 ];
 
@@ -87,8 +105,12 @@ type ControlPlanePanelProps = {
   onConnectProvider?: (providerId: string) => void;
   onValidateProvider?: (providerId: string) => void;
   onDisconnectProvider?: (providerId: string) => void;
-  onCreateGmailDraft?: (to: string, subject: string, body: string) => void;
-  onSyncGoogleSheet?: (direction: 'export' | 'import', sheetUrl: string, offer?: any, leads?: any[]) => void;
+  onCreateGmailDraft?: (to: string, subject: string, body: string, leadId?: string) => void;
+  onRefreshGmailDraftQueue?: () => void;
+  onSyncGoogleSheet?: (direction: 'export' | 'import', sheetUrl: string, offer?: any, leads?: any[], proofAssets?: any[], tasks?: any[]) => void;
+  onCreateProductFromIdea?: (ideaPath: string) => void;
+  onExtractFrictions?: (implementPath: string) => void;
+  onDiscoverMcpTools?: (serverId: string) => void;
 };
 
 type LeadDraft = {
@@ -255,7 +277,9 @@ function buildMcpBrief(server: SalesCockpitMcpServer): string {
     `Status: ${formatStageLabel(server.status)}`,
     `Endpoint: ${server.endpointUrl || 'n/a'}`,
     `Command: ${server.command || 'n/a'}`,
-    `Tools: ${server.toolSummary.join(', ') || 'n/a'}`
+    `Tools: ${server.toolSummary.join(', ') || 'n/a'}`,
+    `Last discovery: ${formatValidationTimestamp(server.lastDiscoveredAt)}`,
+    `Last error: ${server.lastDiscoveryError || 'none'}`
   ].join('\n');
 }
 
@@ -268,13 +292,17 @@ export default function ControlPlanePanel({
   onCopyToClipboard,
   onOpenExternal,
   variant = 'sidebar',
-  activeModule = 'offer',
+  activeModule = 'home',
   onSelectModule,
   onConnectProvider,
   onValidateProvider,
   onDisconnectProvider,
   onCreateGmailDraft,
-  onSyncGoogleSheet
+  onRefreshGmailDraftQueue,
+  onSyncGoogleSheet,
+  onCreateProductFromIdea,
+  onExtractFrictions,
+  onDiscoverMcpTools
 }: ControlPlanePanelProps) {
   const [leadDraft, setLeadDraft] = useState<LeadDraft>(() => createLeadDraft());
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(() => createTaskDraft());
@@ -291,7 +319,7 @@ export default function ControlPlanePanel({
   if (!dashboardModel || !catalog) {
     return (
       <div style={{ padding: '14px 12px', opacity: 0.75, fontSize: '12px' }}>
-        Control plane catalog is not available in this webview session.
+        Le catalogue control plane n est pas disponible dans cette session webview.
       </div>
     );
   }
@@ -550,14 +578,28 @@ export default function ControlPlanePanel({
       return;
     }
     const rendered = renderSalesTemplate(template, lead);
-    onCreateGmailDraft(lead.email, rendered.subject || template.subject || salesCockpit.offer.name, rendered.body);
+    onCreateGmailDraft(lead.email, rendered.subject || template.subject || salesCockpit.offer.name, rendered.body, lead.id);
   };
 
   const syncSheet = (direction: 'export' | 'import') => {
     if (!onSyncGoogleSheet || !salesCockpit.defaultSheetUrl) {
       return;
     }
-    onSyncGoogleSheet(direction, salesCockpit.defaultSheetUrl, salesCockpit.offer, salesCockpit.leads);
+    onSyncGoogleSheet(direction, salesCockpit.defaultSheetUrl, salesCockpit.offer, salesCockpit.leads, salesCockpit.proofAssets, salesCockpit.tasks);
+  };
+
+  const createProductFromIdea = () => {
+    if (!onCreateProductFromIdea || !salesCockpit.ideaPath) {
+      return;
+    }
+    onCreateProductFromIdea(salesCockpit.ideaPath);
+  };
+
+  const extractFrictions = () => {
+    if (!onExtractFrictions || !salesCockpit.implementPath) {
+      return;
+    }
+    onExtractFrictions(salesCockpit.implementPath);
   };
 
   const buildProviderBrief = (provider: SalesProviderAccount): string => {
@@ -566,11 +608,14 @@ export default function ControlPlanePanel({
       definition?.title || provider.label,
       '',
       `Status: ${formatStageLabel(provider.status)}`,
+      `Health: ${formatStageLabel(provider.health || 'unknown')}`,
       `Mode: ${formatStageLabel(provider.mode)}`,
       `Account: ${provider.accountRef || 'not set'}`,
       `Endpoint: ${provider.endpointUrl || 'not set'}`,
+      `Scopes: ${(provider.scopes || []).join(', ') || 'none'}`,
       `Capabilities: ${(provider.capabilities || []).join(', ') || 'none'}`,
       `Last checked: ${formatValidationTimestamp(provider.lastValidatedAt)}`,
+      `Last message: ${provider.lastValidationMessage || 'none'}`,
       `Notes: ${provider.notes || 'none'}`
     ].join('\n');
   };
@@ -1030,6 +1075,20 @@ export default function ControlPlanePanel({
               <div style={{ fontSize: '10px', opacity: 0.66, marginTop: '8px' }}>
                 Last checked: {formatValidationTimestamp(provider.lastValidatedAt)}
               </div>
+              {!!provider.lastValidationMessage && (
+                <div style={{ fontSize: '10px', opacity: 0.82, marginTop: '6px' }}>
+                  Health: <strong>{formatStageLabel(provider.health || 'unknown')}</strong> · {provider.lastValidationMessage}
+                </div>
+              )}
+              {!!provider.scopes?.length && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                  {provider.scopes.map((scope) => (
+                    <span key={`${provider.id}-${scope}`} style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.06)' }}>
+                      {scope}
+                    </span>
+                  ))}
+                </div>
+              )}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
                 <button type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(buildProviderBrief(provider))} style={buttonStyle}>
                   Copy provider brief
@@ -1078,6 +1137,19 @@ export default function ControlPlanePanel({
               {canManage && (
                 <div style={{ fontSize: '10px', opacity: 0.66, marginTop: '8px' }}>
                   Sensitive values are stored in VS Code Secret Storage. The cockpit keeps only the visible metadata.
+                </div>
+              )}
+              {!!provider.logs?.length && (
+                <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {provider.logs.slice(0, 3).map((entry) => (
+                    <div key={entry.id} style={{ border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px', padding: '8px', background: 'rgba(255,255,255,0.02)' }}>
+                      <div style={{ fontSize: '10px', opacity: 0.66 }}>{formatValidationTimestamp(entry.timestamp)} · {entry.level.toUpperCase()}</div>
+                      <div style={{ fontSize: '11px', marginTop: '4px' }}>{entry.message}</div>
+                      {!!entry.detail && (
+                        <div style={{ fontSize: '10px', opacity: 0.72, marginTop: '4px' }}>{entry.detail}</div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -1135,24 +1207,335 @@ export default function ControlPlanePanel({
     </section>
   );
 
+  const renderMissionControlSection = () => (
+    <section key="missionControl" style={sectionStyle}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 700 }}>Mission Control</div>
+          <div style={{ fontSize: '11px', opacity: 0.72, marginTop: '4px' }}>
+            Lis l etat du produit, ce qui bloque, et la meilleure action a executer maintenant.
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: '11px', opacity: 0.66 }}>Readiness</div>
+          <div style={{ fontSize: '24px', fontWeight: 800 }}>{salesModel.readiness.score}%</div>
+          <div style={{ fontSize: '10px', opacity: 0.72 }}>{salesModel.readiness.label}</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '8px' }}>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '10px', opacity: 0.66 }}>Leads prets</div>
+          <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '6px' }}>{salesModel.leadSignals.readyForDraft}</div>
+        </div>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '10px', opacity: 0.66 }}>Frictions</div>
+          <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '6px' }}>{salesModel.frictionSummary.total}</div>
+        </div>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '10px', opacity: 0.66 }}>Providers sains</div>
+          <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '6px' }}>{salesModel.providerSummary.connected}</div>
+        </div>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '10px', opacity: 0.66 }}>Drafts Gmail</div>
+          <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '6px' }}>{salesCockpit.draftQueue.length}</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '10px' }}>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '12px', fontWeight: 700 }}>Blocages prioritaires</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+            {salesModel.readiness.blockers.length === 0 && (
+              <div style={{ fontSize: '11px', opacity: 0.78 }}>Aucun blocage critique.</div>
+            )}
+            {salesModel.readiness.blockers.slice(0, 4).map((blocker) => (
+              <div key={blocker} style={{ fontSize: '11px', opacity: 0.86 }}>• {blocker}</div>
+            ))}
+          </div>
+          <div style={{ fontSize: '10px', opacity: 0.66, marginTop: '10px' }}>
+            Prochaine marche : {salesModel.readiness.nextMilestone}
+          </div>
+        </div>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '12px', fontWeight: 700 }}>Forces actuelles</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+            {salesModel.readiness.strengths.length === 0 && (
+              <div style={{ fontSize: '11px', opacity: 0.78 }}>Le produit doit encore se structurer.</div>
+            )}
+            {salesModel.readiness.strengths.slice(0, 4).map((strength) => (
+              <div key={strength} style={{ fontSize: '11px', opacity: 0.86 }}>• {strength}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {salesModel.recommendations.map((recommendation) => {
+          const tone = recommendation.priority === 'high'
+            ? { background: 'rgba(244, 67, 54, 0.12)', border: 'rgba(244, 67, 54, 0.28)', color: '#ffb4a8' }
+            : recommendation.priority === 'medium'
+              ? { background: 'rgba(242, 201, 76, 0.12)', border: 'rgba(242, 201, 76, 0.28)', color: '#f2c94c' }
+              : { background: 'rgba(14, 165, 233, 0.12)', border: 'rgba(14, 165, 233, 0.28)', color: '#8fd8ff' };
+          return (
+            <div key={recommendation.id} className="cp-card-hover" style={{ ...cardStyle, borderColor: tone.border, background: tone.background }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 700 }}>{recommendation.title}</div>
+                  <div style={{ fontSize: '11px', opacity: 0.82, marginTop: '4px' }}>{recommendation.reason}</div>
+                </div>
+                <span style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.06)', color: tone.color }}>
+                  {recommendation.priority === 'high' ? 'Priorite haute' : recommendation.priority === 'medium' ? 'Priorite moyenne' : 'Priorite basse'}
+                </span>
+              </div>
+              <div style={{ fontSize: '10px', opacity: 0.7, marginTop: '8px' }}>
+                Module : {CONTROL_PLANE_MODULES.find((module) => module.id === recommendation.module)?.title || recommendation.module} · Action : {recommendation.cta}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                <button
+                  type="button"
+                  className="nodrag cp-btn-secondary"
+                  onClick={() => onSelectModule?.(recommendation.module)}
+                  style={buttonStyle}
+                  disabled={!onSelectModule}
+                >
+                  Ouvrir le module
+                </button>
+                <button
+                  type="button"
+                  className="nodrag cp-btn-secondary"
+                  onClick={() => onCopyToClipboard(`${recommendation.title}\n\n${recommendation.reason}`)}
+                  style={buttonStyle}
+                >
+                  Copier la reco
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+
+  const renderLeadGeneratorSection = () => (
+    <section key="leadGenerator" style={sectionStyle}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 700 }}>Generateur de prospects</div>
+          <div style={{ fontSize: '11px', opacity: 0.72, marginTop: '4px' }}>
+            Utilise l offre actuelle pour generer les briefs de chasse, les angles d outreach et les criteres de qualification.
+          </div>
+        </div>
+        <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
+          {salesModel.leadSignals.totalOpen} leads ouverts
+        </span>
+      </div>
+
+      <div className="cp-card-hover" style={cardStyle}>
+        <div style={{ fontSize: '12px', fontWeight: 700 }}>ICP resume</div>
+        <div style={{ fontSize: '11px', opacity: 0.82, marginTop: '6px' }}>{salesModel.leadGenerationBrief.icpSummary}</div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '8px' }}>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '10px', opacity: 0.66 }}>Prets pour draft</div>
+          <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '6px' }}>{salesModel.leadSignals.readyForDraft}</div>
+        </div>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '10px', opacity: 0.66 }}>Emails manquants</div>
+          <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '6px' }}>{salesModel.leadSignals.missingEmail}</div>
+        </div>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '10px', opacity: 0.66 }}>Leads sans douleur/next step</div>
+          <div style={{ fontSize: '20px', fontWeight: 800, marginTop: '6px' }}>{salesModel.leadSignals.missingPain + salesModel.leadSignals.missingNextAction}</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '10px' }}>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '12px', fontWeight: 700 }}>Requetes de recherche</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+            {salesModel.leadGenerationBrief.searchQueries.map((query) => (
+              <button key={query} type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(query)} style={buttonStyle}>
+                {query}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '12px', fontWeight: 700 }}>Angles d outreach</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+            {salesModel.leadGenerationBrief.outreachAngles.map((angle) => (
+              <div key={angle} style={{ fontSize: '11px', opacity: 0.84 }}>• {angle}</div>
+            ))}
+          </div>
+        </div>
+        <div className="cp-card-hover" style={cardStyle}>
+          <div style={{ fontSize: '12px', fontWeight: 700 }}>Checklist de qualification</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+            {salesModel.leadGenerationBrief.qualificationChecklist.map((item) => (
+              <div key={item} style={{ fontSize: '11px', opacity: 0.84 }}>• {item}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderProductWizardSection = () => (
+    <section key="productWizard" style={sectionStyle}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 700 }}>Assistant produit</div>
+          <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '4px' }}>
+            Transforme idea.md en base de SaaS vendable avec offre, actions initiales et configuration cockpit.
+          </div>
+        </div>
+        <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
+          {salesCockpit.ideaPath || 'idea.md'}
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={createProductFromIdea} style={buttonStyle} disabled={!onCreateProductFromIdea || !salesCockpit.ideaPath}>
+          Generer depuis idea.md
+        </button>
+        {!!salesCockpit.ideaPath && (
+          <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile(salesCockpit.ideaPath!)} style={buttonStyle}>
+            Ouvrir idea.md
+          </button>
+        )}
+      </div>
+      <div style={{ fontSize: '11px', opacity: 0.76 }}>
+        L assistant lit le fichier d idee du produit actif et regenere l offre, le funnel et les premieres actions pour ce SaaS.
+      </div>
+    </section>
+  );
+
+  const renderDraftQueueSection = () => (
+    <section key="draftQueue" style={sectionStyle}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 700 }}>File de drafts Gmail</div>
+          <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '4px' }}>
+            Garde les drafts a relire et a envoyer sans quitter VS Code.
+          </div>
+        </div>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => onRefreshGmailDraftQueue?.()} style={buttonStyle} disabled={!onRefreshGmailDraftQueue}>
+          Rafraichir la file
+        </button>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {salesCockpit.draftQueue.length === 0 && (
+          <div style={{ fontSize: '11px', opacity: 0.7 }}>Aucun draft Gmail charge pour le moment.</div>
+        )}
+        {salesCockpit.draftQueue.map((draft) => (
+          <div key={draft.id} className="cp-card-hover" style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 700 }}>{draft.subject || '(no subject)'}</div>
+                <div style={{ fontSize: '11px', opacity: 0.72, marginTop: '4px' }}>A : {draft.to || 'destinataire inconnu'}</div>
+              </div>
+              <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
+                {formatStageLabel(draft.status)}
+              </span>
+            </div>
+            <div style={{ fontSize: '11px', opacity: 0.8, marginTop: '8px' }}>{draft.bodyPreview || 'No preview.'}</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(`${draft.subject}\n\n${draft.bodyPreview}`)} style={buttonStyle}>
+                Copier le resume
+              </button>
+              <button
+                type="button"
+                className="nodrag cp-btn-secondary"
+                onClick={() => updateCockpit({
+                  ...salesCockpit,
+                  draftQueue: salesCockpit.draftQueue.map((entry) => entry.id === draft.id ? { ...entry, status: entry.status === 'reviewed' ? 'drafted' : 'reviewed' } : entry)
+                })}
+                style={buttonStyle}
+              >
+                {draft.status === 'reviewed' ? 'Marquer en brouillon' : 'Marquer relu'}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
+  const renderFrictionInboxSection = () => (
+    <section key="frictionInbox" style={sectionStyle}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 700 }}>Boite de friction</div>
+          <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '4px' }}>
+            Lis implement.md, remonte les lignes de friction et transforme-les en actions cockpit.
+          </div>
+        </div>
+        <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
+          {(salesCockpit.tasks.filter((task) => task.kind === 'friction').length)} friction
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={extractFrictions} style={buttonStyle} disabled={!onExtractFrictions || !salesCockpit.implementPath}>
+          Importer depuis implement.md
+        </button>
+        {!!salesCockpit.implementPath && (
+          <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile(salesCockpit.implementPath!)} style={buttonStyle}>
+            Ouvrir implement.md
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {salesCockpit.tasks.filter((task) => task.kind === 'friction').slice(0, 6).map((task) => (
+          <div key={task.id} className="cp-card-hover" style={cardStyle}>
+            <div style={{ fontSize: '13px', fontWeight: 700 }}>{task.title}</div>
+            {!!task.detail && (
+              <div style={{ fontSize: '11px', opacity: 0.8, marginTop: '4px' }}>{task.detail}</div>
+            )}
+            {!!task.sourceRef && (
+              <div style={{ fontSize: '10px', opacity: 0.66, marginTop: '6px' }}>{task.sourceRef}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
   const renderProductSurfaceSection = () => (
     <section key="productSurface" style={sectionStyle}>
-      <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px' }}>Product Surface</div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 700 }}>Surface produit</div>
+          <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '4px' }}>
+            Garde le SaaS actif relie aux fichiers et assets que tu veux operer depuis VS Code.
+          </div>
+        </div>
+        <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
+          {salesCockpit.pipelinePaths.length} pipeline{salesCockpit.pipelinePaths.length === 1 ? '' : 's'}
+        </span>
+      </div>
       <select className="nodrag" value={salesCockpit.productStage} onChange={(event) => updateCockpit({ ...salesCockpit, productStage: event.target.value as any })} style={inputStyle}>
-        <option value="idea">Idea</option>
-        <option value="offer">Offer</option>
+        <option value="idea">Idee</option>
+        <option value="offer">Offre</option>
         <option value="outbound">Outbound</option>
         <option value="pilot">Pilot</option>
-        <option value="won">Won</option>
+        <option value="won">Gagne</option>
       </select>
       <input className="nodrag" value={salesCockpit.ideaPath || ''} onChange={(event) => updateCockpit({ ...salesCockpit, ideaPath: event.target.value })} placeholder="idea.md path" style={inputStyle} />
       <input className="nodrag" value={salesCockpit.implementPath || ''} onChange={(event) => updateCockpit({ ...salesCockpit, implementPath: event.target.value })} placeholder="implement.md path" style={inputStyle} />
       <input className="nodrag" value={salesCockpit.defaultSheetUrl || ''} onChange={(event) => updateCockpit({ ...salesCockpit, defaultSheetUrl: event.target.value })} placeholder="Google Sheet URL" style={inputStyle} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-        <button type="button" className="nodrag cp-btn-secondary" onClick={() => syncSheet('export')} style={buttonStyle}>Export to Sheet</button>
-        <button type="button" className="nodrag cp-btn-secondary" onClick={() => syncSheet('import')} style={buttonStyle}>Import leads</button>
+        {!!salesCockpit.ideaPath && (
+          <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile(salesCockpit.ideaPath!)} style={buttonStyle}>Open idea.md</button>
+        )}
+        {!!salesCockpit.implementPath && (
+          <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile(salesCockpit.implementPath!)} style={buttonStyle}>Open implement.md</button>
+        )}
+        <button type="button" className="nodrag cp-btn-secondary" onClick={addPipelinePath} style={buttonStyle}>Attacher un pipeline</button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => syncSheet('export')} style={buttonStyle}>Exporter Offre/Leads/Preuves/Actions</button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => syncSheet('import')} style={buttonStyle}>Importer Leads/Actions</button>
         {!!salesCockpit.defaultSheetUrl && (
-          <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenExternal(salesCockpit.defaultSheetUrl!)} style={buttonStyle}>Open Sheet</button>
+          <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenExternal(salesCockpit.defaultSheetUrl!)} style={buttonStyle}>Ouvrir la sheet</button>
         )}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1160,8 +1543,8 @@ export default function ControlPlanePanel({
           <div key={path} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', ...cardStyle }}>
             <span style={{ fontSize: '11px', opacity: 0.84 }}>{path}</span>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile(path)} style={buttonStyle}>Open</button>
-              <button type="button" className="nodrag cp-btn-secondary" onClick={() => removePipelinePath(path)} style={buttonStyle}>Remove</button>
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile(path)} style={buttonStyle}>Ouvrir</button>
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => removePipelinePath(path)} style={buttonStyle}>Retirer</button>
             </div>
           </div>
         ))}
@@ -1173,12 +1556,12 @@ export default function ControlPlanePanel({
     <section key="mcpRegistry" style={sectionStyle}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
         <div>
-          <div style={{ fontSize: '13px', fontWeight: 700 }}>MCP Registry</div>
+          <div style={{ fontSize: '13px', fontWeight: 700 }}>Registre MCP</div>
           <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '4px' }}>
-            Keep a minimal registry of MCP servers tied to the cockpit.
+            Garde un registre utile des serveurs MCP relies au cockpit.
           </div>
         </div>
-        <button type="button" className="nodrag cp-btn-secondary" onClick={addMcpServer} style={buttonStyle}>Add MCP</button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={addMcpServer} style={buttonStyle}>Ajouter un MCP</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {salesCockpit.mcpServers.map((server) => (
@@ -1188,12 +1571,35 @@ export default function ControlPlanePanel({
               <input className="nodrag" value={server.endpointUrl || server.command || ''} onChange={(event) => updateMcpServer(server.id, server.transport === 'stdio' ? { command: event.target.value } : { endpointUrl: event.target.value })} placeholder={server.transport === 'stdio' ? 'Command' : 'Endpoint'} style={inputStyle} />
             </div>
             <textarea className="nodrag" value={server.toolSummary.join(', ')} onChange={(event) => updateMcpServer(server.id, { toolSummary: event.target.value.split(',').map((entry) => entry.trim()).filter(Boolean) })} placeholder="tool-a, tool-b" style={{ ...textareaStyle, minHeight: '44px' }} />
+            {!!server.lastDiscoveryError && (
+              <div style={{ fontSize: '10px', opacity: 0.82, color: '#ffb4a8' }}>
+                Derniere erreur de decouverte : {server.lastDiscoveryError}
+              </div>
+            )}
+            {!!server.tools?.length && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {server.tools.map((tool) => (
+                  <div key={`${server.id}-${tool.name}`} style={{ border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px', padding: '8px', background: 'rgba(255,255,255,0.02)' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700 }}>{tool.title || tool.name}</div>
+                    {!!tool.description && (
+                      <div style={{ fontSize: '11px', opacity: 0.78, marginTop: '4px' }}>{tool.description}</div>
+                    )}
+                    {!!tool.inputSchemaSummary && (
+                      <div style={{ fontSize: '10px', opacity: 0.66, marginTop: '4px' }}>{tool.inputSchemaSummary}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              <button type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(buildMcpBrief(server))} style={buttonStyle}>Copy MCP brief</button>
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => onDiscoverMcpTools?.(server.id)} style={buttonStyle} disabled={!onDiscoverMcpTools}>
+                Decouvrir les outils
+              </button>
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(buildMcpBrief(server))} style={buttonStyle}>Copier le brief MCP</button>
               {!!server.endpointUrl && (
-                <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenExternal(server.endpointUrl!)} style={buttonStyle}>Open endpoint</button>
+                <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenExternal(server.endpointUrl!)} style={buttonStyle}>Ouvrir l endpoint</button>
               )}
-              <button type="button" className="nodrag cp-btn-secondary" onClick={() => removeMcpServer(server.id)} style={buttonStyle}>Remove</button>
+              <button type="button" className="nodrag cp-btn-secondary" onClick={() => removeMcpServer(server.id)} style={buttonStyle}>Supprimer</button>
             </div>
           </div>
         ))}
@@ -1203,7 +1609,7 @@ export default function ControlPlanePanel({
 
   const renderDeliverySection = () => (
     <section key="delivery" style={sectionStyle}>
-      <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px' }}>Delivery proof and deployer</div>
+      <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px' }}>Preuve delivery et deploiement</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
         {statCards.map((card) => (
           <div key={card.label} className="cp-card-hover" style={{ ...cardStyle, background: 'rgba(255,255,255,0.025)' }}>
@@ -1252,7 +1658,7 @@ export default function ControlPlanePanel({
 
   const renderQuickAccessSection = () => (
     <section key="quickAccess" style={sectionStyle}>
-      <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px' }}>Quick access</div>
+      <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '10px' }}>Acces rapide</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
         {quickLinks.map((entry) => (
           <button key={entry.key} type="button" className="nodrag" onClick={() => onOpenWorkspaceFile(entry.path)} style={buttonStyle}>
@@ -1289,10 +1695,16 @@ export default function ControlPlanePanel({
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'flex-end' }}>
           <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
-            Providers: {salesModel.providerSummary.connected + salesModel.providerSummary.configured}/{salesModel.providerSummary.total}
+            Providers : {salesModel.providerSummary.connected + salesModel.providerSummary.configured}/{salesModel.providerSummary.total}
           </span>
           <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
-            Open leads: {salesModel.openLeads.length}
+            MCP : {salesModel.mcpSummary.total}
+          </span>
+          <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
+            Preuves : {salesModel.proofSummary.total}
+          </span>
+          <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
+            Leads ouverts : {salesModel.openLeads.length}
           </span>
         </div>
       </div>
@@ -1326,34 +1738,45 @@ export default function ControlPlanePanel({
 
   if (variant === 'sidebar') {
     sections.push(
+      renderMissionControlSection(),
       renderActionCenterSection(),
+      renderProductWizardSection(),
       renderOverviewSection(),
       renderMetricsSection(),
       renderLeadPipelineSection(),
       renderActionQueueSection(),
+      renderLeadGeneratorSection(),
       renderProspectsSection(),
       renderProvidersSection(),
       renderCampaignSection(),
+      renderDraftQueueSection(),
+      renderFrictionInboxSection(),
       renderProofLockerSection(),
       renderDeliverySection(),
       renderProductSurfaceSection(),
       renderMcpRegistrySection(),
       renderQuickAccessSection()
     );
-  } else if (activeModule === 'offer') {
-    sections.push(renderCockpitModuleBar(), renderActionCenterSection(), renderOverviewSection(), renderOfferBuilderSection(), renderProductSurfaceSection());
+  } else if (activeModule === 'home') {
+    sections.push(renderCockpitModuleBar(), renderMissionControlSection(), renderActionCenterSection(), renderFrictionInboxSection(), renderOverviewSection(), renderMetricsSection(), renderQuickAccessSection());
+  } else if (activeModule === 'products') {
+    sections.push(renderCockpitModuleBar(), renderProductWizardSection(), renderOverviewSection(), renderOfferBuilderSection(), renderProductSurfaceSection());
   } else if (activeModule === 'prospects') {
-    sections.push(renderCockpitModuleBar(), renderLeadPipelineSection(), renderProspectsSection(), renderProductSurfaceSection());
+    sections.push(renderCockpitModuleBar(), renderLeadGeneratorSection(), renderLeadPipelineSection(), renderProspectsSection(), renderProductSurfaceSection());
   } else if (activeModule === 'contact') {
-    sections.push(renderCockpitModuleBar(), renderCampaignSection(), renderActionCenterSection());
+    sections.push(renderCockpitModuleBar(), renderCampaignSection(), renderDraftQueueSection(), renderActionCenterSection());
   } else if (activeModule === 'funnel') {
     sections.push(renderCockpitModuleBar(), renderMetricsSection(), renderFunnelSection(), renderLeadPipelineSection());
+  } else if (activeModule === 'proof') {
+    sections.push(renderCockpitModuleBar(), renderProofLockerSection(), renderDeliverySection(), renderQuickAccessSection());
   } else if (activeModule === 'deploy') {
-    sections.push(renderCockpitModuleBar(), renderDeliverySection(), renderProofLockerSection(), renderQuickAccessSection());
+    sections.push(renderCockpitModuleBar(), renderDeliverySection(), renderProofLockerSection(), renderProductSurfaceSection(), renderQuickAccessSection());
   } else if (activeModule === 'follow_up') {
-    sections.push(renderCockpitModuleBar(), renderActionCenterSection(), renderActionQueueSection(), renderLeadPipelineSection(), renderProofLockerSection(), renderDeliverySection());
-  } else if (activeModule === 'settings') {
-    sections.push(renderCockpitModuleBar(), renderProvidersSection(), renderMcpRegistrySection(), renderQuickAccessSection());
+    sections.push(renderCockpitModuleBar(), renderActionCenterSection(), renderActionQueueSection(), renderDraftQueueSection(), renderLeadPipelineSection(), renderProofLockerSection(), renderDeliverySection(), renderFrictionInboxSection());
+  } else if (activeModule === 'providers') {
+    sections.push(renderCockpitModuleBar(), renderProvidersSection(), renderQuickAccessSection());
+  } else if (activeModule === 'mcp') {
+    sections.push(renderCockpitModuleBar(), renderMcpRegistrySection(), renderQuickAccessSection());
   }
 
   return (

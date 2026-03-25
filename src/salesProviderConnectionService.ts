@@ -9,12 +9,14 @@ import {
 } from './salesCockpitStore';
 import {
     connectGoogleWorkspace,
+    describeGoogleScopes,
     disconnectGoogleWorkspace,
     GOOGLE_WORKSPACE_SECRET_KEYS,
     validateGoogleWorkspace
 } from './googleOAuthService';
 import {
     connectGmailProvider,
+    describeGmailScopes,
     disconnectGmailProvider,
     GMAIL_OAUTH_SECRET_KEYS,
     hasGmailOAuthSession,
@@ -56,6 +58,23 @@ function updateProvider(state: SalesCockpitState, providerId: SalesProviderId, p
                 ...patch
             };
         })
+    };
+}
+
+function providerLog(level: 'info' | 'success' | 'warning' | 'error', message: string, detail?: string) {
+    return {
+        id: `${Date.now()}-${level}-${message.slice(0, 24).replace(/[^a-z0-9]+/gi, '-')}`,
+        timestamp: new Date().toISOString(),
+        level,
+        message,
+        detail
+    };
+}
+
+function withProviderLog(provider: SalesProviderAccount, entry: ReturnType<typeof providerLog>): Partial<SalesProviderAccount> {
+    const nextLogs = [entry, ...(provider.logs || [])].slice(0, 12);
+    return {
+        logs: nextLogs
     };
 }
 
@@ -160,7 +179,11 @@ async function connectEmail(context: vscode.ExtensionContext, state: SalesCockpi
         endpointUrl: `smtp://${host}:${port || '587'}`,
         mode,
         status: password ? 'connected' : 'configured',
-        lastValidatedAt: new Date().toISOString()
+        health: password ? 'healthy' : 'warning',
+        scopes: ['SMTP credentials'],
+        lastValidatedAt: new Date().toISOString(),
+        lastValidationMessage: password ? 'SMTP credentials stored.' : 'SMTP surface configured but not fully connected.',
+        ...withProviderLog(current, providerLog(password ? 'success' : 'warning', 'SMTP connection updated.', `Host: ${host}:${port || '587'}`))
     });
 }
 
@@ -204,7 +227,11 @@ async function connectTokenProvider(
         accountRef,
         endpointUrl,
         status: secret ? 'connected' : 'configured',
-        lastValidatedAt: new Date().toISOString()
+        health: secret ? 'healthy' : 'warning',
+        scopes: ['API token'],
+        lastValidatedAt: new Date().toISOString(),
+        lastValidationMessage: secret ? 'Token stored and ready to validate against the CRM.' : 'CRM surface configured without token.',
+        ...withProviderLog(current, providerLog(secret ? 'success' : 'warning', `${current.label} connection updated.`, endpointUrl))
     });
 }
 
@@ -237,7 +264,11 @@ async function connectManualProvider(
         accountRef,
         endpointUrl,
         status: accountRef || endpointUrl ? 'configured' : 'not_connected',
-        lastValidatedAt: accountRef || endpointUrl ? new Date().toISOString() : undefined
+        health: accountRef || endpointUrl ? 'warning' : 'unknown',
+        scopes: [],
+        lastValidatedAt: accountRef || endpointUrl ? new Date().toISOString() : undefined,
+        lastValidationMessage: accountRef || endpointUrl ? 'Manual handoff surface configured.' : 'Manual handoff surface not configured yet.',
+        ...withProviderLog(current, providerLog(accountRef || endpointUrl ? 'info' : 'warning', `${current.label} handoff surface updated.`, endpointUrl || accountRef))
     });
 }
 
@@ -293,10 +324,28 @@ export async function connectSalesProvider(context: vscode.ExtensionContext, pro
             return undefined;
         }
 
-        const saved = await writeSalesCockpitToWorkspace(next);
+        const connectedState = updateProvider(next, providerId, {
+            health: getProvider(next, providerId).status === 'connected' ? 'healthy' : 'warning',
+            lastValidationMessage: getProvider(next, providerId).status === 'connected'
+                ? `${getProvider(next, providerId).label} connected and ready.`
+                : `${getProvider(next, providerId).label} configured but not fully connected.`,
+            ...withProviderLog(
+                getProvider(next, providerId),
+                providerLog('success', `${getProvider(next, providerId).label} connected.`, getProvider(next, providerId).accountRef || getProvider(next, providerId).endpointUrl)
+            )
+        });
+        const saved = await writeSalesCockpitToWorkspace(connectedState);
         vscode.window.showInformationMessage(`${getProvider(saved, providerId).label} connected in Leion Cockpit.`);
         return saved;
     } catch (error: any) {
+        const state = await readSalesCockpitFromWorkspace();
+        const current = getProvider(state, providerId);
+        await writeSalesCockpitToWorkspace(updateProvider(state, providerId, {
+            health: 'error',
+            lastValidatedAt: new Date().toISOString(),
+            lastValidationMessage: error?.message || String(error),
+            ...withProviderLog(current, providerLog('error', `Failed to connect ${current.label}.`, error?.message || String(error)))
+        }));
         vscode.window.showErrorMessage(`Failed to connect provider: ${error?.message || error}`);
         return undefined;
     }
@@ -322,7 +371,11 @@ export async function disconnectSalesProvider(context: vscode.ExtensionContext, 
 
     const next = updateProvider(state, providerId, {
         ...fallback,
-        lastValidatedAt: undefined
+        lastValidatedAt: undefined,
+        health: 'unknown',
+        scopes: [],
+        lastValidationMessage: 'Disconnected.',
+        ...withProviderLog(getProvider(state, providerId), providerLog('info', `${fallback.label} disconnected.`))
     });
     const saved = await writeSalesCockpitToWorkspace(next);
     vscode.window.showInformationMessage(`${fallback.label} disconnected from Leion Cockpit.`);
@@ -339,32 +392,66 @@ export async function validateSalesProvider(context: vscode.ExtensionContext, pr
         if (providerId === 'email') {
             if (await hasGmailOAuthSession(context)) {
                 patch = await validateGmailProvider(context, current);
+                patch.health = patch.status === 'connected' ? 'healthy' : 'warning';
+                patch.scopes = patch.scopes || describeGmailScopes(current.notes);
+                patch.lastValidationMessage = patch.status === 'connected'
+                    ? 'Gmail OAuth session valid and ready for draft operations.'
+                    : 'Gmail surface is partially configured.';
             } else {
                 const hasPasswordSecret = await hasSecret(context, 'email', 'smtpPassword');
                 patch = {
                     status: current.accountRef && current.endpointUrl && hasPasswordSecret ? 'connected' : current.accountRef || current.endpointUrl ? 'configured' : 'not_connected',
-                    lastValidatedAt: new Date().toISOString()
+                    health: current.accountRef && current.endpointUrl && hasPasswordSecret ? 'healthy' : current.accountRef || current.endpointUrl ? 'warning' : 'unknown',
+                    scopes: ['SMTP credentials'],
+                    lastValidatedAt: new Date().toISOString(),
+                    lastValidationMessage: hasPasswordSecret ? 'SMTP credentials present.' : 'Missing SMTP password secret.'
                 };
             }
         } else if (providerId === 'google_sheets') {
             patch = await validateGoogleWorkspace(context, current);
+            patch.health = patch.status === 'connected' ? 'healthy' : 'warning';
+            patch.scopes = patch.scopes || describeGoogleScopes(current.notes);
+            patch.lastValidationMessage = patch.status === 'connected'
+                ? 'Google Workspace session valid for Sheets and Drive.'
+                : 'Google Workspace connector is partially configured.';
         } else if (providerId === 'crm') {
             const hasToken = await hasSecret(context, 'crm', 'apiToken');
             patch = {
                 status: current.accountRef && current.endpointUrl && hasToken ? 'connected' : current.accountRef || current.endpointUrl ? 'configured' : 'not_connected',
-                lastValidatedAt: new Date().toISOString()
+                health: current.accountRef && current.endpointUrl && hasToken ? 'healthy' : current.accountRef || current.endpointUrl ? 'warning' : 'unknown',
+                scopes: ['API token'],
+                lastValidatedAt: new Date().toISOString(),
+                lastValidationMessage: hasToken ? 'Token present.' : 'Missing CRM API token.'
             };
         } else {
             patch = {
                 status: current.accountRef || current.endpointUrl ? 'configured' : 'not_connected',
-                lastValidatedAt: new Date().toISOString()
+                health: current.accountRef || current.endpointUrl ? 'warning' : 'unknown',
+                scopes: [],
+                lastValidatedAt: new Date().toISOString(),
+                lastValidationMessage: current.accountRef || current.endpointUrl ? 'Manual handoff surface ready to use.' : 'Manual handoff surface not configured.'
             };
         }
 
-        const saved = await writeSalesCockpitToWorkspace(updateProvider(state, providerId, patch));
+        const saved = await writeSalesCockpitToWorkspace(updateProvider(state, providerId, {
+            ...patch,
+            ...withProviderLog(current, providerLog(
+                patch.health === 'healthy' ? 'success' : patch.health === 'warning' ? 'warning' : 'info',
+                `${current.label} validation: ${patch.status?.replace(/_/g, ' ') || 'unknown'}.`,
+                patch.lastValidationMessage
+            ))
+        }));
         vscode.window.showInformationMessage(`${getProvider(saved, providerId).label} validation result: ${getProvider(saved, providerId).status.replace(/_/g, ' ')}.`);
         return saved;
     } catch (error: any) {
+        const state = await readSalesCockpitFromWorkspace();
+        const current = getProvider(state, providerId);
+        await writeSalesCockpitToWorkspace(updateProvider(state, providerId, {
+            health: 'error',
+            lastValidatedAt: new Date().toISOString(),
+            lastValidationMessage: error?.message || String(error),
+            ...withProviderLog(current, providerLog('error', `${current.label} validation failed.`, error?.message || String(error)))
+        }));
         vscode.window.showErrorMessage(`Failed to validate provider: ${error?.message || error}`);
         return readSalesCockpitFromWorkspace();
     }

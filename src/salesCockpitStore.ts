@@ -2,16 +2,26 @@ import * as vscode from 'vscode';
 
 export type SalesLeadStage = 'target' | 'contacted' | 'discovery' | 'demo' | 'proposal' | 'pilot' | 'won' | 'lost';
 export type SalesTaskStatus = 'todo' | 'done';
-export type SalesTaskKind = 'outreach' | 'follow_up' | 'demo' | 'proposal' | 'proof';
+export type SalesTaskKind = 'outreach' | 'follow_up' | 'demo' | 'proposal' | 'proof' | 'friction';
 export type SalesChannel = 'email' | 'linkedin';
 export type SalesProviderId = 'email' | 'google_sheets' | 'crm' | 'linkedin' | 'reddit' | 'product_hunt';
 export type SalesProviderStatus = 'not_connected' | 'configured' | 'connected';
 export type SalesProviderMode = 'draft_only' | 'manual_handoff' | 'sync_only';
+export type SalesProviderHealth = 'unknown' | 'healthy' | 'warning' | 'error';
 export type SalesProductStage = 'idea' | 'offer' | 'outbound' | 'pilot' | 'won';
 export type ProofAssetKind = 'run' | 'doc' | 'metric' | 'snippet' | 'screenshot';
 export type ProofAssetStatus = 'draft' | 'ready';
 export type McpTransport = 'http' | 'sse' | 'stdio';
 export type McpServerStatus = 'not_configured' | 'configured' | 'connected';
+export type SalesDraftStatus = 'drafted' | 'reviewed' | 'sent';
+
+export type SalesProviderLogEntry = {
+    id: string;
+    timestamp: string;
+    level: 'info' | 'success' | 'warning' | 'error';
+    message: string;
+    detail?: string;
+};
 
 export type SalesCockpitLead = {
     id: string;
@@ -36,6 +46,8 @@ export type SalesCockpitTask = {
     owner: string;
     dueDate?: string;
     leadId?: string;
+    detail?: string;
+    sourceRef?: string;
 };
 
 export type SalesCockpitCampaign = {
@@ -61,11 +73,15 @@ export type SalesProviderAccount = {
     label: string;
     status: SalesProviderStatus;
     mode: SalesProviderMode;
+    health?: SalesProviderHealth;
     accountRef?: string;
     endpointUrl?: string;
     notes?: string;
     capabilities: string[];
+    scopes?: string[];
     lastValidatedAt?: string;
+    lastValidationMessage?: string;
+    logs?: SalesProviderLogEntry[];
 };
 
 export type SalesCockpitOffer = {
@@ -96,6 +112,26 @@ export type SalesCockpitProofAsset = {
     createdAt: string;
 };
 
+export type SalesCockpitDraftQueueItem = {
+    id: string;
+    provider: 'gmail';
+    status: SalesDraftStatus;
+    to: string;
+    subject: string;
+    bodyPreview: string;
+    createdAt: string;
+    leadId?: string;
+    draftId?: string;
+    threadId?: string;
+};
+
+export type SalesCockpitMcpTool = {
+    name: string;
+    title?: string;
+    description?: string;
+    inputSchemaSummary?: string;
+};
+
 export type SalesCockpitProduct = {
     id: string;
     name: string;
@@ -114,6 +150,7 @@ export type SalesCockpitProduct = {
     tasks: SalesCockpitTask[];
     campaigns: SalesCockpitCampaign[];
     templates: SalesCockpitTemplate[];
+    draftQueue: SalesCockpitDraftQueueItem[];
     proofAssets: SalesCockpitProofAsset[];
     pipelinePaths: string[];
     ideaPath?: string;
@@ -130,12 +167,15 @@ export type SalesCockpitMcpServer = {
     args: string[];
     status: McpServerStatus;
     toolSummary: string[];
+    tools?: SalesCockpitMcpTool[];
     notes?: string;
     assignedProductIds: string[];
+    lastDiscoveredAt?: string;
+    lastDiscoveryError?: string;
 };
 
 export type SalesCockpitState = {
-    version: 2;
+    version: 3;
     lastUpdatedAt: string;
     activeProductId: string;
     products: SalesCockpitProduct[];
@@ -153,6 +193,7 @@ export type SalesCockpitState = {
     tasks: SalesCockpitTask[];
     campaigns: SalesCockpitCampaign[];
     templates: SalesCockpitTemplate[];
+    draftQueue: SalesCockpitDraftQueueItem[];
     providerAccounts: SalesProviderAccount[];
     proofAssets: SalesCockpitProofAsset[];
     pipelinePaths: string[];
@@ -162,10 +203,11 @@ export type SalesCockpitState = {
     productStage: SalesProductStage;
 };
 
-const FILE_VERSION = 2 as const;
+const FILE_VERSION = 3 as const;
 const SALES_PROVIDER_IDS: SalesProviderId[] = ['email', 'google_sheets', 'crm', 'linkedin', 'reddit', 'product_hunt'];
 const SALES_PROVIDER_STATUSES: SalesProviderStatus[] = ['not_connected', 'configured', 'connected'];
 const SALES_PROVIDER_MODES: SalesProviderMode[] = ['draft_only', 'manual_handoff', 'sync_only'];
+const SALES_PROVIDER_HEALTH: SalesProviderHealth[] = ['unknown', 'healthy', 'warning', 'error'];
 const SALES_PRODUCT_STAGES: SalesProductStage[] = ['idea', 'offer', 'outbound', 'pilot', 'won'];
 const PROOF_ASSET_KINDS: ProofAssetKind[] = ['run', 'doc', 'metric', 'snippet', 'screenshot'];
 const PROOF_ASSET_STATUSES: ProofAssetStatus[] = ['draft', 'ready'];
@@ -202,7 +244,7 @@ function timestamp(): string {
     return new Date().toISOString();
 }
 
-function slugify(value: string): string {
+export function slugify(value: string): string {
     return String(value || '')
         .trim()
         .toLowerCase()
@@ -272,10 +314,14 @@ function createDefaultProviderAccounts(): SalesProviderAccount[] {
             label: 'Email / Gmail',
             status: 'not_connected',
             mode: 'draft_only',
+            health: 'unknown',
             accountRef: '',
             endpointUrl: '',
             notes: '',
-            capabilities: ['oauth connect', 'draft email', 'manual send', 'reply tracking']
+            capabilities: ['oauth connect', 'draft email', 'manual send', 'reply tracking'],
+            scopes: [],
+            lastValidationMessage: 'Not checked yet.',
+            logs: []
         },
         {
             id: 'google_sheets',
@@ -283,10 +329,14 @@ function createDefaultProviderAccounts(): SalesProviderAccount[] {
             label: 'Google Workspace',
             status: 'not_connected',
             mode: 'sync_only',
+            health: 'unknown',
             accountRef: '',
             endpointUrl: '',
             notes: '',
-            capabilities: ['oauth connect', 'sheet sync', 'drive proof locker']
+            capabilities: ['oauth connect', 'sheet sync', 'drive proof locker'],
+            scopes: [],
+            lastValidationMessage: 'Not checked yet.',
+            logs: []
         },
         {
             id: 'crm',
@@ -294,10 +344,14 @@ function createDefaultProviderAccounts(): SalesProviderAccount[] {
             label: 'CRM',
             status: 'not_connected',
             mode: 'sync_only',
+            health: 'unknown',
             accountRef: '',
             endpointUrl: '',
             notes: '',
-            capabilities: ['deal sync', 'manual update', 'contact lookup']
+            capabilities: ['deal sync', 'manual update', 'contact lookup'],
+            scopes: [],
+            lastValidationMessage: 'Not checked yet.',
+            logs: []
         },
         {
             id: 'linkedin',
@@ -305,10 +359,14 @@ function createDefaultProviderAccounts(): SalesProviderAccount[] {
             label: 'LinkedIn',
             status: 'not_connected',
             mode: 'manual_handoff',
+            health: 'unknown',
             accountRef: '',
             endpointUrl: '',
             notes: '',
-            capabilities: ['draft connection', 'draft follow-up', 'manual send']
+            capabilities: ['draft connection', 'draft follow-up', 'manual send'],
+            scopes: [],
+            lastValidationMessage: 'Not checked yet.',
+            logs: []
         },
         {
             id: 'reddit',
@@ -316,10 +374,14 @@ function createDefaultProviderAccounts(): SalesProviderAccount[] {
             label: 'Reddit',
             status: 'not_connected',
             mode: 'manual_handoff',
+            health: 'unknown',
             accountRef: '',
             endpointUrl: '',
             notes: '',
-            capabilities: ['draft post', 'draft reply', 'manual publish']
+            capabilities: ['draft post', 'draft reply', 'manual publish'],
+            scopes: [],
+            lastValidationMessage: 'Not checked yet.',
+            logs: []
         },
         {
             id: 'product_hunt',
@@ -327,10 +389,14 @@ function createDefaultProviderAccounts(): SalesProviderAccount[] {
             label: 'Product Hunt',
             status: 'not_connected',
             mode: 'manual_handoff',
+            health: 'unknown',
             accountRef: '',
             endpointUrl: '',
             notes: '',
-            capabilities: ['launch checklist', 'draft launch copy', 'manual publish']
+            capabilities: ['launch checklist', 'draft launch copy', 'manual publish'],
+            scopes: [],
+            lastValidationMessage: 'Not checked yet.',
+            logs: []
         }
     ];
 }
@@ -345,6 +411,7 @@ function createDefaultMcpServers(): SalesCockpitMcpServer[] {
             args: [],
             status: 'configured',
             toolSummary: ['repo context', 'issues', 'pull requests'],
+            tools: [],
             notes: 'Reference MCP surface already visible in local logs.',
             assignedProductIds: []
         }
@@ -398,6 +465,7 @@ export function createSalesCockpitProduct(name = 'Leion Delivery'): SalesCockpit
             }
         ],
         templates: createDefaultTemplates(),
+        draftQueue: [],
         proofAssets: [],
         pipelinePaths: [],
         ideaPath: 'idea.md',
@@ -406,7 +474,7 @@ export function createSalesCockpitProduct(name = 'Leion Delivery'): SalesCockpit
     };
 }
 
-function snapshotFromProduct(product: SalesCockpitProduct): Pick<SalesCockpitState, 'notes' | 'offer' | 'funnel' | 'weeklyTargets' | 'leads' | 'tasks' | 'campaigns' | 'templates' | 'proofAssets' | 'pipelinePaths' | 'ideaPath' | 'implementPath' | 'defaultSheetUrl' | 'productStage'> {
+function snapshotFromProduct(product: SalesCockpitProduct): Pick<SalesCockpitState, 'notes' | 'offer' | 'funnel' | 'weeklyTargets' | 'leads' | 'tasks' | 'campaigns' | 'templates' | 'draftQueue' | 'proofAssets' | 'pipelinePaths' | 'ideaPath' | 'implementPath' | 'defaultSheetUrl' | 'productStage'> {
     return {
         notes: product.notes,
         offer: product.offer,
@@ -416,6 +484,7 @@ function snapshotFromProduct(product: SalesCockpitProduct): Pick<SalesCockpitSta
         tasks: product.tasks,
         campaigns: product.campaigns,
         templates: product.templates,
+        draftQueue: product.draftQueue,
         proofAssets: product.proofAssets,
         pipelinePaths: product.pipelinePaths,
         ideaPath: product.ideaPath,
@@ -436,6 +505,7 @@ function applySnapshotToProduct(product: SalesCockpitProduct, state: Partial<Sal
         tasks: state.tasks ?? product.tasks,
         campaigns: state.campaigns ?? product.campaigns,
         templates: state.templates ?? product.templates,
+        draftQueue: state.draftQueue ?? product.draftQueue,
         proofAssets: state.proofAssets ?? product.proofAssets,
         pipelinePaths: state.pipelinePaths ?? product.pipelinePaths,
         ideaPath: state.ideaPath ?? product.ideaPath,
@@ -518,7 +588,7 @@ function sanitizeLead(raw: any): SalesCockpitLead | null {
 function sanitizeTask(raw: any): SalesCockpitTask | null {
     const title = String(raw?.title || '').trim();
     if (!title) return null;
-    const kinds: SalesTaskKind[] = ['outreach', 'follow_up', 'demo', 'proposal', 'proof'];
+    const kinds: SalesTaskKind[] = ['outreach', 'follow_up', 'demo', 'proposal', 'proof', 'friction'];
     return {
         id: String(raw?.id || title.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim(),
         title,
@@ -526,7 +596,9 @@ function sanitizeTask(raw: any): SalesCockpitTask | null {
         kind: kinds.includes(raw?.kind) ? raw.kind : 'outreach',
         owner: String(raw?.owner || 'founder').trim() || 'founder',
         dueDate: raw?.dueDate ? String(raw.dueDate).trim() : undefined,
-        leadId: raw?.leadId ? String(raw.leadId).trim() : undefined
+        leadId: raw?.leadId ? String(raw.leadId).trim() : undefined,
+        detail: raw?.detail ? String(raw.detail) : undefined,
+        sourceRef: raw?.sourceRef ? String(raw.sourceRef).trim() : undefined
     };
 }
 
@@ -563,6 +635,18 @@ function sanitizeProviderAccount(raw: any, fallback: SalesProviderAccount): Sale
     const capabilities = Array.isArray(raw?.capabilities)
         ? raw.capabilities.map((entry: unknown) => String(entry || '').trim()).filter(Boolean)
         : fallback.capabilities;
+    const scopes = Array.isArray(raw?.scopes)
+        ? raw.scopes.map((entry: unknown) => String(entry || '').trim()).filter(Boolean)
+        : fallback.scopes;
+    const logs = Array.isArray(raw?.logs)
+        ? raw.logs.map((entry: any, index: number) => ({
+            id: String(entry?.id || `${fallback.id}-log-${index}`).trim(),
+            timestamp: String(entry?.timestamp || timestamp()).trim(),
+            level: ['info', 'success', 'warning', 'error'].includes(raw?.logs?.[index]?.level) ? raw.logs[index].level : 'info',
+            message: String(entry?.message || '').trim(),
+            detail: entry?.detail ? String(entry.detail) : undefined
+        })).filter((entry: SalesProviderLogEntry) => !!entry.message)
+        : fallback.logs;
 
     return {
         id: String(raw?.id || fallback.id).trim() || fallback.id,
@@ -570,11 +654,16 @@ function sanitizeProviderAccount(raw: any, fallback: SalesProviderAccount): Sale
         label: String(raw?.label || fallback.label).trim() || fallback.label,
         status,
         mode,
+        health: SALES_PROVIDER_HEALTH.includes(raw?.health) ? raw.health : fallback.health,
         accountRef: raw?.accountRef ? String(raw.accountRef).trim() : fallback.accountRef,
         endpointUrl: raw?.endpointUrl ? String(raw.endpointUrl).trim() : fallback.endpointUrl,
         notes: raw?.notes ? String(raw.notes) : fallback.notes,
         capabilities,
+        scopes,
         lastValidatedAt: raw?.lastValidatedAt ? String(raw.lastValidatedAt).trim() : fallback.lastValidatedAt
+        ,
+        lastValidationMessage: raw?.lastValidationMessage ? String(raw.lastValidationMessage) : fallback.lastValidationMessage,
+        logs
     };
 }
 
@@ -614,12 +703,33 @@ function sanitizeProofAsset(raw: any): SalesCockpitProofAsset | null {
     };
 }
 
+function sanitizeDraftQueueItem(raw: any): SalesCockpitDraftQueueItem | null {
+    const subject = String(raw?.subject || '').trim();
+    const to = String(raw?.to || '').trim();
+    if (!subject && !to) {
+        return null;
+    }
+    return {
+        id: String(raw?.id || slugify(`${to}-${subject}`)).trim(),
+        provider: 'gmail',
+        status: ['drafted', 'reviewed', 'sent'].includes(raw?.status) ? raw.status : 'drafted',
+        to,
+        subject,
+        bodyPreview: String(raw?.bodyPreview || '').trim(),
+        createdAt: raw?.createdAt ? String(raw.createdAt).trim() : timestamp(),
+        leadId: raw?.leadId ? String(raw.leadId).trim() : undefined,
+        draftId: raw?.draftId ? String(raw.draftId).trim() : undefined,
+        threadId: raw?.threadId ? String(raw.threadId).trim() : undefined
+    };
+}
+
 function sanitizeProduct(raw: any, fallbackName: string, fallbackId?: string): SalesCockpitProduct {
     const fallback = createSalesCockpitProduct(fallbackName);
     const leads = Array.isArray(raw?.leads) ? raw.leads.map(sanitizeLead).filter(Boolean) as SalesCockpitLead[] : fallback.leads;
     const tasks = Array.isArray(raw?.tasks) ? raw.tasks.map(sanitizeTask).filter(Boolean) as SalesCockpitTask[] : fallback.tasks;
     const campaigns = Array.isArray(raw?.campaigns) ? raw.campaigns.map(sanitizeCampaign).filter(Boolean) as SalesCockpitCampaign[] : fallback.campaigns;
     const templates = Array.isArray(raw?.templates) ? raw.templates.map(sanitizeTemplate).filter(Boolean) as SalesCockpitTemplate[] : fallback.templates;
+    const draftQueue = Array.isArray(raw?.draftQueue) ? raw.draftQueue.map(sanitizeDraftQueueItem).filter(Boolean) as SalesCockpitDraftQueueItem[] : fallback.draftQueue;
     const proofAssets = Array.isArray(raw?.proofAssets) ? raw.proofAssets.map(sanitizeProofAsset).filter(Boolean) as SalesCockpitProofAsset[] : fallback.proofAssets;
     const name = String(raw?.name || fallbackName || fallback.name).trim() || fallback.name;
     const slug = String(raw?.slug || slugify(name)).trim() || slugify(name);
@@ -649,6 +759,7 @@ function sanitizeProduct(raw: any, fallbackName: string, fallbackId?: string): S
         tasks,
         campaigns,
         templates,
+        draftQueue,
         proofAssets,
         pipelinePaths,
         ideaPath: raw?.ideaPath ? String(raw.ideaPath).trim() : fallback.ideaPath,
@@ -660,6 +771,18 @@ function sanitizeProduct(raw: any, fallbackName: string, fallbackId?: string): S
 function sanitizeMcpServer(raw: any): SalesCockpitMcpServer | null {
     const name = String(raw?.name || '').trim();
     if (!name) return null;
+    const tools = Array.isArray(raw?.tools)
+        ? raw.tools.map((tool: any) => {
+            const toolName = String(tool?.name || '').trim();
+            if (!toolName) return null;
+            return {
+                name: toolName,
+                title: tool?.title ? String(tool.title).trim() : undefined,
+                description: tool?.description ? String(tool.description).trim() : undefined,
+                inputSchemaSummary: tool?.inputSchemaSummary ? String(tool.inputSchemaSummary).trim() : undefined
+            } as SalesCockpitMcpTool;
+        }).filter(Boolean) as SalesCockpitMcpTool[]
+        : [];
     return {
         id: String(raw?.id || slugify(name)).trim(),
         name,
@@ -669,8 +792,11 @@ function sanitizeMcpServer(raw: any): SalesCockpitMcpServer | null {
         args: Array.isArray(raw?.args) ? raw.args.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : [],
         status: MCP_SERVER_STATUSES.includes(raw?.status) ? raw.status : 'not_configured',
         toolSummary: Array.isArray(raw?.toolSummary) ? raw.toolSummary.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : [],
+        tools,
         notes: raw?.notes ? String(raw.notes) : undefined,
-        assignedProductIds: Array.isArray(raw?.assignedProductIds) ? raw.assignedProductIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : []
+        assignedProductIds: Array.isArray(raw?.assignedProductIds) ? raw.assignedProductIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : [],
+        lastDiscoveredAt: raw?.lastDiscoveredAt ? String(raw.lastDiscoveredAt).trim() : undefined,
+        lastDiscoveryError: raw?.lastDiscoveryError ? String(raw.lastDiscoveryError) : undefined
     };
 }
 
@@ -699,6 +825,7 @@ export function coerceSalesCockpitState(raw: any): SalesCockpitState {
             tasks: raw?.tasks,
             campaigns: raw?.campaigns,
             templates: raw?.templates,
+            draftQueue: raw?.draftQueue,
             proofAssets: raw?.proofAssets,
             pipelinePaths: raw?.pipelinePaths,
             ideaPath: raw?.ideaPath,

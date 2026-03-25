@@ -111,8 +111,12 @@ export type WebviewOutboundMessage =
   | { type: 'salesCockpit.connectProvider'; providerId: string }
   | { type: 'salesCockpit.validateProvider'; providerId: string }
   | { type: 'salesCockpit.disconnectProvider'; providerId: string }
-  | { type: 'salesCockpit.createGmailDraft'; to: string; subject: string; body: string }
-  | { type: 'salesCockpit.syncGoogleSheet'; direction: 'export' | 'import'; sheetUrl: string; offer?: any; leads?: any[] }
+  | { type: 'salesCockpit.createGmailDraft'; to: string; subject: string; body: string; leadId?: string }
+  | { type: 'salesCockpit.refreshGmailDraftQueue' }
+  | { type: 'salesCockpit.syncGoogleSheet'; direction: 'export' | 'import'; sheetUrl: string; offer?: any; leads?: any[]; proofAssets?: any[]; tasks?: any[] }
+  | { type: 'salesCockpit.createProductFromIdea'; ideaPath: string }
+  | { type: 'salesCockpit.extractFrictions'; implementPath: string }
+  | { type: 'salesCockpit.discoverMcpTools'; serverId: string }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };
 

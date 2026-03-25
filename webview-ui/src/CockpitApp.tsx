@@ -39,7 +39,7 @@ export default function CockpitApp() {
   const catalog = (window.initialData?.controlPlaneCatalog || null) as DeliveryCatalogRecord | null;
   const [history, setHistory] = useState<PipelineRun[]>(() => Array.isArray(window.initialData?.history) ? window.initialData.history : []);
   const [uiPreset, setUiPreset] = useState<UiPreset>(() => normalizeUiPreset(window.initialData?.uiPreset || { theme: { tokens: defaultThemeTokens } }));
-  const [activeModule, setActiveModule] = useState<ControlPlaneModuleId>('offer');
+  const [activeModule, setActiveModule] = useState<ControlPlaneModuleId>('home');
   const { salesCockpit, saveSalesCockpit } = useSalesCockpitState();
 
   useEffect(() => {
@@ -61,21 +61,55 @@ export default function CockpitApp() {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  const summaryCards = useMemo(() => {
+  const cockpitCounts = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
     const openLeads = salesCockpit.leads.filter((lead) => lead.status !== 'won' && lead.status !== 'lost').length;
-    const activeCampaigns = salesCockpit.campaigns.filter((campaign) => campaign.active).length;
-    const overdueTasks = salesCockpit.tasks.filter((task) => task.status === 'todo' && !!task.dueDate && task.dueDate < new Date().toISOString().slice(0, 10)).length;
+    const overdueTasks = salesCockpit.tasks.filter((task) => task.status === 'todo' && !!task.dueDate && task.dueDate < today).length;
+    const openTasks = salesCockpit.tasks.filter((task) => task.status === 'todo').length;
     const readyProviders = salesCockpit.providerAccounts.filter((provider) => provider.status === 'connected' || provider.status === 'configured').length;
+    const unhealthyProviders = salesCockpit.providerAccounts.filter((provider) => provider.health === 'warning' || provider.health === 'error').length;
     const proofAssets = salesCockpit.proofAssets.length;
-    return [
-      { label: 'Products', value: String(salesCockpit.products.length) },
-      { label: 'Open leads', value: String(openLeads) },
-      { label: 'Overdue tasks', value: String(overdueTasks) },
-      { label: 'Ready providers', value: String(readyProviders) },
-      { label: 'Proof assets', value: String(proofAssets) },
-      { label: 'Active campaigns', value: String(activeCampaigns) }
-    ];
+    const activeCampaigns = salesCockpit.campaigns.filter((campaign) => campaign.active).length;
+    const mcpServers = salesCockpit.mcpServers.length;
+    const discoveredMcpTools = salesCockpit.mcpServers.reduce((sum, server) => sum + (server.tools?.length || 0), 0);
+    const draftQueue = salesCockpit.draftQueue.length;
+    const frictionTasks = salesCockpit.tasks.filter((task) => task.kind === 'friction' && task.status === 'todo').length;
+    return {
+      openLeads,
+      overdueTasks,
+      openTasks,
+      readyProviders,
+      unhealthyProviders,
+      proofAssets,
+      activeCampaigns,
+      mcpServers,
+      discoveredMcpTools,
+      draftQueue,
+      frictionTasks
+    };
   }, [salesCockpit]);
+
+  const summaryCards = useMemo(() => [
+    { label: 'Produits', value: String(salesCockpit.products.length) },
+    { label: 'Leads ouverts', value: String(cockpitCounts.openLeads) },
+    { label: 'Actions ouvertes', value: String(cockpitCounts.openTasks) },
+    { label: 'Providers prets', value: String(cockpitCounts.readyProviders) },
+    { label: 'Serveurs MCP', value: String(cockpitCounts.mcpServers) },
+    { label: 'Preuves', value: String(cockpitCounts.proofAssets) }
+  ], [cockpitCounts, salesCockpit.products.length]);
+
+  const moduleBadges = useMemo<Record<ControlPlaneModuleId, string>>(() => ({
+    home: cockpitCounts.overdueTasks > 0 ? `${cockpitCounts.overdueTasks} urgences` : `${cockpitCounts.openTasks} actions`,
+    products: `${salesCockpit.products.length} actifs`,
+    prospects: `${cockpitCounts.openLeads} leads`,
+    contact: cockpitCounts.draftQueue > 0 ? `${cockpitCounts.draftQueue} drafts` : `${cockpitCounts.activeCampaigns} campagnes`,
+    funnel: `${salesCockpit.weeklyTargets.outbound}/sem`,
+    proof: `${cockpitCounts.proofAssets} preuves`,
+    deploy: `${salesCockpit.pipelinePaths.length} pipelines`,
+    follow_up: cockpitCounts.frictionTasks > 0 ? `${cockpitCounts.frictionTasks} frictions` : `${cockpitCounts.openTasks} en file`,
+    providers: cockpitCounts.unhealthyProviders > 0 ? `${cockpitCounts.unhealthyProviders} alertes` : `${cockpitCounts.readyProviders}/${salesCockpit.providerAccounts.length} prets`,
+    mcp: cockpitCounts.discoveredMcpTools > 0 ? `${cockpitCounts.discoveredMcpTools} outils` : `${cockpitCounts.mcpServers} serveurs`
+  }), [cockpitCounts, salesCockpit]);
 
   const openWorkspaceFile = (path: string) => postMessage({ type: 'openWorkspaceFile', path });
   const copyToClipboard = (text: string) => postMessage({ type: 'copyToClipboard', text });
@@ -83,16 +117,20 @@ export default function CockpitApp() {
   const connectProvider = (providerId: string) => postMessage({ type: 'salesCockpit.connectProvider', providerId });
   const validateProvider = (providerId: string) => postMessage({ type: 'salesCockpit.validateProvider', providerId });
   const disconnectProvider = (providerId: string) => postMessage({ type: 'salesCockpit.disconnectProvider', providerId });
-  const createGmailDraft = (to: string, subject: string, body: string) => postMessage({ type: 'salesCockpit.createGmailDraft', to, subject, body });
-  const syncGoogleSheet = (direction: 'export' | 'import', sheetUrl: string, offer?: any, leads?: any[]) =>
-    postMessage({ type: 'salesCockpit.syncGoogleSheet', direction, sheetUrl, offer, leads });
+  const createGmailDraft = (to: string, subject: string, body: string, leadId?: string) => postMessage({ type: 'salesCockpit.createGmailDraft', to, subject, body, leadId });
+  const refreshGmailDraftQueue = () => postMessage({ type: 'salesCockpit.refreshGmailDraftQueue' });
+  const syncGoogleSheet = (direction: 'export' | 'import', sheetUrl: string, offer?: any, leads?: any[], proofAssets?: any[], tasks?: any[]) =>
+    postMessage({ type: 'salesCockpit.syncGoogleSheet', direction, sheetUrl, offer, leads, proofAssets, tasks });
+  const createProductFromIdea = (ideaPath: string) => postMessage({ type: 'salesCockpit.createProductFromIdea', ideaPath });
+  const extractFrictions = (implementPath: string) => postMessage({ type: 'salesCockpit.extractFrictions', implementPath });
+  const discoverMcpTools = (serverId: string) => postMessage({ type: 'salesCockpit.discoverMcpTools', serverId });
 
   const switchProduct = (productId: string) => {
     saveSalesCockpit(selectSalesCockpitProduct(salesCockpit, productId));
   };
 
   const createProduct = () => {
-    const name = window.prompt('Product name');
+    const name = window.prompt('Nom du produit');
     if (!name?.trim()) {
       return;
     }
@@ -111,9 +149,12 @@ export default function CockpitApp() {
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px' }}>
           <div>
             <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.14em', opacity: 0.68 }}>Leion Cockpit</div>
-            <div style={{ fontSize: '22px', fontWeight: 800, marginTop: '4px' }}>1 SaaS = 1 interface + 1 to 3 pipelines</div>
+            <div style={{ fontSize: '22px', fontWeight: 800, marginTop: '4px' }}>1 SaaS = 1 interface + 1 a 3 pipelines</div>
             <div style={{ fontSize: '12px', lineHeight: 1.6, opacity: 0.82, marginTop: '6px', maxWidth: '860px' }}>
-              Operate the commercial surface around the product, while Intent Router stays the engine. Build the offer, run outbound, work the funnel, and open the delivery assets from one cockpit.
+              Opere la surface commerciale du produit pendant que Intent Router reste le moteur. Construis l offre, gere l outbound, travaille le funnel et ouvre les assets delivery depuis un seul cockpit.
+            </div>
+            <div style={{ fontSize: '11px', lineHeight: 1.5, opacity: 0.74, marginTop: '8px' }}>
+              Produit actif : <strong>{salesCockpit.offer.name}</strong> · Etape : <strong>{salesCockpit.productStage}</strong> · Pipelines : <strong>{salesCockpit.pipelinePaths.length}</strong>
             </div>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' }}>
@@ -127,12 +168,12 @@ export default function CockpitApp() {
                 <option key={product.id} value={product.id}>{product.name}</option>
               ))}
             </select>
-            <button type="button" className="nodrag cp-card-hover cp-btn-secondary" onClick={createProduct} style={{ ...moduleCardStyle, padding: '10px 12px' }}>New Product</button>
+            <button type="button" className="nodrag cp-card-hover cp-btn-secondary" onClick={createProduct} style={{ ...moduleCardStyle, padding: '10px 12px' }}>Nouveau produit</button>
             {catalog && (
               <>
                 <button type="button" className="nodrag cp-card-hover cp-btn-secondary" onClick={() => openWorkspaceFile(catalog.docs.pricing)} style={{ ...moduleCardStyle, padding: '10px 12px' }}>Pricing</button>
-                <button type="button" className="nodrag cp-card-hover cp-btn-secondary" onClick={() => openWorkspaceFile(catalog.docs.salesPlaybook)} style={{ ...moduleCardStyle, padding: '10px 12px' }}>Sales Playbook</button>
-                <button type="button" className="nodrag cp-card-hover cp-btn-secondary" onClick={() => openWorkspaceFile(catalog.docs.proofScript)} style={{ ...moduleCardStyle, padding: '10px 12px' }}>Demo Script</button>
+                <button type="button" className="nodrag cp-card-hover cp-btn-secondary" onClick={() => openWorkspaceFile(catalog.docs.salesPlaybook)} style={{ ...moduleCardStyle, padding: '10px 12px' }}>Playbook vente</button>
+                <button type="button" className="nodrag cp-card-hover cp-btn-secondary" onClick={() => openWorkspaceFile(catalog.docs.proofScript)} style={{ ...moduleCardStyle, padding: '10px 12px' }}>Script demo</button>
               </>
             )}
           </div>
@@ -166,7 +207,12 @@ export default function CockpitApp() {
                 }}
               >
                 <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.64 }}>{module.kicker}</div>
-                <div style={{ fontSize: '14px', fontWeight: 800, marginTop: '6px' }}>{module.title}</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '6px' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 800 }}>{module.title}</div>
+                  <span style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '999px', background: selected ? 'rgba(0, 162, 255, 0.2)' : 'rgba(255,255,255,0.06)', opacity: 0.9 }}>
+                    {moduleBadges[module.id]}
+                  </span>
+                </div>
                 <div style={{ fontSize: '11px', lineHeight: 1.5, opacity: 0.82, marginTop: '6px' }}>{module.description}</div>
               </button>
             );
@@ -189,7 +235,11 @@ export default function CockpitApp() {
             onValidateProvider={validateProvider}
             onDisconnectProvider={disconnectProvider}
             onCreateGmailDraft={createGmailDraft}
+            onRefreshGmailDraftQueue={refreshGmailDraftQueue}
             onSyncGoogleSheet={syncGoogleSheet}
+            onCreateProductFromIdea={createProductFromIdea}
+            onExtractFrictions={extractFrictions}
+            onDiscoverMcpTools={discoverMcpTools}
           />
         </main>
       </div>

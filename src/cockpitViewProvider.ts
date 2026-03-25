@@ -5,8 +5,11 @@ import { generateSecureNonce } from './security';
 import { LEION_DELIVERY_CATALOG } from './controlPlane/leionDeliveryCatalog';
 import { readSalesCockpitFromWorkspace, writeSalesCockpitToWorkspace } from './salesCockpitStore';
 import { connectSalesProvider, disconnectSalesProvider, validateSalesProvider } from './salesProviderConnectionService';
-import { createGmailDraft, openGmailDrafts } from './gmailDraftService';
+import { createGmailDraft, listGmailDraftQueue, openGmailDrafts } from './gmailDraftService';
 import { exportProductToGoogleSheets, importLeadsFromGoogleSheets, openGoogleSheet } from './googleSheetsSyncService';
+import { createProductFromIdeaPath } from './productWizardService';
+import { extractFrictionTasks } from './frictionInboxService';
+import { discoverMcpTools } from './mcpRegistryService';
 import { readEmbeddedUiPreset, resolveUiPreset } from './uiPresetStore';
 
 type CockpitInitialData = {
@@ -187,15 +190,62 @@ export class CockpitViewProvider implements vscode.WebviewViewProvider, vscode.D
 
         if (message.type === 'salesCockpit.createGmailDraft') {
             try {
+                const current = await readSalesCockpitFromWorkspace();
                 const result = await createGmailDraft(this.extensionContext, {
                     to: String(message.to || '').trim(),
                     subject: String(message.subject || '').trim(),
                     body: String(message.body || '')
                 });
+                const draftQueue = [
+                    {
+                        id: result.id || `draft-${Date.now()}`,
+                        provider: 'gmail' as const,
+                        status: 'drafted' as const,
+                        to: String(message.to || '').trim(),
+                        subject: String(message.subject || '').trim(),
+                        bodyPreview: String(message.body || '').trim().slice(0, 220),
+                        createdAt: new Date().toISOString(),
+                        leadId: message.leadId ? String(message.leadId).trim() : undefined,
+                        draftId: result.id,
+                        threadId: result.message?.threadId
+                    },
+                    ...current.draftQueue.filter((entry: any) => entry.id !== result.id)
+                ].slice(0, 25);
+                const next = await writeSalesCockpitToWorkspace({
+                    ...current,
+                    draftQueue
+                } as any);
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
                 await openGmailDrafts();
                 vscode.window.showInformationMessage(`Gmail draft created${result.id ? ` (${result.id})` : ''}.`);
             } catch (error: any) {
                 vscode.window.showErrorMessage(`Failed to create Gmail draft: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.refreshGmailDraftQueue') {
+            try {
+                const queue = await listGmailDraftQueue(this.extensionContext, 12);
+                const current = await readSalesCockpitFromWorkspace();
+                const next = await writeSalesCockpitToWorkspace({
+                    ...current,
+                    draftQueue: queue.map((entry) => ({
+                        id: entry.id,
+                        provider: 'gmail',
+                        status: 'drafted',
+                        to: entry.to,
+                        subject: entry.subject,
+                        bodyPreview: entry.bodyPreview,
+                        createdAt: new Date().toISOString(),
+                        draftId: entry.draftId,
+                        threadId: entry.threadId
+                    }))
+                } as any);
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+                vscode.window.showInformationMessage(`Loaded ${queue.length} Gmail draft(s).`);
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Failed to refresh Gmail drafts: ${error?.message || error}`);
             }
             return;
         }
@@ -211,24 +261,95 @@ export class CockpitViewProvider implements vscode.WebviewViewProvider, vscode.D
                     await exportProductToGoogleSheets(this.extensionContext, {
                         sheetUrl,
                         offer: message.offer,
-                        leads: Array.isArray(message.leads) ? message.leads : []
+                        leads: Array.isArray(message.leads) ? message.leads : [],
+                        proofAssets: Array.isArray(message.proofAssets) ? message.proofAssets : [],
+                        tasks: Array.isArray(message.tasks) ? message.tasks : []
                     });
                     await openGoogleSheet(sheetUrl);
                     vscode.window.showInformationMessage('Google Sheets export completed.');
                 } else if (direction === 'import') {
-                    const importedLeads = await importLeadsFromGoogleSheets(this.extensionContext, sheetUrl);
+                    const imported = await importLeadsFromGoogleSheets(this.extensionContext, sheetUrl);
                     const current = await readSalesCockpitFromWorkspace();
                     const next = await writeSalesCockpitToWorkspace({
                         ...current,
-                        leads: importedLeads,
+                        leads: imported.leads,
+                        tasks: imported.tasks.length > 0 ? imported.tasks : current.tasks,
                         defaultSheetUrl: sheetUrl
                     } as any);
                     await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
                     await openGoogleSheet(sheetUrl);
-                    vscode.window.showInformationMessage(`Imported ${importedLeads.length} leads from Google Sheets.`);
+                    vscode.window.showInformationMessage(`Imported ${imported.leads.length} leads and ${imported.tasks.length} actions from Google Sheets.`);
                 }
             } catch (error: any) {
                 vscode.window.showErrorMessage(`Google Sheets sync failed: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.createProductFromIdea') {
+            try {
+                const current = await readSalesCockpitFromWorkspace();
+                const next = await writeSalesCockpitToWorkspace(
+                    await createProductFromIdeaPath(current, String(message.ideaPath || current.ideaPath || 'idea.md').trim())
+                );
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+                vscode.window.showInformationMessage(`Product created from ${next.ideaPath || 'idea.md'}.`);
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Product wizard failed: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.extractFrictions') {
+            try {
+                const current = await readSalesCockpitFromWorkspace();
+                const result = await extractFrictionTasks(current, String(message.implementPath || current.implementPath || 'implement.md').trim());
+                const next = await writeSalesCockpitToWorkspace(result.nextState);
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+                vscode.window.showInformationMessage(`Imported ${result.importedCount} friction task(s) from implement.md.`);
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Friction inbox failed: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.discoverMcpTools') {
+            try {
+                const current = await readSalesCockpitFromWorkspace();
+                const serverId = String(message.serverId || '').trim();
+                const server = current.mcpServers.find((entry) => entry.id === serverId);
+                if (!server) {
+                    throw new Error('Unknown MCP server.');
+                }
+                const result = await discoverMcpTools(server);
+                const next = await writeSalesCockpitToWorkspace({
+                    ...current,
+                    mcpServers: current.mcpServers.map((entry) => entry.id === serverId ? {
+                        ...entry,
+                        status: result.status,
+                        toolSummary: result.tools.map((tool) => tool.name),
+                        tools: result.tools,
+                        lastDiscoveredAt: new Date().toISOString(),
+                        lastDiscoveryError: undefined,
+                        notes: entry.notes ? `${entry.notes}\n\n${result.note}` : result.note
+                    } : entry)
+                } as any);
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+                vscode.window.showInformationMessage(`MCP discovery loaded ${result.tools.length} tool(s).`);
+            } catch (error: any) {
+                const current = await readSalesCockpitFromWorkspace();
+                const serverId = String(message.serverId || '').trim();
+                const next = await writeSalesCockpitToWorkspace({
+                    ...current,
+                    mcpServers: current.mcpServers.map((entry) => entry.id === serverId ? {
+                        ...entry,
+                        status: entry.endpointUrl || entry.command ? 'configured' : 'not_configured',
+                        lastDiscoveredAt: new Date().toISOString(),
+                        lastDiscoveryError: error?.message || String(error)
+                    } : entry)
+                } as any);
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+                vscode.window.showErrorMessage(`MCP discovery failed: ${error?.message || error}`);
             }
             return;
         }

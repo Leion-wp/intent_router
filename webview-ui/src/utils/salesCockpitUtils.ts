@@ -1,14 +1,16 @@
 export const SALES_LEAD_STAGES = ['target', 'contacted', 'discovery', 'demo', 'proposal', 'pilot', 'won', 'lost'] as const;
-export const SALES_TASK_KINDS = ['outreach', 'follow_up', 'demo', 'proposal', 'proof'] as const;
+export const SALES_TASK_KINDS = ['outreach', 'follow_up', 'demo', 'proposal', 'proof', 'friction'] as const;
 export const SALES_CHANNELS = ['email', 'linkedin'] as const;
 export const SALES_PROVIDER_IDS = ['email', 'google_sheets', 'crm', 'linkedin', 'reddit', 'product_hunt'] as const;
 export const SALES_PROVIDER_STATUSES = ['not_connected', 'configured', 'connected'] as const;
 export const SALES_PROVIDER_MODES = ['draft_only', 'manual_handoff', 'sync_only'] as const;
+export const SALES_PROVIDER_HEALTH = ['unknown', 'healthy', 'warning', 'error'] as const;
 export const SALES_PRODUCT_STAGES = ['idea', 'offer', 'outbound', 'pilot', 'won'] as const;
 export const PROOF_ASSET_KINDS = ['run', 'doc', 'metric', 'snippet', 'screenshot'] as const;
 export const PROOF_ASSET_STATUSES = ['draft', 'ready'] as const;
 export const MCP_TRANSPORTS = ['http', 'sse', 'stdio'] as const;
 export const MCP_SERVER_STATUSES = ['not_configured', 'configured', 'connected'] as const;
+export const SALES_DRAFT_STATUSES = ['drafted', 'reviewed', 'sent'] as const;
 
 export type SalesLeadStage = typeof SALES_LEAD_STAGES[number];
 export type SalesTaskStatus = 'todo' | 'done';
@@ -17,11 +19,21 @@ export type SalesChannel = typeof SALES_CHANNELS[number];
 export type SalesProviderId = typeof SALES_PROVIDER_IDS[number];
 export type SalesProviderStatus = typeof SALES_PROVIDER_STATUSES[number];
 export type SalesProviderMode = typeof SALES_PROVIDER_MODES[number];
+export type SalesProviderHealth = typeof SALES_PROVIDER_HEALTH[number];
 export type SalesProductStage = typeof SALES_PRODUCT_STAGES[number];
 export type ProofAssetKind = typeof PROOF_ASSET_KINDS[number];
 export type ProofAssetStatus = typeof PROOF_ASSET_STATUSES[number];
 export type McpTransport = typeof MCP_TRANSPORTS[number];
 export type McpServerStatus = typeof MCP_SERVER_STATUSES[number];
+export type SalesDraftStatus = typeof SALES_DRAFT_STATUSES[number];
+
+export type SalesProviderLogEntry = {
+  id: string;
+  timestamp: string;
+  level: 'info' | 'success' | 'warning' | 'error';
+  message: string;
+  detail?: string;
+};
 
 export type SalesCockpitLead = {
   id: string;
@@ -46,6 +58,8 @@ export type SalesCockpitTask = {
   owner: string;
   dueDate?: string;
   leadId?: string;
+  detail?: string;
+  sourceRef?: string;
 };
 
 export type SalesCockpitCampaign = {
@@ -71,11 +85,15 @@ export type SalesProviderAccount = {
   label: string;
   status: SalesProviderStatus;
   mode: SalesProviderMode;
+  health?: SalesProviderHealth;
   accountRef?: string;
   endpointUrl?: string;
   notes?: string;
   capabilities: string[];
+  scopes?: string[];
   lastValidatedAt?: string;
+  lastValidationMessage?: string;
+  logs?: SalesProviderLogEntry[];
 };
 
 export type SalesProviderDefinition = {
@@ -118,6 +136,26 @@ export type SalesCockpitProofAsset = {
   createdAt: string;
 };
 
+export type SalesCockpitDraftQueueItem = {
+  id: string;
+  provider: 'gmail';
+  status: SalesDraftStatus;
+  to: string;
+  subject: string;
+  bodyPreview: string;
+  createdAt: string;
+  leadId?: string;
+  draftId?: string;
+  threadId?: string;
+};
+
+export type SalesCockpitMcpTool = {
+  name: string;
+  title?: string;
+  description?: string;
+  inputSchemaSummary?: string;
+};
+
 export type SalesCockpitProduct = {
   id: string;
   name: string;
@@ -136,6 +174,7 @@ export type SalesCockpitProduct = {
   tasks: SalesCockpitTask[];
   campaigns: SalesCockpitCampaign[];
   templates: SalesCockpitTemplate[];
+  draftQueue: SalesCockpitDraftQueueItem[];
   proofAssets: SalesCockpitProofAsset[];
   pipelinePaths: string[];
   ideaPath?: string;
@@ -152,12 +191,15 @@ export type SalesCockpitMcpServer = {
   args: string[];
   status: McpServerStatus;
   toolSummary: string[];
+  tools?: SalesCockpitMcpTool[];
   notes?: string;
   assignedProductIds: string[];
+  lastDiscoveredAt?: string;
+  lastDiscoveryError?: string;
 };
 
 export type SalesCockpitState = {
-  version: 2;
+  version: 3;
   lastUpdatedAt: string;
   activeProductId: string;
   products: SalesCockpitProduct[];
@@ -175,6 +217,7 @@ export type SalesCockpitState = {
   tasks: SalesCockpitTask[];
   campaigns: SalesCockpitCampaign[];
   templates: SalesCockpitTemplate[];
+  draftQueue: SalesCockpitDraftQueueItem[];
   providerAccounts: SalesProviderAccount[];
   proofAssets: SalesCockpitProofAsset[];
   pipelinePaths: string[];
@@ -198,6 +241,44 @@ export type SalesCockpitActionItem = {
   kind: 'product' | 'provider' | 'lead' | 'proof' | 'delivery';
 };
 
+export type SalesCockpitReadiness = {
+  score: number;
+  label: string;
+  blockers: string[];
+  strengths: string[];
+  nextMilestone: string;
+};
+
+export type SalesCockpitRecommendation = {
+  id: string;
+  title: string;
+  reason: string;
+  priority: 'high' | 'medium' | 'low';
+  module: 'home' | 'products' | 'prospects' | 'contact' | 'funnel' | 'proof' | 'deploy' | 'follow_up' | 'providers' | 'mcp';
+  cta: string;
+};
+
+export type SalesCockpitLeadSignals = {
+  totalOpen: number;
+  readyForDraft: number;
+  missingEmail: number;
+  stale: number;
+  missingPain: number;
+  missingNextAction: number;
+};
+
+export type SalesCockpitFrictionSummary = {
+  total: number;
+  byType: Record<'product' | 'offer' | 'sales' | 'cockpit' | 'pipeline' | 'general', number>;
+};
+
+export type SalesCockpitLeadGenerationBrief = {
+  icpSummary: string;
+  searchQueries: string[];
+  outreachAngles: string[];
+  qualificationChecklist: string[];
+};
+
 export type SalesCockpitModel = {
   activeProduct: SalesCockpitProduct;
   metrics: SalesCockpitMetric[];
@@ -211,6 +292,7 @@ export type SalesCockpitModel = {
     connected: number;
     configured: number;
     draftOnly: number;
+    unhealthy: number;
   };
   productSummary: {
     total: number;
@@ -224,7 +306,13 @@ export type SalesCockpitModel = {
   mcpSummary: {
     total: number;
     ready: number;
+    discoveredTools: number;
   };
+  readiness: SalesCockpitReadiness;
+  recommendations: SalesCockpitRecommendation[];
+  leadSignals: SalesCockpitLeadSignals;
+  frictionSummary: SalesCockpitFrictionSummary;
+  leadGenerationBrief: SalesCockpitLeadGenerationBrief;
   actionCenter: SalesCockpitActionItem[];
 };
 
@@ -372,10 +460,14 @@ export function createDefaultProviderAccounts(): SalesProviderAccount[] {
     label: definition.title,
     status: 'not_connected',
     mode: definition.recommendedMode,
+    health: 'unknown',
     accountRef: '',
     endpointUrl: '',
     notes: '',
-    capabilities: [...definition.capabilities]
+    capabilities: [...definition.capabilities],
+    scopes: [],
+    lastValidationMessage: 'Not checked yet.',
+    logs: []
   }));
 }
 
@@ -389,6 +481,7 @@ function createDefaultMcpServers(): SalesCockpitMcpServer[] {
       args: [],
       status: 'configured',
       toolSummary: ['repo context', 'issues', 'pull requests'],
+      tools: [],
       notes: 'Reference MCP surface already visible in local logs.',
       assignedProductIds: []
     }
@@ -442,6 +535,7 @@ export function createSalesCockpitProduct(name = 'Leion Delivery'): SalesCockpit
       }
     ],
     templates: createDefaultTemplates(),
+    draftQueue: [],
     proofAssets: [],
     pipelinePaths: [],
     ideaPath: 'idea.md',
@@ -450,7 +544,7 @@ export function createSalesCockpitProduct(name = 'Leion Delivery'): SalesCockpit
   };
 }
 
-function snapshotFromProduct(product: SalesCockpitProduct): Pick<SalesCockpitState, 'notes' | 'offer' | 'funnel' | 'weeklyTargets' | 'leads' | 'tasks' | 'campaigns' | 'templates' | 'proofAssets' | 'pipelinePaths' | 'ideaPath' | 'implementPath' | 'defaultSheetUrl' | 'productStage'> {
+function snapshotFromProduct(product: SalesCockpitProduct): Pick<SalesCockpitState, 'notes' | 'offer' | 'funnel' | 'weeklyTargets' | 'leads' | 'tasks' | 'campaigns' | 'templates' | 'draftQueue' | 'proofAssets' | 'pipelinePaths' | 'ideaPath' | 'implementPath' | 'defaultSheetUrl' | 'productStage'> {
   return {
     notes: product.notes,
     offer: product.offer,
@@ -460,6 +554,7 @@ function snapshotFromProduct(product: SalesCockpitProduct): Pick<SalesCockpitSta
     tasks: product.tasks,
     campaigns: product.campaigns,
     templates: product.templates,
+    draftQueue: product.draftQueue,
     proofAssets: product.proofAssets,
     pipelinePaths: product.pipelinePaths,
     ideaPath: product.ideaPath,
@@ -480,6 +575,7 @@ function applySnapshotToProduct(product: SalesCockpitProduct, state: Partial<Sal
     tasks: state.tasks ?? product.tasks,
     campaigns: state.campaigns ?? product.campaigns,
     templates: state.templates ?? product.templates,
+    draftQueue: state.draftQueue ?? product.draftQueue,
     proofAssets: state.proofAssets ?? product.proofAssets,
     pipelinePaths: state.pipelinePaths ?? product.pipelinePaths,
     ideaPath: state.ideaPath ?? product.ideaPath,
@@ -527,7 +623,7 @@ function syncActiveProduct(state: SalesCockpitState): SalesCockpitState {
 export function createDefaultSalesCockpitState(): SalesCockpitState {
   const product = createSalesCockpitProduct('Leion Delivery');
   return {
-    version: 2,
+    version: 3,
     lastUpdatedAt: timestamp(),
     activeProductId: product.id,
     products: [product],
@@ -567,7 +663,9 @@ function sanitizeTask(raw: any): SalesCockpitTask | null {
     kind: SALES_TASK_KINDS.includes(raw?.kind) ? raw.kind : 'outreach',
     owner: String(raw?.owner || 'founder').trim() || 'founder',
     dueDate: raw?.dueDate ? String(raw.dueDate).trim() : undefined,
-    leadId: raw?.leadId ? String(raw.leadId).trim() : undefined
+    leadId: raw?.leadId ? String(raw.leadId).trim() : undefined,
+    detail: raw?.detail ? String(raw.detail) : undefined,
+    sourceRef: raw?.sourceRef ? String(raw.sourceRef).trim() : undefined
   };
 }
 
@@ -604,6 +702,18 @@ function sanitizeProviderAccount(raw: any, fallback: SalesProviderAccount): Sale
   const capabilities = Array.isArray(raw?.capabilities)
     ? raw.capabilities.map((entry: unknown) => String(entry || '').trim()).filter(Boolean)
     : fallback.capabilities;
+  const scopes = Array.isArray(raw?.scopes)
+    ? raw.scopes.map((entry: unknown) => String(entry || '').trim()).filter(Boolean)
+    : fallback.scopes;
+  const logs = Array.isArray(raw?.logs)
+    ? raw.logs.map((entry: any, index: number) => ({
+      id: String(entry?.id || `${fallback.id}-log-${index}`).trim(),
+      timestamp: String(entry?.timestamp || timestamp()).trim(),
+      level: ['info', 'success', 'warning', 'error'].includes(entry?.level) ? entry.level : 'info',
+      message: String(entry?.message || '').trim(),
+      detail: entry?.detail ? String(entry.detail) : undefined
+    })).filter((entry: SalesProviderLogEntry) => !!entry.message)
+    : fallback.logs;
 
   return {
     id: String(raw?.id || fallback.id).trim() || fallback.id,
@@ -611,11 +721,15 @@ function sanitizeProviderAccount(raw: any, fallback: SalesProviderAccount): Sale
     label: String(raw?.label || fallback.label).trim() || fallback.label,
     status,
     mode,
+    health: SALES_PROVIDER_HEALTH.includes(raw?.health) ? raw.health : fallback.health,
     accountRef: raw?.accountRef ? String(raw.accountRef).trim() : fallback.accountRef,
     endpointUrl: raw?.endpointUrl ? String(raw.endpointUrl).trim() : fallback.endpointUrl,
     notes: raw?.notes ? String(raw.notes) : fallback.notes,
     capabilities,
-    lastValidatedAt: raw?.lastValidatedAt ? String(raw.lastValidatedAt).trim() : fallback.lastValidatedAt
+    scopes,
+    lastValidatedAt: raw?.lastValidatedAt ? String(raw.lastValidatedAt).trim() : fallback.lastValidatedAt,
+    lastValidationMessage: raw?.lastValidationMessage ? String(raw.lastValidationMessage) : fallback.lastValidationMessage,
+    logs
   };
 }
 
@@ -655,12 +769,31 @@ function sanitizeProofAsset(raw: any): SalesCockpitProofAsset | null {
   };
 }
 
+function sanitizeDraftQueueItem(raw: any): SalesCockpitDraftQueueItem | null {
+  const subject = String(raw?.subject || '').trim();
+  const to = String(raw?.to || '').trim();
+  if (!subject && !to) return null;
+  return {
+    id: String(raw?.id || slugify(`${to}-${subject}`)).trim(),
+    provider: 'gmail',
+    status: SALES_DRAFT_STATUSES.includes(raw?.status) ? raw.status : 'drafted',
+    to,
+    subject,
+    bodyPreview: String(raw?.bodyPreview || '').trim(),
+    createdAt: raw?.createdAt ? String(raw.createdAt).trim() : timestamp(),
+    leadId: raw?.leadId ? String(raw.leadId).trim() : undefined,
+    draftId: raw?.draftId ? String(raw.draftId).trim() : undefined,
+    threadId: raw?.threadId ? String(raw.threadId).trim() : undefined
+  };
+}
+
 function sanitizeProduct(raw: any, fallbackName: string, fallbackId?: string): SalesCockpitProduct {
   const fallback = createSalesCockpitProduct(fallbackName);
   const leads = Array.isArray(raw?.leads) ? raw.leads.map(sanitizeLead).filter(Boolean) as SalesCockpitLead[] : fallback.leads;
   const tasks = Array.isArray(raw?.tasks) ? raw.tasks.map(sanitizeTask).filter(Boolean) as SalesCockpitTask[] : fallback.tasks;
   const campaigns = Array.isArray(raw?.campaigns) ? raw.campaigns.map(sanitizeCampaign).filter(Boolean) as SalesCockpitCampaign[] : fallback.campaigns;
   const templates = Array.isArray(raw?.templates) ? raw.templates.map(sanitizeTemplate).filter(Boolean) as SalesCockpitTemplate[] : fallback.templates;
+  const draftQueue = Array.isArray(raw?.draftQueue) ? raw.draftQueue.map(sanitizeDraftQueueItem).filter(Boolean) as SalesCockpitDraftQueueItem[] : fallback.draftQueue;
   const proofAssets = Array.isArray(raw?.proofAssets) ? raw.proofAssets.map(sanitizeProofAsset).filter(Boolean) as SalesCockpitProofAsset[] : fallback.proofAssets;
   const name = String(raw?.name || fallbackName || fallback.name).trim() || fallback.name;
   const slug = String(raw?.slug || slugify(name)).trim() || slugify(name);
@@ -690,6 +823,7 @@ function sanitizeProduct(raw: any, fallbackName: string, fallbackId?: string): S
     tasks,
     campaigns,
     templates,
+    draftQueue,
     proofAssets,
     pipelinePaths,
     ideaPath: raw?.ideaPath ? String(raw.ideaPath).trim() : fallback.ideaPath,
@@ -701,6 +835,18 @@ function sanitizeProduct(raw: any, fallbackName: string, fallbackId?: string): S
 function sanitizeMcpServer(raw: any): SalesCockpitMcpServer | null {
   const name = String(raw?.name || '').trim();
   if (!name) return null;
+  const tools = Array.isArray(raw?.tools)
+    ? raw.tools.map((tool: any) => {
+      const toolName = String(tool?.name || '').trim();
+      if (!toolName) return null;
+      return {
+        name: toolName,
+        title: tool?.title ? String(tool.title).trim() : undefined,
+        description: tool?.description ? String(tool.description).trim() : undefined,
+        inputSchemaSummary: tool?.inputSchemaSummary ? String(tool.inputSchemaSummary).trim() : undefined
+      } as SalesCockpitMcpTool;
+    }).filter(Boolean) as SalesCockpitMcpTool[]
+    : [];
   return {
     id: String(raw?.id || slugify(name)).trim(),
     name,
@@ -710,8 +856,11 @@ function sanitizeMcpServer(raw: any): SalesCockpitMcpServer | null {
     args: Array.isArray(raw?.args) ? raw.args.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : [],
     status: MCP_SERVER_STATUSES.includes(raw?.status) ? raw.status : 'not_configured',
     toolSummary: Array.isArray(raw?.toolSummary) ? raw.toolSummary.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : [],
+    tools,
     notes: raw?.notes ? String(raw.notes) : undefined,
-    assignedProductIds: Array.isArray(raw?.assignedProductIds) ? raw.assignedProductIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : []
+    assignedProductIds: Array.isArray(raw?.assignedProductIds) ? raw.assignedProductIds.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : [],
+    lastDiscoveredAt: raw?.lastDiscoveredAt ? String(raw.lastDiscoveredAt).trim() : undefined,
+    lastDiscoveryError: raw?.lastDiscoveryError ? String(raw.lastDiscoveryError) : undefined
   };
 }
 
@@ -739,6 +888,7 @@ export function coerceSalesCockpitState(raw: any): SalesCockpitState {
       tasks: raw?.tasks,
       campaigns: raw?.campaigns,
       templates: raw?.templates,
+      draftQueue: raw?.draftQueue,
       proofAssets: raw?.proofAssets,
       pipelinePaths: raw?.pipelinePaths,
       ideaPath: raw?.ideaPath,
@@ -752,7 +902,7 @@ export function coerceSalesCockpitState(raw: any): SalesCockpitState {
     : defaults.mcpServers;
 
   const base = {
-    version: 2 as const,
+    version: 3 as const,
     lastUpdatedAt: String(raw?.lastUpdatedAt || timestamp()),
     activeProductId,
     products: incomingProducts,
@@ -790,6 +940,254 @@ function compareDate(a?: string, b?: string): number {
   return a.localeCompare(b);
 }
 
+function includesAny(value: string, patterns: string[]): boolean {
+  const normalized = String(value || '').toLowerCase();
+  return patterns.some((pattern) => normalized.includes(pattern));
+}
+
+function classifyFriction(task: SalesCockpitTask): 'product' | 'offer' | 'sales' | 'cockpit' | 'pipeline' | 'general' {
+  const haystack = `${task.title} ${task.detail || ''}`.toLowerCase();
+  if (includesAny(haystack, ['pipeline', 'intent', 'run', 'builder', 'workflow'])) return 'pipeline';
+  if (includesAny(haystack, ['offer', 'pricing', 'promise', 'landing', 'proof'])) return 'offer';
+  if (includesAny(haystack, ['lead', 'prospect', 'email', 'outbound', 'demo', 'follow-up', 'follow up'])) return 'sales';
+  if (includesAny(haystack, ['cockpit', 'ui', 'ux', 'dashboard', 'provider'])) return 'cockpit';
+  if (includesAny(haystack, ['product', 'idea', 'positioning', 'saas'])) return 'product';
+  return 'general';
+}
+
+function buildLeadGenerationBrief(cockpit: SalesCockpitState): SalesCockpitLeadGenerationBrief {
+  const audience = cockpit.offer.audience || 'equipes software avec friction repetitive';
+  const problem = cockpit.offer.problem || 'travail delivery repetitif';
+  const promise = cockpit.offer.promise || 'workflow gouverne avec validation humaine';
+  const icpSummary = `${audience} qui vivent ${problem.toLowerCase()}`;
+  const searchQueries = [
+    `${audience} GitHub livraison`,
+    `${audience} CTO agence software factory`,
+    `${audience} PR review release process`,
+    `${audience} engineering manager github workflow`
+  ].filter((entry, index, all) => entry.trim() && all.indexOf(entry) === index).slice(0, 4);
+  const outreachAngles = [
+    `Promesse: ${promise}`,
+    `Probleme central: ${problem}`,
+    'Angle: remplacer le travail delivery repetitif par une boucle gouvernee, pas par une autonomie opaque.',
+    'Angle: montrer Issue -> PR, PR Fix et Release Gate comme surfaces vendables.'
+  ];
+  const qualificationChecklist = [
+    'Le prospect a un flux GitHub repetitif avec revues ou releases frequentes.',
+    'Une validation humaine reste obligatoire avant merge ou push.',
+    'Le prospect peut montrer un repo ou un exemple concret a piloter.',
+    'Le gain attendu est du temps operatoire, pas juste de la curiosite IA.'
+  ];
+  return {
+    icpSummary,
+    searchQueries,
+    outreachAngles,
+    qualificationChecklist
+  };
+}
+
+function buildReadiness(cockpit: SalesCockpitState): SalesCockpitReadiness {
+  let score = 0;
+  const blockers: string[] = [];
+  const strengths: string[] = [];
+
+  if (cockpit.offer.name && cockpit.offer.problem && cockpit.offer.promise && cockpit.offer.callToAction) {
+    score += 20;
+    strengths.push('Offre structuree');
+  } else {
+    blockers.push('L offre n est pas encore complete.');
+  }
+
+  if (cockpit.pipelinePaths.length >= 1 && cockpit.pipelinePaths.length <= 3) {
+    score += 20;
+    strengths.push('Pipelines relies');
+  } else if (cockpit.pipelinePaths.length > 3) {
+    score += 10;
+    blockers.push('Le produit depasse la regle des 1 a 3 pipelines.');
+  } else {
+    blockers.push('Aucun pipeline relie au produit.');
+  }
+
+  if (cockpit.providerAccounts.some((provider) => provider.provider === 'email' && provider.status === 'connected')) {
+    score += 15;
+    strengths.push('Canal Gmail pret');
+  } else {
+    blockers.push('Gmail n est pas connecte.');
+  }
+
+  if (cockpit.providerAccounts.some((provider) => provider.provider === 'google_sheets' && provider.status === 'connected')) {
+    score += 15;
+    strengths.push('Google Workspace pret');
+  } else {
+    blockers.push('Google Workspace n est pas connecte.');
+  }
+
+  if (cockpit.defaultSheetUrl) {
+    score += 10;
+    strengths.push('Sheet produit reliee');
+  } else {
+    blockers.push('Aucune Google Sheet reliee.');
+  }
+
+  if (cockpit.proofAssets.length > 0) {
+    score += 10;
+    strengths.push('Preuve commerciale disponible');
+  } else {
+    blockers.push('Aucune preuve capturee.');
+  }
+
+  if (cockpit.leads.length >= 5) {
+    score += 10;
+    strengths.push('Premiere base de leads presente');
+  } else {
+    blockers.push('Moins de 5 leads qualifies.');
+  }
+
+  const label = score >= 85 ? 'Pret a operer'
+    : score >= 65 ? 'Presque pret'
+    : score >= 40 ? 'En construction'
+    : 'Encore fragile';
+  const nextMilestone = blockers[0] || 'Passer en outbound proprement.';
+  return { score, label, blockers, strengths, nextMilestone };
+}
+
+function buildLeadSignals(cockpit: SalesCockpitState): SalesCockpitLeadSignals {
+  const today = new Date().toISOString().slice(0, 10);
+  const openLeads = cockpit.leads.filter((lead) => lead.status !== 'won' && lead.status !== 'lost');
+  return {
+    totalOpen: openLeads.length,
+    readyForDraft: openLeads.filter((lead) => !!lead.email && !!lead.pain && !!lead.nextAction).length,
+    missingEmail: openLeads.filter((lead) => !lead.email).length,
+    stale: openLeads.filter((lead) => !!lead.dueDate && lead.dueDate < today).length,
+    missingPain: openLeads.filter((lead) => !lead.pain).length,
+    missingNextAction: openLeads.filter((lead) => !lead.nextAction).length
+  };
+}
+
+function buildFrictionSummary(cockpit: SalesCockpitState): SalesCockpitFrictionSummary {
+  const frictions = cockpit.tasks.filter((task) => task.kind === 'friction' && task.status === 'todo');
+  const byType = {
+    product: 0,
+    offer: 0,
+    sales: 0,
+    cockpit: 0,
+    pipeline: 0,
+    general: 0
+  };
+  for (const friction of frictions) {
+    byType[classifyFriction(friction)] += 1;
+  }
+  return {
+    total: frictions.length,
+    byType
+  };
+}
+
+function buildRecommendations(cockpit: SalesCockpitState, readiness: SalesCockpitReadiness, leadSignals: SalesCockpitLeadSignals, frictionSummary: SalesCockpitFrictionSummary): SalesCockpitRecommendation[] {
+  const recommendations: SalesCockpitRecommendation[] = [];
+
+  if (cockpit.pipelinePaths.length === 0) {
+    recommendations.push({
+      id: 'rec-pipeline',
+      title: 'Relier le premier pipeline',
+      reason: 'Sans pipeline, le produit n a pas encore de moteur operable.',
+      priority: 'high',
+      module: 'products',
+      cta: 'Attacher 1 pipeline'
+    });
+  }
+
+  if (!cockpit.providerAccounts.some((provider) => provider.provider === 'email' && provider.status === 'connected')) {
+    recommendations.push({
+      id: 'rec-gmail',
+      title: 'Connecter Gmail',
+      reason: 'Tu ne peux pas produire une vraie file de drafts sans canal email pret.',
+      priority: 'high',
+      module: 'providers',
+      cta: 'Connecter Gmail'
+    });
+  }
+
+  if (!cockpit.defaultSheetUrl) {
+    recommendations.push({
+      id: 'rec-sheet',
+      title: 'Relier une Google Sheet produit',
+      reason: 'La sync offre/leads/proof/actions devient beaucoup plus utile une fois la sheet fixee.',
+      priority: 'high',
+      module: 'products',
+      cta: 'Relier une sheet'
+    });
+  }
+
+  if (leadSignals.readyForDraft > 0) {
+    recommendations.push({
+      id: 'rec-drafts',
+      title: `Generer ${leadSignals.readyForDraft} draft(s) Gmail`,
+      reason: 'Tu as deja des leads exploitables avec email, douleur et prochaine action.',
+      priority: 'high',
+      module: 'contact',
+      cta: 'Remplir la draft queue'
+    });
+  }
+
+  if (leadSignals.missingEmail > 0) {
+    recommendations.push({
+      id: 'rec-emails',
+      title: 'Completer les emails manquants',
+      reason: `${leadSignals.missingEmail} lead(s) restent bloques sans email.`,
+      priority: 'medium',
+      module: 'prospects',
+      cta: 'Completer les leads'
+    });
+  }
+
+  if (cockpit.proofAssets.length === 0) {
+    recommendations.push({
+      id: 'rec-proof',
+      title: 'Capturer une premiere preuve',
+      reason: 'Sans preuve, le cockpit vend une promesse mais pas encore un resultat montre.',
+      priority: 'high',
+      module: 'proof',
+      cta: 'Ouvrir le proof locker'
+    });
+  }
+
+  if (frictionSummary.total > 0) {
+    recommendations.push({
+      id: 'rec-friction',
+      title: 'Vider la friction inbox',
+      reason: `${frictionSummary.total} friction(s) freinent encore la boucle commerciale.`,
+      priority: 'medium',
+      module: 'follow_up',
+      cta: 'Traiter les frictions'
+    });
+  }
+
+  if (cockpit.mcpServers.some((server) => (server.status === 'configured' || server.status === 'connected') && (!server.tools || server.tools.length === 0))) {
+    recommendations.push({
+      id: 'rec-mcp',
+      title: 'Decouvrir les tools MCP',
+      reason: 'Le registre MCP est configure mais les outils utilisables ne sont pas encore visibles.',
+      priority: 'medium',
+      module: 'mcp',
+      cta: 'Scanner les serveurs'
+    });
+  }
+
+  if (readiness.score >= 70 && leadSignals.totalOpen < 5) {
+    recommendations.push({
+      id: 'rec-leadgen',
+      title: 'Lancer une vraie session de generation de leads',
+      reason: 'Le produit devient operable, il faut maintenant remplir le haut de funnel.',
+      priority: 'medium',
+      module: 'prospects',
+      cta: 'Ouvrir le generateur'
+    });
+  }
+
+  return recommendations.slice(0, 6);
+}
+
 export function buildSalesCockpitModel(cockpit: SalesCockpitState): SalesCockpitModel {
   const stageCounts = SALES_LEAD_STAGES.reduce((acc, stage) => {
     acc[stage] = cockpit.leads.filter((lead) => lead.status === stage).length;
@@ -800,46 +1198,58 @@ export function buildSalesCockpitModel(cockpit: SalesCockpitState): SalesCockpit
   const openTasks = [...cockpit.tasks]
     .filter((task) => task.status === 'todo')
     .sort((left, right) => compareDate(left.dueDate, right.dueDate) || left.title.localeCompare(right.title));
+  const readiness = buildReadiness(cockpit);
+  const leadSignals = buildLeadSignals(cockpit);
+  const frictionSummary = buildFrictionSummary(cockpit);
+  const leadGenerationBrief = buildLeadGenerationBrief(cockpit);
+  const recommendations = buildRecommendations(cockpit, readiness, leadSignals, frictionSummary);
 
   const actionCenter: SalesCockpitActionItem[] = [];
   if (!cockpit.pipelinePaths.length) {
     actionCenter.push({
       id: 'action-pipelines',
-      title: 'Link up to 3 pipelines',
-      detail: 'This product still has no attached delivery or growth pipeline.',
+      title: 'Relier 1 a 3 pipelines',
+      detail: 'Ce produit n a encore aucun pipeline relie.',
       kind: 'product'
     });
   }
   if (!cockpit.defaultSheetUrl) {
     actionCenter.push({
       id: 'action-sheet',
-      title: 'Attach a Google Sheet',
-      detail: 'Set a default Sheet URL before sync becomes useful.',
+      title: 'Relier une Google Sheet',
+      detail: 'La sync cockpit devient vraiment utile une fois la sheet produit fixee.',
       kind: 'provider'
     });
   }
   if (!cockpit.proofAssets.length) {
     actionCenter.push({
       id: 'action-proof',
-      title: 'Capture first proof asset',
-      detail: 'Save one run, screenshot, or measurable result in the Proof Locker.',
+      title: 'Capturer une premiere preuve',
+      detail: 'Ajoute au moins un run, screenshot ou resultat measurable au Proof Locker.',
       kind: 'proof'
     });
   }
-  if (cockpit.providerAccounts.filter((provider) => provider.status === 'connected' || provider.status === 'configured').length < 2) {
+  if (frictionSummary.total > 0) {
     actionCenter.push({
-      id: 'action-providers',
-      title: 'Connect the core providers',
-      detail: 'Google Workspace and Email / Gmail should both be ready for this cockpit.',
-      kind: 'provider'
+      id: 'action-frictions',
+      title: `Traiter ${frictionSummary.total} friction(s)`,
+      detail: 'Des frictions ouvertes ralentissent encore la boucle commerciale.',
+      kind: 'delivery'
     });
   }
-  const nextLead = cockpit.leads.find((lead) => lead.status !== 'won' && lead.status !== 'lost' && !!lead.nextAction);
-  if (nextLead) {
+  if (cockpit.draftQueue.length > 0) {
     actionCenter.push({
-      id: `action-lead-${nextLead.id}`,
-      title: `Move ${nextLead.company}`,
-      detail: nextLead.nextAction,
+      id: 'action-drafts',
+      title: `Relire ${cockpit.draftQueue.length} draft(s) Gmail`,
+      detail: cockpit.draftQueue[0]?.subject || 'La draft queue doit etre revue.',
+      kind: 'lead'
+    });
+  }
+  if (leadSignals.readyForDraft > 0) {
+    actionCenter.push({
+      id: 'action-ready-drafts',
+      title: `Generer ${leadSignals.readyForDraft} draft(s)`,
+      detail: 'Des leads sont deja assez complets pour partir en outreach.',
       kind: 'lead'
     });
   }
@@ -847,7 +1257,7 @@ export function buildSalesCockpitModel(cockpit: SalesCockpitState): SalesCockpit
     actionCenter.push({
       id: `action-task-${openTasks[0].id}`,
       title: openTasks[0].title,
-      detail: openTasks[0].dueDate ? `Due ${openTasks[0].dueDate}` : 'No due date set',
+      detail: openTasks[0].dueDate ? `Echeance ${openTasks[0].dueDate}` : 'Pas d echeance definie',
       kind: 'delivery'
     });
   }
@@ -866,6 +1276,7 @@ export function buildSalesCockpitModel(cockpit: SalesCockpitState): SalesCockpit
       tasks: cockpit.tasks,
       campaigns: cockpit.campaigns,
       templates: cockpit.templates,
+      draftQueue: cockpit.draftQueue,
       proofAssets: cockpit.proofAssets,
       pipelinePaths: cockpit.pipelinePaths,
       ideaPath: cockpit.ideaPath,
@@ -909,7 +1320,8 @@ export function buildSalesCockpitModel(cockpit: SalesCockpitState): SalesCockpit
       total: cockpit.providerAccounts.length,
       connected: cockpit.providerAccounts.filter((provider) => provider.status === 'connected').length,
       configured: cockpit.providerAccounts.filter((provider) => provider.status === 'configured').length,
-      draftOnly: cockpit.providerAccounts.filter((provider) => provider.mode === 'draft_only').length
+      draftOnly: cockpit.providerAccounts.filter((provider) => provider.mode === 'draft_only').length,
+      unhealthy: cockpit.providerAccounts.filter((provider) => provider.health === 'warning' || provider.health === 'error').length
     },
     productSummary: {
       total: cockpit.products.length,
@@ -922,8 +1334,14 @@ export function buildSalesCockpitModel(cockpit: SalesCockpitState): SalesCockpit
     },
     mcpSummary: {
       total: cockpit.mcpServers.length,
-      ready: cockpit.mcpServers.filter((server) => server.status === 'connected' || server.status === 'configured').length
+      ready: cockpit.mcpServers.filter((server) => server.status === 'connected' || server.status === 'configured').length,
+      discoveredTools: cockpit.mcpServers.reduce((sum, server) => sum + (server.tools?.length || 0), 0)
     },
+    readiness,
+    recommendations,
+    leadSignals,
+    frictionSummary,
+    leadGenerationBrief,
     actionCenter
   };
 }

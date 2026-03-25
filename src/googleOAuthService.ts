@@ -541,6 +541,7 @@ export async function connectGoogleWorkspace(context: vscode.ExtensionContext, c
             status: 'connected',
             mode: current.mode || 'sync_only',
             capabilities: ['oauth connect', 'sheet sync', 'drive proof locker'],
+            scopes: describeGoogleScopes(tokens.scope || GOOGLE_WORKSPACE_SCOPES),
             lastValidatedAt: new Date().toISOString()
         };
     } finally {
@@ -560,6 +561,7 @@ export async function validateGoogleWorkspace(context: vscode.ExtensionContext, 
         notes: mergeGoogleManagedNotes(current.notes, session.scope || GOOGLE_WORKSPACE_SCOPES),
         status,
         capabilities: ['oauth connect', 'sheet sync', 'drive proof locker'],
+        scopes: describeGoogleScopes(session.scope || GOOGLE_WORKSPACE_SCOPES),
         lastValidatedAt: new Date().toISOString()
     };
 }

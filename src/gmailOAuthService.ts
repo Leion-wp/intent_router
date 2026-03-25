@@ -337,6 +337,17 @@ async function promptGmailClientCredentials(context: vscode.ExtensionContext): P
 function buildGmailManagedNotes(existingNotes: string | undefined, scopeValue: string | readonly string[] | undefined): string {
     const prefix = '[Gmail OAuth]';
     const cleaned = String(existingNotes || '').split(prefix)[0].trim();
+    const labels = describeGmailScopes(scopeValue);
+    const managed = [
+        prefix,
+        'Flow: desktop OAuth with loopback callback and PKCE.',
+        `Scopes: ${Array.from(new Set(labels)).join(', ') || 'pending scope grant'}.`,
+        'Mode: draft-first and manual-first. No blind auto-send.'
+    ].join('\n');
+    return cleaned ? `${cleaned}\n\n${managed}` : managed;
+}
+
+export function describeGmailScopes(scopeValue: string | readonly string[] | undefined): string[] {
     const scopes = Array.isArray(scopeValue)
         ? [...scopeValue]
         : String(scopeValue || '')
@@ -350,13 +361,7 @@ function buildGmailManagedNotes(existingNotes: string | undefined, scopeValue: s
         if (scope === 'https://www.googleapis.com/auth/gmail.compose') return 'Gmail drafts and send';
         return scope;
     });
-    const managed = [
-        prefix,
-        'Flow: desktop OAuth with loopback callback and PKCE.',
-        `Scopes: ${Array.from(new Set(labels)).join(', ') || 'pending scope grant'}.`,
-        'Mode: draft-first and manual-first. No blind auto-send.'
-    ].join('\n');
-    return cleaned ? `${cleaned}\n\n${managed}` : managed;
+    return Array.from(new Set(labels));
 }
 
 export async function hasGmailOAuthSession(context: vscode.ExtensionContext): Promise<boolean> {
@@ -495,6 +500,7 @@ export async function connectGmailProvider(context: vscode.ExtensionContext, cur
             status: 'connected',
             mode: current.mode || 'draft_only',
             capabilities: ['oauth connect', 'draft email', 'manual send', 'reply tracking'],
+            scopes: describeGmailScopes(tokens.scope || GMAIL_OAUTH_SCOPES),
             lastValidatedAt: new Date().toISOString()
         };
     } finally {
@@ -514,6 +520,7 @@ export async function validateGmailProvider(context: vscode.ExtensionContext, cu
         notes: buildGmailManagedNotes(current.notes, session.scope || GMAIL_OAUTH_SCOPES),
         status,
         capabilities: ['oauth connect', 'draft email', 'manual send', 'reply tracking'],
+        scopes: describeGmailScopes(session.scope || GMAIL_OAUTH_SCOPES),
         lastValidatedAt: new Date().toISOString()
     };
 }

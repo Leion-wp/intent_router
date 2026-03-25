@@ -1,6 +1,234 @@
 {
-  "version": 1,
-  "lastUpdatedAt": "2026-03-24T11:36:38.388Z",
+  "version": 3,
+  "lastUpdatedAt": "2026-03-25T08:31:14.303Z",
+  "activeProductId": "product-leion-delivery-founding-pilot",
+  "products": [
+    {
+      "id": "product-leion-delivery-founding-pilot",
+      "name": "Leion Delivery Founding Pilot",
+      "slug": "leion-delivery-founding-pilot",
+      "stage": "idea",
+      "notes": "Use this cockpit to track agency outreach, next actions, and reusable messaging from inside VS Code.",
+      "offer": {
+        "name": "Leion Delivery Founding Pilot",
+        "audience": "Agencies and software factories with repeated GitHub delivery work.",
+        "problem": "Repeated GitHub delivery work stays manual, opaque, and hard to govern.",
+        "promise": "Turn issue-to-PR, PR fix, and release gates into governed AI workflows with explicit human approval.",
+        "proof": "Show 3 delivery flows running on one repo with traceable approvals and reusable run history.",
+        "callToAction": "Book a 30-minute pilot scoping call on one target repository."
+      },
+      "funnel": {
+        "acquisition": "Founder outbound to 100 qualified agencies and software factories.",
+        "qualification": "Confirm repeated GitHub delivery pain, approval needs, and a repo suitable for a pilot.",
+        "demo": "Run the 3 delivery workflows live on a target repo or a realistic demo repo.",
+        "proposal": "Offer a fixed-fee founding pilot with one org, five repos max, and three workflows.",
+        "close": "Convert the pilot into monthly governance and control-plane subscription."
+      },
+      "weeklyTargets": {
+        "outbound": 100,
+        "discovery": 10,
+        "demos": 4,
+        "proposals": 2
+      },
+      "leads": [],
+      "tasks": [
+        {
+          "id": "task-build-list",
+          "title": "Build first 100 agency target list",
+          "status": "todo",
+          "kind": "outreach",
+          "owner": "founder"
+        },
+        {
+          "id": "task-book-calls",
+          "title": "Book 10 discovery calls in 30 days",
+          "status": "todo",
+          "kind": "follow_up",
+          "owner": "founder"
+        },
+        {
+          "id": "task-close-pilots",
+          "title": "Convert 2 pilot proposals",
+          "status": "todo",
+          "kind": "proposal",
+          "owner": "founder"
+        }
+      ],
+      "campaigns": [
+        {
+          "id": "campaign-founder-email",
+          "name": "Founder outbound email",
+          "channel": "email",
+          "goal": "Get first discovery calls with agencies",
+          "templateId": "tpl-founder-email",
+          "active": true
+        },
+        {
+          "id": "campaign-linkedin-followup",
+          "name": "LinkedIn follow-up",
+          "channel": "linkedin",
+          "goal": "Revive conversations after first touch",
+          "templateId": "tpl-linkedin-followup",
+          "active": true
+        }
+      ],
+      "templates": [
+        {
+          "id": "tpl-founder-email",
+          "name": "Founder outbound email",
+          "channel": "email",
+          "subject": "Governed AI delivery workflows for your GitHub flow",
+          "body": "Bonjour {{name}},\n\nje travaille sur Leion Delivery: un cockpit de workflows IA gouvernes pour equipes software.\n\nL idee n est pas de laisser un agent coder seul. L idee est de transformer des etapes repetitives comme Issue -> PR, PR review/fix et release gate en flows tracables avec validation humaine.\n\nSi vous avez ce type de friction dans GitHub, je peux te montrer un pilote tres concret sur un repo cible.\n\nMatth"
+        },
+        {
+          "id": "tpl-linkedin-followup",
+          "name": "LinkedIn follow-up",
+          "channel": "linkedin",
+          "body": "Bonjour {{name}},\nje reviens vers toi au sujet de Leion Delivery.\nOn aide les equipes a standardiser issue -> PR, PR fix et release gate avec validation humaine explicite.\nSi tu veux, je peux te montrer le flow sur un repo de demo."
+        }
+      ],
+      "draftQueue": [],
+      "proofAssets": [],
+      "pipelinePaths": [],
+      "ideaPath": "idea.md",
+      "implementPath": "implement.md",
+      "defaultSheetUrl": ""
+    }
+  ],
+  "mcpServers": [
+    {
+      "id": "mcp-github",
+      "name": "GitHub MCP",
+      "transport": "http",
+      "endpointUrl": "https://api.mcp.github.com",
+      "args": [],
+      "status": "connected",
+      "toolSummary": [],
+      "tools": [],
+      "notes": "Reference MCP surface already visible in local logs.\n\nConnected and listed MCP tools.",
+      "assignedProductIds": [],
+      "lastDiscoveredAt": "2026-03-25T04:44:20.029Z"
+    }
+  ],
+  "providerAccounts": [
+    {
+      "id": "email",
+      "provider": "email",
+      "label": "Gmail",
+      "status": "connected",
+      "mode": "draft_only",
+      "health": "unknown",
+      "accountRef": "matth.schwaiger@gmail.com",
+      "endpointUrl": "https://mail.google.com/",
+      "notes": "[Gmail OAuth]\nFlow: desktop OAuth with loopback callback and PKCE.\nScopes: OpenID, Gmail drafts and send, https://www.googleapis.com/auth/userinfo.email, https://www.googleapis.com/auth/userinfo.profile, https://www.googleapis.com/auth/drive.file.\nMode: draft-first and manual-first. No blind auto-send.",
+      "capabilities": [
+        "oauth connect",
+        "draft email",
+        "manual send",
+        "reply tracking"
+      ],
+      "scopes": [],
+      "lastValidatedAt": "2026-03-24T11:36:38.387Z",
+      "lastValidationMessage": "Not checked yet.",
+      "logs": []
+    },
+    {
+      "id": "google_sheets",
+      "provider": "google_sheets",
+      "label": "Google Workspace",
+      "status": "connected",
+      "mode": "manual_handoff",
+      "health": "unknown",
+      "accountRef": "matth.schwaiger@gmail.com",
+      "endpointUrl": "",
+      "notes": "[Google OAuth]\nFlow: desktop OAuth with loopback callback and PKCE.\nScopes: https://www.googleapis.com/auth/userinfo.profile, https://www.googleapis.com/auth/userinfo.email, OpenID, Google Drive (file-level), Google Sheets.\nSurface: Google Sheets and Drive first. Gmail comes next as a separate connector.",
+      "capabilities": [
+        "oauth connect",
+        "sheet sync",
+        "drive proof locker"
+      ],
+      "scopes": [],
+      "lastValidatedAt": "2026-03-24T11:18:54.668Z",
+      "lastValidationMessage": "Not checked yet.",
+      "logs": []
+    },
+    {
+      "id": "crm",
+      "provider": "crm",
+      "label": "CRM",
+      "status": "not_connected",
+      "mode": "sync_only",
+      "health": "unknown",
+      "accountRef": "",
+      "endpointUrl": "",
+      "notes": "",
+      "capabilities": [
+        "deal sync",
+        "manual update",
+        "contact lookup"
+      ],
+      "scopes": [],
+      "lastValidationMessage": "Not checked yet.",
+      "logs": []
+    },
+    {
+      "id": "linkedin",
+      "provider": "linkedin",
+      "label": "LinkedIn",
+      "status": "not_connected",
+      "mode": "manual_handoff",
+      "health": "unknown",
+      "accountRef": "",
+      "endpointUrl": "",
+      "notes": "",
+      "capabilities": [
+        "draft connection",
+        "draft follow-up",
+        "manual send"
+      ],
+      "scopes": [],
+      "lastValidationMessage": "Not checked yet.",
+      "logs": []
+    },
+    {
+      "id": "reddit",
+      "provider": "reddit",
+      "label": "Reddit",
+      "status": "not_connected",
+      "mode": "manual_handoff",
+      "health": "unknown",
+      "accountRef": "",
+      "endpointUrl": "",
+      "notes": "",
+      "capabilities": [
+        "draft post",
+        "draft reply",
+        "manual publish"
+      ],
+      "scopes": [],
+      "lastValidationMessage": "Not checked yet.",
+      "logs": []
+    },
+    {
+      "id": "product_hunt",
+      "provider": "product_hunt",
+      "label": "Product Hunt",
+      "status": "not_connected",
+      "mode": "manual_handoff",
+      "health": "unknown",
+      "accountRef": "",
+      "endpointUrl": "",
+      "notes": "",
+      "capabilities": [
+        "launch checklist",
+        "draft launch copy",
+        "manual publish"
+      ],
+      "scopes": [],
+      "lastValidationMessage": "Not checked yet.",
+      "logs": []
+    }
+  ],
   "notes": "Use this cockpit to track agency outreach, next actions, and reusable messaging from inside VS Code.",
   "offer": {
     "name": "Leion Delivery Founding Pilot",
@@ -80,99 +308,11 @@
       "body": "Bonjour {{name}},\nje reviens vers toi au sujet de Leion Delivery.\nOn aide les equipes a standardiser issue -> PR, PR fix et release gate avec validation humaine explicite.\nSi tu veux, je peux te montrer le flow sur un repo de demo."
     }
   ],
-  "providerAccounts": [
-    {
-      "id": "email",
-      "provider": "email",
-      "label": "Gmail",
-      "status": "connected",
-      "mode": "draft_only",
-      "accountRef": "matth.schwaiger@gmail.com",
-      "endpointUrl": "https://mail.google.com/",
-      "notes": "[Gmail OAuth]\nFlow: desktop OAuth with loopback callback and PKCE.\nScopes: OpenID, Gmail drafts and send, https://www.googleapis.com/auth/userinfo.email, https://www.googleapis.com/auth/userinfo.profile, https://www.googleapis.com/auth/drive.file.\nMode: draft-first and manual-first. No blind auto-send.",
-      "capabilities": [
-        "oauth connect",
-        "draft email",
-        "manual send",
-        "reply tracking"
-      ],
-      "lastValidatedAt": "2026-03-24T11:36:38.387Z"
-    },
-    {
-      "id": "google_sheets",
-      "provider": "google_sheets",
-      "label": "Google Workspace",
-      "status": "connected",
-      "mode": "manual_handoff",
-      "accountRef": "matth.schwaiger@gmail.com",
-      "endpointUrl": "",
-      "notes": "[Google OAuth]\nFlow: desktop OAuth with loopback callback and PKCE.\nScopes: https://www.googleapis.com/auth/userinfo.profile, https://www.googleapis.com/auth/userinfo.email, OpenID, Google Drive (file-level), Google Sheets.\nSurface: Google Sheets and Drive first. Gmail comes next as a separate connector.",
-      "capabilities": [
-        "oauth connect",
-        "sheet sync",
-        "drive proof locker"
-      ],
-      "lastValidatedAt": "2026-03-24T11:18:54.668Z"
-    },
-    {
-      "id": "crm",
-      "provider": "crm",
-      "label": "CRM",
-      "status": "not_connected",
-      "mode": "sync_only",
-      "accountRef": "",
-      "endpointUrl": "",
-      "notes": "",
-      "capabilities": [
-        "deal sync",
-        "manual update",
-        "contact lookup"
-      ]
-    },
-    {
-      "id": "linkedin",
-      "provider": "linkedin",
-      "label": "LinkedIn",
-      "status": "not_connected",
-      "mode": "manual_handoff",
-      "accountRef": "",
-      "endpointUrl": "",
-      "notes": "",
-      "capabilities": [
-        "draft connection",
-        "draft follow-up",
-        "manual send"
-      ]
-    },
-    {
-      "id": "reddit",
-      "provider": "reddit",
-      "label": "Reddit",
-      "status": "not_connected",
-      "mode": "manual_handoff",
-      "accountRef": "",
-      "endpointUrl": "",
-      "notes": "",
-      "capabilities": [
-        "draft post",
-        "draft reply",
-        "manual publish"
-      ]
-    },
-    {
-      "id": "product_hunt",
-      "provider": "product_hunt",
-      "label": "Product Hunt",
-      "status": "not_connected",
-      "mode": "manual_handoff",
-      "accountRef": "",
-      "endpointUrl": "",
-      "notes": "",
-      "capabilities": [
-        "launch checklist",
-        "draft launch copy",
-        "manual publish"
-      ]
-    }
-  ]
+  "draftQueue": [],
+  "proofAssets": [],
+  "pipelinePaths": [],
+  "ideaPath": "idea.md",
+  "implementPath": "implement.md",
+  "defaultSheetUrl": "",
+  "productStage": "idea"
 }
