@@ -1,14 +1,14 @@
 {
   "version": 3,
-  "lastUpdatedAt": "2026-03-25T08:31:14.303Z",
+  "lastUpdatedAt": "2026-03-26T04:02:32.237Z",
   "activeProductId": "product-leion-delivery-founding-pilot",
   "products": [
     {
       "id": "product-leion-delivery-founding-pilot",
       "name": "Leion Delivery Founding Pilot",
       "slug": "leion-delivery-founding-pilot",
-      "stage": "idea",
-      "notes": "Use this cockpit to track agency outreach, next actions, and reusable messaging from inside VS Code.",
+      "stage": "offer",
+      "notes": "Produit initialise directement depuis le cockpit.\n\nAudience: Agencies and software factories with repeated GitHub delivery work.\nProbleme: Repeated GitHub delivery work stays manual, opaque, and hard to govern.\nPromesse: Turn issue-to-PR, PR fix, and release gates into governed AI workflows with explicit human approval.",
       "offer": {
         "name": "Leion Delivery Founding Pilot",
         "audience": "Agencies and software factories with repeated GitHub delivery work.",
@@ -18,11 +18,11 @@
         "callToAction": "Book a 30-minute pilot scoping call on one target repository."
       },
       "funnel": {
-        "acquisition": "Founder outbound to 100 qualified agencies and software factories.",
-        "qualification": "Confirm repeated GitHub delivery pain, approval needs, and a repo suitable for a pilot.",
-        "demo": "Run the 3 delivery workflows live on a target repo or a realistic demo repo.",
-        "proposal": "Offer a fixed-fee founding pilot with one org, five repos max, and three workflows.",
-        "close": "Convert the pilot into monthly governance and control-plane subscription."
+        "acquisition": "Prospection fondateur ciblee sur agencies and software factories with repeated github delivery work..",
+        "qualification": "Valider que le prospect vit bien repeated github delivery work stays manual, opaque, and hard to govern..",
+        "demo": "Montrer une interface dediee + 1 a 3 pipelines pour Leion Delivery Founding Pilot.",
+        "proposal": "Transformer la promesse \"Turn issue-to-PR, PR fix, and release gates into governed AI workflows with explicit human approval.\" en pilote payable.",
+        "close": "Convertir le pilote en abonnement mensuel autour de Leion Delivery Founding Pilot."
       },
       "weeklyTargets": {
         "outbound": 100,
@@ -33,42 +33,53 @@
       "leads": [],
       "tasks": [
         {
-          "id": "task-build-list",
-          "title": "Build first 100 agency target list",
-          "status": "todo",
-          "kind": "outreach",
-          "owner": "founder"
-        },
-        {
-          "id": "task-book-calls",
-          "title": "Book 10 discovery calls in 30 days",
+          "id": "leion-delivery-founding-pilot-task-connect-google",
+          "title": "Connecter Google Workspace et Gmail",
           "status": "todo",
           "kind": "follow_up",
-          "owner": "founder"
+          "owner": "founder",
+          "detail": "Active les providers Google et Gmail pour faire tourner la boucle cockpit sans quitter VS Code."
         },
         {
-          "id": "task-close-pilots",
-          "title": "Convert 2 pilot proposals",
+          "id": "leion-delivery-founding-pilot-task-create-sheet",
+          "title": "Creer la Google Sheet du produit",
           "status": "todo",
-          "kind": "proposal",
-          "owner": "founder"
+          "kind": "follow_up",
+          "owner": "founder",
+          "detail": "Utilise le cockpit pour creer la sheet Offer / Leads / Proof / Actions."
+        },
+        {
+          "id": "leion-delivery-founding-pilot-task-build-target-list",
+          "title": "Lister 25 comptes cibles",
+          "status": "todo",
+          "kind": "outreach",
+          "owner": "founder",
+          "detail": "Commence par 25 comptes cibles qualifies avant de penser a automatiser plus fort."
+        },
+        {
+          "id": "leion-delivery-founding-pilot-task-first-drafts",
+          "title": "Generer 5 drafts Gmail relus",
+          "status": "todo",
+          "kind": "outreach",
+          "owner": "founder",
+          "detail": "Passe en mode draft-first pour valider le message avant tout envoi plus fort."
+        },
+        {
+          "id": "leion-delivery-founding-pilot-task-proof-locker",
+          "title": "Capturer la premiere preuve vendable",
+          "status": "todo",
+          "kind": "proof",
+          "owner": "founder",
+          "detail": "Ajoute un run, une capture ou un before/after dans le Proof Locker."
         }
       ],
       "campaigns": [
         {
-          "id": "campaign-founder-email",
+          "id": "leion-delivery-founding-pilot-campaign-founder-email",
           "name": "Founder outbound email",
           "channel": "email",
           "goal": "Get first discovery calls with agencies",
           "templateId": "tpl-founder-email",
-          "active": true
-        },
-        {
-          "id": "campaign-linkedin-followup",
-          "name": "LinkedIn follow-up",
-          "channel": "linkedin",
-          "goal": "Revive conversations after first touch",
-          "templateId": "tpl-linkedin-followup",
           "active": true
         }
       ],
@@ -77,8 +88,8 @@
           "id": "tpl-founder-email",
           "name": "Founder outbound email",
           "channel": "email",
-          "subject": "Governed AI delivery workflows for your GitHub flow",
-          "body": "Bonjour {{name}},\n\nje travaille sur Leion Delivery: un cockpit de workflows IA gouvernes pour equipes software.\n\nL idee n est pas de laisser un agent coder seul. L idee est de transformer des etapes repetitives comme Issue -> PR, PR review/fix et release gate en flows tracables avec validation humaine.\n\nSi vous avez ce type de friction dans GitHub, je peux te montrer un pilote tres concret sur un repo cible.\n\nMatth"
+          "subject": "Leion Delivery Founding Pilot pour equipes avec repeated github delivery work stays manual, opaque, and hard to govern.",
+          "body": "Bonjour {{name}},\n\nje travaille sur Leion Delivery Founding Pilot.\n\nLe probleme que je cible est simple: Repeated GitHub delivery work stays manual, opaque, and hard to govern.\nLa promesse: Turn issue-to-PR, PR fix, and release gates into governed AI workflows with explicit human approval.\n\nSi c est pertinent pour votre equipe, je peux te montrer le cockpit et le flow en demo tres concrete.\n\nMatth"
         },
         {
           "id": "tpl-linkedin-followup",
@@ -140,7 +151,7 @@
       "mode": "manual_handoff",
       "health": "unknown",
       "accountRef": "matth.schwaiger@gmail.com",
-      "endpointUrl": "",
+      "endpointUrl": "https://docs.google.com/spreadsheets/d/1jn0GOiOOFCCcRZLoBC1h2yKVrgsx6qLWZ28fyy5vscU/edit",
       "notes": "[Google OAuth]\nFlow: desktop OAuth with loopback callback and PKCE.\nScopes: https://www.googleapis.com/auth/userinfo.profile, https://www.googleapis.com/auth/userinfo.email, OpenID, Google Drive (file-level), Google Sheets.\nSurface: Google Sheets and Drive first. Gmail comes next as a separate connector.",
       "capabilities": [
         "oauth connect",
@@ -148,8 +159,8 @@
         "drive proof locker"
       ],
       "scopes": [],
-      "lastValidatedAt": "2026-03-24T11:18:54.668Z",
-      "lastValidationMessage": "Not checked yet.",
+      "lastValidatedAt": "2026-03-26T04:02:32.236Z",
+      "lastValidationMessage": "Google Sheet creee depuis le cockpit.",
       "logs": []
     },
     {
@@ -229,7 +240,7 @@
       "logs": []
     }
   ],
-  "notes": "Use this cockpit to track agency outreach, next actions, and reusable messaging from inside VS Code.",
+  "notes": "Produit initialise directement depuis le cockpit.\n\nAudience: Agencies and software factories with repeated GitHub delivery work.\nProbleme: Repeated GitHub delivery work stays manual, opaque, and hard to govern.\nPromesse: Turn issue-to-PR, PR fix, and release gates into governed AI workflows with explicit human approval.",
   "offer": {
     "name": "Leion Delivery Founding Pilot",
     "audience": "Agencies and software factories with repeated GitHub delivery work.",
@@ -239,11 +250,11 @@
     "callToAction": "Book a 30-minute pilot scoping call on one target repository."
   },
   "funnel": {
-    "acquisition": "Founder outbound to 100 qualified agencies and software factories.",
-    "qualification": "Confirm repeated GitHub delivery pain, approval needs, and a repo suitable for a pilot.",
-    "demo": "Run the 3 delivery workflows live on a target repo or a realistic demo repo.",
-    "proposal": "Offer a fixed-fee founding pilot with one org, five repos max, and three workflows.",
-    "close": "Convert the pilot into monthly governance and control-plane subscription."
+    "acquisition": "Prospection fondateur ciblee sur agencies and software factories with repeated github delivery work..",
+    "qualification": "Valider que le prospect vit bien repeated github delivery work stays manual, opaque, and hard to govern..",
+    "demo": "Montrer une interface dediee + 1 a 3 pipelines pour Leion Delivery Founding Pilot.",
+    "proposal": "Transformer la promesse \"Turn issue-to-PR, PR fix, and release gates into governed AI workflows with explicit human approval.\" en pilote payable.",
+    "close": "Convertir le pilote en abonnement mensuel autour de Leion Delivery Founding Pilot."
   },
   "weeklyTargets": {
     "outbound": 100,
@@ -254,42 +265,53 @@
   "leads": [],
   "tasks": [
     {
-      "id": "task-build-list",
-      "title": "Build first 100 agency target list",
-      "status": "todo",
-      "kind": "outreach",
-      "owner": "founder"
-    },
-    {
-      "id": "task-book-calls",
-      "title": "Book 10 discovery calls in 30 days",
+      "id": "leion-delivery-founding-pilot-task-connect-google",
+      "title": "Connecter Google Workspace et Gmail",
       "status": "todo",
       "kind": "follow_up",
-      "owner": "founder"
+      "owner": "founder",
+      "detail": "Active les providers Google et Gmail pour faire tourner la boucle cockpit sans quitter VS Code."
     },
     {
-      "id": "task-close-pilots",
-      "title": "Convert 2 pilot proposals",
+      "id": "leion-delivery-founding-pilot-task-create-sheet",
+      "title": "Creer la Google Sheet du produit",
       "status": "todo",
-      "kind": "proposal",
-      "owner": "founder"
+      "kind": "follow_up",
+      "owner": "founder",
+      "detail": "Utilise le cockpit pour creer la sheet Offer / Leads / Proof / Actions."
+    },
+    {
+      "id": "leion-delivery-founding-pilot-task-build-target-list",
+      "title": "Lister 25 comptes cibles",
+      "status": "todo",
+      "kind": "outreach",
+      "owner": "founder",
+      "detail": "Commence par 25 comptes cibles qualifies avant de penser a automatiser plus fort."
+    },
+    {
+      "id": "leion-delivery-founding-pilot-task-first-drafts",
+      "title": "Generer 5 drafts Gmail relus",
+      "status": "todo",
+      "kind": "outreach",
+      "owner": "founder",
+      "detail": "Passe en mode draft-first pour valider le message avant tout envoi plus fort."
+    },
+    {
+      "id": "leion-delivery-founding-pilot-task-proof-locker",
+      "title": "Capturer la premiere preuve vendable",
+      "status": "todo",
+      "kind": "proof",
+      "owner": "founder",
+      "detail": "Ajoute un run, une capture ou un before/after dans le Proof Locker."
     }
   ],
   "campaigns": [
     {
-      "id": "campaign-founder-email",
+      "id": "leion-delivery-founding-pilot-campaign-founder-email",
       "name": "Founder outbound email",
       "channel": "email",
       "goal": "Get first discovery calls with agencies",
       "templateId": "tpl-founder-email",
-      "active": true
-    },
-    {
-      "id": "campaign-linkedin-followup",
-      "name": "LinkedIn follow-up",
-      "channel": "linkedin",
-      "goal": "Revive conversations after first touch",
-      "templateId": "tpl-linkedin-followup",
       "active": true
     }
   ],
@@ -298,8 +320,8 @@
       "id": "tpl-founder-email",
       "name": "Founder outbound email",
       "channel": "email",
-      "subject": "Governed AI delivery workflows for your GitHub flow",
-      "body": "Bonjour {{name}},\n\nje travaille sur Leion Delivery: un cockpit de workflows IA gouvernes pour equipes software.\n\nL idee n est pas de laisser un agent coder seul. L idee est de transformer des etapes repetitives comme Issue -> PR, PR review/fix et release gate en flows tracables avec validation humaine.\n\nSi vous avez ce type de friction dans GitHub, je peux te montrer un pilote tres concret sur un repo cible.\n\nMatth"
+      "subject": "Leion Delivery Founding Pilot pour equipes avec repeated github delivery work stays manual, opaque, and hard to govern.",
+      "body": "Bonjour {{name}},\n\nje travaille sur Leion Delivery Founding Pilot.\n\nLe probleme que je cible est simple: Repeated GitHub delivery work stays manual, opaque, and hard to govern.\nLa promesse: Turn issue-to-PR, PR fix, and release gates into governed AI workflows with explicit human approval.\n\nSi c est pertinent pour votre equipe, je peux te montrer le cockpit et le flow en demo tres concrete.\n\nMatth"
     },
     {
       "id": "tpl-linkedin-followup",
@@ -314,5 +336,5 @@
   "ideaPath": "idea.md",
   "implementPath": "implement.md",
   "defaultSheetUrl": "",
-  "productStage": "idea"
+  "productStage": "offer"
 }

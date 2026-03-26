@@ -17,6 +17,11 @@ type BatchUpdateResponse = {
     spreadsheetId?: string;
 };
 
+type SpreadsheetCreateResponse = {
+    spreadsheetId?: string;
+    spreadsheetUrl?: string;
+};
+
 type ValueRange = {
     values?: Array<Array<string>>;
 };
@@ -200,6 +205,55 @@ export async function exportProductToGoogleSheets(
             ]
         })
     );
+}
+
+export async function createCockpitGoogleSheet(
+    context: vscode.ExtensionContext,
+    input: {
+        title: string;
+        offer: SalesCockpitOffer;
+        leads: SalesCockpitLead[];
+        proofAssets?: SalesCockpitProofAsset[];
+        tasks?: SalesCockpitTask[];
+    }
+): Promise<{ sheetUrl: string }> {
+    const session = await getValidGoogleWorkspaceSession(context);
+    if (!session.accessToken) {
+        throw new Error('Google Workspace is not connected.');
+    }
+
+    const title = String(input.title || '').trim() || 'Leion Cockpit';
+    const created = await jsonRequest<SpreadsheetCreateResponse>(
+        'https://sheets.googleapis.com/v4/spreadsheets',
+        session.accessToken,
+        'POST',
+        JSON.stringify({
+            properties: {
+                title
+            },
+            sheets: [
+                { properties: { title: 'Offer' } },
+                { properties: { title: 'Leads' } },
+                { properties: { title: 'Proof' } },
+                { properties: { title: 'Actions' } }
+            ]
+        })
+    );
+
+    if (!created.spreadsheetId) {
+        throw new Error('Google Sheets did not return a spreadsheet id.');
+    }
+
+    const sheetUrl = created.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${created.spreadsheetId}/edit`;
+    await exportProductToGoogleSheets(context, {
+        sheetUrl,
+        offer: input.offer,
+        leads: input.leads,
+        proofAssets: input.proofAssets,
+        tasks: input.tasks
+    });
+
+    return { sheetUrl };
 }
 
 export async function importLeadsFromGoogleSheets(

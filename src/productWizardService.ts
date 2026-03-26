@@ -8,6 +8,14 @@ import {
 import { readWorkspaceTextFile } from './workspaceFileService';
 
 type IdeaSectionMap = Record<string, string>;
+type BootstrapProductInput = {
+    name: string;
+    audience: string;
+    problem: string;
+    promise: string;
+    callToAction: string;
+    proof?: string;
+};
 
 function parseMarkdownSections(markdown: string): IdeaSectionMap {
     const lines = String(markdown || '').split(/\r?\n/);
@@ -116,6 +124,130 @@ function buildWizardTasks(product: SalesCockpitProduct, bullets: string[]): Sale
     }
 
     return tasks;
+}
+
+function buildBootstrapTasks(product: SalesCockpitProduct): SalesCockpitTask[] {
+    return [
+        {
+            id: `${product.slug}-task-connect-google`,
+            title: 'Connecter Google Workspace et Gmail',
+            status: 'todo',
+            kind: 'follow_up',
+            owner: 'founder',
+            detail: 'Active les providers Google et Gmail pour faire tourner la boucle cockpit sans quitter VS Code.'
+        },
+        {
+            id: `${product.slug}-task-create-sheet`,
+            title: 'Creer la Google Sheet du produit',
+            status: 'todo',
+            kind: 'follow_up',
+            owner: 'founder',
+            detail: 'Utilise le cockpit pour creer la sheet Offer / Leads / Proof / Actions.'
+        },
+        {
+            id: `${product.slug}-task-build-target-list`,
+            title: 'Lister 25 comptes cibles',
+            status: 'todo',
+            kind: 'outreach',
+            owner: 'founder',
+            detail: 'Commence par 25 comptes cibles qualifies avant de penser a automatiser plus fort.'
+        },
+        {
+            id: `${product.slug}-task-first-drafts`,
+            title: 'Generer 5 drafts Gmail relus',
+            status: 'todo',
+            kind: 'outreach',
+            owner: 'founder',
+            detail: 'Passe en mode draft-first pour valider le message avant tout envoi plus fort.'
+        },
+        {
+            id: `${product.slug}-task-proof-locker`,
+            title: 'Capturer la premiere preuve vendable',
+            status: 'todo',
+            kind: 'proof',
+            owner: 'founder',
+            detail: 'Ajoute un run, une capture ou un before/after dans le Proof Locker.'
+        }
+    ];
+}
+
+export function bootstrapProductFromScratch(state: SalesCockpitState, input: BootstrapProductInput): SalesCockpitState {
+    const name = firstSentence(input.name, 'Nouveau produit Leion');
+    const product = createSalesCockpitProduct(name);
+
+    product.ideaPath = '';
+    product.implementPath = '';
+    product.defaultSheetUrl = '';
+    product.stage = 'offer';
+    product.notes = [
+        'Produit initialise directement depuis le cockpit.',
+        '',
+        `Audience: ${input.audience}`,
+        `Probleme: ${input.problem}`,
+        `Promesse: ${input.promise}`
+    ].join('\n');
+    product.offer = {
+        name,
+        audience: firstSentence(input.audience, product.offer.audience),
+        problem: firstSentence(input.problem, product.offer.problem),
+        promise: firstSentence(input.promise, product.offer.promise),
+        proof: firstSentence(input.proof || '', product.offer.proof),
+        callToAction: firstSentence(input.callToAction, product.offer.callToAction)
+    };
+    product.funnel = {
+        acquisition: `Prospection fondateur ciblee sur ${product.offer.audience.toLowerCase()}.`,
+        qualification: `Valider que le prospect vit bien ${product.offer.problem.toLowerCase()}.`,
+        demo: `Montrer une interface dediee + 1 a 3 pipelines pour ${name}.`,
+        proposal: `Transformer la promesse "${product.offer.promise}" en pilote payable.`,
+        close: `Convertir le pilote en abonnement mensuel autour de ${name}.`
+    };
+    product.tasks = buildBootstrapTasks(product);
+    product.templates = product.templates.map((template) => template.id === 'tpl-founder-email'
+        ? {
+            ...template,
+            subject: `${name} pour equipes avec ${product.offer.problem.toLowerCase()}`,
+            body: [
+                'Bonjour {{name}},',
+                '',
+                `je travaille sur ${name}.`,
+                '',
+                `Le probleme que je cible est simple: ${product.offer.problem}`,
+                `La promesse: ${product.offer.promise}`,
+                '',
+                'Si c est pertinent pour votre equipe, je peux te montrer le cockpit et le flow en demo tres concrete.',
+                '',
+                'Matth'
+            ].join('\n')
+        }
+        : template
+    );
+
+    const existingIndex = state.products.findIndex((entry) => entry.id === product.id || entry.slug === product.slug);
+    const products = existingIndex >= 0
+        ? state.products.map((entry, index) => index === existingIndex ? product : entry)
+        : [...state.products, product];
+
+    return {
+        ...state,
+        activeProductId: product.id,
+        products,
+        notes: product.notes,
+        offer: product.offer,
+        funnel: product.funnel,
+        weeklyTargets: product.weeklyTargets,
+        leads: product.leads,
+        tasks: product.tasks,
+        campaigns: product.campaigns,
+        templates: product.templates,
+        draftQueue: product.draftQueue,
+        providerAccounts: state.providerAccounts,
+        proofAssets: product.proofAssets,
+        pipelinePaths: product.pipelinePaths,
+        ideaPath: product.ideaPath,
+        implementPath: product.implementPath,
+        defaultSheetUrl: product.defaultSheetUrl,
+        productStage: product.stage
+    };
 }
 
 export async function createProductFromIdeaPath(state: SalesCockpitState, ideaPath: string): Promise<SalesCockpitState> {

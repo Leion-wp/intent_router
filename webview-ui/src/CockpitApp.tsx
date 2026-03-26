@@ -40,6 +40,7 @@ export default function CockpitApp() {
   const [history, setHistory] = useState<PipelineRun[]>(() => Array.isArray(window.initialData?.history) ? window.initialData.history : []);
   const [uiPreset, setUiPreset] = useState<UiPreset>(() => normalizeUiPreset(window.initialData?.uiPreset || { theme: { tokens: defaultThemeTokens } }));
   const [activeModule, setActiveModule] = useState<ControlPlaneModuleId>('home');
+  const [autofillRequested, setAutofillRequested] = useState(false);
   const { salesCockpit, saveSalesCockpit } = useSalesCockpitState();
 
   useEffect(() => {
@@ -122,8 +123,31 @@ export default function CockpitApp() {
   const syncGoogleSheet = (direction: 'export' | 'import', sheetUrl: string, offer?: any, leads?: any[], proofAssets?: any[], tasks?: any[]) =>
     postMessage({ type: 'salesCockpit.syncGoogleSheet', direction, sheetUrl, offer, leads, proofAssets, tasks });
   const createProductFromIdea = (ideaPath: string) => postMessage({ type: 'salesCockpit.createProductFromIdea', ideaPath });
+  const bootstrapProduct = () => postMessage({ type: 'salesCockpit.bootstrapProduct' });
   const extractFrictions = (implementPath: string) => postMessage({ type: 'salesCockpit.extractFrictions', implementPath });
+  const autofillCockpit = () => postMessage({ type: 'salesCockpit.autofill' });
+  const runLeadResearch = () => postMessage({ type: 'salesCockpit.runLeadResearch' });
+  const enrichLeads = () => postMessage({ type: 'salesCockpit.enrichLeads' });
+  const pushGoogleSheet = () => postMessage({ type: 'salesCockpit.pushGoogleSheet' });
+  const generateLeadDrafts = () => postMessage({ type: 'salesCockpit.generateLeadDrafts' });
+  const runLeadPipeline = () => postMessage({ type: 'salesCockpit.runLeadPipeline' });
+  const createGoogleSheet = (title?: string) => postMessage({ type: 'salesCockpit.createGoogleSheet', title });
   const discoverMcpTools = (serverId: string) => postMessage({ type: 'salesCockpit.discoverMcpTools', serverId });
+
+  const shouldAutofillOnOpen = useMemo(() => (
+    Boolean(salesCockpit.ideaPath)
+    || Boolean(salesCockpit.implementPath)
+    || Boolean(salesCockpit.defaultSheetUrl)
+    || salesCockpit.providerAccounts.some((provider) => provider.status === 'connected')
+  ), [salesCockpit.defaultSheetUrl, salesCockpit.ideaPath, salesCockpit.implementPath, salesCockpit.providerAccounts]);
+
+  useEffect(() => {
+    if (!shouldAutofillOnOpen || autofillRequested) {
+      return;
+    }
+    setAutofillRequested(true);
+    autofillCockpit();
+  }, [autofillRequested, shouldAutofillOnOpen]);
 
   const switchProduct = (productId: string) => {
     saveSalesCockpit(selectSalesCockpitProduct(salesCockpit, productId));
@@ -238,7 +262,15 @@ export default function CockpitApp() {
             onRefreshGmailDraftQueue={refreshGmailDraftQueue}
             onSyncGoogleSheet={syncGoogleSheet}
             onCreateProductFromIdea={createProductFromIdea}
+            onBootstrapProduct={bootstrapProduct}
             onExtractFrictions={extractFrictions}
+            onAutofillCockpit={autofillCockpit}
+            onRunLeadResearch={runLeadResearch}
+            onEnrichLeads={enrichLeads}
+            onPushGoogleSheet={pushGoogleSheet}
+            onGenerateLeadDrafts={generateLeadDrafts}
+            onRunLeadPipeline={runLeadPipeline}
+            onCreateGoogleSheet={createGoogleSheet}
             onDiscoverMcpTools={discoverMcpTools}
           />
         </main>

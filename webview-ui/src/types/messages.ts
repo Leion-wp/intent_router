@@ -115,7 +115,15 @@ export type WebviewOutboundMessage =
   | { type: 'salesCockpit.refreshGmailDraftQueue' }
   | { type: 'salesCockpit.syncGoogleSheet'; direction: 'export' | 'import'; sheetUrl: string; offer?: any; leads?: any[]; proofAssets?: any[]; tasks?: any[] }
   | { type: 'salesCockpit.createProductFromIdea'; ideaPath: string }
+  | { type: 'salesCockpit.bootstrapProduct' }
   | { type: 'salesCockpit.extractFrictions'; implementPath: string }
+  | { type: 'salesCockpit.autofill' }
+  | { type: 'salesCockpit.runLeadResearch' }
+  | { type: 'salesCockpit.enrichLeads' }
+  | { type: 'salesCockpit.pushGoogleSheet' }
+  | { type: 'salesCockpit.generateLeadDrafts' }
+  | { type: 'salesCockpit.runLeadPipeline' }
+  | { type: 'salesCockpit.createGoogleSheet'; title?: string }
   | { type: 'salesCockpit.discoverMcpTools'; serverId: string }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };

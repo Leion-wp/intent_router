@@ -109,7 +109,15 @@ type ControlPlanePanelProps = {
   onRefreshGmailDraftQueue?: () => void;
   onSyncGoogleSheet?: (direction: 'export' | 'import', sheetUrl: string, offer?: any, leads?: any[], proofAssets?: any[], tasks?: any[]) => void;
   onCreateProductFromIdea?: (ideaPath: string) => void;
+  onBootstrapProduct?: () => void;
   onExtractFrictions?: (implementPath: string) => void;
+  onAutofillCockpit?: () => void;
+  onRunLeadResearch?: () => void;
+  onEnrichLeads?: () => void;
+  onPushGoogleSheet?: () => void;
+  onGenerateLeadDrafts?: () => void;
+  onRunLeadPipeline?: () => void;
+  onCreateGoogleSheet?: (title?: string) => void;
   onDiscoverMcpTools?: (serverId: string) => void;
 };
 
@@ -301,7 +309,15 @@ export default function ControlPlanePanel({
   onRefreshGmailDraftQueue,
   onSyncGoogleSheet,
   onCreateProductFromIdea,
+  onBootstrapProduct,
   onExtractFrictions,
+  onAutofillCockpit,
+  onRunLeadResearch,
+  onEnrichLeads,
+  onPushGoogleSheet,
+  onGenerateLeadDrafts,
+  onRunLeadPipeline,
+  onCreateGoogleSheet,
   onDiscoverMcpTools
 }: ControlPlanePanelProps) {
   const [leadDraft, setLeadDraft] = useState<LeadDraft>(() => createLeadDraft());
@@ -593,6 +609,34 @@ export default function ControlPlanePanel({
       return;
     }
     onCreateProductFromIdea(salesCockpit.ideaPath);
+  };
+
+  const bootstrapProduct = () => {
+    onBootstrapProduct?.();
+  };
+
+  const createGoogleSheet = () => {
+    onCreateGoogleSheet?.(`${salesCockpit.offer.name} - Leion Cockpit`);
+  };
+
+  const runLeadResearch = () => {
+    onRunLeadResearch?.();
+  };
+
+  const enrichLeads = () => {
+    onEnrichLeads?.();
+  };
+
+  const pushGoogleSheet = () => {
+    onPushGoogleSheet?.();
+  };
+
+  const generateLeadDrafts = () => {
+    onGenerateLeadDrafts?.();
+  };
+
+  const runLeadPipeline = () => {
+    onRunLeadPipeline?.();
   };
 
   const extractFrictions = () => {
@@ -1223,6 +1267,21 @@ export default function ControlPlanePanel({
         </div>
       </div>
 
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={bootstrapProduct} style={buttonStyle} disabled={!onBootstrapProduct}>
+          Bootstrap sans fichiers
+        </button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => onAutofillCockpit?.()} style={buttonStyle} disabled={!onAutofillCockpit}>
+          Remplir automatiquement le cockpit
+        </button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => onSelectModule?.('products')} style={buttonStyle} disabled={!onSelectModule}>
+          Ouvrir le produit
+        </button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => onSelectModule?.('contact')} style={buttonStyle} disabled={!onSelectModule}>
+          Ouvrir le contact
+        </button>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '8px' }}>
         <div className="cp-card-hover" style={cardStyle}>
           <div style={{ fontSize: '10px', opacity: 0.66 }}>Leads prets</div>
@@ -1355,6 +1414,24 @@ export default function ControlPlanePanel({
         <div className="cp-card-hover" style={cardStyle}>
           <div style={{ fontSize: '12px', fontWeight: 700 }}>Requetes de recherche</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+            <button type="button" className="nodrag cp-btn-secondary" onClick={runLeadResearch} style={{ ...buttonStyle, width: '100%' }} disabled={!onRunLeadResearch}>
+              Lancer la recherche auto
+            </button>
+            <button type="button" className="nodrag cp-btn-secondary" onClick={enrichLeads} style={{ ...buttonStyle, width: '100%' }} disabled={!onEnrichLeads}>
+              Enrichir les leads
+            </button>
+            <button type="button" className="nodrag cp-btn-secondary" onClick={pushGoogleSheet} style={{ ...buttonStyle, width: '100%' }} disabled={!onPushGoogleSheet}>
+              Push vers Google Sheets
+            </button>
+            <button type="button" className="nodrag cp-btn-secondary" onClick={generateLeadDrafts} style={{ ...buttonStyle, width: '100%' }} disabled={!onGenerateLeadDrafts}>
+              Generer les drafts Gmail
+            </button>
+            <button type="button" className="nodrag cp-btn-secondary" onClick={runLeadPipeline} style={{ ...buttonStyle, width: '100%' }} disabled={!onRunLeadPipeline}>
+              Pipeline leads complet
+            </button>
+            <button type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(salesModel.leadGenerationBrief.searchQueries.join('\n'))} style={{ ...buttonStyle, width: '100%' }}>
+              Copier toutes les requetes
+            </button>
             {salesModel.leadGenerationBrief.searchQueries.map((query) => (
               <button key={query} type="button" className="nodrag cp-btn-secondary" onClick={() => onCopyToClipboard(query)} style={buttonStyle}>
                 {query}
@@ -1388,16 +1465,22 @@ export default function ControlPlanePanel({
         <div>
           <div style={{ fontSize: '13px', fontWeight: 700 }}>Assistant produit</div>
           <div style={{ fontSize: '11px', opacity: 0.7, marginTop: '4px' }}>
-            Transforme idea.md en base de SaaS vendable avec offre, actions initiales et configuration cockpit.
+            Demarre un produit soit depuis idea.md, soit directement depuis le cockpit sans aucun fichier pre-existant.
           </div>
         </div>
         <span style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '999px', background: 'rgba(255,255,255,0.05)' }}>
-          {salesCockpit.ideaPath || 'idea.md'}
+          {salesCockpit.ideaPath || 'sans fichier'}
         </span>
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={bootstrapProduct} style={buttonStyle} disabled={!onBootstrapProduct}>
+          Bootstrap sans fichiers
+        </button>
         <button type="button" className="nodrag cp-btn-secondary" onClick={createProductFromIdea} style={buttonStyle} disabled={!onCreateProductFromIdea || !salesCockpit.ideaPath}>
           Generer depuis idea.md
+        </button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={() => onAutofillCockpit?.()} style={buttonStyle} disabled={!onAutofillCockpit}>
+          Auto-fill complet
         </button>
         {!!salesCockpit.ideaPath && (
           <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile(salesCockpit.ideaPath!)} style={buttonStyle}>
@@ -1406,7 +1489,7 @@ export default function ControlPlanePanel({
         )}
       </div>
       <div style={{ fontSize: '11px', opacity: 0.76 }}>
-        L assistant lit le fichier d idee du produit actif et regenere l offre, le funnel et les premieres actions pour ce SaaS.
+        Sans fichier, le bootstrap te demande juste le nom, l audience, le probleme et la promesse, puis il te monte directement une fiche produit exploitable.
       </div>
     </section>
   );
@@ -1422,6 +1505,9 @@ export default function ControlPlanePanel({
         </div>
         <button type="button" className="nodrag cp-btn-secondary" onClick={() => onRefreshGmailDraftQueue?.()} style={buttonStyle} disabled={!onRefreshGmailDraftQueue}>
           Rafraichir la file
+        </button>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={generateLeadDrafts} style={buttonStyle} disabled={!onGenerateLeadDrafts}>
+          Generer depuis leads enrichis
         </button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1521,10 +1607,13 @@ export default function ControlPlanePanel({
         <option value="pilot">Pilot</option>
         <option value="won">Gagne</option>
       </select>
-      <input className="nodrag" value={salesCockpit.ideaPath || ''} onChange={(event) => updateCockpit({ ...salesCockpit, ideaPath: event.target.value })} placeholder="idea.md path" style={inputStyle} />
-      <input className="nodrag" value={salesCockpit.implementPath || ''} onChange={(event) => updateCockpit({ ...salesCockpit, implementPath: event.target.value })} placeholder="implement.md path" style={inputStyle} />
-      <input className="nodrag" value={salesCockpit.defaultSheetUrl || ''} onChange={(event) => updateCockpit({ ...salesCockpit, defaultSheetUrl: event.target.value })} placeholder="Google Sheet URL" style={inputStyle} />
+      <input className="nodrag" value={salesCockpit.ideaPath || ''} onChange={(event) => updateCockpit({ ...salesCockpit, ideaPath: event.target.value })} placeholder="idea.md (optionnel)" style={inputStyle} />
+      <input className="nodrag" value={salesCockpit.implementPath || ''} onChange={(event) => updateCockpit({ ...salesCockpit, implementPath: event.target.value })} placeholder="implement.md (optionnel)" style={inputStyle} />
+      <input className="nodrag" value={salesCockpit.defaultSheetUrl || ''} onChange={(event) => updateCockpit({ ...salesCockpit, defaultSheetUrl: event.target.value })} placeholder="Google Sheet URL (cree-la depuis le cockpit si vide)" style={inputStyle} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        <button type="button" className="nodrag cp-btn-secondary" onClick={createGoogleSheet} style={buttonStyle} disabled={!onCreateGoogleSheet}>
+          Creer la Google Sheet cockpit
+        </button>
         {!!salesCockpit.ideaPath && (
           <button type="button" className="nodrag cp-btn-secondary" onClick={() => onOpenWorkspaceFile(salesCockpit.ideaPath!)} style={buttonStyle}>Open idea.md</button>
         )}

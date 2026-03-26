@@ -4,7 +4,7 @@
     "description": "Human-centric visual orchestration runtime for VS Code",
     "publisher": "LeionCorp",
     "icon": "media/leion_roots_icon.png",
-    "version": "0.1.15",
+    "version": "0.1.20",
     "license": "MIT",
     "repository": {
         "type": "git",
