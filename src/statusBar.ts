@@ -43,10 +43,25 @@ export class StatusBarManager {
                 this.updateStatus('Resuming...');
                 break;
             case 'pipelineEnd':
-                this.statusBarItem.hide();
                 this.currentStep = 0;
                 this.totalSteps = 0;
                 this.isPaused = false;
+                if (event.status === 'failure' && event.failureReason) {
+                    const reasonLabels: Record<string, string> = {
+                        validation: 'validation error',
+                        timeout: 'step timed out',
+                        provider_error: 'provider error',
+                        policy_blocked: 'blocked by policy',
+                        user_cancelled: 'cancelled'
+                    };
+                    const label = reasonLabels[event.failureReason] ?? event.failureReason;
+                    const stepHint = event.failedStepId ? ` in step ${event.failedStepId}` : '';
+                    this.statusBarItem.text = `$(error) ${this.pipelineName}: ${label}${stepHint}`;
+                    this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+                    setTimeout(() => this.statusBarItem.hide(), 5000);
+                } else {
+                    this.statusBarItem.hide();
+                }
                 break;
         }
     }

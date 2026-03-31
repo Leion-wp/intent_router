@@ -17,6 +17,7 @@ export type Intent = {
     };
     continueOnError?: boolean;
     captureErrorVar?: string;
+    inputSchema?: Record<string, { type: 'string' | 'number' | 'boolean' | 'object' | 'array'; required?: boolean; description?: string }>;
     meta?: {
         dryRun?: boolean;
         traceId?: string;

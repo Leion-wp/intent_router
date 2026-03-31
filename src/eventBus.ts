@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 
 export type PipelineEvent =
     | { type: 'pipelineStart'; runId: string; timestamp: number; totalSteps?: number; name?: string; pipeline?: any }
-    | { type: 'pipelineEnd'; runId: string; timestamp: number; success: boolean; status?: 'success' | 'failure' | 'cancelled' }
+    | { type: 'pipelineEnd'; runId: string; timestamp: number; success: boolean; status?: 'success' | 'failure' | 'cancelled'; failureReason?: 'validation' | 'timeout' | 'provider_error' | 'policy_blocked' | 'user_cancelled'; failedStepId?: string }
     | { type: 'stepStart'; runId: string; intentId: string; timestamp: number; description?: string; intent?: string; index?: number; stepId?: string }
     | { type: 'stepEnd'; runId: string; intentId: string; timestamp: number; success: boolean; index?: number; stepId?: string }
     | { type: 'stepLog'; runId: string; intentId: string; stepId?: string; text: string; stream: 'stdout' | 'stderr' }

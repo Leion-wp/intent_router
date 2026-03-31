@@ -7,6 +7,7 @@ import { generateSecureToken, sanitizeShellArg, validateSafeRelativePath, resolv
 import { listPublicCapabilities } from './registry';
 import { Determinism } from './types';
 import { clearRunMemory, isRunMemoryEnabled, queryRunMemory, saveRunMemory } from './runMemoryStore';
+import { validateStepInput, formatValidationErrors } from './pipelineValidator';
 
 export type PipelineFile = {
     name: string;
@@ -34,6 +35,8 @@ export type PipelineRunResult = {
     runId: string;
     status: 'success' | 'failure' | 'cancelled';
     success: boolean;
+    failureReason?: 'validation' | 'timeout' | 'provider_error' | 'policy_blocked' | 'user_cancelled';
+    failedStepId?: string;
 };
 
 type RuntimeSandboxPolicy = {
@@ -631,6 +634,8 @@ async function runPipeline(
     isCancelled = false;
     isPaused = false;
     let runStatus: 'success' | 'failure' | 'cancelled' = 'success';
+    let runFailureReason: PipelineRunResult['failureReason'];
+    let runFailedStepId: string | undefined;
     const variableCache = new Map<string, string>();
     seedVariableCacheFromEnvironment(variableCache);
     seedVariableCacheFromRuntimeContext(variableCache, context);
@@ -1287,6 +1292,29 @@ async function runPipeline(
 
             // COMPILE AND EXECUTE
             const compiledStep = await compileStep(step, variableCache, currentCwd, trustedRoot);
+
+            // VALIDATION — check inputSchema before execution
+            if (compiledStep.inputSchema) {
+                const validationErrors = validateStepInput(compiledStep, compiledStep.payload ?? {});
+                if (validationErrors.length > 0) {
+                    const localValidationId = generateSecureToken(8);
+                    pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localValidationId, timestamp: Date.now(), description: compiledStep.description, intent: compiledStep.intent, index: currentIndex, stepId: compiledStep.id });
+                    pipelineEventBus.emit({
+                        type: 'stepLog',
+                        runId,
+                        intentId: localValidationId,
+                        stepId: compiledStep.id,
+                        text: `[validation] Step "${compiledStep.intent}" failed input validation:\n${formatValidationErrors(validationErrors)}`,
+                        stream: 'stderr'
+                    } as any);
+                    pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localValidationId, timestamp: Date.now(), success: false, index: currentIndex, stepId: compiledStep.id });
+                    runFailureReason = 'validation';
+                    runFailedStepId = compiledStep.id;
+                    runStatus = 'failure';
+                    break;
+                }
+            }
+
             const intentId = compiledStep.meta?.traceId ?? generateSecureToken(8);
             pipelineEventBus.emit({ type: 'stepStart', runId, intentId, timestamp: Date.now(), description: compiledStep.description, intent: compiledStep.intent, index: currentIndex, stepId: compiledStep.id });
 
@@ -1336,6 +1364,8 @@ async function runPipeline(
                         continue;
                     }
                 }
+                runFailureReason = 'policy_blocked';
+                runFailedStepId = compiledStep.id;
                 runStatus = 'failure';
                 break;
             }
@@ -1365,6 +1395,10 @@ async function runPipeline(
                     lastErrorMessage = `Step returned unsuccessful result for intent "${String(compiledStep.intent || '')}".`;
                 } catch (error: any) {
                     lastErrorMessage = String(error?.message || error || 'Unknown error');
+                    if (!runFailureReason) {
+                        runFailureReason = lastErrorMessage.includes('timed out') ? 'timeout' : 'provider_error';
+                        runFailedStepId = compiledStep.id;
+                    }
                     pipelineEventBus.emit({
                         type: 'stepLog',
                         runId,
@@ -1436,19 +1470,22 @@ async function runPipeline(
         }
         if (isCancelled && runStatus !== 'failure') {
             runStatus = 'cancelled';
+            runFailureReason = 'user_cancelled';
         }
         pipelineEventBus.emit({
             type: 'pipelineEnd',
             runId,
             timestamp: Date.now(),
             success: runStatus === 'success',
-            status: runStatus
+            status: runStatus,
+            failureReason: runFailureReason,
+            failedStepId: runFailedStepId
         });
-        return { runId, success: runStatus === 'success', status: runStatus };
+        return { runId, success: runStatus === 'success', status: runStatus, failureReason: runFailureReason, failedStepId: runFailedStepId };
     } catch (e) {
         runStatus = 'failure';
-        pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: false, status: 'failure' });
-        return { runId, success: false, status: 'failure' };
+        pipelineEventBus.emit({ type: 'pipelineEnd', runId, timestamp: Date.now(), success: false, status: 'failure', failureReason: 'provider_error' });
+        return { runId, success: false, status: 'failure', failureReason: 'provider_error' };
     } finally {
         currentRunId = null;
     }
