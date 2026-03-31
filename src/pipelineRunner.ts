@@ -9,11 +9,23 @@ import { Determinism } from './types';
 import { clearRunMemory, isRunMemoryEnabled, queryRunMemory, saveRunMemory } from './runMemoryStore';
 import { validateStepInput, formatValidationErrors } from './pipelineValidator';
 
+export type PipelineExecutionPolicy = {
+    defaultTimeoutMs?: number;
+    defaultRetry?: {
+        mode?: 'none' | 'fixed' | 'exponential';
+        maxAttempts?: number;
+        delayMs?: number;
+        maxDelayMs?: number;
+    };
+    continueOnError?: boolean;
+};
+
 export type PipelineFile = {
     name: string;
     description?: string;
     profile?: string;
     steps: Array<Intent>;
+    executionPolicy?: PipelineExecutionPolicy;
     meta?: {
         ui?: {
             nodes: any[];
@@ -189,13 +201,16 @@ function normalizeRetryMode(raw: any): RetryMode {
     return 'none';
 }
 
-function resolveRetryPolicy(step: Intent): RetryPolicy {
-    const retry = (step as any)?.retry || step?.payload?.retry || {};
+function resolveRetryPolicy(step: Intent, pipelineDefault?: PipelineExecutionPolicy['defaultRetry']): RetryPolicy {
+    const stepRetry = (step as any)?.retry || step?.payload?.retry;
+    // Step-level overrides pipeline defaults; pipeline defaults override hard-coded fallbacks
+    const retry = stepRetry || pipelineDefault || {};
     const mode = normalizeRetryMode(retry?.mode);
+    const defaultDelayMs = toPositiveInt(pipelineDefault?.delayMs, 1000);
     const maxAttempts = Math.max(1, Math.min(10, toPositiveInt(retry?.maxAttempts, 1)));
-    const delayMs = Math.max(0, toPositiveInt(retry?.delayMs, 1000));
+    const delayMs = Math.max(0, toPositiveInt(retry?.delayMs, defaultDelayMs));
     const maxDelayMs = Math.max(delayMs, toPositiveInt(retry?.maxDelayMs, 30000));
-    const jitterMs = Math.max(0, toPositiveInt(retry?.jitterMs, 0));
+    const jitterMs = Math.max(0, toPositiveInt((stepRetry as any)?.jitterMs, 0));
     return {
         mode,
         maxAttempts: mode === 'none' ? 1 : maxAttempts,
@@ -214,11 +229,12 @@ function computeRetryDelayMs(policy: RetryPolicy, attempt: number): number {
     return base + jitter;
 }
 
-function resolveErrorPolicy(step: Intent): ErrorPolicy {
+function resolveErrorPolicy(step: Intent, pipelineContinueOnError?: boolean): ErrorPolicy {
     const continueOnErrorFromStep = parseBoolean((step as any)?.continueOnError, false);
     const continueOnErrorFromPayload = parseBoolean(step?.payload?.continueOnError, false);
     const errorPolicyRaw = String((step as any)?.errorPolicy || step?.payload?.errorPolicy || '').trim().toLowerCase();
-    const continueOnError = continueOnErrorFromStep || continueOnErrorFromPayload || errorPolicyRaw === 'continue';
+    // Step-level wins; fall back to pipeline-level default
+    const continueOnError = continueOnErrorFromStep || continueOnErrorFromPayload || errorPolicyRaw === 'continue' || (pipelineContinueOnError ?? false);
     const captureErrorVar = String((step as any)?.captureErrorVar || step?.payload?.captureErrorVar || step?.payload?.errorCaptureVar || '').trim() || undefined;
     return { continueOnError, captureErrorVar };
 }
@@ -285,14 +301,16 @@ export function detectIntentWritesFiles(intent: Intent): boolean {
     return /(>>?|set-content|add-content|out-file|\brm\b|\bdel\b|\bmv\b|\bmove-item\b|\bcp\b|\bcopy-item\b|\bmkdir\b|\bnew-item\b|\bni\b|\btouch\b)/i.test(command);
 }
 
-function resolveRuntimeSandboxPolicy(step: Intent): RuntimeSandboxPolicy {
+function resolveRuntimeSandboxPolicy(step: Intent, pipelineDefaultTimeoutMs?: number): RuntimeSandboxPolicy {
     const config = vscode.workspace.getConfiguration('intentRouter');
     const stepSandbox = step.payload?.__sandbox || step.payload?.sandbox || {};
     const intentName = String(step.intent || '').trim().toLowerCase();
     const hasStepTimeout = Number.isFinite(Number(stepSandbox?.timeoutMs)) && Number(stepSandbox?.timeoutMs) > 0;
-    const defaultTimeoutMs = (!hasStepTimeout && intentName === 'vscode.reviewdiff')
+    const globalDefaultMs = (!hasStepTimeout && intentName === 'vscode.reviewdiff')
         ? config.get<number>('runtime.reviewDiff.timeoutMs', 1800000)
         : config.get<number>('runtime.sandbox.timeoutMs', 120000);
+    // Pipeline-level default overrides global config but is overridden by step-level
+    const defaultTimeoutMs = hasStepTimeout ? globalDefaultMs : (pipelineDefaultTimeoutMs ?? globalDefaultMs);
     return {
         allowNetwork: toBool(stepSandbox?.allowNetwork, config.get<boolean>('runtime.sandbox.allowNetwork', true)),
         allowFileWrite: toBool(stepSandbox?.allowFileWrite, config.get<boolean>('runtime.sandbox.allowFileWrite', true)),
@@ -1327,9 +1345,9 @@ async function runPipeline(
                 dryRun,
                 subPipelineDepth
             };
-            const sandboxPolicy = resolveRuntimeSandboxPolicy(compiledStep);
-            const retryPolicy = resolveRetryPolicy(compiledStep);
-            const errorPolicy = resolveErrorPolicy(compiledStep);
+            const sandboxPolicy = resolveRuntimeSandboxPolicy(compiledStep, pipeline.executionPolicy?.defaultTimeoutMs);
+            const retryPolicy = resolveRetryPolicy(compiledStep, pipeline.executionPolicy?.defaultRetry);
+            const errorPolicy = resolveErrorPolicy(compiledStep, pipeline.executionPolicy?.continueOnError);
             const sandboxError = checkRuntimeSandbox(compiledStep, sandboxPolicy, sandboxUsage);
             if (sandboxError) {
                 pipelineEventBus.emit({
