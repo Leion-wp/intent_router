@@ -11,6 +11,7 @@ export interface StepLog {
     status: 'pending' | 'running' | 'success' | 'failure';
     startTime: number;
     endTime?: number;
+    durationMs?: number;
     error?: string;
 }
 
@@ -76,6 +77,7 @@ export class HistoryManager {
     private runs: PipelineRun[] = [];
     private currentRun: PipelineRun | null = null;
     private readonly FILE_NAME = 'history.json';
+    private stepStartTimestamps = new Map<string, number>(); // intentId -> startTime
     private historyUri: vscode.Uri | undefined;
     private ready: Promise<void>;
 
@@ -269,6 +271,7 @@ export class HistoryManager {
 
             case 'stepStart':
                 if (this.currentRun && this.currentRun.id === event.runId) {
+                    this.stepStartTimestamps.set(event.intentId, event.timestamp);
                     this.currentRun.steps.push({
                         index: event.index ?? -1,
                         stepId: event.stepId,
@@ -296,6 +299,11 @@ export class HistoryManager {
                     if (step) {
                         step.status = event.success ? 'success' : 'failure';
                         step.endTime = event.timestamp;
+                        const startTs = this.stepStartTimestamps.get(event.intentId);
+                        if (startTs !== undefined) {
+                            step.durationMs = event.timestamp - startTs;
+                            this.stepStartTimestamps.delete(event.intentId);
+                        }
                         if (event.success) {
                             ensureCost();
                             const intentKey = String(step.intent || '').trim().toLowerCase();
@@ -306,13 +314,15 @@ export class HistoryManager {
                             }
                         }
                     }
+                    const stepDurationMs = step?.durationMs;
                     appendTimeline({
                         timestamp: event.timestamp,
                         type: 'step.end',
                         level: event.success ? 'info' : 'error',
                         stepId: event.stepId,
                         intentId: event.intentId,
-                        message: `Step ${event.success ? 'succeeded' : 'failed'}: ${event.stepId || event.intentId}`
+                        message: `Step ${event.success ? 'succeeded' : 'failed'}: ${event.stepId || event.intentId}`,
+                        data: stepDurationMs !== undefined ? { durationMs: stepDurationMs } : undefined
                     });
                     // Autosave on step completion? Maybe too frequent.
                 }
@@ -443,11 +453,14 @@ export class HistoryManager {
                         level: event.success ? 'info' : 'error',
                         message: `Pipeline ended: ${String(this.currentRun.status).toUpperCase()}`,
                         data: {
-                            estimatedCost: this.currentRun.audit?.cost?.estimatedTotal || 0
+                            estimatedCost: this.currentRun.audit?.cost?.estimatedTotal || 0,
+                            ...(event.failureReason ? { failureReason: event.failureReason } : {}),
+                            ...(event.failedStepId ? { failedStepId: event.failedStepId } : {})
                         }
                     });
                     this.saveHistory();
                     this.currentRun = null;
+                    this.stepStartTimestamps.clear();
                 }
                 break;
 

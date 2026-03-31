@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { getResumeFromFailedStepId } from '../../utils/historyListUtils';
 import { buildHistoryTree, TreeFolder, TreeLeaf } from '../../utils/treeUtils';
+import { RunTimeline } from '../RunTimeline';
 
 type HistoryPanelProps = {
   historySearch: string;
@@ -99,10 +100,10 @@ function HistoryTreeItem({
   }
 
   const run = item.data;
-  const pullRequests = Array.isArray(run.pullRequests) ? run.pullRequests : [];
-  const timelineCount = Array.isArray(run?.audit?.timeline) ? run.audit.timeline.length : 0;
   const resumeStepId = getResumeFromFailedStepId(run);
   const canResumeFromFailure = !!run.pipelineSnapshot && !!resumeStepId;
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const hasSteps = Array.isArray(run.steps) && run.steps.length > 0;
 
   return (
     <div
@@ -146,16 +147,37 @@ function HistoryTreeItem({
           )}
         </div>
       </div>
-      <div style={{ fontSize: '10px', opacity: 0.5, display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+      <div style={{ fontSize: '10px', opacity: 0.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 600 }}>
         <span>{new Date(run.timestamp).toLocaleTimeString()}</span>
-        <span style={{
-          color: run.status === 'success' ? 'var(--ir-status-success)' :
-            run.status === 'failure' ? 'var(--ir-status-error)' :
-            '#e6c300'
-        }}>
-          {String(run.status || '').toUpperCase()}
-        </span>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          {hasSteps && (
+            <button
+              type="button"
+              className="mini-action-btn"
+              onClick={(e) => { e.stopPropagation(); setTimelineOpen(v => !v); }}
+              title="Toggle step timeline"
+              style={{ fontSize: '10px', padding: '1px 5px' }}
+            >
+              <span className="codicon codicon-list-tree" style={{ fontSize: '11px' }} />
+            </button>
+          )}
+          <span style={{
+            color: run.status === 'success' ? 'var(--ir-status-success)' :
+              run.status === 'failure' ? 'var(--ir-status-error)' :
+              '#e6c300'
+          }}>
+            {String(run.status || '').toUpperCase()}
+          </span>
+        </div>
       </div>
+      {timelineOpen && hasSteps && (
+        <div
+          style={{ marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '4px' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <RunTimeline steps={run.steps} timeline={run?.audit?.timeline} />
+        </div>
+      )}
       
       <style>{`
         .mini-action-btn {

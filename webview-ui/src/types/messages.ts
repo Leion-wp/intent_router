@@ -1,11 +1,41 @@
 export type ExecutionStatus = 'running' | 'success' | 'failure';
 
+export type RunTimelineEntry = {
+  timestamp: number;
+  type: string;
+  level: 'info' | 'warn' | 'error';
+  stepId?: string;
+  intentId?: string;
+  message: string;
+  data?: {
+    durationMs?: number;
+    failureReason?: string;
+    failedStepId?: string;
+    intent?: string;
+    description?: string;
+    [key: string]: unknown;
+  };
+};
+
+export type RunStepLog = {
+  index: number;
+  stepId?: string;
+  intentId: string;
+  intent?: string;
+  description?: string;
+  status: 'pending' | 'running' | 'success' | 'failure';
+  startTime: number;
+  endTime?: number;
+  durationMs?: number;
+  error?: string;
+};
+
 export type PipelineRun = {
   id: string;
   name: string;
   timestamp: number;
   status: 'running' | 'success' | 'failure' | 'cancelled';
-  steps: Array<any>;
+  steps: RunStepLog[];
   pullRequests?: Array<{
     provider: 'github';
     url: string;
@@ -20,7 +50,7 @@ export type PipelineRun = {
   }>;
   pipelineSnapshot?: any;
   audit?: {
-    timeline?: Array<any>;
+    timeline?: RunTimelineEntry[];
     hitl?: Array<any>;
     reviews?: Array<any>;
     cost?: {
