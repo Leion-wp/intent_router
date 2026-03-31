@@ -68,6 +68,34 @@ suite('Control Plane Contracts (Mocked)', () => {
     }
   });
 
+  test('delivery orchestrator switch routes and sub-pipeline sandboxes stay runtime-compatible', () => {
+    const orchestrator = readPipeline('pipeline/product-1/delivery.orchestrator.intent.json');
+    const byId = new Map<string, any>((orchestrator.steps || []).map((step: any) => [String(step.id || ''), step]));
+    const routeStep = byId.get('route_workflow');
+    assert.ok(routeStep, 'Missing route_workflow step in delivery orchestrator.');
+
+    const routes = Array.isArray(routeStep.payload?.routes) ? routeStep.payload.routes : [];
+    assert.deepStrictEqual(
+      routes.map((route: any) => String(route?.value || '')),
+      ['issue_to_pr', 'pr_review_fix', 'release_gate'],
+      'delivery.orchestrator switch routes must match workflow values directly.'
+    );
+
+    const supportedSandboxKeys = ['allowNetwork', 'allowFileWrite', 'timeoutMs'];
+    for (const stepId of ['run_issue_to_pr', 'run_pr_review_fix', 'run_release_gate']) {
+      const step = byId.get(stepId);
+      assert.ok(step, `Missing sub-pipeline step ${stepId} in delivery orchestrator.`);
+      const sandbox = step?.payload?.__sandbox;
+      assert.ok(sandbox && typeof sandbox === 'object', `Expected __sandbox on ${stepId}.`);
+      const sandboxKeys = Object.keys(sandbox).sort();
+      assert.deepStrictEqual(
+        sandboxKeys,
+        [...supportedSandboxKeys].sort(),
+        `${stepId} must only use runtime-supported sandbox keys.`
+      );
+    }
+  });
+
   test('accepts a sync envelope with approvals, artifacts, and logs', () => {
     const parsed = PipelineSyncEnvelopeSchema.parse({
       organizationId: 'org_agency',

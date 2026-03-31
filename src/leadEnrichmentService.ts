@@ -19,6 +19,9 @@ type EnrichmentResult = {
     enrichedCount: number;
     leadsWithEmail: number;
     summaries: EnrichmentSummary[];
+    updated: number;
+    skipped: number;
+    errors: string[];
 };
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) LeionCockpit/0.1';
@@ -216,6 +219,9 @@ async function enrichOneLead(lead: SalesCockpitLead): Promise<{ lead: SalesCockp
         const nextLead: SalesCockpitLead = {
             ...lead,
             email: lead.email || emails[0] || undefined,
+            status: lead.email || emails[0]
+                ? (lead.status === 'candidate' || lead.status === 'reviewed' || lead.status === 'enriched' ? 'ready_for_draft' : lead.status)
+                : (lead.status === 'candidate' ? 'reviewed' : 'enriched'),
             nextAction: lead.email || emails[0]
                 ? 'Relire les informations enrichies puis preparer un draft Gmail.'
                 : lead.nextAction || 'Chercher un contact humain ou une adresse email exploitable.',
@@ -225,7 +231,17 @@ async function enrichOneLead(lead: SalesCockpitLead): Promise<{ lead: SalesCockp
                 description ? `Description: ${description}` : '',
                 emails.length > 0 ? `Emails trouves: ${emails.join(', ')}` : 'Aucun email trouve automatiquement.'
             ]),
-            profileUrl: homepage.finalUrl || lead.profileUrl
+            profileUrl: homepage.finalUrl || lead.profileUrl,
+            sourceUrl: lead.sourceUrl || homepage.finalUrl,
+            snippet: lead.snippet || description,
+            enrichment: {
+                status: emails.length > 0 ? 'complete' : 'partial',
+                attempts: Math.max(1, Number(lead.enrichment?.attempts || 0) + 1),
+                lastAttemptAt: new Date().toISOString(),
+                lastSuccessAt: new Date().toISOString(),
+                error: undefined,
+                sources: Array.from(new Set([homepage.finalUrl, ...(lead.enrichment?.sources || [])])).filter(Boolean)
+            }
         };
 
         return {
@@ -237,27 +253,45 @@ async function enrichOneLead(lead: SalesCockpitLead): Promise<{ lead: SalesCockp
                 finalUrl: homepage.finalUrl
             }
         };
-    } catch {
-        return { lead };
+    } catch (error: any) {
+        return {
+            lead: {
+                ...lead,
+                enrichment: {
+                    status: 'failed',
+                    attempts: Math.max(1, Number(lead.enrichment?.attempts || 0) + 1),
+                    lastAttemptAt: new Date().toISOString(),
+                    lastSuccessAt: lead.enrichment?.lastSuccessAt,
+                    error: error?.message || String(error),
+                    sources: lead.enrichment?.sources || []
+                }
+            }
+        };
     }
 }
 
-export async function enrichCockpitLeads(leads: SalesCockpitLead[], maxLeads = 8): Promise<EnrichmentResult> {
+export async function enrichCockpitLeads(leads: SalesCockpitLead[], maxLeads = 8, leadIds?: string[]): Promise<EnrichmentResult> {
     const nextLeads: SalesCockpitLead[] = [];
     const summaries: EnrichmentSummary[] = [];
     let processed = 0;
     let leadsWithEmail = 0;
+    let updated = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    const selectedIds = Array.isArray(leadIds) && leadIds.length > 0 ? new Set(leadIds.map((entry) => String(entry).trim())) : undefined;
 
     for (const lead of leads) {
         const shouldEnrich = processed < maxLeads
+            && (!selectedIds || selectedIds.has(String(lead.id || '').trim()))
             && !!normalizeUrl(lead.profileUrl || '')
-            && (!lead.email || !String(lead.notes || '').includes('[Enrichment]'));
+            && (!lead.email || !String(lead.notes || '').includes('[Enrichment]') || lead.status === 'reviewed' || lead.status === 'enriched');
 
         if (!shouldEnrich) {
             nextLeads.push(lead);
             if (lead.email) {
                 leadsWithEmail += 1;
             }
+            skipped += 1;
             continue;
         }
 
@@ -269,6 +303,11 @@ export async function enrichCockpitLeads(leads: SalesCockpitLead[], maxLeads = 8
         if (enriched.summary) {
             summaries.push(enriched.summary);
         }
+        if (enriched.lead.enrichment?.status === 'failed' && enriched.lead.enrichment.error) {
+            errors.push(`${lead.company}: ${enriched.lead.enrichment.error}`);
+        } else {
+            updated += 1;
+        }
         processed += 1;
     }
 
@@ -276,6 +315,9 @@ export async function enrichCockpitLeads(leads: SalesCockpitLead[], maxLeads = 8
         leads: nextLeads,
         enrichedCount: summaries.length,
         leadsWithEmail,
-        summaries
+        summaries,
+        updated,
+        skipped,
+        errors
     };
 }

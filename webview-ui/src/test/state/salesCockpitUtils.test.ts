@@ -3,6 +3,7 @@ import { buildSalesCockpitModel, coerceSalesCockpitState, createSalesCockpitProd
 
 export function run() {
   const cockpit = coerceSalesCockpitState({
+    version: 3,
     weeklyTargets: {
       outbound: 100,
       discovery: 10,
@@ -71,7 +72,21 @@ export function run() {
         kind: 'proof',
         owner: 'founder'
       }
-    ]
+    ],
+    leadInbox: {
+      candidates: [
+        {
+          id: 'candidate-1',
+          company: 'Inbox Agency',
+          sourceUrl: 'https://inbox-agency.example',
+          sourceQuery: 'agency github workflow',
+          snippet: 'Repeated GitHub delivery work',
+          confidence: 0.78,
+          status: 'candidate',
+          discoveredAt: '2026-03-25T10:00:00.000Z'
+        }
+      ]
+    }
   });
 
   const model = buildSalesCockpitModel(cockpit);
@@ -80,6 +95,11 @@ export function run() {
   assert.strictEqual(cockpit.funnel.acquisition.length > 0, true);
   assert.strictEqual(cockpit.providerAccounts.length >= 6, true);
   assert.strictEqual(cockpit.products.length >= 1, true);
+  assert.strictEqual(cockpit.version, 4);
+  assert.strictEqual(cockpit.leadInbox.candidates.length, 1);
+  assert.strictEqual(cockpit.sheetBinding.tabs.leads, 'Leads');
+  assert.strictEqual(cockpit.providerBindings.length >= 2, true);
+  assert.strictEqual(cockpit.activityLog.length >= 1, true);
   assert.strictEqual(model.providerSummary.total >= 6, true);
   assert.strictEqual(model.productSummary.total >= 1, true);
   assert.strictEqual(model.metrics.find((metric) => metric.key === 'outbound')?.current, 3);
@@ -88,6 +108,8 @@ export function run() {
   assert.strictEqual(model.metrics.find((metric) => metric.key === 'proposals')?.current, 1);
   assert.strictEqual(model.stageCounts.proposal, 1);
   assert.strictEqual(model.stageCounts.lost, 1);
+  assert.strictEqual(model.leadInbox.candidates.length, 1);
+  assert.strictEqual(Array.isArray(model.campaignQueue), true);
   assert.strictEqual(model.openTasks.length, 2);
   assert.strictEqual(model.overdueTasks >= 1, true);
   assert.strictEqual(model.openLeads.length, 3);

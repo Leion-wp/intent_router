@@ -115,8 +115,9 @@ function buildOfferRows(offer: SalesCockpitOffer): Array<Array<string>> {
 
 function buildLeadRows(leads: SalesCockpitLead[]): Array<Array<string>> {
     return [
-        ['Company', 'Contact Name', 'Role', 'Email', 'Stage', 'Pain', 'Next Action', 'Due Date', 'Profile URL', 'Notes'],
+        ['Lead ID', 'Company', 'Contact Name', 'Role', 'Email', 'Stage', 'Pain', 'Next Action', 'Due Date', 'Profile URL', 'Notes'],
         ...leads.map((lead) => [
+            lead.id,
             lead.company,
             lead.contactName,
             lead.role,
@@ -191,7 +192,7 @@ export async function exportProductToGoogleSheets(
                     values: buildOfferRows(input.offer)
                 },
                 {
-                    range: 'Leads!A1:J500',
+                    range: 'Leads!A1:K500',
                     values: buildLeadRows(input.leads)
                 },
                 {
@@ -269,30 +270,43 @@ export async function importLeadsFromGoogleSheets(
     }
     const spreadsheetId = extractSpreadsheetId(sheetUrl);
     const response = await jsonRequest<ValueRange>(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Leads!A2:J500`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Leads!A2:K500`,
         session.accessToken,
         'GET'
     );
     const rows = Array.isArray(response.values) ? response.values : [];
 
+    // Detect old 10-column format (no Lead ID column) vs new 11-column format.
+    // Old format: Company | Contact Name | Role | Email | Stage | Pain | Next Action | Due Date | Profile URL | Notes
+    // New format: Lead ID | Company | Contact Name | Role | Email | Stage | Pain | Next Action | Due Date | Profile URL | Notes
+    const firstId = String(rows[0]?.[0] || '').trim();
+    const isLegacyFormat = rows.length > 0 && !firstId.startsWith('lead-') && !firstId.startsWith('sheet-');
+    if (isLegacyFormat) {
+        void vscode.window.showWarningMessage(
+            'Leion: Detected old 10-column Sheet format (no Lead ID column). Importing with compatibility mode.'
+        );
+    }
+
     const leads = rows
         .map((row, index) => {
-            const company = String(row?.[0] || '').trim();
+            const offset = isLegacyFormat ? -1 : 0;
+            const id = isLegacyFormat ? '' : String(row?.[0] || '').trim();
+            const company = String(row?.[1 + offset] || '').trim();
             if (!company) {
                 return null;
             }
             return {
-                id: `sheet-${company.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index}`,
+                id: id || `sheet-${company.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index}`,
                 company,
-                contactName: String(row?.[1] || '').trim(),
-                role: String(row?.[2] || '').trim(),
-                email: String(row?.[3] || '').trim() || undefined,
-                status: (String(row?.[4] || 'target').trim() || 'target') as SalesCockpitLead['status'],
-                pain: String(row?.[5] || '').trim(),
-                nextAction: String(row?.[6] || '').trim(),
-                dueDate: String(row?.[7] || '').trim() || undefined,
-                profileUrl: String(row?.[8] || '').trim() || undefined,
-                notes: String(row?.[9] || '').trim() || undefined,
+                contactName: String(row?.[2 + offset] || '').trim(),
+                role: String(row?.[3 + offset] || '').trim(),
+                email: String(row?.[4 + offset] || '').trim() || undefined,
+                status: (String(row?.[5 + offset] || 'reviewed').trim() || 'reviewed') as SalesCockpitLead['status'],
+                pain: String(row?.[6 + offset] || '').trim(),
+                nextAction: String(row?.[7 + offset] || '').trim(),
+                dueDate: String(row?.[8 + offset] || '').trim() || undefined,
+                profileUrl: String(row?.[9 + offset] || '').trim() || undefined,
+                notes: String(row?.[10 + offset] || '').trim() || undefined,
                 owner: 'founder'
             } as SalesCockpitLead;
         })

@@ -92,10 +92,10 @@ export default function CockpitApp() {
 
   const summaryCards = useMemo(() => [
     { label: 'Produits', value: String(salesCockpit.products.length) },
-    { label: 'Leads ouverts', value: String(cockpitCounts.openLeads) },
-    { label: 'Actions ouvertes', value: String(cockpitCounts.openTasks) },
+    { label: 'Lead Inbox', value: String(cockpitCounts.openLeads) },
+    { label: 'Campagnes', value: String(cockpitCounts.activeCampaigns) },
     { label: 'Providers prets', value: String(cockpitCounts.readyProviders) },
-    { label: 'Serveurs MCP', value: String(cockpitCounts.mcpServers) },
+    { label: 'MCP', value: String(cockpitCounts.mcpServers) },
     { label: 'Preuves', value: String(cockpitCounts.proofAssets) }
   ], [cockpitCounts, salesCockpit.products.length]);
 
@@ -104,12 +104,8 @@ export default function CockpitApp() {
     products: `${salesCockpit.products.length} actifs`,
     prospects: `${cockpitCounts.openLeads} leads`,
     contact: cockpitCounts.draftQueue > 0 ? `${cockpitCounts.draftQueue} drafts` : `${cockpitCounts.activeCampaigns} campagnes`,
-    funnel: `${salesCockpit.weeklyTargets.outbound}/sem`,
-    proof: `${cockpitCounts.proofAssets} preuves`,
-    deploy: `${salesCockpit.pipelinePaths.length} pipelines`,
-    follow_up: cockpitCounts.frictionTasks > 0 ? `${cockpitCounts.frictionTasks} frictions` : `${cockpitCounts.openTasks} en file`,
     providers: cockpitCounts.unhealthyProviders > 0 ? `${cockpitCounts.unhealthyProviders} alertes` : `${cockpitCounts.readyProviders}/${salesCockpit.providerAccounts.length} prets`,
-    mcp: cockpitCounts.discoveredMcpTools > 0 ? `${cockpitCounts.discoveredMcpTools} outils` : `${cockpitCounts.mcpServers} serveurs`
+    proof: cockpitCounts.proofAssets > 0 ? `${cockpitCounts.proofAssets} preuves` : cockpitCounts.discoveredMcpTools > 0 ? `${cockpitCounts.discoveredMcpTools} outils` : '0'
   }), [cockpitCounts, salesCockpit]);
 
   const openWorkspaceFile = (path: string) => postMessage({ type: 'openWorkspaceFile', path });
@@ -175,7 +171,7 @@ export default function CockpitApp() {
             <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.14em', opacity: 0.68 }}>Leion Cockpit</div>
             <div style={{ fontSize: '22px', fontWeight: 800, marginTop: '4px' }}>1 SaaS = 1 interface + 1 a 3 pipelines</div>
             <div style={{ fontSize: '12px', lineHeight: 1.6, opacity: 0.82, marginTop: '6px', maxWidth: '860px' }}>
-              Opere la surface commerciale du produit pendant que Intent Router reste le moteur. Construis l offre, gere l outbound, travaille le funnel et ouvre les assets delivery depuis un seul cockpit.
+              Opere la surface commerciale du produit pendant que Intent Router reste le moteur. Construis l offre, gere l outbound, pilote les leads et ouvre les assets delivery depuis un seul cockpit.
             </div>
             <div style={{ fontSize: '11px', lineHeight: 1.5, opacity: 0.74, marginTop: '8px' }}>
               Produit actif : <strong>{salesCockpit.offer.name}</strong> · Etape : <strong>{salesCockpit.productStage}</strong> · Pipelines : <strong>{salesCockpit.pipelinePaths.length}</strong>

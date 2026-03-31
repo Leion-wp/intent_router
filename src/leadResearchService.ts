@@ -1,5 +1,5 @@
 import * as https from 'https';
-import { SalesCockpitLead, SalesCockpitOffer, slugify } from './salesCockpitStore';
+import { LeadCandidateRecord, SalesCockpitLead, SalesCockpitOffer, slugify } from './salesCockpitStore';
 
 type SearchHit = {
     query: string;
@@ -134,6 +134,14 @@ function hostnameLabel(urlString: string): string {
     }
 }
 
+function domainFromUrl(urlString: string): string {
+    try {
+        return new URL(urlString).hostname.toLowerCase().replace(/^www\./, '');
+    } catch {
+        return '';
+    }
+}
+
 function guessCompanyName(hit: SearchHit): string {
     const rawTitle = String(hit.title || '').trim();
     const candidates = rawTitle
@@ -147,63 +155,109 @@ function guessCompanyName(hit: SearchHit): string {
 export async function runAutomaticLeadResearch(
     offer: SalesCockpitOffer,
     existingLeads: SalesCockpitLead[],
-    maxLeads = 12
-): Promise<{ leads: SalesCockpitLead[]; queries: string[] }> {
+    existingCandidatesOrMax: LeadCandidateRecord[] | number = [],
+    maxCandidatesInput = 12
+): Promise<{
+    candidates: LeadCandidateRecord[];
+    leads: SalesCockpitLead[];
+    queries: string[];
+    added: number;
+    skipped: number;
+    duplicates: number;
+    errors: string[];
+}> {
+    const existingCandidates = Array.isArray(existingCandidatesOrMax) ? existingCandidatesOrMax : [];
+    const maxCandidates = typeof existingCandidatesOrMax === 'number' ? existingCandidatesOrMax : maxCandidatesInput;
     const queries = buildQueries(offer);
     const hits: SearchHit[] = [];
+    const errors: string[] = [];
 
     for (const query of queries) {
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
         try {
             const html = await httpGet(url);
             hits.push(...parseSearchResults(html, query));
-        } catch {
-            // Continue with other queries when one search source fails.
+        } catch (error: any) {
+            errors.push(`${query}: ${error?.message || error}`);
         }
     }
 
     const knownCompanies = new Set(existingLeads.map((lead) => lead.company.toLowerCase().trim()).filter(Boolean));
     const knownUrls = new Set(existingLeads.map((lead) => String(lead.profileUrl || '').trim().toLowerCase()).filter(Boolean));
-    const leads: SalesCockpitLead[] = [];
+    const knownCandidateUrls = new Set(existingCandidates.map((candidate) => String(candidate.sourceUrl || '').trim().toLowerCase()).filter(Boolean));
+    const knownDomains = new Set(existingLeads.map((lead) => String(lead.domain || '').trim().toLowerCase()).filter(Boolean));
+    const candidates: LeadCandidateRecord[] = [];
+    let duplicates = 0;
+    let skipped = 0;
 
     for (const hit of hits) {
         if (!shouldKeepUrl(hit.url)) {
+            skipped += 1;
             continue;
         }
         const company = guessCompanyName(hit);
         const normalizedCompany = company.toLowerCase().trim();
         const normalizedUrl = hit.url.toLowerCase().trim();
-        if (!normalizedCompany || knownCompanies.has(normalizedCompany) || knownUrls.has(normalizedUrl)) {
+        const domain = domainFromUrl(hit.url);
+        if (!normalizedCompany) {
+            skipped += 1;
+            continue;
+        }
+        if (knownCompanies.has(normalizedCompany) || knownUrls.has(normalizedUrl) || knownCandidateUrls.has(normalizedUrl) || knownDomains.has(domain)) {
+            duplicates += 1;
             continue;
         }
 
-        leads.push({
-            id: `auto-${slugify(company)}-${leads.length + 1}`,
+        candidates.push({
+            id: `candidate-${slugify(company)}-${candidates.length + 1}`,
             company,
-            contactName: '',
-            role: '',
-            status: 'target',
-            pain: offer.problem,
-            nextAction: 'Qualifier ce compte puis preparer un premier draft.',
-            owner: 'founder',
-            profileUrl: hit.url,
-            notes: [
-                `Source query: ${hit.query}`,
-                hit.snippet ? `Snippet: ${hit.snippet}` : '',
-                `Angle: ${offer.promise}`
-            ].filter(Boolean).join('\n')
+            domain,
+            sourceUrl: hit.url,
+            sourceQuery: hit.query,
+            snippet: hit.snippet,
+            confidence: hit.snippet ? 0.72 : 0.55,
+            status: 'candidate',
+            discoveredAt: new Date().toISOString(),
+            notes: `Angle: ${offer.promise}`
         });
 
         knownCompanies.add(normalizedCompany);
         knownUrls.add(normalizedUrl);
+        knownCandidateUrls.add(normalizedUrl);
+        knownDomains.add(domain);
 
-        if (leads.length >= maxLeads) {
+        if (candidates.length >= maxCandidates) {
             break;
         }
     }
 
     return {
-        leads,
-        queries
+        candidates,
+        leads: candidates.map((candidate) => ({
+            id: candidate.id.replace(/^candidate-/, 'lead-'),
+            company: candidate.company,
+            contactName: '',
+            role: '',
+            status: 'reviewed',
+            pain: offer.problem,
+            nextAction: 'Qualifier ce compte puis preparer un premier draft.',
+            owner: 'founder',
+            profileUrl: candidate.sourceUrl,
+            notes: [
+                candidate.sourceQuery ? `Source query: ${candidate.sourceQuery}` : '',
+                candidate.snippet ? `Snippet: ${candidate.snippet}` : '',
+                `Angle: ${offer.promise}`
+            ].filter(Boolean).join('\n'),
+            domain: candidate.domain,
+            sourceUrl: candidate.sourceUrl,
+            sourceQuery: candidate.sourceQuery,
+            snippet: candidate.snippet,
+            confidence: candidate.confidence
+        })),
+        queries,
+        added: candidates.length,
+        skipped,
+        duplicates,
+        errors
     };
 }

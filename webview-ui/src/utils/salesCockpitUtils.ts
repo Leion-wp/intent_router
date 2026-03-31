@@ -1,4 +1,4 @@
-export const SALES_LEAD_STAGES = ['target', 'contacted', 'discovery', 'demo', 'proposal', 'pilot', 'won', 'lost'] as const;
+export const SALES_LEAD_STAGES = ['candidate', 'reviewed', 'enriched', 'ready_for_draft', 'drafted', 'contacted', 'discovery', 'demo', 'proposal', 'pilot', 'won', 'lost'] as const;
 export const SALES_TASK_KINDS = ['outreach', 'follow_up', 'demo', 'proposal', 'proof', 'friction'] as const;
 export const SALES_CHANNELS = ['email', 'linkedin'] as const;
 export const SALES_PROVIDER_IDS = ['email', 'google_sheets', 'crm', 'linkedin', 'reddit', 'product_hunt'] as const;
@@ -11,6 +11,10 @@ export const PROOF_ASSET_STATUSES = ['draft', 'ready'] as const;
 export const MCP_TRANSPORTS = ['http', 'sse', 'stdio'] as const;
 export const MCP_SERVER_STATUSES = ['not_configured', 'configured', 'connected'] as const;
 export const SALES_DRAFT_STATUSES = ['drafted', 'reviewed', 'sent'] as const;
+export const LEAD_CANDIDATE_STATUSES = ['candidate', 'reviewed', 'rejected'] as const;
+export const LEAD_ENRICHMENT_STATUSES = ['not_started', 'partial', 'complete', 'failed'] as const;
+export const CAMPAIGN_QUEUE_STATUSES = ['ready_for_draft', 'drafted', 'reviewed', 'needs_follow_up', 'stale'] as const;
+export const SALES_PROVIDER_ROLES = ['research', 'enrich', 'sync', 'draft', 'proof'] as const;
 
 export type SalesLeadStage = typeof SALES_LEAD_STAGES[number];
 export type SalesTaskStatus = 'todo' | 'done';
@@ -26,6 +30,10 @@ export type ProofAssetStatus = typeof PROOF_ASSET_STATUSES[number];
 export type McpTransport = typeof MCP_TRANSPORTS[number];
 export type McpServerStatus = typeof MCP_SERVER_STATUSES[number];
 export type SalesDraftStatus = typeof SALES_DRAFT_STATUSES[number];
+export type LeadCandidateStatus = typeof LEAD_CANDIDATE_STATUSES[number];
+export type LeadEnrichmentStatus = typeof LEAD_ENRICHMENT_STATUSES[number];
+export type CampaignQueueStatus = typeof CAMPAIGN_QUEUE_STATUSES[number];
+export type SalesProviderRole = typeof SALES_PROVIDER_ROLES[number];
 
 export type SalesProviderLogEntry = {
   id: string;
@@ -33,6 +41,22 @@ export type SalesProviderLogEntry = {
   level: 'info' | 'success' | 'warning' | 'error';
   message: string;
   detail?: string;
+};
+
+export type LeadScore = {
+  total: number;
+  label: 'faible' | 'moyen' | 'fort';
+  reasons: string[];
+  updatedAt: string;
+};
+
+export type LeadEnrichmentState = {
+  status: LeadEnrichmentStatus;
+  attempts: number;
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  error?: string;
+  sources?: string[];
 };
 
 export type SalesCockpitLead = {
@@ -47,6 +71,31 @@ export type SalesCockpitLead = {
   owner: string;
   dueDate?: string;
   profileUrl?: string;
+  notes?: string;
+  domain?: string;
+  sourceUrl?: string;
+  sourceQuery?: string;
+  snippet?: string;
+  confidence?: number;
+  score?: LeadScore;
+  enrichment?: LeadEnrichmentState;
+  manualFields?: string[];
+  lastContactedAt?: string;
+  templateId?: string;
+};
+
+export type LeadRecord = SalesCockpitLead;
+
+export type LeadCandidateRecord = {
+  id: string;
+  company: string;
+  domain?: string;
+  sourceUrl: string;
+  sourceQuery: string;
+  snippet: string;
+  confidence: number;
+  status: LeadCandidateStatus;
+  discoveredAt: string;
   notes?: string;
 };
 
@@ -149,11 +198,70 @@ export type SalesCockpitDraftQueueItem = {
   threadId?: string;
 };
 
+export type CampaignQueueItem = {
+  id: string;
+  leadId: string;
+  company: string;
+  channel: SalesChannel;
+  templateId?: string;
+  status: CampaignQueueStatus;
+  dueDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  draftId?: string;
+  threadId?: string;
+  summary?: string;
+};
+
 export type SalesCockpitMcpTool = {
   name: string;
   title?: string;
   description?: string;
   inputSchemaSummary?: string;
+};
+
+export type McpToolBinding = {
+  serverId: string;
+  toolName: string;
+  roles: SalesProviderRole[];
+  notes?: string;
+};
+
+export type SalesCockpitLeadInbox = {
+  candidates: LeadCandidateRecord[];
+  lastResearchAt?: string;
+  lastQueries?: string[];
+  lastResearchSummary?: string;
+};
+
+export type SheetBinding = {
+  sheetUrl?: string;
+  spreadsheetId?: string;
+  tabs: {
+    offer: string;
+    leads: string;
+    proof: string;
+    actions: string;
+  };
+  lastSyncedAt?: string;
+};
+
+export type ProviderRoleBinding = {
+  providerId: SalesProviderId;
+  roles: SalesProviderRole[];
+  notes?: string;
+  lastUsedAt?: string;
+};
+
+export type ActivityLogEntry = {
+  id: string;
+  timestamp: string;
+  level: 'info' | 'success' | 'warning' | 'error';
+  source: 'research' | 'enrichment' | 'sheet' | 'drafts' | 'provider' | 'product' | 'mcp' | 'system';
+  message: string;
+  detail?: string;
+  productId?: string;
+  stage?: string;
 };
 
 export type SalesCockpitProduct = {
@@ -180,6 +288,12 @@ export type SalesCockpitProduct = {
   ideaPath?: string;
   implementPath?: string;
   defaultSheetUrl?: string;
+  leadInbox: SalesCockpitLeadInbox;
+  campaignQueue: CampaignQueueItem[];
+  sheetBinding: SheetBinding;
+  providerBindings: ProviderRoleBinding[];
+  activityLog: ActivityLogEntry[];
+  mcpToolBindings: McpToolBinding[];
 };
 
 export type SalesCockpitMcpServer = {
@@ -199,7 +313,7 @@ export type SalesCockpitMcpServer = {
 };
 
 export type SalesCockpitState = {
-  version: 3;
+  version: 4;
   lastUpdatedAt: string;
   activeProductId: string;
   products: SalesCockpitProduct[];
@@ -225,6 +339,12 @@ export type SalesCockpitState = {
   implementPath?: string;
   defaultSheetUrl?: string;
   productStage: SalesProductStage;
+  leadInbox: SalesCockpitLeadInbox;
+  campaignQueue: CampaignQueueItem[];
+  sheetBinding: SheetBinding;
+  providerBindings: ProviderRoleBinding[];
+  activityLog: ActivityLogEntry[];
+  mcpToolBindings: McpToolBinding[];
 };
 
 export type SalesCockpitMetric = {
@@ -254,7 +374,7 @@ export type SalesCockpitRecommendation = {
   title: string;
   reason: string;
   priority: 'high' | 'medium' | 'low';
-  module: 'home' | 'products' | 'prospects' | 'contact' | 'funnel' | 'proof' | 'deploy' | 'follow_up' | 'providers' | 'mcp';
+  module: 'home' | 'products' | 'prospects' | 'contact' | 'providers' | 'proof';
   cta: string;
 };
 
@@ -287,6 +407,9 @@ export type SalesCockpitModel = {
   overdueTasks: number;
   activeCampaigns: SalesCockpitCampaign[];
   openLeads: SalesCockpitLead[];
+  leadInbox: SalesCockpitLeadInbox;
+  campaignQueue: CampaignQueueItem[];
+  activityLog: ActivityLogEntry[];
   providerSummary: {
     total: number;
     connected: number;
@@ -385,7 +508,7 @@ export const SALES_PROVIDER_DEFINITIONS: SalesProviderDefinition[] = [
   }
 ];
 
-const STAGE_ORDER: SalesLeadStage[] = ['target', 'contacted', 'discovery', 'demo', 'proposal', 'pilot', 'won', 'lost'];
+const STAGE_ORDER: SalesLeadStage[] = ['candidate', 'reviewed', 'enriched', 'ready_for_draft', 'drafted', 'contacted', 'discovery', 'demo', 'proposal', 'pilot', 'won', 'lost'];
 
 function timestamp(): string {
   return new Date().toISOString();
@@ -397,6 +520,69 @@ export function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'entry';
+}
+
+function normalizeDomain(urlValue?: string): string | undefined {
+  const value = String(urlValue || '').trim();
+  if (!value) return undefined;
+  try {
+    return new URL(value).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return undefined;
+  }
+}
+
+function tokenizeAudience(value: string): string[] {
+  return Array.from(new Set(
+    String(value || '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/g)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 4)
+  )).slice(0, 8);
+}
+
+export function computeLeadScore(lead: SalesCockpitLead, offer?: SalesCockpitOffer): LeadScore {
+  const reasons: string[] = [];
+  let total = 0;
+  if (lead.company) {
+    total += 10;
+    reasons.push('societe identifiee');
+  }
+  if (lead.profileUrl || lead.sourceUrl || lead.domain) {
+    total += 15;
+    reasons.push('surface web exploitable');
+  }
+  if (lead.email) {
+    total += 25;
+    reasons.push('email disponible');
+  }
+  if (lead.pain) {
+    total += 15;
+    reasons.push('douleur explicite');
+  }
+  if (lead.nextAction) {
+    total += 10;
+    reasons.push('prochaine action definie');
+  }
+  if (lead.sourceQuery || lead.snippet) {
+    total += 10;
+    reasons.push('source de recherche tracee');
+  }
+  const audienceTokens = tokenizeAudience(offer?.audience || '');
+  if (audienceTokens.length > 0) {
+    const haystack = `${lead.company} ${lead.role} ${lead.notes || ''} ${lead.snippet || ''}`.toLowerCase();
+    if (audienceTokens.some((token) => haystack.includes(token))) {
+      total += 15;
+      reasons.push('match partiel avec l ICP');
+    }
+  }
+  return {
+    total,
+    label: total >= 75 ? 'fort' : total >= 45 ? 'moyen' : 'faible',
+    reasons,
+    updatedAt: timestamp()
+  };
 }
 
 function createDefaultOffer(): SalesCockpitOffer {
@@ -471,6 +657,52 @@ export function createDefaultProviderAccounts(): SalesProviderAccount[] {
   }));
 }
 
+function createDefaultProviderBindings(): ProviderRoleBinding[] {
+  return [
+    { providerId: 'email', roles: ['draft'], notes: 'Draft Gmail only, never auto-send.' },
+    { providerId: 'google_sheets', roles: ['sync', 'proof'], notes: 'Sync et preuve sur Google Workspace.' },
+    { providerId: 'crm', roles: ['sync'], notes: 'Sync CRM optionnelle.' },
+    { providerId: 'linkedin', roles: ['research'], notes: 'Handoff manuel.' },
+    { providerId: 'reddit', roles: ['research'], notes: 'Handoff manuel.' },
+    { providerId: 'product_hunt', roles: ['proof'], notes: 'Preparation de lancement seulement.' }
+  ];
+}
+
+function createDefaultLeadInbox(): SalesCockpitLeadInbox {
+  return {
+    candidates: [],
+    lastQueries: []
+  };
+}
+
+function createDefaultSheetBinding(): SheetBinding {
+  return {
+    tabs: {
+      offer: 'Offer',
+      leads: 'Leads',
+      proof: 'Proof',
+      actions: 'Actions'
+    }
+  };
+}
+
+function createDefaultCampaignQueue(): CampaignQueueItem[] {
+  return [];
+}
+
+function createDefaultActivityLog(productId?: string): ActivityLogEntry[] {
+  return [
+    {
+      id: `activity-${slugify(productId || 'default')}-created`,
+      timestamp: timestamp(),
+      level: 'info',
+      source: 'system',
+      message: 'Cockpit initialise.',
+      productId
+    }
+  ];
+}
+
 function createDefaultMcpServers(): SalesCockpitMcpServer[] {
   return [
     {
@@ -490,12 +722,13 @@ function createDefaultMcpServers(): SalesCockpitMcpServer[] {
 
 export function createSalesCockpitProduct(name = 'Leion Delivery'): SalesCockpitProduct {
   const slug = slugify(name);
+  const productId = `product-${slug}`;
   return {
-    id: `product-${slug}`,
+    id: productId,
     name,
     slug,
     stage: 'idea',
-    notes: 'Use this product space to track one SaaS offer, one interface, and up to three pipelines.',
+    notes: 'Un produit = une promesse, une interface, et 1 a 3 pipelines maximum.',
     offer: {
       ...createDefaultOffer(),
       name
@@ -540,32 +773,99 @@ export function createSalesCockpitProduct(name = 'Leion Delivery'): SalesCockpit
     pipelinePaths: [],
     ideaPath: 'idea.md',
     implementPath: 'implement.md',
-    defaultSheetUrl: ''
+    defaultSheetUrl: '',
+    leadInbox: createDefaultLeadInbox(),
+    campaignQueue: createDefaultCampaignQueue(),
+    sheetBinding: createDefaultSheetBinding(),
+    providerBindings: createDefaultProviderBindings(),
+    activityLog: createDefaultActivityLog(productId),
+    mcpToolBindings: []
   };
 }
 
-function snapshotFromProduct(product: SalesCockpitProduct): Pick<SalesCockpitState, 'notes' | 'offer' | 'funnel' | 'weeklyTargets' | 'leads' | 'tasks' | 'campaigns' | 'templates' | 'draftQueue' | 'proofAssets' | 'pipelinePaths' | 'ideaPath' | 'implementPath' | 'defaultSheetUrl' | 'productStage'> {
+function rebuildCampaignQueue(product: SalesCockpitProduct): CampaignQueueItem[] {
+  const queue = new Map<string, CampaignQueueItem>();
+  const now = timestamp();
+  for (const lead of product.leads) {
+    if (!lead.id) continue;
+    const activeDraft = product.draftQueue.find((entry) => entry.leadId === lead.id && entry.status !== 'sent');
+    let status: CampaignQueueStatus | undefined;
+    if (activeDraft) {
+      status = activeDraft.status === 'reviewed' ? 'reviewed' : 'drafted';
+    } else if (lead.status === 'ready_for_draft') {
+      status = 'ready_for_draft';
+    } else if (lead.status === 'drafted') {
+      status = 'drafted';
+    } else if (lead.status === 'contacted' || lead.status === 'discovery' || lead.status === 'demo' || lead.status === 'proposal' || lead.status === 'pilot') {
+      status = 'needs_follow_up';
+    } else if (lead.dueDate && lead.dueDate < now.slice(0, 10) && lead.status !== 'won' && lead.status !== 'lost') {
+      status = 'stale';
+    }
+    if (!status) continue;
+    queue.set(lead.id, {
+      id: `queue-${lead.id}`,
+      leadId: lead.id,
+      company: lead.company,
+      channel: 'email',
+      templateId: lead.templateId || product.templates.find((template) => template.channel === 'email')?.id,
+      status,
+      dueDate: lead.dueDate,
+      createdAt: activeDraft?.createdAt || now,
+      updatedAt: now,
+      draftId: activeDraft?.draftId,
+      threadId: activeDraft?.threadId,
+      summary: lead.nextAction || lead.pain || lead.notes || ''
+    });
+  }
+  return Array.from(queue.values());
+}
+
+function applyLeadScoring(product: SalesCockpitProduct): SalesCockpitProduct {
+  const leads = product.leads.map((lead) => ({
+    ...lead,
+    domain: lead.domain || normalizeDomain(lead.profileUrl || lead.sourceUrl),
+    score: computeLeadScore(lead, product.offer)
+  }));
   return {
-    notes: product.notes,
-    offer: product.offer,
-    funnel: product.funnel,
-    weeklyTargets: product.weeklyTargets,
-    leads: product.leads,
-    tasks: product.tasks,
-    campaigns: product.campaigns,
-    templates: product.templates,
-    draftQueue: product.draftQueue,
-    proofAssets: product.proofAssets,
-    pipelinePaths: product.pipelinePaths,
-    ideaPath: product.ideaPath,
-    implementPath: product.implementPath,
-    defaultSheetUrl: product.defaultSheetUrl,
-    productStage: product.stage
+    ...product,
+    leads,
+    campaignQueue: rebuildCampaignQueue({
+      ...product,
+      leads
+    })
+  };
+}
+
+function snapshotFromProduct(product: SalesCockpitProduct): Pick<SalesCockpitState, 'notes' | 'offer' | 'funnel' | 'weeklyTargets' | 'leads' | 'tasks' | 'campaigns' | 'templates' | 'draftQueue' | 'proofAssets' | 'pipelinePaths' | 'ideaPath' | 'implementPath' | 'defaultSheetUrl' | 'productStage' | 'leadInbox' | 'campaignQueue' | 'sheetBinding' | 'providerBindings' | 'activityLog' | 'mcpToolBindings'> {
+  const normalized = applyLeadScoring(product);
+  return {
+    notes: normalized.notes,
+    offer: normalized.offer,
+    funnel: normalized.funnel,
+    weeklyTargets: normalized.weeklyTargets,
+    leads: normalized.leads,
+    tasks: normalized.tasks,
+    campaigns: normalized.campaigns,
+    templates: normalized.templates,
+    draftQueue: normalized.draftQueue,
+    proofAssets: normalized.proofAssets,
+    pipelinePaths: normalized.pipelinePaths,
+    ideaPath: normalized.ideaPath,
+    implementPath: normalized.implementPath,
+    defaultSheetUrl: normalized.defaultSheetUrl || normalized.sheetBinding.sheetUrl,
+    productStage: normalized.stage,
+    leadInbox: normalized.leadInbox,
+    campaignQueue: normalized.campaignQueue,
+    sheetBinding: normalized.sheetBinding,
+    providerBindings: normalized.providerBindings,
+    activityLog: normalized.activityLog,
+    mcpToolBindings: normalized.mcpToolBindings
   };
 }
 
 function applySnapshotToProduct(product: SalesCockpitProduct, state: Partial<SalesCockpitState>): SalesCockpitProduct {
-  return {
+  const sheetBinding = state.sheetBinding ?? product.sheetBinding;
+  return applyLeadScoring({
     ...product,
     notes: state.notes ?? product.notes,
     offer: state.offer ?? product.offer,
@@ -580,13 +880,23 @@ function applySnapshotToProduct(product: SalesCockpitProduct, state: Partial<Sal
     pipelinePaths: state.pipelinePaths ?? product.pipelinePaths,
     ideaPath: state.ideaPath ?? product.ideaPath,
     implementPath: state.implementPath ?? product.implementPath,
-    defaultSheetUrl: state.defaultSheetUrl ?? product.defaultSheetUrl,
-    stage: state.productStage ?? product.stage
-  };
+    defaultSheetUrl: state.defaultSheetUrl ?? sheetBinding.sheetUrl ?? product.defaultSheetUrl,
+    stage: state.productStage ?? product.stage,
+    leadInbox: state.leadInbox ?? product.leadInbox,
+    campaignQueue: state.campaignQueue ?? product.campaignQueue,
+    sheetBinding: {
+      ...sheetBinding,
+      sheetUrl: state.defaultSheetUrl ?? sheetBinding.sheetUrl ?? product.defaultSheetUrl
+    },
+    providerBindings: state.providerBindings ?? product.providerBindings,
+    activityLog: state.activityLog ?? product.activityLog,
+    mcpToolBindings: state.mcpToolBindings ?? product.mcpToolBindings
+  });
 }
 
 function hydrateActiveProduct(state: SalesCockpitState): SalesCockpitState {
-  const activeProduct = state.products.find((product) => product.id === state.activeProductId) || state.products[0];
+  const products = state.products.length > 0 ? state.products.map((product) => applyLeadScoring(product)) : [createSalesCockpitProduct()];
+  const activeProduct = products.find((product) => product.id === state.activeProductId) || products[0];
   if (!activeProduct) {
     const fallback = createSalesCockpitProduct();
     return {
@@ -598,6 +908,7 @@ function hydrateActiveProduct(state: SalesCockpitState): SalesCockpitState {
   }
   return {
     ...state,
+    products,
     activeProductId: activeProduct.id,
     ...snapshotFromProduct(activeProduct)
   };
@@ -611,7 +922,7 @@ function syncActiveProduct(state: SalesCockpitState): SalesCockpitState {
   const nextProducts = products.map((product) =>
     product.id === activeProductId
       ? applySnapshotToProduct(product, state)
-      : product
+      : applyLeadScoring(product)
   );
   return hydrateActiveProduct({
     ...state,
@@ -623,7 +934,7 @@ function syncActiveProduct(state: SalesCockpitState): SalesCockpitState {
 export function createDefaultSalesCockpitState(): SalesCockpitState {
   const product = createSalesCockpitProduct('Leion Delivery');
   return {
-    version: 3,
+    version: 4,
     lastUpdatedAt: timestamp(),
     activeProductId: product.id,
     products: [product],
@@ -633,11 +944,13 @@ export function createDefaultSalesCockpitState(): SalesCockpitState {
   };
 }
 
-function sanitizeLead(raw: any): SalesCockpitLead | null {
+function sanitizeLead(raw: any, offer?: SalesCockpitOffer): SalesCockpitLead | null {
   const company = String(raw?.company || '').trim();
   if (!company) return null;
-  const status = SALES_LEAD_STAGES.includes(raw?.status) ? raw.status : 'target';
-  return {
+  const status = String(raw?.status || '').trim() === 'target'
+    ? 'reviewed'
+    : (SALES_LEAD_STAGES.includes(raw?.status) ? raw.status : 'reviewed');
+  const lead: SalesCockpitLead = {
     id: String(raw?.id || slugify(company)).trim(),
     company,
     contactName: String(raw?.contactName || '').trim(),
@@ -649,6 +962,49 @@ function sanitizeLead(raw: any): SalesCockpitLead | null {
     owner: String(raw?.owner || 'founder').trim() || 'founder',
     dueDate: raw?.dueDate ? String(raw.dueDate).trim() : undefined,
     profileUrl: raw?.profileUrl ? String(raw.profileUrl).trim() : undefined,
+    notes: raw?.notes ? String(raw.notes) : undefined,
+    domain: raw?.domain ? String(raw.domain).trim() : normalizeDomain(raw?.profileUrl || raw?.sourceUrl),
+    sourceUrl: raw?.sourceUrl ? String(raw.sourceUrl).trim() : (raw?.profileUrl ? String(raw.profileUrl).trim() : undefined),
+    sourceQuery: raw?.sourceQuery ? String(raw.sourceQuery).trim() : undefined,
+    snippet: raw?.snippet ? String(raw.snippet).trim() : undefined,
+    confidence: typeof raw?.confidence === 'number' ? raw.confidence : undefined,
+    enrichment: raw?.enrichment ? {
+      status: LEAD_ENRICHMENT_STATUSES.includes(raw.enrichment?.status) ? raw.enrichment.status : 'not_started',
+      attempts: Math.max(0, Number(raw.enrichment?.attempts || 0)),
+      lastAttemptAt: raw.enrichment?.lastAttemptAt ? String(raw.enrichment.lastAttemptAt).trim() : undefined,
+      lastSuccessAt: raw.enrichment?.lastSuccessAt ? String(raw.enrichment.lastSuccessAt).trim() : undefined,
+      error: raw.enrichment?.error ? String(raw.enrichment.error) : undefined,
+      sources: Array.isArray(raw.enrichment?.sources) ? raw.enrichment.sources.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : []
+    } : undefined,
+    manualFields: Array.isArray(raw?.manualFields) ? raw.manualFields.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : [],
+    lastContactedAt: raw?.lastContactedAt ? String(raw.lastContactedAt).trim() : undefined,
+    templateId: raw?.templateId ? String(raw.templateId).trim() : undefined
+  };
+  return {
+    ...lead,
+    score: raw?.score ? {
+      total: Number(raw.score?.total || 0),
+      label: ['faible', 'moyen', 'fort'].includes(raw.score?.label) ? raw.score.label : 'faible',
+      reasons: Array.isArray(raw.score?.reasons) ? raw.score.reasons.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : [],
+      updatedAt: String(raw.score?.updatedAt || timestamp()).trim()
+    } : computeLeadScore(lead, offer)
+  };
+}
+
+function sanitizeCandidate(raw: any): LeadCandidateRecord | null {
+  const company = String(raw?.company || '').trim();
+  const sourceUrl = String(raw?.sourceUrl || raw?.profileUrl || '').trim();
+  if (!company || !sourceUrl) return null;
+  return {
+    id: String(raw?.id || `candidate-${slugify(company)}-${slugify(sourceUrl)}`).trim(),
+    company,
+    domain: raw?.domain ? String(raw.domain).trim() : normalizeDomain(sourceUrl),
+    sourceUrl,
+    sourceQuery: String(raw?.sourceQuery || '').trim(),
+    snippet: String(raw?.snippet || raw?.notes || '').trim(),
+    confidence: Math.max(0, Math.min(1, Number(raw?.confidence || 0.5))),
+    status: LEAD_CANDIDATE_STATUSES.includes(raw?.status) ? raw.status : 'candidate',
+    discoveredAt: String(raw?.discoveredAt || timestamp()).trim(),
     notes: raw?.notes ? String(raw.notes) : undefined
   };
 }
@@ -787,31 +1143,130 @@ function sanitizeDraftQueueItem(raw: any): SalesCockpitDraftQueueItem | null {
   };
 }
 
+function sanitizeCampaignQueueItem(raw: any): CampaignQueueItem | null {
+  const leadId = String(raw?.leadId || '').trim();
+  if (!leadId) return null;
+  return {
+    id: String(raw?.id || `queue-${leadId}`).trim(),
+    leadId,
+    company: String(raw?.company || '').trim(),
+    channel: raw?.channel === 'linkedin' ? 'linkedin' : 'email',
+    templateId: raw?.templateId ? String(raw.templateId).trim() : undefined,
+    status: CAMPAIGN_QUEUE_STATUSES.includes(raw?.status) ? raw.status : 'ready_for_draft',
+    dueDate: raw?.dueDate ? String(raw.dueDate).trim() : undefined,
+    createdAt: String(raw?.createdAt || timestamp()).trim(),
+    updatedAt: String(raw?.updatedAt || timestamp()).trim(),
+    draftId: raw?.draftId ? String(raw.draftId).trim() : undefined,
+    threadId: raw?.threadId ? String(raw.threadId).trim() : undefined,
+    summary: raw?.summary ? String(raw.summary) : undefined
+  };
+}
+
+function sanitizeLeadInbox(raw: any): SalesCockpitLeadInbox {
+  const defaults = createDefaultLeadInbox();
+  return {
+    candidates: Array.isArray(raw?.candidates) ? raw.candidates.map(sanitizeCandidate).filter(Boolean) as LeadCandidateRecord[] : defaults.candidates,
+    lastResearchAt: raw?.lastResearchAt ? String(raw.lastResearchAt).trim() : undefined,
+    lastQueries: Array.isArray(raw?.lastQueries) ? raw.lastQueries.map((entry: unknown) => String(entry || '').trim()).filter(Boolean) : defaults.lastQueries,
+    lastResearchSummary: raw?.lastResearchSummary ? String(raw.lastResearchSummary) : undefined
+  };
+}
+
+function sanitizeSheetBinding(raw: any, defaultSheetUrl?: string): SheetBinding {
+  const fallback = createDefaultSheetBinding();
+  const tabs = raw?.tabs || {};
+  return {
+    sheetUrl: raw?.sheetUrl ? String(raw.sheetUrl).trim() : (defaultSheetUrl ? String(defaultSheetUrl).trim() : undefined),
+    spreadsheetId: raw?.spreadsheetId ? String(raw.spreadsheetId).trim() : undefined,
+    tabs: {
+      offer: String(tabs.offer || fallback.tabs.offer).trim() || fallback.tabs.offer,
+      leads: String(tabs.leads || fallback.tabs.leads).trim() || fallback.tabs.leads,
+      proof: String(tabs.proof || fallback.tabs.proof).trim() || fallback.tabs.proof,
+      actions: String(tabs.actions || fallback.tabs.actions).trim() || fallback.tabs.actions
+    },
+    lastSyncedAt: raw?.lastSyncedAt ? String(raw.lastSyncedAt).trim() : undefined
+  };
+}
+
+function sanitizeProviderBinding(raw: any): ProviderRoleBinding | null {
+  const providerId = SALES_PROVIDER_IDS.includes(raw?.providerId) ? raw.providerId : undefined;
+  if (!providerId) return null;
+  return {
+    providerId,
+    roles: Array.isArray(raw?.roles)
+      ? raw.roles.map((entry: unknown) => String(entry || '').trim()).filter((entry: string) => SALES_PROVIDER_ROLES.includes(entry as SalesProviderRole)) as SalesProviderRole[]
+      : [],
+    notes: raw?.notes ? String(raw.notes) : undefined,
+    lastUsedAt: raw?.lastUsedAt ? String(raw.lastUsedAt).trim() : undefined
+  };
+}
+
+function sanitizeActivityLogEntry(raw: any, productId?: string): ActivityLogEntry | null {
+  const message = String(raw?.message || '').trim();
+  if (!message) return null;
+  return {
+    id: String(raw?.id || `activity-${slugify(message)}-${Date.now()}`).trim(),
+    timestamp: String(raw?.timestamp || timestamp()).trim(),
+    level: ['info', 'success', 'warning', 'error'].includes(raw?.level) ? raw.level : 'info',
+    source: ['research', 'enrichment', 'sheet', 'drafts', 'provider', 'product', 'mcp', 'system'].includes(raw?.source) ? raw.source : 'system',
+    message,
+    detail: raw?.detail ? String(raw.detail) : undefined,
+    productId: raw?.productId ? String(raw.productId).trim() : productId,
+    stage: raw?.stage ? String(raw.stage).trim() : undefined
+  };
+}
+
+function sanitizeMcpToolBinding(raw: any): McpToolBinding | null {
+  const serverId = String(raw?.serverId || '').trim();
+  const toolName = String(raw?.toolName || '').trim();
+  if (!serverId || !toolName) return null;
+  return {
+    serverId,
+    toolName,
+    roles: Array.isArray(raw?.roles)
+      ? raw.roles.map((entry: unknown) => String(entry || '').trim()).filter((entry: string) => SALES_PROVIDER_ROLES.includes(entry as SalesProviderRole)) as SalesProviderRole[]
+      : [],
+    notes: raw?.notes ? String(raw.notes) : undefined
+  };
+}
+
 function sanitizeProduct(raw: any, fallbackName: string, fallbackId?: string): SalesCockpitProduct {
   const fallback = createSalesCockpitProduct(fallbackName);
-  const leads = Array.isArray(raw?.leads) ? raw.leads.map(sanitizeLead).filter(Boolean) as SalesCockpitLead[] : fallback.leads;
+  const name = String(raw?.name || fallbackName || fallback.name).trim() || fallback.name;
+  const slug = String(raw?.slug || slugify(name)).trim() || slugify(name);
+  const id = String(raw?.id || fallbackId || `product-${slug}`).trim() || `product-${slug}`;
+  const offer = sanitizeOffer(raw?.offer, {
+    ...fallback.offer,
+    name
+  });
+  const leads = Array.isArray(raw?.leads) ? raw.leads.map((entry: any) => sanitizeLead(entry, offer)).filter(Boolean) as SalesCockpitLead[] : fallback.leads;
   const tasks = Array.isArray(raw?.tasks) ? raw.tasks.map(sanitizeTask).filter(Boolean) as SalesCockpitTask[] : fallback.tasks;
   const campaigns = Array.isArray(raw?.campaigns) ? raw.campaigns.map(sanitizeCampaign).filter(Boolean) as SalesCockpitCampaign[] : fallback.campaigns;
   const templates = Array.isArray(raw?.templates) ? raw.templates.map(sanitizeTemplate).filter(Boolean) as SalesCockpitTemplate[] : fallback.templates;
   const draftQueue = Array.isArray(raw?.draftQueue) ? raw.draftQueue.map(sanitizeDraftQueueItem).filter(Boolean) as SalesCockpitDraftQueueItem[] : fallback.draftQueue;
   const proofAssets = Array.isArray(raw?.proofAssets) ? raw.proofAssets.map(sanitizeProofAsset).filter(Boolean) as SalesCockpitProofAsset[] : fallback.proofAssets;
-  const name = String(raw?.name || fallbackName || fallback.name).trim() || fallback.name;
-  const slug = String(raw?.slug || slugify(name)).trim() || slugify(name);
-  const id = String(raw?.id || fallbackId || `product-${slug}`).trim() || `product-${slug}`;
   const pipelinePaths = Array.isArray(raw?.pipelinePaths)
     ? raw.pipelinePaths.map((entry: unknown) => String(entry || '').trim()).filter(Boolean)
     : fallback.pipelinePaths;
+  const leadInbox = sanitizeLeadInbox(raw?.leadInbox);
+  const sheetBinding = sanitizeSheetBinding(raw?.sheetBinding, raw?.defaultSheetUrl);
+  const providerBindings = Array.isArray(raw?.providerBindings)
+    ? raw.providerBindings.map(sanitizeProviderBinding).filter(Boolean) as ProviderRoleBinding[]
+    : fallback.providerBindings;
+  const activityLog = Array.isArray(raw?.activityLog)
+    ? raw.activityLog.map((entry: any) => sanitizeActivityLogEntry(entry, id)).filter(Boolean) as ActivityLogEntry[]
+    : createDefaultActivityLog(id);
+  const mcpToolBindings = Array.isArray(raw?.mcpToolBindings)
+    ? raw.mcpToolBindings.map(sanitizeMcpToolBinding).filter(Boolean) as McpToolBinding[]
+    : [];
 
-  return {
+  return applyLeadScoring({
     id,
     name,
     slug,
     stage: SALES_PRODUCT_STAGES.includes(raw?.stage) ? raw.stage : fallback.stage,
     notes: String(raw?.notes || fallback.notes),
-    offer: sanitizeOffer(raw?.offer, {
-      ...fallback.offer,
-      name
-    }),
+    offer,
     funnel: sanitizeFunnel(raw?.funnel, fallback.funnel),
     weeklyTargets: {
       outbound: Number(raw?.weeklyTargets?.outbound || fallback.weeklyTargets.outbound),
@@ -828,8 +1283,17 @@ function sanitizeProduct(raw: any, fallbackName: string, fallbackId?: string): S
     pipelinePaths,
     ideaPath: raw?.ideaPath ? String(raw.ideaPath).trim() : fallback.ideaPath,
     implementPath: raw?.implementPath ? String(raw.implementPath).trim() : fallback.implementPath,
-    defaultSheetUrl: raw?.defaultSheetUrl ? String(raw.defaultSheetUrl).trim() : fallback.defaultSheetUrl
-  };
+    defaultSheetUrl: raw?.defaultSheetUrl ? String(raw.defaultSheetUrl).trim() : sheetBinding.sheetUrl || fallback.defaultSheetUrl,
+    leadInbox,
+    campaignQueue: Array.isArray(raw?.campaignQueue) ? raw.campaignQueue.map(sanitizeCampaignQueueItem).filter(Boolean) as CampaignQueueItem[] : createDefaultCampaignQueue(),
+    sheetBinding: {
+      ...sheetBinding,
+      sheetUrl: sheetBinding.sheetUrl || raw?.defaultSheetUrl || fallback.defaultSheetUrl
+    },
+    providerBindings: providerBindings.length > 0 ? providerBindings : fallback.providerBindings,
+    activityLog: activityLog.length > 0 ? activityLog : createDefaultActivityLog(id),
+    mcpToolBindings
+  });
 }
 
 function sanitizeMcpServer(raw: any): SalesCockpitMcpServer | null {
@@ -893,7 +1357,13 @@ export function coerceSalesCockpitState(raw: any): SalesCockpitState {
       pipelinePaths: raw?.pipelinePaths,
       ideaPath: raw?.ideaPath,
       implementPath: raw?.implementPath,
-      defaultSheetUrl: raw?.defaultSheetUrl
+      defaultSheetUrl: raw?.defaultSheetUrl,
+      leadInbox: raw?.leadInbox,
+      campaignQueue: raw?.campaignQueue,
+      sheetBinding: raw?.sheetBinding,
+      providerBindings: raw?.providerBindings,
+      activityLog: raw?.activityLog,
+      mcpToolBindings: raw?.mcpToolBindings
     }, raw?.offer?.name || 'Leion Delivery')];
 
   const activeProductId = String(raw?.activeProductId || incomingProducts[0]?.id || defaults.activeProductId).trim();
@@ -901,13 +1371,15 @@ export function coerceSalesCockpitState(raw: any): SalesCockpitState {
     ? raw.mcpServers.map(sanitizeMcpServer).filter(Boolean) as SalesCockpitMcpServer[]
     : defaults.mcpServers;
 
+  const activeProduct = incomingProducts.find((product) => product.id === activeProductId) || incomingProducts[0] || createSalesCockpitProduct();
   const base = {
-    version: 3 as const,
+    version: 4 as const,
     lastUpdatedAt: String(raw?.lastUpdatedAt || timestamp()),
     activeProductId,
     products: incomingProducts,
     mcpServers: mcpServers.length > 0 ? mcpServers : defaults.mcpServers,
-    providerAccounts
+    providerAccounts,
+    ...snapshotFromProduct(activeProduct)
   } as SalesCockpitState;
 
   return hydrateActiveProduct(base);
@@ -1056,7 +1528,7 @@ function buildLeadSignals(cockpit: SalesCockpitState): SalesCockpitLeadSignals {
   const openLeads = cockpit.leads.filter((lead) => lead.status !== 'won' && lead.status !== 'lost');
   return {
     totalOpen: openLeads.length,
-    readyForDraft: openLeads.filter((lead) => !!lead.email && !!lead.pain && !!lead.nextAction).length,
+    readyForDraft: openLeads.filter((lead) => lead.status === 'ready_for_draft' || (!!lead.email && !!lead.pain && !!lead.nextAction)).length,
     missingEmail: openLeads.filter((lead) => !lead.email).length,
     stale: openLeads.filter((lead) => !!lead.dueDate && lead.dueDate < today).length,
     missingPain: openLeads.filter((lead) => !lead.pain).length,
@@ -1158,7 +1630,7 @@ function buildRecommendations(cockpit: SalesCockpitState, readiness: SalesCockpi
       title: 'Vider la friction inbox',
       reason: `${frictionSummary.total} friction(s) freinent encore la boucle commerciale.`,
       priority: 'medium',
-      module: 'follow_up',
+      module: 'proof',
       cta: 'Traiter les frictions'
     });
   }
@@ -1169,7 +1641,7 @@ function buildRecommendations(cockpit: SalesCockpitState, readiness: SalesCockpi
       title: 'Decouvrir les tools MCP',
       reason: 'Le registre MCP est configure mais les outils utilisables ne sont pas encore visibles.',
       priority: 'medium',
-      module: 'mcp',
+      module: 'proof',
       cta: 'Scanner les serveurs'
     });
   }
@@ -1281,7 +1753,13 @@ export function buildSalesCockpitModel(cockpit: SalesCockpitState): SalesCockpit
       pipelinePaths: cockpit.pipelinePaths,
       ideaPath: cockpit.ideaPath,
       implementPath: cockpit.implementPath,
-      defaultSheetUrl: cockpit.defaultSheetUrl
+      defaultSheetUrl: cockpit.defaultSheetUrl,
+      leadInbox: cockpit.leadInbox,
+      campaignQueue: cockpit.campaignQueue,
+      sheetBinding: cockpit.sheetBinding,
+      providerBindings: cockpit.providerBindings,
+      activityLog: cockpit.activityLog,
+      mcpToolBindings: cockpit.mcpToolBindings
     },
     metrics: [
       {
@@ -1316,6 +1794,9 @@ export function buildSalesCockpitModel(cockpit: SalesCockpitState): SalesCockpit
     openLeads: [...cockpit.leads]
       .filter((lead) => lead.status !== 'won' && lead.status !== 'lost')
       .sort((left, right) => compareDate(left.dueDate, right.dueDate) || left.company.localeCompare(right.company)),
+    leadInbox: cockpit.leadInbox,
+    campaignQueue: cockpit.campaignQueue,
+    activityLog: cockpit.activityLog,
     providerSummary: {
       total: cockpit.providerAccounts.length,
       connected: cockpit.providerAccounts.filter((provider) => provider.status === 'connected').length,

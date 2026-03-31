@@ -21,7 +21,7 @@ import {
   slugify
 } from '../../utils/salesCockpitUtils';
 
-export type ControlPlaneModuleId = 'home' | 'products' | 'prospects' | 'contact' | 'funnel' | 'proof' | 'deploy' | 'follow_up' | 'providers' | 'mcp';
+export type ControlPlaneModuleId = 'home' | 'products' | 'prospects' | 'contact' | 'providers' | 'proof';
 
 export const CONTROL_PLANE_MODULES: Array<{
   id: ControlPlaneModuleId;
@@ -33,49 +33,25 @@ export const CONTROL_PLANE_MODULES: Array<{
     id: 'home',
     title: 'Mission',
     kicker: 'Piloter la journee',
-    description: 'Pars du centre de mission, vois les frictions, puis execute la meilleure action pour le produit actif.'
+    description: 'Vois le produit actif, les blocages et la prochaine meilleure action sans quitter le cockpit.'
   },
   {
     id: 'products',
-    title: 'Produit',
+    title: 'Produits',
     kicker: 'Structurer un SaaS',
-    description: 'Pilote l offre, idea.md, implement.md, la sheet et les 1 a 3 pipelines attaches a ce produit.'
+    description: 'Pilote l offre, les 1 a 3 pipelines, la sheet et les assets du produit actif.'
   },
   {
     id: 'prospects',
-    title: 'Prospects',
+    title: 'Lead Inbox',
     kicker: 'Remplir le haut de funnel',
-    description: 'Genere les angles de prospection, suis les comptes cibles et qualifie les leads au meme endroit.'
+    description: 'Genere, revele et qualifie les leads avant enrichissement et draft.'
   },
   {
     id: 'contact',
-    title: 'Contact',
+    title: 'Campagnes',
     kicker: 'Operer l outbound',
-    description: 'Travaille les campagnes, les drafts Gmail et les messages de relance sans sortir de VS Code.'
-  },
-  {
-    id: 'funnel',
-    title: 'Tunnel',
-    kicker: 'Controler la progression',
-    description: 'Cadre les objectifs hebdo et la facon dont un lead avance jusqu au pilote.'
-  },
-  {
-    id: 'proof',
-    title: 'Preuves',
-    kicker: 'Reutiliser les preuves',
-    description: 'Capture les runs, snippets et assets qui rendent l offre plus facile a vendre.'
-  },
-  {
-    id: 'deploy',
-    title: 'Deploiement',
-    kicker: 'Sortir la surface vendable',
-    description: 'Ouvre le pricing, les assets, les landing pages et les pipelines qui portent l offre.'
-  },
-  {
-    id: 'follow_up',
-    title: 'Suivi',
-    kicker: 'Fermer la boucle',
-    description: 'Travaille la queue d actions, les frictions, les preuves et les deals actifs.'
+    description: 'Travaille les campagnes, les drafts Gmail et les relances sans quitter VS Code.'
   },
   {
     id: 'providers',
@@ -84,10 +60,10 @@ export const CONTROL_PLANE_MODULES: Array<{
     description: 'Gere Google, Gmail, Sheets, CRM et les connexions reelles avec handoff prudent.'
   },
   {
-    id: 'mcp',
-    title: 'MCP',
-    kicker: 'Enregistrer les outils',
-    description: 'Rends les serveurs MCP visibles, rattache-les aux produits et expose leurs outils.'
+    id: 'proof',
+    title: 'Preuves / MCP / Settings',
+    kicker: 'Reutiliser les preuves',
+    description: 'Capture les preuves, expose les outils MCP et garde les reglages operables au meme endroit.'
   }
 ];
 
@@ -1830,40 +1806,67 @@ export default function ControlPlanePanel({
       renderMissionControlSection(),
       renderActionCenterSection(),
       renderProductWizardSection(),
-      renderOverviewSection(),
-      renderMetricsSection(),
-      renderLeadPipelineSection(),
-      renderActionQueueSection(),
       renderLeadGeneratorSection(),
-      renderProspectsSection(),
       renderProvidersSection(),
-      renderCampaignSection(),
-      renderDraftQueueSection(),
-      renderFrictionInboxSection(),
       renderProofLockerSection(),
-      renderDeliverySection(),
-      renderProductSurfaceSection(),
       renderMcpRegistrySection(),
       renderQuickAccessSection()
     );
   } else if (activeModule === 'home') {
-    sections.push(renderCockpitModuleBar(), renderMissionControlSection(), renderActionCenterSection(), renderFrictionInboxSection(), renderOverviewSection(), renderMetricsSection(), renderQuickAccessSection());
+    sections.push(
+      renderCockpitModuleBar(),
+      renderMissionControlSection(),
+      renderActionCenterSection(),
+      renderFrictionInboxSection(),
+      renderOverviewSection(),
+      renderMetricsSection(),
+      renderQuickAccessSection()
+    );
   } else if (activeModule === 'products') {
-    sections.push(renderCockpitModuleBar(), renderProductWizardSection(), renderOverviewSection(), renderOfferBuilderSection(), renderProductSurfaceSection());
+    sections.push(
+      renderCockpitModuleBar(),
+      renderProductWizardSection(),
+      renderOverviewSection(),
+      renderOfferBuilderSection(),
+      renderProductSurfaceSection()
+    );
   } else if (activeModule === 'prospects') {
-    sections.push(renderCockpitModuleBar(), renderLeadGeneratorSection(), renderLeadPipelineSection(), renderProspectsSection(), renderProductSurfaceSection());
+    sections.push(
+      renderCockpitModuleBar(),
+      renderLeadGeneratorSection(),
+      renderLeadPipelineSection(),
+      renderProspectsSection(),
+      renderActionCenterSection()
+    );
   } else if (activeModule === 'contact') {
-    sections.push(renderCockpitModuleBar(), renderCampaignSection(), renderDraftQueueSection(), renderActionCenterSection());
+    sections.push(
+      renderCockpitModuleBar(),
+      renderCampaignSection(),
+      renderDraftQueueSection(),
+      renderActionCenterSection(),
+      renderLeadPipelineSection()
+    );
+  } else if (activeModule === 'providers') {
+    sections.push(
+      renderCockpitModuleBar(),
+      renderProvidersSection(),
+      renderOverviewSection(),
+      renderQuickAccessSection()
+    );
+  } else if (activeModule === 'proof') {
+    sections.push(
+      renderCockpitModuleBar(),
+      renderProofLockerSection(),
+      renderMcpRegistrySection(),
+      renderFrictionInboxSection(),
+      renderQuickAccessSection()
+    );
   } else if (activeModule === 'funnel') {
     sections.push(renderCockpitModuleBar(), renderMetricsSection(), renderFunnelSection(), renderLeadPipelineSection());
-  } else if (activeModule === 'proof') {
-    sections.push(renderCockpitModuleBar(), renderProofLockerSection(), renderDeliverySection(), renderQuickAccessSection());
   } else if (activeModule === 'deploy') {
     sections.push(renderCockpitModuleBar(), renderDeliverySection(), renderProofLockerSection(), renderProductSurfaceSection(), renderQuickAccessSection());
   } else if (activeModule === 'follow_up') {
-    sections.push(renderCockpitModuleBar(), renderActionCenterSection(), renderActionQueueSection(), renderDraftQueueSection(), renderLeadPipelineSection(), renderProofLockerSection(), renderDeliverySection(), renderFrictionInboxSection());
-  } else if (activeModule === 'providers') {
-    sections.push(renderCockpitModuleBar(), renderProvidersSection(), renderQuickAccessSection());
+    sections.push(renderCockpitModuleBar(), renderActionCenterSection(), renderActionQueueSection(), renderDraftQueueSection(), renderLeadPipelineSection(), renderFrictionInboxSection());
   } else if (activeModule === 'mcp') {
     sections.push(renderCockpitModuleBar(), renderMcpRegistrySection(), renderQuickAccessSection());
   }

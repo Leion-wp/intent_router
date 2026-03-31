@@ -3,7 +3,7 @@ import { pipelineEventBus } from './eventBus';
 import { historyManager } from './historyManager';
 import { generateSecureNonce } from './security';
 import { LEION_DELIVERY_CATALOG } from './controlPlane/leionDeliveryCatalog';
-import { readSalesCockpitFromWorkspace, writeSalesCockpitToWorkspace } from './salesCockpitStore';
+import { appendActivityLog, createActivityLogEntry, getActiveSalesCockpitProduct, readSalesCockpitFromWorkspace, withActiveSalesCockpitProduct, writeSalesCockpitToWorkspace } from './salesCockpitStore';
 import { connectSalesProvider, disconnectSalesProvider, validateSalesProvider } from './salesProviderConnectionService';
 import { createGmailDraft, listGmailDraftQueue, openGmailDrafts } from './gmailDraftService';
 import { createCockpitGoogleSheet, exportProductToGoogleSheets, importLeadsFromGoogleSheets, openGoogleSheet } from './googleSheetsSyncService';
@@ -68,6 +68,52 @@ function mergeImportedTasks(existingTasks: any[], importedTasks: any[]): any[] {
         knownIds.add(id);
     }
     return merged;
+}
+
+function candidateToLead(candidate: any, offer: any): any {
+    return {
+        id: String(candidate?.id || '').replace(/^candidate-/, 'lead-') || `lead-${Date.now()}`,
+        company: String(candidate?.company || '').trim(),
+        contactName: '',
+        role: '',
+        email: undefined,
+        status: 'reviewed',
+        pain: String(offer?.problem || '').trim(),
+        nextAction: 'Enrichir ce lead puis preparer un premier draft.',
+        owner: 'founder',
+        dueDate: undefined,
+        profileUrl: candidate?.sourceUrl ? String(candidate.sourceUrl).trim() : undefined,
+        notes: [
+            candidate?.sourceQuery ? `Source query: ${candidate.sourceQuery}` : '',
+            candidate?.snippet ? `Snippet: ${candidate.snippet}` : '',
+            candidate?.notes ? String(candidate.notes) : ''
+        ].filter(Boolean).join('\n'),
+        domain: candidate?.domain ? String(candidate.domain).trim() : undefined,
+        sourceUrl: candidate?.sourceUrl ? String(candidate.sourceUrl).trim() : undefined,
+        sourceQuery: candidate?.sourceQuery ? String(candidate.sourceQuery).trim() : undefined,
+        snippet: candidate?.snippet ? String(candidate.snippet).trim() : undefined,
+        confidence: typeof candidate?.confidence === 'number' ? candidate.confidence : undefined,
+        enrichment: {
+            status: 'not_started',
+            attempts: 0
+        },
+        manualFields: []
+    };
+}
+
+function dedupeLeadsById(existingLeads: any[], incomingLeads: any[]): any[] {
+    const known = new Set(existingLeads.map((lead) => String(lead?.id || '').trim()).filter(Boolean));
+    return [
+        ...existingLeads,
+        ...incomingLeads.filter((lead) => {
+            const id = String(lead?.id || '').trim();
+            if (!id || known.has(id)) {
+                return false;
+            }
+            known.add(id);
+            return true;
+        })
+    ];
 }
 
 function autofillProofAssets(existingAssets: any[], history: any[]): { proofAssets: any[]; added: number } {
@@ -701,7 +747,7 @@ export class CockpitViewProvider implements vscode.WebviewViewProvider, vscode.D
                         updatedLeads[index] = {
                             ...updatedLeads[index],
                             nextAction: 'Relire le draft Gmail genere puis envoyer manuellement.',
-                            status: updatedLeads[index].status === 'target' ? 'contacted' : updatedLeads[index].status
+                            status: 'drafted'
                         };
                     }
                 }
@@ -723,10 +769,16 @@ export class CockpitViewProvider implements vscode.WebviewViewProvider, vscode.D
         if (message.type === 'salesCockpit.runLeadPipeline') {
             try {
                 let current = await readSalesCockpitFromWorkspace();
-                const researched = await runAutomaticLeadResearch(current.offer, current.leads, 8);
+                const researched = await runAutomaticLeadResearch(current.offer, current.leads, current.leadInbox.candidates, 12);
                 current = await writeSalesCockpitToWorkspace({
                     ...current,
-                    leads: [...current.leads, ...researched.leads]
+                    leadInbox: {
+                        ...current.leadInbox,
+                        candidates: [...current.leadInbox.candidates, ...researched.candidates],
+                        lastQueries: researched.queries,
+                        lastResearchAt: new Date().toISOString(),
+                        lastResearchSummary: `${researched.added} candidat(s), ${researched.duplicates} doublon(s), ${researched.skipped} ignore(s)`
+                    }
                 } as any);
 
                 const enriched = await enrichCockpitLeads(current.leads, 8);
@@ -803,7 +855,7 @@ export class CockpitViewProvider implements vscode.WebviewViewProvider, vscode.D
                                 updatedLeads[index] = {
                                     ...updatedLeads[index],
                                     nextAction: 'Relire le draft Gmail genere puis envoyer manuellement.',
-                                    status: updatedLeads[index].status === 'target' ? 'contacted' : updatedLeads[index].status
+                                    status: 'drafted'
                                 };
                             }
                         }
@@ -908,6 +960,262 @@ export class CockpitViewProvider implements vscode.WebviewViewProvider, vscode.D
                 } as any);
                 await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
                 vscode.window.showErrorMessage(`MCP discovery failed: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.reviewLeadCandidate') {
+            try {
+                const current = await readSalesCockpitFromWorkspace();
+                const candidateId = String(message.candidateId || '').trim();
+                const candidate = current.leadInbox.candidates.find((entry: any) => String(entry?.id || '').trim() === candidateId);
+                if (!candidate) {
+                    throw new Error('Lead candidate introuvable.');
+                }
+                const product = getActiveSalesCockpitProduct(current);
+                const nextState = withActiveSalesCockpitProduct(current, (activeProduct) => ({
+                    ...activeProduct,
+                    leads: dedupeLeadsById(activeProduct.leads, [candidateToLead(candidate, activeProduct.offer)]),
+                    leadInbox: {
+                        ...activeProduct.leadInbox,
+                        candidates: activeProduct.leadInbox.candidates.map((entry: any) => entry.id === candidateId ? { ...entry, status: 'reviewed' } : entry)
+                    }
+                }));
+                const next = await writeSalesCockpitToWorkspace(
+                    appendActivityLog(
+                        nextState,
+                        createActivityLogEntry('research', 'success', `Candidate accepte: ${candidate.company}.`, candidate.sourceUrl, product.id, 'review'),
+                        product.id
+                    )
+                );
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+                vscode.window.showInformationMessage(`Candidate accepte: ${candidate.company}.`);
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Lead review failed: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.rejectLeadCandidate') {
+            try {
+                const current = await readSalesCockpitFromWorkspace();
+                const candidateId = String(message.candidateId || '').trim();
+                const candidate = current.leadInbox.candidates.find((entry: any) => String(entry?.id || '').trim() === candidateId);
+                if (!candidate) {
+                    throw new Error('Lead candidate introuvable.');
+                }
+                const product = getActiveSalesCockpitProduct(current);
+                const nextState = withActiveSalesCockpitProduct(current, (activeProduct) => ({
+                    ...activeProduct,
+                    leadInbox: {
+                        ...activeProduct.leadInbox,
+                        candidates: activeProduct.leadInbox.candidates.map((entry: any) => entry.id === candidateId ? { ...entry, status: 'rejected' } : entry)
+                    }
+                }));
+                const next = await writeSalesCockpitToWorkspace(
+                    appendActivityLog(
+                        nextState,
+                        createActivityLogEntry('research', 'warning', `Candidate rejete: ${candidate.company}.`, candidate.sourceUrl, product.id, 'review'),
+                        product.id
+                    )
+                );
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Lead reject failed: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.enrichSelectedLeads') {
+            try {
+                const current = await readSalesCockpitFromWorkspace();
+                const leadIds = Array.isArray(message.leadIds) ? message.leadIds.map((entry: any) => String(entry || '').trim()).filter(Boolean) : undefined;
+                const product = getActiveSalesCockpitProduct(current);
+                const enriched = await enrichCockpitLeads(current.leads, 12, leadIds);
+                const nextState = withActiveSalesCockpitProduct(current, (activeProduct) => ({
+                    ...activeProduct,
+                    leads: enriched.leads
+                }));
+                const next = await writeSalesCockpitToWorkspace(
+                    appendActivityLog(
+                        nextState,
+                        createActivityLogEntry(
+                            'enrichment',
+                            enriched.errors.length > 0 ? 'warning' : 'success',
+                            `Enrichissement: ${enriched.updated} lead(s) mis a jour.`,
+                            enriched.errors[0] || `${enriched.leadsWithEmail} lead(s) avec email.`,
+                            product.id,
+                            'enrich'
+                        ),
+                        product.id
+                    )
+                );
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+                vscode.window.showInformationMessage(`Enrichissement termine: ${enriched.updated} lead(s) mis a jour.`);
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Lead enrichment failed: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.pushSelectedLeadsToSheet') {
+            try {
+                let current = await readSalesCockpitFromWorkspace();
+                const leadIds = Array.isArray(message.leadIds) ? message.leadIds.map((entry: any) => String(entry || '').trim()).filter(Boolean) : undefined;
+                const product = getActiveSalesCockpitProduct(current);
+                const selectedLeads = leadIds && leadIds.length > 0
+                    ? current.leads.filter((lead: any) => leadIds.includes(String(lead.id || '').trim()))
+                    : current.leads;
+
+                if (!current.defaultSheetUrl) {
+                    const created = await createCockpitGoogleSheet(this.extensionContext, {
+                        title: `${current.offer.name} - Leion Cockpit`,
+                        offer: current.offer,
+                        leads: selectedLeads,
+                        proofAssets: current.proofAssets,
+                        tasks: current.tasks
+                    });
+                    current = await writeSalesCockpitToWorkspace({
+                        ...current,
+                        defaultSheetUrl: created.sheetUrl
+                    } as any);
+                }
+
+                const sheetUrl = String(current.defaultSheetUrl || '').trim();
+                if (!sheetUrl) {
+                    throw new Error('Aucune Google Sheet n est disponible pour ce produit.');
+                }
+
+                await exportProductToGoogleSheets(this.extensionContext, {
+                    sheetUrl,
+                    offer: current.offer,
+                    leads: selectedLeads,
+                    proofAssets: current.proofAssets,
+                    tasks: current.tasks
+                });
+
+                const next = await writeSalesCockpitToWorkspace(
+                    appendActivityLog(
+                        current,
+                        createActivityLogEntry('sheet', 'success', `Sync Google Sheets: ${selectedLeads.length} lead(s).`, sheetUrl, product.id, 'sheet'),
+                        product.id
+                    )
+                );
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+                await openGoogleSheet(sheetUrl);
+                vscode.window.showInformationMessage(`Google Sheets: ${selectedLeads.length} lead(s) pousses.`);
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Push Google Sheet failed: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.generateDraftsForSelectedLeads') {
+            try {
+                const current = await readSalesCockpitFromWorkspace();
+                if (!hasConnectedProvider(current, 'email')) {
+                    throw new Error('Gmail n est pas connecte.');
+                }
+                const leadIds = Array.isArray(message.leadIds) ? message.leadIds.map((entry: any) => String(entry || '').trim()).filter(Boolean) : undefined;
+                const template = current.templates.find((entry: any) => entry.channel === 'email');
+                if (!template) {
+                    throw new Error('Aucun template email n est disponible.');
+                }
+
+                const activeDraftKeys = new Set(
+                    current.draftQueue
+                        .filter((entry: any) => entry.status !== 'sent')
+                        .map((entry: any) => `${String(entry.leadId || '').trim()}::${template.id}`)
+                );
+
+                const readyLeads = current.leads
+                    .filter((lead: any) => {
+                        const leadId = String(lead.id || '').trim();
+                        if (!leadId) {
+                            return false;
+                        }
+                        if (leadIds && leadIds.length > 0 && !leadIds.includes(leadId)) {
+                            return false;
+                        }
+                        if (!lead.email || lead.status === 'won' || lead.status === 'lost') {
+                            return false;
+                        }
+                        return !activeDraftKeys.has(`${leadId}::${template.id}`);
+                    })
+                    .slice(0, 10);
+
+                if (readyLeads.length === 0) {
+                    vscode.window.showInformationMessage('Aucun lead eligible pour de nouveaux drafts Gmail.');
+                    return;
+                }
+
+                const createdQueueItems: any[] = [];
+                const updatedLeads = [...current.leads];
+                for (const lead of readyLeads) {
+                    const rendered = buildLeadDraftPayload(template, lead, current.offer.name);
+                    const recipient = String(lead.email || '').trim();
+                    if (!recipient) {
+                        continue;
+                    }
+                    const result = await createGmailDraft(this.extensionContext, {
+                        to: recipient,
+                        subject: rendered.subject,
+                        body: rendered.body
+                    });
+                    createdQueueItems.push({
+                        id: result.id || `draft-${lead.id}-${Date.now()}`,
+                        provider: 'gmail',
+                        status: 'drafted',
+                        to: recipient,
+                        subject: rendered.subject,
+                        bodyPreview: rendered.body.trim().slice(0, 220),
+                        createdAt: new Date().toISOString(),
+                        leadId: lead.id,
+                        draftId: result.id,
+                        threadId: result.message?.threadId
+                    });
+                    const index = updatedLeads.findIndex((entry: any) => entry.id === lead.id);
+                    if (index >= 0) {
+                        updatedLeads[index] = {
+                            ...updatedLeads[index],
+                            nextAction: 'Relire le draft Gmail genere puis envoyer manuellement.',
+                            status: 'drafted',
+                            templateId: template.id
+                        };
+                    }
+                }
+
+                const product = getActiveSalesCockpitProduct(current);
+                const nextState = withActiveSalesCockpitProduct(current, (activeProduct) => ({
+                    ...activeProduct,
+                    leads: updatedLeads,
+                    draftQueue: [...createdQueueItems, ...activeProduct.draftQueue].slice(0, 30)
+                }));
+                const next = await writeSalesCockpitToWorkspace(
+                    appendActivityLog(
+                        nextState,
+                        createActivityLogEntry('drafts', 'success', `${createdQueueItems.length} draft(s) Gmail generes.`, template.id, product.id, 'drafts'),
+                        product.id
+                    )
+                );
+                await this.postMessage({ type: 'salesCockpitUpdate', salesCockpit: next });
+                await openGmailDrafts();
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`Generate drafts failed: ${error?.message || error}`);
+            }
+            return;
+        }
+
+        if (message.type === 'salesCockpit.retryLeadPipelineStage') {
+            const stage = String(message.stage || '').trim();
+            if (stage === 'research') {
+                await this.handleMessage({ type: 'salesCockpit.runLeadResearch' });
+            } else if (stage === 'enrich') {
+                await this.handleMessage({ type: 'salesCockpit.enrichSelectedLeads', leadIds: message.leadIds });
+            } else if (stage === 'sheet') {
+                await this.handleMessage({ type: 'salesCockpit.pushSelectedLeadsToSheet', leadIds: message.leadIds });
+            } else if (stage === 'drafts') {
+                await this.handleMessage({ type: 'salesCockpit.generateDraftsForSelectedLeads', leadIds: message.leadIds });
             }
             return;
         }

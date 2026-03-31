@@ -1,6 +1,6 @@
 {
-  "version": 3,
-  "lastUpdatedAt": "2026-03-26T04:02:32.237Z",
+  "version": 4,
+  "lastUpdatedAt": "2026-03-26T12:21:08.926Z",
   "activeProductId": "product-leion-delivery-founding-pilot",
   "products": [
     {
@@ -103,7 +103,77 @@
       "pipelinePaths": [],
       "ideaPath": "idea.md",
       "implementPath": "implement.md",
-      "defaultSheetUrl": ""
+      "defaultSheetUrl": "",
+      "leadInbox": {
+        "candidates": [],
+        "lastQueries": []
+      },
+      "campaignQueue": [],
+      "sheetBinding": {
+        "sheetUrl": "",
+        "tabs": {
+          "offer": "Offer",
+          "leads": "Leads",
+          "proof": "Proof",
+          "actions": "Actions"
+        }
+      },
+      "providerBindings": [
+        {
+          "providerId": "email",
+          "roles": [
+            "draft"
+          ],
+          "notes": "Draft Gmail only, never auto-send."
+        },
+        {
+          "providerId": "google_sheets",
+          "roles": [
+            "sync",
+            "proof"
+          ],
+          "notes": "Sync et preuve sur Google Workspace."
+        },
+        {
+          "providerId": "crm",
+          "roles": [
+            "sync"
+          ],
+          "notes": "Sync CRM optionnelle."
+        },
+        {
+          "providerId": "linkedin",
+          "roles": [
+            "research"
+          ],
+          "notes": "Handoff manuel."
+        },
+        {
+          "providerId": "reddit",
+          "roles": [
+            "research"
+          ],
+          "notes": "Handoff manuel."
+        },
+        {
+          "providerId": "product_hunt",
+          "roles": [
+            "proof"
+          ],
+          "notes": "Preparation de lancement seulement."
+        }
+      ],
+      "activityLog": [
+        {
+          "id": "activity-product-leion-delivery-founding-pilot-created",
+          "timestamp": "2026-03-26T12:19:34.235Z",
+          "level": "info",
+          "source": "system",
+          "message": "Cockpit initialise.",
+          "productId": "product-leion-delivery-founding-pilot"
+        }
+      ],
+      "mcpToolBindings": []
     }
   ],
   "mcpServers": [
@@ -116,9 +186,9 @@
       "status": "connected",
       "toolSummary": [],
       "tools": [],
-      "notes": "Reference MCP surface already visible in local logs.\n\nConnected and listed MCP tools.",
+      "notes": "Reference MCP surface already visible in local logs.\n\nConnected and listed MCP tools.\n\nConnected and listed MCP tools.",
       "assignedProductIds": [],
-      "lastDiscoveredAt": "2026-03-25T04:44:20.029Z"
+      "lastDiscoveredAt": "2026-03-26T12:20:13.034Z"
     }
   ],
   "providerAccounts": [
@@ -151,7 +221,7 @@
       "mode": "manual_handoff",
       "health": "unknown",
       "accountRef": "matth.schwaiger@gmail.com",
-      "endpointUrl": "https://docs.google.com/spreadsheets/d/1jn0GOiOOFCCcRZLoBC1h2yKVrgsx6qLWZ28fyy5vscU/edit",
+      "endpointUrl": "https://docs.google.com/spreadsheets/d/1LJqxyu1BuwV3VAJj-UeQ0DALOMh3QVzEKnl_9olntEI/edit",
       "notes": "[Google OAuth]\nFlow: desktop OAuth with loopback callback and PKCE.\nScopes: https://www.googleapis.com/auth/userinfo.profile, https://www.googleapis.com/auth/userinfo.email, OpenID, Google Drive (file-level), Google Sheets.\nSurface: Google Sheets and Drive first. Gmail comes next as a separate connector.",
       "capabilities": [
         "oauth connect",
@@ -159,7 +229,7 @@
         "drive proof locker"
       ],
       "scopes": [],
-      "lastValidatedAt": "2026-03-26T04:02:32.236Z",
+      "lastValidatedAt": "2026-03-26T12:21:08.924Z",
       "lastValidationMessage": "Google Sheet creee depuis le cockpit.",
       "logs": []
     },
@@ -336,5 +406,75 @@
   "ideaPath": "idea.md",
   "implementPath": "implement.md",
   "defaultSheetUrl": "",
-  "productStage": "offer"
+  "productStage": "offer",
+  "leadInbox": {
+    "candidates": [],
+    "lastQueries": []
+  },
+  "campaignQueue": [],
+  "sheetBinding": {
+    "sheetUrl": "",
+    "tabs": {
+      "offer": "Offer",
+      "leads": "Leads",
+      "proof": "Proof",
+      "actions": "Actions"
+    }
+  },
+  "providerBindings": [
+    {
+      "providerId": "email",
+      "roles": [
+        "draft"
+      ],
+      "notes": "Draft Gmail only, never auto-send."
+    },
+    {
+      "providerId": "google_sheets",
+      "roles": [
+        "sync",
+        "proof"
+      ],
+      "notes": "Sync et preuve sur Google Workspace."
+    },
+    {
+      "providerId": "crm",
+      "roles": [
+        "sync"
+      ],
+      "notes": "Sync CRM optionnelle."
+    },
+    {
+      "providerId": "linkedin",
+      "roles": [
+        "research"
+      ],
+      "notes": "Handoff manuel."
+    },
+    {
+      "providerId": "reddit",
+      "roles": [
+        "research"
+      ],
+      "notes": "Handoff manuel."
+    },
+    {
+      "providerId": "product_hunt",
+      "roles": [
+        "proof"
+      ],
+      "notes": "Preparation de lancement seulement."
+    }
+  ],
+  "activityLog": [
+    {
+      "id": "activity-product-leion-delivery-founding-pilot-created",
+      "timestamp": "2026-03-26T12:19:34.235Z",
+      "level": "info",
+      "source": "system",
+      "message": "Cockpit initialise.",
+      "productId": "product-leion-delivery-founding-pilot"
+    }
+  ],
+  "mcpToolBindings": []
 }

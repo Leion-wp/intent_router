@@ -125,6 +125,12 @@ export type WebviewOutboundMessage =
   | { type: 'salesCockpit.runLeadPipeline' }
   | { type: 'salesCockpit.createGoogleSheet'; title?: string }
   | { type: 'salesCockpit.discoverMcpTools'; serverId: string }
+  | { type: 'salesCockpit.reviewLeadCandidate'; candidateId: string }
+  | { type: 'salesCockpit.rejectLeadCandidate'; candidateId: string }
+  | { type: 'salesCockpit.enrichSelectedLeads'; leadIds?: string[] }
+  | { type: 'salesCockpit.pushSelectedLeadsToSheet'; leadIds?: string[] }
+  | { type: 'salesCockpit.generateDraftsForSelectedLeads'; leadIds?: string[] }
+  | { type: 'salesCockpit.retryLeadPipelineStage'; stage: 'research' | 'enrich' | 'sheet' | 'drafts'; leadIds?: string[] }
   | { type: 'selectPath'; id: string; argName: string }
   | { type: 'fetchOptions'; command: string; argName: string };
 
