@@ -5,6 +5,7 @@ import { registerCapabilities } from '../registry';
 import { pipelineEventBus } from '../eventBus';
 
 type OpenPrArgs = {
+    repo?: string;
     head?: string;
     base?: string;
     title?: string;
@@ -76,6 +77,7 @@ export function registerGitHubProvider(_context: vscode.ExtensionContext) {
                     { name: 'head', type: 'string', description: 'Head branch', required: true },
                     { name: 'base', type: 'string', description: 'Base branch', required: true },
                     { name: 'title', type: 'string', description: 'PR title', required: true },
+                    { name: 'repo', type: 'string', description: 'repo owner/name (optional explicit target)' },
                     { name: 'body', type: 'string', description: 'PR body markdown' },
                     { name: 'bodyFile', type: 'path', description: 'PR body markdown file path' },
                     { name: 'cwd', type: 'path', description: 'Repository working directory', default: '${workspaceRoot}' }
@@ -138,6 +140,10 @@ function normalizeExecutionCwd(rawCwd: any): string {
 
 function buildGhPrArgs(args: OpenPrArgs): string[] {
     const cliArgs = ['pr', 'create', '--head', String(args.head), '--base', String(args.base), '--title', String(args.title)];
+    const repo = String(args.repo || '').trim();
+    if (repo) {
+        cliArgs.push('--repo', repo);
+    }
     if (args.bodyFile) {
         cliArgs.push('--body-file', String(args.bodyFile));
     } else if (args.body) {

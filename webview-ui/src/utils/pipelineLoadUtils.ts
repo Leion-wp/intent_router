@@ -99,6 +99,7 @@ export function buildGraphFromPipeline(
           : String(step.payload?.args || '');
         data.cwd = String(step.payload?.cwd || '');
         data.interpreter = String(step.payload?.interpreter || '');
+        data.outputVar = String(step.payload?.outputVar || '');
         data.description = String(step.description || '');
         data.kind = 'script';
       } else if (intent === 'system.setCwd') {

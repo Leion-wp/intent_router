@@ -7,6 +7,28 @@ export type PipelineEvent =
     | { type: 'stepEnd'; runId: string; intentId: string; timestamp: number; success: boolean; index?: number; stepId?: string; durationMs?: number }
     | { type: 'stepLog'; runId: string; intentId: string; stepId?: string; text: string; stream: 'stdout' | 'stderr' }
     | {
+        type: 'runMetricRecorded';
+        runId: string;
+        intentId: string;
+        stepId?: string;
+        key: string;
+        value: number;
+        label?: string;
+        unit?: string;
+        aggregation?: 'gauge' | 'counter';
+        tags?: string[];
+    }
+    | {
+        type: 'runAlertRaised';
+        runId: string;
+        intentId: string;
+        stepId?: string;
+        level: 'info' | 'warn' | 'error';
+        title?: string;
+        message: string;
+        details?: any;
+    }
+    | {
         type: 'approvalReviewReady';
         runId: string;
         intentId: string;

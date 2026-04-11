@@ -35,7 +35,9 @@ suite('GitHub Adapter (Mocked)', () => {
   });
 
   test('creates PR and emits URL event/log', async () => {
+    let seenArgs: string[] = [];
     childProcess.spawn = (_command: string, _args: string[]) => {
+      seenArgs = _args;
       const child: any = new EventEmitter();
       child.stdout = new EventEmitter();
       child.stderr = new EventEmitter();
@@ -51,6 +53,7 @@ suite('GitHub Adapter (Mocked)', () => {
 
     try {
       const result = await executeGitHubOpenPr({
+        repo: 'acme/repo',
         head: 'feature/TICKET-1-frontend',
         base: 'main',
         title: 'feat(frontend): TICKET-1',
@@ -62,6 +65,8 @@ suite('GitHub Adapter (Mocked)', () => {
       assert.strictEqual(result.number, 42);
       assert.strictEqual(result.state, 'open');
       assert.strictEqual(result.isDraft, false);
+      assert.ok(seenArgs.includes('--repo'));
+      assert.ok(seenArgs.includes('acme/repo'));
       assert.ok(events.some((event) => event.type === 'githubPullRequestCreated' && event.url.includes('/pull/42')));
       assert.ok(events.some((event) => event.type === 'githubPullRequestCreated' && event.number === 42 && event.state === 'open'));
       assert.ok(events.some((event) => event.type === 'stepLog' && String(event.text || '').includes('PR created')));

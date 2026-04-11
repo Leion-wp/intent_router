@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "layout": {
+    "file:///d%3A/intent_router/out/webview-bundle": {
+      "x": -385.9968683966641,
+      "y": 1022.6481740902179
+    },
+    "file:///d%3A/intent_router/out": {
+      "x": -539.1416212126135,
+      "y": 219.82949983880047
+    },
+    "file:///d%3A/intent_router/out/test": {
+      "x": -779.4989561322212,
+      "y": 473.5006765940193
+    },
+    "file:///d%3A/intent_router/out/controlPlane": {
+      "x": -744.642997219692,
+      "y": 1069.6684719107957
+    },
+    "file:///d%3A/intent_router/out/test/suite": {
+      "x": -804.5093948100078,
+      "y": 701.5047361581348
+    },
+    "file:///d%3A/intent_router": {
+      "x": -625.2609669446696,
+      "y": -190.05142114546368
+    }
+  },
+  "npcs": [
+    {
+      "id": "foreman",
+      "name": "Foreman",
+      "role": "Pipeline Ops",
+      "color": "#e0c36f"
+    },
+    {
+      "id": "gardener",
+      "name": "Gardener",
+      "role": "Automation Care",
+      "color": "#87c38f"
+    },
+    {
+      "id": "librarian",
+      "name": "Librarian",
+      "role": "Code Search",
+      "color": "#8bb2d9"
+    }
+  ]
+}

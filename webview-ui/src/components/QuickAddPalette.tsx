@@ -57,15 +57,16 @@ function QuickAddPalette(props: QuickAddPaletteProps) {
         left: paletteLeft,
         top: paletteTop,
         zIndex: 1200,
-        width: '260px',
-        background: 'var(--vscode-editorWidget-background)',
-        border: '1px solid var(--vscode-editorWidget-border)',
-        boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
-        borderRadius: '8px',
-        padding: '8px',
+        width: '280px',
+        background: 'var(--ir-glass-bg)',
+        backdropFilter: 'var(--ir-glass-blur)',
+        border: '1px solid var(--ir-glass-border)',
+        boxShadow: 'var(--ir-glass-shadow)',
+        borderRadius: '16px',
+        padding: '12px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '8px'
+        gap: '10px'
       }}
       onClick={(event) => event.stopPropagation()}
     >
@@ -98,59 +99,66 @@ function QuickAddPalette(props: QuickAddPaletteProps) {
         }}
         style={{
           width: '100%',
-          padding: '6px 8px',
-          borderRadius: '6px',
-          border: '1px solid var(--vscode-input-border)',
-          background: 'var(--vscode-input-background)',
-          color: 'var(--vscode-input-foreground)'
+          padding: '10px 14px',
+          borderRadius: '8px',
+          border: '1px solid rgba(255,255,255,0.15)',
+          background: 'rgba(255,255,255,0.05)',
+          color: 'var(--ir-node-text)',
+          fontSize: '13px',
+          outline: 'none',
+          boxSizing: 'border-box'
         }}
       />
-      <div style={{ maxHeight: '220px', overflow: 'auto' }} role="listbox" aria-label="Matching nodes">
+      <div className="custom-scrollbar" style={{ maxHeight: '300px', overflowY: 'auto', paddingRight: '4px' }} role="listbox" aria-label="Matching nodes">
         {filteredQuickAddItems.length === 0 && (
-          <div style={{ fontSize: '12px', opacity: 0.7, padding: '6px' }}>No results</div>
+          <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.5)', padding: '8px', textAlign: 'center' }}>No results</div>
         )}
         {Array.from(quickAddGroupedItems.entries()).map(([category, items]) => (
-          <div key={category} style={{ marginBottom: '6px' }}>
-            <div style={{ fontSize: '10px', opacity: 0.65, padding: '4px 6px' }}>
+          <div key={category} style={{ marginBottom: '12px' }}>
+            <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', padding: '4px 8px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
               {categoryTitleMap.get(category) || category}
             </div>
-            {items.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                className="quick-add-item"
-                role="option"
-                aria-selected={filteredQuickAddItems[activeIndex]?.id === item.id}
-                style={{
-                  padding: '6px 8px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  width: '100%',
-                  textAlign: 'left',
-                  border: 'none',
-                  background: filteredQuickAddItems[activeIndex]?.id === item.id
-                    ? 'var(--vscode-list-activeSelectionBackground)'
-                    : 'transparent',
-                  color: filteredQuickAddItems[activeIndex]?.id === item.id
-                    ? 'var(--vscode-list-activeSelectionForeground)'
-                    : 'var(--vscode-foreground)'
-                }}
-                onMouseEnter={() => {
-                  const nextIndex = filteredQuickAddItems.findIndex((entry) => entry.id === item.id);
-                  if (nextIndex >= 0) {
-                    setActiveIndex(nextIndex);
-                  }
-                }}
-                onClick={() => {
-                  addNodeFromItem(item, quickAddPos || undefined, quickAddEdge);
-                  setQuickAddOpen(false);
-                  setQuickAddEdge(null);
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              {items.map((item) => {
+                const isActive = filteredQuickAddItems[activeIndex]?.id === item.id;
+                return (
+                  <button
+                    type="button"
+                    key={item.id}
+                    className="quick-add-item nodrag"
+                    role="option"
+                    aria-selected={isActive}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      width: '100%',
+                      textAlign: 'left',
+                      border: 'none',
+                      background: isActive ? 'var(--ir-accent-primary)' : 'transparent',
+                      color: isActive ? '#fff' : 'var(--ir-node-text)',
+                      transition: 'all 0.15s ease',
+                      boxShadow: isActive ? '0 4px 12px rgba(0, 162, 255, 0.3)' : 'none'
+                    }}
+                    onMouseEnter={() => {
+                      const nextIndex = filteredQuickAddItems.findIndex((entry) => entry.id === item.id);
+                      if (nextIndex >= 0) {
+                        setActiveIndex(nextIndex);
+                      }
+                    }}
+                    onClick={() => {
+                      addNodeFromItem(item, quickAddPos || undefined, quickAddEdge);
+                      setQuickAddOpen(false);
+                      setQuickAddEdge(null);
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         ))}
       </div>

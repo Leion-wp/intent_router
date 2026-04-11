@@ -52,7 +52,7 @@ suite('Control Plane Contracts (Mocked)', () => {
       const guardedWrites = pipeline.steps.filter((step: any) => {
         const intent = String(step.intent || '');
         const command = String(step?.payload?.command || '');
-        if (intent === 'github.openPr') return true;
+        if (intent === 'github.openPr' || intent === 'github.prComment' || intent === 'github.prRerunFailedChecks') return true;
         if (intent !== 'terminal.run') return false;
         return /git add -A|git commit|git push|gh pr merge|gh release create/i.test(command);
       });
@@ -64,6 +64,30 @@ suite('Control Plane Contracts (Mocked)', () => {
           `Guarded write step ${step.id} in ${template.pipelinePath} must come after ${template.humanApprovalStepId}.`
         );
         assert.ok(step?.payload?.__sandbox, `Guarded write step ${step.id} in ${template.pipelinePath} must declare __sandbox.`);
+      }
+    }
+  });
+
+  test('delivery github steps avoid implicit repo assumptions', () => {
+    const issueToPr = readPipeline('pipeline/product-1/delivery.issue-to-pr.intent.json');
+    const prReviewFix = readPipeline('pipeline/product-1/delivery.pr-review-fix.intent.json');
+    const releaseGate = readPipeline('pipeline/product-1/delivery.release-gate.intent.json');
+
+    const openPr = issueToPr.steps.find((step: any) => String(step.id || '') === 'open_pr');
+    assert.ok(openPr, 'Missing open_pr step in delivery.issue-to-pr.');
+    assert.strictEqual(openPr.intent, 'github.openPr');
+    assert.strictEqual(openPr.payload?.repo, '${var:repoSlug}', 'delivery.issue-to-pr open_pr must target repoSlug explicitly.');
+
+    for (const [pipelinePath, stepIds] of [
+      ['pipeline/product-1/delivery.pr-review-fix.intent.json', ['comment_pr', 'rerun_checks']],
+      ['pipeline/product-1/delivery.release-gate.intent.json', ['check_pr', 'comment_gate']]
+    ] as Array<[string, string[]]>) {
+      const pipeline = pipelinePath.includes('pr-review-fix') ? prReviewFix : releaseGate;
+      for (const stepId of stepIds) {
+        const step = pipeline.steps.find((candidate: any) => String(candidate.id || '') === stepId);
+        assert.ok(step, `Missing ${stepId} in ${pipelinePath}.`);
+        assert.strictEqual(step.payload?.repo, '${var:repoSlug}', `${stepId} in ${pipelinePath} must target repoSlug explicitly.`);
+        assert.strictEqual(step.payload?.number, '${var:prNumber}', `${stepId} in ${pipelinePath} must target prNumber explicitly.`);
       }
     }
   });

@@ -25,10 +25,14 @@ const MENU_BUTTON_STYLE: React.CSSProperties = {
   width: '100%',
   textAlign: 'left',
   background: 'transparent',
-  color: 'var(--vscode-foreground)',
+  color: 'var(--ir-node-text)',
   border: 'none',
-  padding: '8px',
-  cursor: 'pointer'
+  padding: '8px 12px',
+  fontSize: '13px',
+  fontWeight: 600,
+  borderRadius: '6px',
+  cursor: 'pointer',
+  transition: 'background 0.2s ease'
 };
 
 function NodeContextMenu(props: NodeContextMenuProps) {
@@ -74,12 +78,16 @@ function NodeContextMenu(props: NodeContextMenuProps) {
         left: contextMenu.x,
         top: contextMenu.y,
         zIndex: 1000,
-        background: 'var(--vscode-editorWidget-background)',
-        border: '1px solid var(--vscode-editorWidget-border)',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
-        padding: '6px',
-        borderRadius: '6px',
-        minWidth: '160px'
+        background: 'var(--ir-glass-bg)',
+        backdropFilter: 'var(--ir-glass-blur)',
+        border: '1px solid var(--ir-glass-border)',
+        boxShadow: 'var(--ir-glass-shadow)',
+        padding: '8px',
+        borderRadius: '12px',
+        minWidth: '180px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px'
       }}
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
@@ -92,7 +100,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
       <button
         type="button"
         role="menuitem"
-        className="nodrag"
+        className="nodrag cp-card-hover"
         onClick={() => {
           onOpenNode(contextMenu.nodeId);
           onClose();
@@ -104,7 +112,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
       <button
         type="button"
         role="menuitem"
-        className="nodrag"
+        className="nodrag cp-card-hover"
         onClick={() => {
           onCopyNode(contextMenu.nodeId);
           onClose();
@@ -116,14 +124,14 @@ function NodeContextMenu(props: NodeContextMenuProps) {
       <button
         type="button"
         role="menuitem"
-        className="nodrag"
+        className="nodrag cp-card-hover"
         onClick={() => {
           onPasteNode({ x: contextMenu.x, y: contextMenu.y });
           onClose();
         }}
         style={{
           ...MENU_BUTTON_STYLE,
-          color: canPaste ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
+          color: canPaste ? 'var(--ir-node-text)' : 'rgba(255,255,255,0.3)',
           cursor: canPaste ? 'pointer' : 'not-allowed'
         }}
         disabled={!canPaste}
@@ -133,7 +141,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
       <button
         type="button"
         role="menuitem"
-        className="nodrag"
+        className="nodrag cp-card-hover"
         onClick={() => {
           onDuplicateNode(contextMenu.nodeId);
           onClose();
@@ -145,7 +153,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
       <button
         type="button"
         role="menuitem"
-        className="nodrag"
+        className="nodrag cp-card-hover"
         onClick={() => {
           onToggleCollapse(contextMenu.nodeId);
           onClose();
@@ -153,7 +161,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
         disabled={!canToggleCollapse}
         style={{
           ...MENU_BUTTON_STYLE,
-          color: canToggleCollapse ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
+          color: canToggleCollapse ? 'var(--ir-node-text)' : 'rgba(255,255,255,0.3)',
           cursor: canToggleCollapse ? 'pointer' : 'not-allowed'
         }}
       >
@@ -162,7 +170,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
       <button
         type="button"
         role="menuitem"
-        className="nodrag"
+        className="nodrag cp-card-hover"
         onClick={() => {
           onDisconnectNodeLinks(contextMenu.nodeId);
           onClose();
@@ -170,7 +178,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
         disabled={!canDisconnectLinks}
         style={{
           ...MENU_BUTTON_STYLE,
-          color: canDisconnectLinks ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
+          color: canDisconnectLinks ? 'var(--ir-node-text)' : 'rgba(255,255,255,0.3)',
           cursor: canDisconnectLinks ? 'pointer' : 'not-allowed'
         }}
       >
@@ -179,7 +187,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
       <button
         type="button"
         role="menuitem"
-        className="nodrag"
+        className="nodrag cp-card-hover"
         onClick={() => {
           onRunFromNode(contextMenu.nodeId, false);
           onClose();
@@ -187,7 +195,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
         disabled={!canRunFromNode}
         style={{
           ...MENU_BUTTON_STYLE,
-          color: canRunFromNode ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
+          color: canRunFromNode ? 'var(--ir-node-text)' : 'rgba(255,255,255,0.3)',
           cursor: canRunFromNode ? 'pointer' : 'not-allowed'
         }}
       >
@@ -196,7 +204,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
       <button
         type="button"
         role="menuitem"
-        className="nodrag"
+        className="nodrag cp-card-hover"
         onClick={() => {
           onRunFromNode(contextMenu.nodeId, true);
           onClose();
@@ -204,7 +212,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
         disabled={!canRunFromNode}
         style={{
           ...MENU_BUTTON_STYLE,
-          color: canRunFromNode ? 'var(--vscode-foreground)' : 'var(--vscode-descriptionForeground)',
+          color: canRunFromNode ? 'var(--ir-node-text)' : 'rgba(255,255,255,0.3)',
           cursor: canRunFromNode ? 'pointer' : 'not-allowed'
         }}
       >
@@ -213,7 +221,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
       <button
         type="button"
         role="menuitem"
-        className="nodrag"
+        className="nodrag cp-card-hover"
         onClick={() => {
           onClearHighlight();
           onClose();
@@ -228,7 +236,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
       <button
         type="button"
         role="menuitem"
-        className="nodrag"
+        className="nodrag cp-card-hover"
         onClick={() => {
           onDeleteNode(contextMenu.nodeId);
           onClose();
@@ -236,7 +244,7 @@ function NodeContextMenu(props: NodeContextMenuProps) {
         disabled={!canDeleteNode}
         style={{
           ...MENU_BUTTON_STYLE,
-          color: canDeleteNode ? 'var(--vscode-errorForeground)' : 'var(--vscode-descriptionForeground)',
+          color: canDeleteNode ? 'var(--ir-accent-error)' : 'rgba(255,255,255,0.3)',
           cursor: canDeleteNode ? 'pointer' : 'not-allowed'
         }}
       >

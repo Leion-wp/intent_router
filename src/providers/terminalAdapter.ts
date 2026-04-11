@@ -32,7 +32,8 @@ function doRegister() {
                 determinism: 'deterministic',
                 args: [
                     { name: 'command', type: 'string', description: 'The shell command to execute', required: true },
-                    { name: 'cwd', type: 'path', description: 'Working directory', default: '.' }
+                    { name: 'cwd', type: 'path', description: 'Working directory', default: '.' },
+                    { name: 'outputVar', type: 'string', description: 'Variable to store captured stdout' }
                 ]
             }
         ]
@@ -80,7 +81,7 @@ function getRuntimePlatform(): NodeJS.Platform {
     return platformOverride || process.platform;
 }
 
-export async function executeTerminalCommand(args: any): Promise<void> {
+export async function executeTerminalCommand(args: any): Promise<any> {
     const commandText = args?.command;
     const cwd = normalizeExecutionCwd(args?.cwd);
     const meta = args?.__meta;
@@ -313,7 +314,7 @@ export function cancelTerminalRun(runId: string | undefined | null): void {
     }
 }
 
-function runCommand(command: string, cwd: string | undefined, runId: string, intentId: string, stepId?: string): Promise<void> {
+function runCommand(command: string, cwd: string | undefined, runId: string, intentId: string, stepId?: string): Promise<{ content: string; stdout: string; stderr: string; exitCode: number }> {
     const { terminal, write } = getOrCreateTerminal();
     terminal.show(true);
 
@@ -323,6 +324,8 @@ function runCommand(command: string, cwd: string | undefined, runId: string, int
         const envOverrides = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
         const env = { ...process.env, ...envOverrides };
         const safeCwd = (typeof cwd === 'string' && cwd.trim() !== '') ? cwd : undefined;
+        let stdoutBuffer = '';
+        let stderrBuffer = '';
 
         if (safeCwd) {
             const trustedRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || path.resolve('.');
@@ -345,6 +348,7 @@ function runCommand(command: string, cwd: string | undefined, runId: string, int
             if (!text) {
                 return;
             }
+            stdoutBuffer += text;
             write(text);
             pipelineEventBus.emit({
                 type: 'stepLog',
@@ -361,6 +365,7 @@ function runCommand(command: string, cwd: string | undefined, runId: string, int
             if (!text) {
                 return;
             }
+            stderrBuffer += text;
             write(`\x1b[31m${text}\x1b[0m`);
             pipelineEventBus.emit({
                 type: 'stepLog',
@@ -386,7 +391,12 @@ function runCommand(command: string, cwd: string | undefined, runId: string, int
         child.on('close', (code) => {
             cleanup();
             if (code === 0) {
-                resolve();
+                resolve({
+                    content: stdoutBuffer.trim(),
+                    stdout: stdoutBuffer,
+                    stderr: stderrBuffer,
+                    exitCode: 0
+                });
             } else {
                 reject(new Error(`Command failed with exit code ${code}`));
             }

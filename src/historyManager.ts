@@ -27,6 +27,26 @@ export interface RunAuditTimelineEntry {
 
 export interface RunAuditData {
     timeline: RunAuditTimelineEntry[];
+    metrics: Array<{
+        timestamp: number;
+        stepId?: string;
+        intentId?: string;
+        key: string;
+        value: number;
+        label?: string;
+        unit?: string;
+        aggregation?: 'gauge' | 'counter';
+        tags?: string[];
+    }>;
+    alerts: Array<{
+        timestamp: number;
+        stepId?: string;
+        intentId?: string;
+        level: 'info' | 'warn' | 'error';
+        title?: string;
+        message: string;
+        details?: any;
+    }>;
     hitl: Array<{
         timestamp: number;
         nodeId?: string;
@@ -138,6 +158,8 @@ export class HistoryManager {
             steps: run.steps || [],
             audit: run.audit || {
                 timeline: [],
+                metrics: [],
+                alerts: [],
                 hitl: [],
                 reviews: [],
                 cost: {
@@ -208,6 +230,8 @@ export class HistoryManager {
             if (!this.currentRun.audit) {
                 this.currentRun.audit = {
                     timeline: [],
+                    metrics: [],
+                    alerts: [],
                     hitl: [],
                     reviews: [],
                     cost: { estimatedTotal: 0, byIntent: {} }
@@ -221,6 +245,8 @@ export class HistoryManager {
             if (!this.currentRun.audit) {
                 this.currentRun.audit = {
                     timeline: [],
+                    metrics: [],
+                    alerts: [],
                     hitl: [],
                     reviews: [],
                     cost: { estimatedTotal: 0, byIntent: {} }
@@ -249,6 +275,8 @@ export class HistoryManager {
                     pipelineSnapshot: this.buildSnapshot(event),
                     audit: {
                         timeline: [],
+                        metrics: [],
+                        alerts: [],
                         hitl: [],
                         reviews: [],
                         cost: { estimatedTotal: 0, byIntent: {} }
@@ -337,6 +365,60 @@ export class HistoryManager {
                         stepId: event.stepId,
                         intentId: event.intentId,
                         message: String(event.text || '').trim().slice(0, 280)
+                    });
+                }
+                break;
+
+            case 'runMetricRecorded':
+                if (this.currentRun && this.currentRun.id === event.runId) {
+                    ensureCost();
+                    this.currentRun.audit?.metrics.push({
+                        timestamp: Date.now(),
+                        stepId: event.stepId,
+                        intentId: event.intentId,
+                        key: event.key,
+                        value: event.value,
+                        label: event.label,
+                        unit: event.unit,
+                        aggregation: event.aggregation,
+                        tags: event.tags
+                    });
+                    appendTimeline({
+                        timestamp: Date.now(),
+                        type: 'run.metric',
+                        level: 'info',
+                        stepId: event.stepId,
+                        intentId: event.intentId,
+                        message: `Metric recorded: ${event.key}=${event.value}${event.unit ? ` ${event.unit}` : ''}`,
+                        data: {
+                            label: event.label,
+                            aggregation: event.aggregation,
+                            tags: event.tags || []
+                        }
+                    });
+                }
+                break;
+
+            case 'runAlertRaised':
+                if (this.currentRun && this.currentRun.id === event.runId) {
+                    ensureCost();
+                    this.currentRun.audit?.alerts.push({
+                        timestamp: Date.now(),
+                        stepId: event.stepId,
+                        intentId: event.intentId,
+                        level: event.level,
+                        title: event.title,
+                        message: event.message,
+                        details: event.details
+                    });
+                    appendTimeline({
+                        timestamp: Date.now(),
+                        type: 'run.alert',
+                        level: event.level,
+                        stepId: event.stepId,
+                        intentId: event.intentId,
+                        message: event.title ? `${event.title}: ${event.message}` : event.message,
+                        data: event.details
                     });
                 }
                 break;

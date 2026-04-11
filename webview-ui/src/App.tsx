@@ -291,9 +291,22 @@ function Flow({
       .map((f: any) => String(f?.key || '').trim())
       .filter(Boolean);
 
+    const actionVarKeys = ['outputVar', 'outputVarPath', 'outputVarChanges', 'outputVarCount', 'outputVarRemoved', 'outputVarRemaining'];
+    const actionVars = (nodesRef.current || [])
+      .flatMap((n: any) => {
+        const data = n?.data || {};
+        const values = [
+          ...actionVarKeys.map((key) => data?.[key]),
+          ...actionVarKeys.map((key) => data?.args?.[key])
+        ];
+        return values;
+      })
+      .map((value: any) => String(value || '').trim())
+      .filter(Boolean);
+
     const envVars = Object.keys(envRef.current || {}).map(s => String(s).trim()).filter(Boolean);
 
-    const all = Array.from(new Set([...promptVars, ...formVars, ...envVars]));
+    const all = Array.from(new Set([...promptVars, ...formVars, ...actionVars, ...envVars]));
     all.sort((a, b) => a.localeCompare(b));
     return all;
   }, []);
@@ -704,6 +717,7 @@ function Flow({
             scriptPath,
             args,
             interpreter: interpreter || undefined,
+            ...(String(data.outputVar || '').trim() ? { outputVar: String(data.outputVar || '').trim() } : {}),
             __kind: 'script'
           };
           description = String(data.description || '');

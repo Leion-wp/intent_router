@@ -57,17 +57,17 @@ function ChromeControlsPanel(props: ChromeControlsPanelProps) {
         zIndex: 940,
         display: 'flex',
         flexDirection: 'column',
-        gap: '10px',
-        padding: '10px 14px',
-        borderRadius: '16px',
+        gap: '12px',
+        padding: '14px 20px',
+        borderRadius: '20px',
         background: 'var(--ir-glass-bg)',
         backdropFilter: 'var(--ir-glass-blur)',
         border: '1px solid var(--ir-glass-border)',
         opacity: chromeOpacity,
-        width: chromeCollapsed ? '240px' : '780px',
+        width: chromeCollapsed ? '260px' : '820px',
         maxWidth: 'calc(100vw - 40px)',
         boxSizing: 'border-box',
-        boxShadow: '0 10px 40px rgba(0, 0, 0, 0.4)',
+        boxShadow: 'var(--ir-glass-shadow)',
         transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
       }}
     >

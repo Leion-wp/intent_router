@@ -58,8 +58,8 @@
             "status": "idle"
           },
           "position": {
-            "x": 135,
-            "y": -210
+            "x": 30,
+            "y": -405
           },
           "sourcePosition": "right",
           "deletable": false,
@@ -74,8 +74,8 @@
           "id": "node_1",
           "type": "actionNode",
           "position": {
-            "x": 510,
-            "y": -195
+            "x": 360,
+            "y": -240
           },
           "data": {
             "provider": "terminal",
@@ -86,12 +86,12 @@
             },
             "kind": "action",
             "label": "install des deps",
-            "collapsed": true,
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
-            "width": 282,
-            "height": 54
+            "width": 1016,
+            "height": 561
           },
           "selected": false,
           "dragging": false
@@ -100,8 +100,8 @@
           "id": "node_3",
           "type": "actionNode",
           "position": {
-            "x": 840,
-            "y": -315
+            "x": 615,
+            "y": -435
           },
           "data": {
             "provider": "terminal",
@@ -112,12 +112,12 @@
             },
             "kind": "action",
             "label": "compilation",
-            "collapsed": true,
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
-            "width": 282,
-            "height": 54
+            "width": 857,
+            "height": 561
           },
           "selected": false,
           "dragging": false
@@ -126,8 +126,8 @@
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 1155,
-            "y": -180
+            "x": 1440,
+            "y": -390
           },
           "data": {
             "provider": "terminal",
@@ -138,12 +138,12 @@
             },
             "kind": "action",
             "label": "package vsix",
-            "collapsed": true,
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
-            "width": 282,
-            "height": 54
+            "width": 1016,
+            "height": 561
           },
           "selected": false,
           "dragging": false
@@ -152,44 +152,44 @@
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1515,
-            "y": -15
+            "x": 2535,
+            "y": -420
           },
           "data": {
             "commandId": "workbench.extensions.action.installVSIX",
             "argsJson": "",
             "kind": "vscodeCommand",
             "label": "installation vsix",
-            "collapsed": true,
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
             "width": 282,
-            "height": 46
+            "height": 226
           },
-          "selected": false,
+          "selected": true,
           "dragging": false
         },
         {
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 1890,
-            "y": 75
+            "x": 2565,
+            "y": -135
           },
           "data": {
             "commandId": "workbench.action.reloadWindow",
             "argsJson": "",
             "kind": "vscodeCommand",
             "label": "reload vsix",
-            "collapsed": true,
+            "collapsed": false,
             "status": "idle"
           },
           "measured": {
             "width": 282,
-            "height": 46
+            "height": 226
           },
-          "selected": true,
+          "selected": false,
           "dragging": false
         }
       ],
@@ -233,7 +233,8 @@
           "target": "node_9",
           "markerEnd": {
             "type": "arrowclosed"
-          }
+          },
+          "className": "ir-edge-running"
         },
         {
           "source": "node_5",
@@ -241,7 +242,8 @@
           "markerEnd": {
             "type": "arrowclosed"
           },
-          "id": "xy-edge__node_5-node_7"
+          "id": "xy-edge__node_5-node_7",
+          "className": "ir-edge-running"
         }
       ]
     }

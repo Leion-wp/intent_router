@@ -13,7 +13,13 @@ import { registerSystemProvider } from './providers/systemAdapter';
 import { registerVSCodeProvider } from './providers/vscodeAdapter';
 import { registerAiProvider, executeAiCommand, executeAiTeamCommand } from './providers/aiAdapter';
 import { registerHttpProvider, executeHttpCommand } from './providers/httpAdapter';
+import { registerDocsProvider } from './providers/docsAdapter';
+import { registerDbProvider } from './providers/dbAdapter';
+import { registerEmailProvider } from './providers/emailAdapter';
+import { registerSlackProvider } from './providers/slackAdapter';
 import { executeGitHubOpenPr, executeGitHubPrChecks, executeGitHubPrComment, executeGitHubPrRerunFailedChecks, registerGitHubProvider } from './providers/githubAdapter';
+import { executeN8nManageCommand, executeN8nWebhookInvokeCommand, registerN8nProvider } from './providers/n8nAdapter';
+import { executeRunAlertCommand, executeRunMetricCommand, registerRunProvider } from './providers/runAdapter';
 import { StatusBarManager } from './statusBar';
 import { historyManager } from './historyManager';
 import { RuntimeTriggerManager } from './runtimeTriggerManager';
@@ -39,7 +45,13 @@ export function activate(context: vscode.ExtensionContext) {
         ['vscodeProvider', () => registerVSCodeProvider(context)],
         ['aiProvider', () => registerAiProvider(context)],
         ['httpProvider', () => registerHttpProvider(context)],
-        ['githubProvider', () => registerGitHubProvider(context)]
+        ['docsProvider', () => registerDocsProvider(context)],
+        ['dbProvider', () => registerDbProvider(context)],
+        ['emailProvider', () => registerEmailProvider(context)],
+        ['slackProvider', () => registerSlackProvider(context)],
+        ['githubProvider', () => registerGitHubProvider(context)],
+        ['runProvider', () => registerRunProvider(context)],
+        ['n8nProvider', () => registerN8nProvider(context)]
     ] as const) {
         try {
             register();
@@ -177,6 +189,18 @@ export function activate(context: vscode.ExtensionContext) {
         });
         let githubPrCommentDisposable = vscode.commands.registerCommand('intentRouter.internal.githubPrComment', async (args: any) => {
             return await executeGitHubPrComment(args);
+        });
+        let runMetricDisposable = vscode.commands.registerCommand('intentRouter.internal.runMetric', async (args: any) => {
+            return await executeRunMetricCommand(args);
+        });
+        let runAlertDisposable = vscode.commands.registerCommand('intentRouter.internal.runAlert', async (args: any) => {
+            return await executeRunAlertCommand(args);
+        });
+        let n8nManageDisposable = vscode.commands.registerCommand('intentRouter.internal.n8nManage', async (args: any) => {
+            return await executeN8nManageCommand(args);
+        });
+        let n8nWebhookInvokeDisposable = vscode.commands.registerCommand('intentRouter.internal.n8nWebhookInvoke', async (args: any) => {
+            return await executeN8nWebhookInvokeCommand(args);
         });
 
     let promptDisposable = vscode.commands.registerCommand('intentRouter.routeFromJson', async () => {
@@ -555,6 +579,10 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(githubPrChecksDisposable);
     context.subscriptions.push(githubPrRerunFailedChecksDisposable);
     context.subscriptions.push(githubPrCommentDisposable);
+    context.subscriptions.push(runMetricDisposable);
+    context.subscriptions.push(runAlertDisposable);
+    context.subscriptions.push(n8nManageDisposable);
+    context.subscriptions.push(n8nWebhookInvokeDisposable);
 	    context.subscriptions.push(promptDisposable);
 	    context.subscriptions.push(createPipelineDisposable);
 	    context.subscriptions.push(runPipelineDisposable);

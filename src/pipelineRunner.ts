@@ -138,6 +138,71 @@ function parseLoopItems(raw: any): string[] {
     return value.split(',').map((entry) => entry.trim()).filter(Boolean);
 }
 
+type FormSelectOption = {
+    label: string;
+    value: string;
+    metadata?: Record<string, string>;
+};
+
+function normalizeFormSelectOptions(raw: any): FormSelectOption[] {
+    const toOption = (entry: any): FormSelectOption | null => {
+        if (typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') {
+            const value = String(entry).trim();
+            return value ? { label: value, value } : null;
+        }
+        if (entry && typeof entry === 'object') {
+            const label = String(entry.label ?? entry.name ?? entry.value ?? '').trim();
+            const value = String(entry.value ?? entry.path ?? entry.label ?? entry.name ?? '').trim();
+            if (!label && !value) return null;
+            const metadataEntries = Object.entries(entry)
+                .filter(([key]) => !['label', 'name', 'value', 'path'].includes(String(key)))
+                .map(([key, value]) => {
+                    if (value === undefined || value === null) return [String(key), ''];
+                    if (typeof value === 'string') return [String(key), value];
+                    if (typeof value === 'number' || typeof value === 'boolean') return [String(key), String(value)];
+                    try {
+                        return [String(key), JSON.stringify(value)];
+                    } catch {
+                        return [String(key), String(value)];
+                    }
+                });
+            return {
+                label: label || value,
+                value: value || label,
+                ...(metadataEntries.length ? { metadata: Object.fromEntries(metadataEntries) } : {})
+            };
+        }
+        return null;
+    };
+
+    const normalizeArray = (items: any[]): FormSelectOption[] =>
+        items
+            .map(toOption)
+            .filter((entry): entry is FormSelectOption => !!entry);
+
+    if (Array.isArray(raw)) {
+        return normalizeArray(raw);
+    }
+
+    const value = String(raw ?? '').trim();
+    if (!value) return [];
+
+    try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+            return normalizeArray(parsed);
+        }
+    } catch {
+        // Fall back to CSV parsing below.
+    }
+
+    return value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .map((entry) => ({ label: entry, value: entry }));
+}
+
 function inferRuntimeScriptInterpreter(scriptPath: string): string {
     const lower = String(scriptPath || '').trim().toLowerCase();
     if (lower.endsWith('.ps1')) return 'pwsh -File';
@@ -511,6 +576,23 @@ function resolveTemplateVariables(input: any, store: Map<string, string>): any {
     return input;
 }
 
+function stringifyVariableValue(value: any): string {
+    if (value === undefined || value === null) {
+        return '';
+    }
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (typeof value === 'object') {
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return String(value);
+        }
+    }
+    return String(value);
+}
+
 function transformToTerminal(intent: Intent, cwd: string, trustedRoot: string): Intent {
     const { intent: name, payload } = intent;
     if (!name.startsWith('git.') && !name.startsWith('docker.')) return intent;
@@ -709,8 +791,9 @@ async function runPipeline(
             // SYSTEM.FORM
             if (step.intent === 'system.form') {
                 pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, intent: step.intent, index: currentIndex, stepId: step.id });
-                const fields = Array.isArray(step.payload?.fields) ? (step.payload.fields as any[]) : [];
-                for (const raw of fields) {
+                const rawFields = Array.isArray(step.payload?.fields) ? (step.payload.fields as any[]) : [];
+                for (const rawField of rawFields) {
+                    const raw = resolveTemplateVariables(rawField, variableCache);
                     const key = String(raw?.key || '').trim();
                     if (!key) {
                         continue;
@@ -721,25 +804,34 @@ async function runPipeline(
                     const required = !!raw?.required;
                     const defaultValue = String(raw?.default ?? '').trim();
                     let value: string | undefined;
+                    let selectedOption: FormSelectOption | undefined;
 
                     if (type === 'select') {
-                        const optionsRaw = Array.isArray(raw?.options)
-                            ? raw.options
-                            : String(raw?.options || '').split(',');
-                        const options = optionsRaw
-                            .map((entry: any) => String(entry ?? '').trim())
-                            .filter(Boolean);
+                        const options = normalizeFormSelectOptions(raw?.options);
 
                         if (options.length > 0) {
-                            const picked = await vscode.window.showQuickPick(options, {
+                            const picked = await vscode.window.showQuickPick(
+                                options.map((option) => ({
+                                    label: option.label,
+                                    description: option.value !== option.label ? option.value : undefined,
+                                    value: option.value,
+                                    option
+                                })),
+                                {
                                 placeHolder: label,
                                 title: 'Leion Roots Form'
-                            });
+                                }
+                            );
                             if (picked === undefined) {
                                 isCancelled = true;
                                 break;
                             }
-                            value = picked;
+                            value = typeof picked === 'string'
+                                ? picked
+                                : String((picked as any)?.value ?? (picked as any)?.label ?? '');
+                            selectedOption = typeof picked === 'object' && picked
+                                ? (picked as any)?.option
+                                : options.find((option) => option.value === value || option.label === value);
                         } else {
                             value = await vscode.window.showInputBox({
                                 prompt: label,
@@ -776,6 +868,26 @@ async function runPipeline(
                     }
 
                     variableCache.set(key, normalized || defaultValue);
+                    if (type === 'select' && selectedOption && raw?.captureMap && typeof raw.captureMap === 'object') {
+                        for (const [targetVarRaw, sourceKeyRaw] of Object.entries(raw.captureMap)) {
+                            const targetVar = String(targetVarRaw || '').trim();
+                            const sourceKey = String(sourceKeyRaw || '').trim();
+                            if (!targetVar || !sourceKey) {
+                                continue;
+                            }
+                            let capturedValue: string | undefined;
+                            if (sourceKey === 'label') {
+                                capturedValue = selectedOption.label;
+                            } else if (sourceKey === 'value') {
+                                capturedValue = selectedOption.value;
+                            } else {
+                                capturedValue = selectedOption.metadata?.[sourceKey];
+                            }
+                            if (capturedValue !== undefined) {
+                                variableCache.set(targetVar, capturedValue);
+                            }
+                        }
+                    }
                 }
                 if (isCancelled) {
                     runStatus = 'cancelled';
@@ -821,8 +933,8 @@ async function runPipeline(
                 pipelineEventBus.emit({ type: 'stepStart', runId, intentId: localIntentId, timestamp: Date.now(), description: step.description, intent: step.intent, index: currentIndex, stepId: step.id });
                 const variableName = String((step.payload as any)?.name || '').trim();
                 if (variableName) {
-                    const variableValue = (step.payload as any)?.value;
-                    variableCache.set(variableName, String(variableValue ?? ''));
+                    const variableValue = resolveTemplateVariables((step.payload as any)?.value, variableCache);
+                    variableCache.set(variableName, stringifyVariableValue(variableValue));
                 }
                 pipelineEventBus.emit({ type: 'stepEnd', runId, intentId: localIntentId, timestamp: Date.now(), success: true, index: currentIndex, stepId: step.id });
                 currentIndex++;
@@ -1448,9 +1560,15 @@ async function runPipeline(
                 const outContent = compiledStep.payload?.outputVar;
                 const outPath = compiledStep.payload?.outputVarPath;
                 const outChanges = compiledStep.payload?.outputVarChanges;
-                if (outContent && result.content !== undefined) variableCache.set(outContent, String(result.content));
+                const outStatusCode = compiledStep.payload?.outputVarStatusCode;
+                const outStatusText = compiledStep.payload?.outputVarStatusText;
+                const outData = compiledStep.payload?.outputVarData;
+                if (outContent && result.content !== undefined) variableCache.set(outContent, stringifyVariableValue(result.content));
                 if (outPath && result.path !== undefined) variableCache.set(outPath, String(result.path));
                 if (outChanges && result.changes !== undefined) variableCache.set(outChanges, JSON.stringify(result.changes));
+                if (outStatusCode && result.status !== undefined) variableCache.set(outStatusCode, stringifyVariableValue(result.status));
+                if (outStatusText && result.statusText !== undefined) variableCache.set(outStatusText, stringifyVariableValue(result.statusText));
+                if (outData && result.data !== undefined) variableCache.set(outData, stringifyVariableValue(result.data));
             } else if (ok) {
                 const outVar = compiledStep.payload?.outputVar;
                 if (outVar) variableCache.set(outVar, String(result));

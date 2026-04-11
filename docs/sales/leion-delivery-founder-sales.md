@@ -1,393 +1,271 @@
 # Leion Delivery Founder Sales
 
+## Core sales thesis
+
+Sell one narrow offer: `Leion Delivery Founding Pilot`.
+
+This is a governed AI delivery workflow pilot for teams that already ship through GitHub and want repeatable issue, PR, and release operations without handing merge or publish authority to a black-box agent.
+
+Do not pitch this as general AI coding help.
+Do not pitch this as hosted autonomous execution.
+Do not pitch broad platform transformation.
+
 ## Offer to sell
 
-Sell one offer only: `Leion Delivery Founding Pilot`.
+### Package
 
-Keep the offer narrow:
-
-- `4-week` paid pilot
+- `4-week` pilot
 - `1 organization`
 - `up to 5 repos`
+- `3 fixed workflows`
 - `1 named workflow owner`
-- `3 fixed workflows`: `Issue -> PR`, `PR Review -> Fix`, `Release / QA / Security Gate`
-- explicit human approval before guarded write, merge, or release actions
-- local-first execution with a lightweight control-plane layer for governance, metadata, routing, and run visibility
-- `BYO AI keys` or explicit pass-through as the default V1 usage model
+- local-first execution
+- `BYO AI keys` or explicit usage pass-through in V1
 
-Sell the pilot as a governed delivery workflow pack for GitHub teams.
+### Included workflows
 
-Do not sell:
+- `Issue -> PR`
+- `PR Review -> Fix / Improve`
+- `Release / QA / Security Gate`
 
-- a generic AI coding seat
-- a broad "agentic SDLC" transformation
-- full autonomous delivery
-- open-ended custom automation consulting
-- measured ROI claims the current proof does not support yet
+### Commercial default
 
-## Best-fit buyer
+- `4 500 EUR` fixed founding pilot
+- `1 000 EUR / month` post-pilot operating subscription
 
-Prioritize teams with repeated GitHub delivery work and clear workflow friction:
+### What the buyer gets
 
-1. software agencies or delivery factories repeating the same issue, PR, and release motions across client repos
-2. CTOs or engineering managers at small product teams shipping often through GitHub with visible review or release bottlenecks
-3. platform or developer productivity owners who care about governed workflows more than seat-based AI tooling
+- one installed and configured pilot scope
+- the three workflows adapted to one repo group
+- approval points and operating rules defined
+- initial runs on real issues or PRs
+- one repeatable demo path
+- proof capture material for renewal or expansion
 
-## Trigger moments
+## Best-fit buyers
 
-The offer is strongest when at least one of these is already painful:
+### Primary wedges
 
-- the same issue-to-branch-to-PR motion repeats every week
-- PR review and follow-up fixes are slow, inconsistent, or depend too much on one engineer
-- release checks live in checklists, scripts, or tribal knowledge
-- leadership wants AI leverage but does not want opaque autonomous changes
-- the team has AI tools already, but the workflow is still ad hoc and non-repeatable
-- they need a safer starting point than "turn the agent loose on production repos"
+- software agencies shipping repeated client delivery work in GitHub
+- CTOs or engineering managers at small product teams with recurring PR and release friction
+- platform or developer productivity owners who need governance and repeatability, not more AI seats
 
-## Qualification signals
+### Trigger moments
 
-- GitHub is central to the delivery process
-- one repo group or one team is obvious for a pilot
-- the buyer wants approval and auditability, not unchecked autonomy
-- one internal owner can work with you during the pilot
-- one of the three fixed workflows is clearly painful today
-- they can buy or route a fixed `4 500 EUR` pilot decision
-- the local-first and `BYO AI keys` model is acceptable
+- review and release work is repetitive and slows a small team
+- the team wants AI assistance but still requires explicit approval before risky actions
+- scripts exist, but ownership, auditability, and reuse are weak
+- there is enough recurring GitHub work to justify standardizing three delivery motions
 
-## Fast disqualifiers
+### Fast disqualifiers
 
-- no GitHub-centered engineering workflow
-- they want autonomous code changes without explicit approval checkpoints
-- they want general AI enablement or prompt coaching instead of a workflow pack
-- there is no named owner, no repo group, or no pilot window
-- the pain cannot be tied to `Issue -> PR`, `PR Review -> Fix`, or `Release / QA / Security Gate`
-- they need claims about ROI, reliability, or production adoption that are not proven yet
-- they require fully hosted execution from day one
+- no recurring GitHub workflow pain
+- wants fully autonomous hosted code execution immediately
+- no workflow owner and no repo group available for a pilot
+- wants bundled unlimited model usage in the pilot price
+- expects a broad internal platform rebuild instead of a narrow workflow package
 
-## Core sales narrative
+## Positioning rules
 
-Use this framing consistently:
+### Lead with this
 
-- the pain is not "we need more AI"; the pain is repeated delivery work that is still manual, inconsistent, and hard to govern
-- the product is not an autonomous coder; it is a governed workflow layer around recurring GitHub delivery operations
-- the proof is not broad productivity claims; the proof is that three reusable delivery workflows already exist with explicit approval checkpoints
-- the pilot outcome is not transformation; it is one team running a fixed delivery pack on a real repo group with a repeatable demo path
+Leion turns recurring GitHub delivery work into governed workflows with explicit human approval before guarded write actions.
 
-## What the repo credibly proves now
+### Support with proof-safe claims
 
-Use only claims supported by the current product and proof docs:
+- there are `3` named delivery workflows and `1` orchestrator entry point
+- code-changing flows place human diff review before stage, commit, push, or PR creation
+- the release flow places an explicit approval pause before optional merge or publish
+- the offer is packaged as a fixed pilot, not a custom automation project
 
-- Leion Delivery packages `3` named workflows behind one delivery offer and one orchestrator
-- the code-changing flows place human diff review before stage, commit, push, or PR creation
-- the release flow requires an explicit pause before optional merge or publish actions
-- the operating model stays local-first
-- the control-plane story is governance, metadata, routing, and run visibility, not remote autonomous execution
-- contract tests exist to verify approval-before-write ordering in the current template set
+### Do not claim yet
 
-Do not claim yet:
-
-- measured time savings
-- reduced defects
-- customer rollout outcomes
-- proven production audit exports
-- fully automatic context propagation in every flow
-- zero-setup onboarding across arbitrary repos
-
-## First wedge selection
-
-Pick one workflow as the first wedge before discovery ends:
-
-- `Issue -> PR` when the team repeats well-scoped implementation tickets and wants a governed path from issue to reviewed PR
-- `PR Review -> Fix` when review cycles drag and follow-up changes are noisy or hard to delegate
-- `Release / QA / Security Gate` when release discipline, pre-merge evidence, or approval auditability is the visible pain
-
-If no first wedge is obvious, the deal is not qualified enough yet.
-
-## Discovery goals
-
-A strong discovery call must resolve these five points:
-
-1. where the current delivery workflow breaks on a real example
-2. which fixed workflow is the right first wedge
-3. where approval, review, and auditability are non-negotiable
-4. who owns the pilot and how the buying path works
-5. whether the buyer wants governed automation or is actually shopping for full autonomy
-
-## Discovery questions
-
-### Workflow reality
-
-- Walk me through the last real issue that became a merged PR.
-- Which part of that flow repeats often enough to deserve a reusable workflow?
-- What usually stalls: implementation, PR review, follow-up fixes, or release checks?
-- Where does the workflow depend too much on one engineer or reviewer?
-- Which repo group would you start with if we had to pilot this next month?
-
-### Wedge-specific questions
-
-- For `Issue -> PR`: how well-scoped are the tickets that already follow a stable pattern?
-- For `PR Review -> Fix`: what usually happens after the reviewer leaves comments, and where does cycle time get lost?
-- For `Release / QA / Security Gate`: which checks, approvals, or release steps are currently buried in scripts or human memory?
-- Which wedge would produce a visible win without changing your entire engineering process?
-
-### Approval and risk
-
-- Before what actions would you require an explicit human checkpoint?
-- What would make an AI-assisted workflow unacceptable in your environment?
-- Who needs evidence of what changed, what ran, and who approved it?
-- Is local-first execution important, or would hosted execution be acceptable?
-- Would `BYO AI keys` or explicit usage pass-through be acceptable for an initial pilot?
-
-### Fit and scope
-
-- Which of these is the sharpest first wedge: `Issue -> PR`, `PR Review -> Fix`, or `Release / QA / Security Gate`?
-- How similar is that workflow across the repos that matter?
-- What would we have to exclude to keep the pilot narrow and useful?
-- Where would manual summaries or manual context handoff still be acceptable in V1?
-- Who would be the named owner during a `4-week` pilot?
-
-### Buying and urgency
-
-- Why solve this in the next quarter instead of later?
-- What budget path would a `4 500 EUR` pilot need to clear?
-- What outcome would make you expand after the pilot?
-- What would block you from starting if the workflow fit is real?
-
-## Discovery scorecard
-
-Advance only when at least four are true:
-
-- one live GitHub delivery problem is described with a recent example
-- one first-wedge workflow is obvious
-- the buyer accepts explicit approval gates
-- one named pilot owner exists
-- a budget or decision path exists
-- the pilot can start within the next quarter
-
-If fewer than four are true, keep it in `follow up later` or `disqualify`.
-
-## Demo booking rule
-
-Book a demo only when:
-
-- the pain maps clearly to one fixed workflow
-- the buyer accepts the narrow paid pilot boundary
-- the buyer wants governed automation, not autonomous shipping
-- there is a likely owner who can attend the demo
-
-The demo should show:
-
-- the pipeline graph
-- the approval checkpoint
-- the guarded action that only appears after approval
-- the narrow pilot scope and success criteria
-
-## Outreach angles
-
-- governed AI workflows for repeated GitHub delivery work
-- explicit approval without giving up useful automation
-- reusable delivery operations instead of prompt sprawl
-- local-first execution for teams that do not want hosted code execution
-- a fixed pilot with one repo group instead of vague AI transformation
+- proven ROI
+- live customer production results
+- hands-off autonomous shipping
+- benchmarked time savings
+- complete elimination of manual context handoff in V1
 
 ## Outreach variants
 
-### Variant 1: Agency / software factory email
+Keep every first message short.
+Mention the workflow pain, the governance angle, and a specific CTA.
 
-Subject: Govern GitHub delivery work across repos
+### Variant 1: agency email
 
-Hi {{name}},
+Subject: governed AI delivery for repeated GitHub work
 
-I’m working on `Leion Delivery`, a narrow paid pilot for teams that repeat the same GitHub delivery motions across multiple repos.
+Hi {{first_name}}. I’m working with agencies that repeat the same issue, PR, and release motions across client repos but still need human approval before risky actions. We packaged that into a narrow `4-week` pilot with three governed GitHub workflows. Worth a `20-minute` call to see if one repo group is a fit?
 
-The focus is not autonomous coding. The focus is a fixed workflow pack for `Issue -> PR`, `PR Review -> Fix`, and `Release / QA / Security Gate`, with explicit human approval before guarded actions.
+### Variant 2: CTO email
 
-If your team is repeating this work already, I think there may be a fit for one repo group.
+Subject: reduce PR and release friction without autonomous merges
 
-Worth a short call?
+Hi {{first_name}}. We built a narrow delivery pilot for teams that want AI help on GitHub work but do not want a black-box agent merging code. The pilot standardizes `Issue -> PR`, `PR fix`, and `release gate` flows with explicit approval points. Open to a short call if this is a current pain?
 
-### Variant 2: CTO / engineering manager email
+### Variant 3: platform owner email
 
-Subject: Reduce review and release friction without removing approval
+Subject: governed workflow pack, not another AI seat
 
-Hi {{name}},
+Hi {{first_name}}. If your team is evaluating AI for delivery work, the gap I keep seeing is governance and repeatability, not raw model access. We packaged three GitHub delivery workflows into a local-first pilot with approval checkpoints and a clear operating owner. Should I send the one-page outline?
 
-I help GitHub-centered teams turn repeated delivery work into governed workflows instead of one-off prompts or scripts.
+### Variant 4: referral ask
 
-The pilot is fixed: `4 weeks`, `1 organization`, `up to 5 repos`, and `3` delivery workflows. Sensitive steps keep explicit human approval.
+Hi {{first_name}}. Quick ask: I’m looking for teams with repeated GitHub issue, PR, and release work that want AI assistance without giving up explicit human approval. If someone on your side owns engineering workflow or developer productivity, would you point me to them?
 
-If your team already uses AI ad hoc but still feels review or release friction, I can show the exact pilot scope and success criteria.
+### Variant 5: short DM
 
-Open to a `20-minute` conversation?
+Built a narrow pilot for GitHub teams that want AI-assisted delivery with human approval before commit, push, merge, or release. It covers issue-to-PR, PR fixes, and release gates. Useful if your team has delivery friction and governance constraints. Worth comparing notes?
 
-### Variant 3: Platform / dev productivity email
+### Variant 6: breakup note
 
-Subject: Standardize delivery workflows, not just AI seats
+Closing the loop for now. If repeated PR and release work becomes urgent, I can send the short pilot outline. The fit is strongest when a team wants governed workflow automation, not general AI coding seats.
 
-Hi {{name}},
+### Follow-up 1: proof-led
 
-I’m building a narrow founder-led pilot around governed engineering workflows in GitHub.
+Following up with the clearest angle: this is not an autonomous merge bot. The current proof is that the workflows are explicit pipeline assets with human approval before guarded write actions. If that governance model matters on your side, I can walk through the pilot in `20 minutes`.
 
-The wedge is simple: package repeated delivery operations with explicit approvals and local-first execution, rather than letting each engineer recreate the flow with prompts.
+### Follow-up 2: pilot outline
 
-If auditability and repeatability matter more than raw autonomy, I think this may be worth comparing against your current setup.
+Sending the narrow scope in case it helps: `4 weeks`, `1 org`, `up to 5 repos`, `3 workflows`, local-first execution, and one named workflow owner. If you already know one repo group with repeated issue/PR/release pain, that is usually enough to qualify the first conversation.
 
-Should I send the pilot outline?
+### Follow-up 3: objection pre-handle
 
-### Variant 4: Release-focused email
+To be explicit, this does not require hosted code execution or bundled model spend. V1 is local-first and defaults to `BYO AI keys`. If the main concern is governance rather than model access, that is usually where the pilot makes sense.
 
-Subject: Put release approval back into the workflow
+## Discovery call brief
 
-Hi {{name}},
+### Goal
 
-Some teams have strong CI, but the actual release decision still lives in checklists, scripts, and Slack threads.
+Confirm that the buyer has a recurring GitHub workflow problem, governance sensitivity, a pilot owner, and a repo group that can support a narrow `4-week` pilot.
 
-I’m packaging a narrow pilot that turns `Release / QA / Security Gate` into an explicit governed workflow with a human checkpoint before merge or publish.
+### Core questions
 
-If release evidence and approval are messy today, I can send the pilot outline.
+- What delivery work repeats most often today: issue implementation, PR repair, or release gating?
+- Where does the current process stall: context handoff, review latency, release coordination, or compliance checks?
+- Which actions require explicit human approval on your side before code is pushed, merged, or released?
+- How many repos or teams share the same workflow shape today?
+- Who would own a `4-week` pilot internally?
+- Are you comfortable with local-first execution and `BYO AI keys` in V1?
+- What would make a pilot clearly successful by the end of four weeks?
+- If this worked, would you expand by repo count, workflow count, or operating governance?
 
-### Variant 5: Referral ask
+### Wedge-specific questions
 
-Subject: Who owns delivery workflow tooling on your side?
+#### Agency
 
-Hi {{name}},
+- How often do delivery patterns repeat across client repos?
+- Are code review and release steps consistent enough to standardize?
+- Do clients care about auditability or approval checkpoints?
 
-Quick question: I’m working on a small paid pilot for teams that want governed GitHub delivery workflows with explicit approval points.
+#### Product CTO / engineering manager
 
-If this is not your area, who owns developer productivity, release process, or engineering workflow tooling on your side?
+- Which backlog-to-PR or PR-repair motions consume the most senior time?
+- How often do release checks block a small team?
+- Would one repo group be enough to prove value quickly?
 
-### Variant 6: Short LinkedIn / DM
+#### Platform / dev productivity owner
 
-Working on a narrow paid offer for teams with repeated GitHub delivery work:
-`Issue -> PR`, `PR Review -> Fix`, and `Release / QA / Security Gate` as governed workflows with explicit approval.
+- Are you trying to reduce prompt sprawl and ad hoc operator behavior?
+- What governance or evidence would be required to approve a workflow pilot?
+- Is the bigger need workflow packaging, approvals, or run visibility?
 
-Not an autonomous-agent pitch. More a reusable workflow layer for teams that want control.
+### Qualification scorecard
 
-If that is a live pain for your team, I can send the `4-week` pilot outline.
+Advance only when at least `4/5` are true:
 
-### Variant 7: Reply when they already use AI coding tools
+- repeated GitHub delivery work exists
+- approval or governance sensitivity is real
+- one repo group is available for pilot scope
+- one named owner can run the pilot
+- local-first plus `BYO AI keys` is acceptable for V1
 
-That makes sense. I’m not replacing Copilot / Codex / Cursor seats.
+### End every call with one explicit next step
 
-The wedge is the repeated team workflow around GitHub delivery: turning `Issue -> PR`, `PR Review -> Fix`, or release gating into a governed flow with explicit approval, instead of leaving it as prompts plus tribal process.
-
-If that layer is still messy for your team, I can send the pilot scope.
-
-### Variant 8: Breakup / close-the-loop note
-
-Hi {{name}},
-
-I’m going to close the loop for now.
-
-I reached out because some teams want AI help on GitHub delivery work without giving up approval control, but this is only useful when one workflow pain is already visible.
-
-If `Issue -> PR`, PR follow-up fixes, or release gates become urgent later, I can resend the pilot scope.
-
-## Follow-up notes
-
-### Follow-up after no reply
-
-Hi {{name}},
-
-Following up once because the fit is specific:
-teams using GitHub heavily, feeling repeated delivery friction, and wanting AI leverage without removing review checkpoints.
-
-If that is live for you, I can send the exact founding-pilot scope and the success criteria for the first repo group.
-
-### Follow-up after discovery
-
-Hi {{name}},
-
-Thanks again for the conversation.
-
-Based on what you shared, the sharpest starting wedge looks like `{{first_workflow}}` for `{{repo_group}}`, with approval needed before `{{approval_point}}`.
-
-My next step is to send the pilot outline tied to that workflow, the pilot boundary, and the success criteria we discussed.
-
-### Follow-up with pilot outline
-
-Hi {{name}},
-
-Here is the narrow pilot shape we discussed:
-`4 weeks`, `1 organization`, `up to 5 repos`, `1 named owner`, and a first wedge of `{{first_workflow}}`.
-
-The goal is not broad AI transformation. The goal is to make one repeated delivery motion explicit, governed, and demoable on a real repo group.
-
-If this still fits, the next step is a working session with the pilot owner.
+- `send pilot outline`
+- `book product demo`
+- `disqualify`
+- `follow up later`
 
 ## Objection handling
 
 ### `We do not want autonomous code changes`
 
-Then the pilot is positioned correctly. The workflow keeps explicit human review before guarded write or release actions. This is a governed workflow offer, not blind autonomy.
+Answer: that is the design point. The credible story is governed workflow automation with explicit human approval before guarded write actions. Merge and publish remain optional.
 
-### `We already use Copilot / Codex / Cursor`
+### `We already use Copilot, Codex, or Claude`
 
-Those tools help individuals. This pilot packages repeated team workflows with explicit approval rules, reusable operating structure, and a clearer path to run visibility.
+Answer: those tools help individuals. This offer packages repeatable team workflows with approval policy, workflow structure, and proof capture around issue, PR, and release operations.
 
-### `This sounds like custom consulting`
+### `This sounds like custom services`
 
-The scope is intentionally fixed: `4 weeks`, `1 organization`, `up to 5 repos`, `3` workflows. Adaptation is limited to fitting the existing delivery process, not inventing a custom platform project.
+Answer: the starting point is fixed: one `4-week` pilot, one org, up to five repos, and three predefined workflows. Adaptation is narrow and bounded to the team’s operating reality.
 
 ### `We need auditability`
 
-That is part of the wedge. The credible story today is explicit workflow structure, visible approval points, and a governance layer around local-first execution. Do not over-claim mature audit exports if the buyer asks for production proof that does not exist yet.
+Answer: that is one of the strongest reasons to look at this. The current proof is workflow structure, explicit approval steps, and guarded action ordering. It is not yet a full enterprise audit product story, so keep the claim narrow.
 
-### `We do not want cloud-hosted code execution`
+### `We do not want hosted code execution`
 
-You do not need it. The runtime stays local-first, which is often the better fit for teams that care about control, review, and environment boundaries.
+Answer: V1 is local-first. The control-plane story is governance, metadata, and routing, not remote autonomous execution.
 
-### `We already have scripts for this`
+### `We already have scripts`
 
-Scripts automate isolated steps. The pilot is about turning repeated delivery motions into a governed workflow pack with approvals, repeatability, and one clear operating model across a repo group.
+Answer: scripts can automate steps, but they usually do not package approval points, reusable workflow structure, or proof assets for how the team should operate.
 
-### `We do not want to manage AI keys`
+### `We do not want to manage model spend`
 
-That is a fair concern. For V1, `BYO AI keys` or explicit pass-through keeps the operating model predictable and avoids hiding usage inside a black box. If that is a hard blocker, the pilot is not the right fit yet.
+Answer: V1 assumes `BYO AI keys` or pass-through usage because it keeps control clear and avoids bundling opaque usage into the pilot price.
 
-### `What about gaps in runtime context or manual summaries?`
+### `The pilot price feels high`
 
-Be direct: early pilots may still require manual issue or PR summaries where automatic context propagation is not complete. The right buyers accept that because they are buying governed workflow structure first, not magic autonomy.
-
-### `The price is high for a pilot`
-
-The test is not "did we experiment with AI." The test is whether one team leaves with a real workflow pack, explicit approval points, and a repeatable path they can operate on real repos.
+Answer: the offer is priced around installing, adapting, and proving three repeatable workflows in a live delivery environment, not around selling prompt access. If the pain is real and repeated, the comparison should be against delivery friction and workflow inconsistency, not against a seat license.
 
 ### `We are too early`
 
-That is often correct. If there is no clear repo group, no workflow owner, or no urgent workflow pain, disqualify now and re-open when one fixed workflow becomes important enough to sponsor.
+Answer: fair if there is no repo group, no owner, or no recurring delivery pattern yet. The right trigger is when one team already feels issue, PR, or release friction often enough to standardize it.
 
-### `We need proof this saves time`
+### `What proof do you have today?`
 
-Be direct: that claim is not the lead proof yet. The credible proof today is governed workflow design with approval checkpoints. Time or ROI claims need fresh run evidence before they belong in the sales motion.
+Answer: the strongest proof today is structural. The repo already contains the three packaged delivery workflows, the orchestrator, approval-before-write ordering, and the pilot packaging. Live run exports, screenshots, and ROI claims still need to be captured and should not be overstated.
 
-## Call outcome states
+## Proof use in calls
 
-- `send pilot`
-- `book demo`
-- `follow up later`
-- `disqualify`
+### What to show
+
+- the existence of the `3` named workflows
+- the explicit approval step before guarded writeback in the code-changing flows
+- the approval pause before merge or publish in the release flow
+- the fixed pilot packaging and scope
+
+### What to say
+
+Use: "The proof today is that these workflows are explicit and governed."
+
+Use: "The next proof step is a live run on a safe repo, not a claim that this is already autonomous production delivery."
+
+### What to avoid
+
+- do not imply customer traction that does not exist
+- do not imply measured speed gains without a captured baseline
+- do not present V1 context propagation as fully automatic
 
 ## Founder-led next actions
 
-Use this as the concrete sales loop for the next `14` days:
+### Immediate operating list
 
-1. Build a list of `30` target accounts: `10` agencies, `10` product teams, `10` platform or dev productivity owners.
-2. Write one fit hypothesis per account tied to one exact workflow pain and one likely owner.
-3. Send `12` outbound messages using the variants above: `4` email, `4` LinkedIn / DM, `2` referral asks, `2` targeted follow-ups.
-4. Reply to every response within `24` hours with one of four states: `send pilot`, `book demo`, `follow up later`, or `disqualify`.
-5. Run discovery only when one recent GitHub workflow problem and one likely first wedge are visible.
-6. After each discovery call, log three things immediately: `first wedge`, `approval boundary`, `next action with date`.
-7. Book demos only for buyers that accept the fixed paid pilot, local-first execution model, and explicit approval structure.
-8. Use the demo to collect proof, not just interest: screenshot the graph, the approval step, and the guarded post-approval action.
-9. Note every objection verbatim and update this doc when a new objection repeats twice.
-10. Stop spending time on accounts that want generic AI help, full autonomy, fully hosted execution, or no defined owner.
+1. Build a `25-account` target list split across agencies, small product teams, and platform owners.
+2. For each account, log one concrete GitHub workflow pain and one reason the governance angle might matter.
+3. Send `10` first-touch emails using at least `3` different outreach variants.
+4. Send `5` founder DMs to second-degree or warm-adjacent contacts using the short DM variant.
+5. Track every reply in one simple table with: account, wedge, pain, status, objection, next step, owner date.
+6. Book at least `3` discovery calls before writing any new positioning copy.
+7. After each call, record the exact workflow pain, the buying trigger, the pilot owner, and the next committed action.
+8. If the same objection appears twice, update this doc before the next outbound batch.
+9. Prepare one short pilot-outline artifact and one proof-led demo narrative for live calls.
+10. Disqualify quickly if there is no owner, no repo group, or no governance-sensitive delivery problem.
 
-## Next-step rule
+### Focus for the next run
 
-No sales conversation stays open without:
-
-- one owner
-- one next action
-- one date
-- one explicit state: `send pilot`, `book demo`, `follow up later`, or `disqualify`
+Do not broaden the offer.
+Use this document to drive account selection, outreach, discovery logging, and objection refinement from real conversations.

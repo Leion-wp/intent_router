@@ -13,7 +13,7 @@ It is that Leion Delivery already packages common GitHub delivery work into reus
 
 | Artifact | What it credibly proves now | What it does not prove yet |
 | --- | --- | --- |
-| `pipeline/product-1/delivery.issue-to-pr.intent.json` | A defined `Issue -> reviewed patch -> validation -> commit -> push -> PR` flow exists with `vscode.reviewDiff` before `git add`, `git commit`, `git push`, and `github.openPr`. | That the flow has completed successfully on a live customer repo. |
+| `pipeline/product-1/delivery.issue-to-pr.intent.json` | A defined `Issue -> reviewed patch -> validation -> commit -> push -> PR` flow exists with `vscode.reviewDiff` before `git add`, `git commit`, `git push`, and `github.openPr`. The flow intentionally stops at PR creation instead of assuming merge context. | That the flow has completed successfully on a live customer repo. |
 | `pipeline/product-1/delivery.pr-review-fix.intent.json` | A defined `PR -> corrective patch -> review -> validation -> push -> rerun checks` flow exists with human review before code writeback. | That it reduced review time or fixed a real PR in production. |
 | `pipeline/product-1/delivery.release-gate.intent.json` | A defined release gate exists with QA, security, PR checks, then `system.pause` before optional merge or release publication. | That a release was approved and published through this gate end-to-end. |
 | `pipeline/product-1/delivery.orchestrator.intent.json` | The three delivery workflows are packaged behind a single entry point via `system.subPipeline`. | That operators prefer the orchestrator UI in practice. |

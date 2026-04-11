@@ -22,6 +22,10 @@
 **/.thorclient/**
 **/.intent-router/**
 **/.gemini/**
+**/.claude/**
+**/.world-mode.json
+**/*.n8n
+**/*.vsix
 scripts/**
 PR_PROMPT.md
 PR_PROMPT_FINISHED.md

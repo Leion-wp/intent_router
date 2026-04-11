@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /d/intent_router/docs/sales -type f -name *.md)",
+      "Bash(find /d/intent_router/docs/proof -type f -name *.md)",
+      "Bash(ls -la /d/intent_router/src/*.ts)",
+      "Bash(grep -l \"TODO\\\\|FIXME\\\\|BUG\\\\|HACK\\\\|XXX\" /d/intent_router/src/*.ts)",
+      "Bash(wc -l /d/intent_router/src/*.ts)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\(''''scripts'''',{}\\), indent=2\\)\\)\")",
+      "Bash(npm run:*)",
+      "Bash(wait)",
+      "Bash(npx tsc:*)",
+      "Bash(node ./out/test/runMockedTests.js)",
+      "Bash(xargs grep:*)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(sort -k6,7)"
+    ]
+  }
+}
