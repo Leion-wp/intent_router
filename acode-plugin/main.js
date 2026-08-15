@@ -349,10 +349,12 @@ window.runIntentTests = async () => {
         } catch (e) {
             return this.normalizeResponse(false, null, e);
         }
-    }
+    acode.setPluginInit('com.leion.roots', (baseUrl, $page, { cacheFile, cacheFileUrl }) => {
+
 }
 
-// --- Terminal Provider ---
+    acode.setPluginUnmount('com.leion.roots', () => {
+
 class TerminalProvider extends BaseProvider {
     constructor() {
         super(PROVIDERS.TERMINAL);
@@ -362,6 +364,36 @@ class TerminalProvider extends BaseProvider {
         const hasTerminal = !!(window.terminal || (window.acode && window.acode.require('terminal')));
         return intent.scheme === this.name && hasTerminal;
     }
+
+window.runIntentTests = async () => {
+    console.log('--- STARTING INTENT ROUTER TESTS ---');
+    if (!window.intentRouter) {
+        console.error('Intent Router not initialized!');
+        return;
+    }
+
+    const tests = [
+        {
+            name: 'System Toast',
+            intent: { scheme: 'system', action: 'toast', data: { message: 'Test Success!' } }
+        },
+        {
+            name: 'System Info',
+            intent: { scheme: 'system', action: 'get_info' }
+        },
+        {
+            name: 'Invalid Scheme',
+            intent: { scheme: 'invalid', action: 'test' }
+        }
+    ];
+
+    for (const test of tests) {
+        console.log(`Running: ${test.name}...`);
+        const res = await window.intentRouter.execute(test.intent);
+        console.log(`Result for ${test.name}:`, res);
+    }
+    console.log('--- TESTS COMPLETE ---');
+};
 
     async execute(intent, context) {
         const terminal = window.terminal || (window.acode && window.acode.require('terminal'));
