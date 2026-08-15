@@ -508,7 +508,79 @@ class IntentRouter {
         this.registerCapability({
             intent: 'http.request',
             handler: async (payload) => {
-                const response = await fetch(payload.url, {
+        // --- GITHUB (via gh CLI) ---
+        const gh = (cmd) => this.route({ intent: 'terminal.exec', payload: { command: `gh ${cmd}` } });
+        this.registerCapability({
+            intent: 'github.openPr',
+            handler: (p) => gh(`pr create --title "${p.title}" --body "${p.body || ''}" --base ${p.base} --head ${p.head}`)
+        });
+        this.registerCapability({
+            intent: 'github.prChecks',
+            handler: (p) => gh(`pr checks ${p.number || ''}`)
+        });
+        this.registerCapability({
+            intent: 'github.repoClone',
+            handler: (p) => gh(`repo clone ${p.repo} ${p.path || ''}`)
+        });
+
+        // --- DOCKER ---
+        const docker = (cmd) => this.route({ intent: 'terminal.exec', payload: { command: `docker ${cmd}` } });
+        this.registerCapability({
+            intent: 'docker.build',
+            handler: (p) => docker(`build -t ${p.tag} ${p.path || '.'}`)
+        });
+        this.registerCapability({
+            intent: 'docker.run',
+            handler: (p) => docker(`run ${p.detach ? '-d' : ''} ${p.image}`)
+        });
+        this.registerCapability({
+            intent: 'docker.ps',
+            handler: () => docker('ps')
+        });
+
+        // --- AI (Enhanced) ---
+        this.registerCapability({
+            intent: 'ai.generate',
+            handler: async (payload) => {
+                const loader = acode.require('loader');
+                if (loader) loader.show('AI is thinking...');
+                
+                try {
+                    // Try to use a global AI provider if available, otherwise fallback to mock
+                    if (window.leionAI) {
+                        const res = await window.leionAI.generate(payload);
+                        if (payload.var) this.variableCache.set(payload.var, res);
+                        return res;
+                    }
+                    
+                    // Fallback simulation
+                    await new Promise(r => setTimeout(r, 1500));
+                    const res = `[AI Mock] Response to: ${payload.instruction}\nContext files: ${payload.contextFiles?.join(', ') || 'none'}`;
+                    if (payload.var) this.variableCache.set(payload.var, res);
+                    return res;
+                } finally {
+                    if (loader) loader.hide();
+                }
+            }
+        });
+
+        // --- VSCODE COMPATIBILITY (Acode Bridge) ---
+        this.registerCapability({
+            intent: 'vscode.reviewDiff',
+            handler: async (p) => {
+                const fs = acode.require('fs');
+                const original = await fs.readFile(p.path);
+                const confirmed = await new Promise(resolve => {
+                    acode.confirm('Review Changes', `Apply changes to ${p.path}?\n\nPROPOSAL:\n${p.proposal.substring(0, 100)}...`, resolve);
+                });
+                if (confirmed) {
+                    await fs.writeFile(p.path, p.proposal);
+                    return true;
+                }
+                return false;
+            }
+        });
+
                     method: payload.method || 'GET',
                     headers: payload.headers || { 'Content-Type': 'application/json' },
                     body: payload.body ? (typeof payload.body === 'string' ? payload.body : JSON.stringify(payload.body)) : undefined
