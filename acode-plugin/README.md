@@ -1,4 +1,4 @@
-# Leion Roots (Intent Router) for Acode
+# Intent Router for Acode
 
 ## Description
 Human-centric orchestration layer for mobile automation. This plugin allows Acode to communicate with various services (GitHub, Terminal, AI) through a unified Intent system.
@@ -22,14 +22,26 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - You can run tests or view logs.
 - Developers can access the router via the global `intentRouter` object.
 
-
-Human-centric orchestration layer for mobile automation.
-
 ## Features
 - **System Routing**: Control Acode UI and files.
-- **Terminal Integration**: Execute commands directly.
+- **Terminal Integration**: Execute commands directly (requires Terminal plugin).
 - **GitHub API**: Fetch repos and files.
-- **AI Ready**: Structured for LLM integration.
+- **File System (FS)**: Read, write, and manage local files via `fsOperation`.
+- **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
 
-## Usage
-Access the `intentRouter` object in the console or use the Command Palette (`Ctrl+Shift+P`).
+## API Example
+```javascript
+// Send a toast notification
+intentRouter.execute({
+  scheme: 'system',
+  action: 'toast',
+  data: { message: 'Hello World' }
+});
+
+// List files in a directory
+intentRouter.execute({
+  scheme: 'fs',
+  action: 'list',
+  data: { path: 'file:///sdcard/Documents' }
+});
+```

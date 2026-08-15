@@ -1,13 +1,13 @@
 {
-  "id": "com.leion.roots",
-  "name": "Leion Roots",
-  "version": "1.0.0",
+  "id": "com.leion.intentrouter",
+  "name": "Intent Router",
+  "version": "1.1.6",
   "main": "main.js",
   "icon": "account_tree",
   "author": "Leion-wp",
   "description": "Human-centric orchestration layer for mobile automation.",
   "readme": "README.md",
-  "minVersionCode": 200,
+  "versionCode": 16,
   "license": "MIT",
   "category": "utility"
 }
