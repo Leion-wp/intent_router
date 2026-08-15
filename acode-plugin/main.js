@@ -1,213 +1,283 @@
-(function() {
-  "use strict";
+(function () {
+  'use strict';
 
-  const SCHEMES = {
-    SYSTEM: 'system',
-    AI: 'ai',
-    GITHUB: 'github',
-    TERMINAL: 'terminal',
-    FS: 'fs'
-  };
-
-  class BaseProvider {
-    constructor(name) {
-      this.name = name;
-    }
-    canHandle(intent) { return false; }
-    async execute(intent, context) {
-      return this.normalizeResponse(false, null, 'Not implemented');
-    }
-    normalizeResponse(success, data = null, error = null, metadata = {}) {
-      return {
-        success,
-        data,
-        error,
-        metadata: { ...metadata, timestamp: Date.now(), provider: this.name }
-      };
-    }
-  }
-
-  class SystemProvider extends BaseProvider {
-    constructor() { super('SystemProvider'); }
-    canHandle(intent) { return intent.scheme === SCHEMES.SYSTEM; }
-    async execute(intent) {
-      const { action, data = {} } = intent;
-      try {
-        switch (action) {
-          case 'toast':
-            if (window.acode && acode.toast) acode.toast(data.message || 'Default Toast');
-            return this.normalizeResponse(true, { status: 'sent' });
-          case 'alert':
-            if (window.acode && acode.alert) acode.alert('System', data.message || 'Default Alert');
-            return this.normalizeResponse(true, { status: 'displayed' });
-          case 'confirm':
-            let res = window.confirm(data.message || 'Confirm?');
-            return this.normalizeResponse(true, res);
-          case 'copy':
-            if (navigator.clipboard && data.text) {
-              await navigator.clipboard.writeText(data.text);
-              return this.normalizeResponse(true, { status: 'copied' });
-            }
-            return this.normalizeResponse(false, null, 'Clipboard API not supported');
-          default:
-            return this.normalizeResponse(false, null, `Action ${action} not supported`);
-        }
-      } catch (e) { return this.normalizeResponse(false, null, e.message); }
-    }
-  }
-
-  class FileProvider extends BaseProvider {
-    constructor() { super('FileProvider'); }
-    canHandle(intent) { return intent.scheme === SCHEMES.FS; }
-    async execute(intent) {
-      const { action, data = {} } = intent;
-      const fs = window.acode ? acode.require('fsOperation') : null;
-      if (!fs) return this.normalizeResponse(false, null, 'fsOperation not available');
-      try {
-        let result;
-        switch (action) {
-          case 'read':
-            result = await fs(data.path).readFile('utf-8');
-            return this.normalizeResponse(true, { content: result });
-          case 'write':
-            await fs(data.path).writeFile(data.content || '');
-            return this.normalizeResponse(true, { status: 'written' });
-          case 'list':
-            result = await fs(data.path).lsDir();
-            return this.normalizeResponse(true, { files: result });
-          default:
-            return this.normalizeResponse(false, null, `Action ${action} not supported`);
-        }
-      } catch (e) { return this.normalizeResponse(false, null, e.message); }
-    }
-  }
-
-  class AIProvider extends BaseProvider {
-    constructor() { super('AIProvider'); }
-    canHandle(intent) { return intent.scheme === SCHEMES.AI; }
-    async execute(intent) {
-      const { action, data = {} } = intent;
-      return this.normalizeResponse(true, { 
-        answer: `AI Response to ${action}: ${data.prompt || 'No prompt provided'}` 
-      }, null, { model: data.model || 'gpt-4o' });
-    }
-  }
-
-  class GitHubProvider extends BaseProvider {
-    constructor() { super('GitHubProvider'); }
-    canHandle(intent) { return intent.scheme === SCHEMES.GITHUB; }
-    async execute(intent) {
-      const { action, data = {} } = intent;
-      const baseUrl = 'https://api.github.com';
-      const headers = data.token ? { 'Authorization': `token ${data.token}` } : {};
-      try {
-        let response;
-        switch (action) {
-          case 'get_repo':
-            response = await fetch(`${baseUrl}/repos/${data.owner}/${data.repo}`, { headers });
-            break;
-          case 'get_file':
-            response = await fetch(`${baseUrl}/repos/${data.owner}/${data.repo}/contents/${data.path}`, { headers });
-            break;
-          default:
-            return this.normalizeResponse(false, null, `Action ${action} not supported`);
-        }
-        if (!response.ok) throw new Error(`GitHub API: ${response.statusText}`);
-        const result = await response.json();
-        if (action === 'get_file' && result.encoding === 'base64' && result.content) {
-          try { result.decodedContent = atob(result.content.replace(/\n/g, '')); } catch (e) { result.decodeError = 'Failed to decode base64'; }
-        }
-        return this.normalizeResponse(true, result);
-      } catch (e) { return this.normalizeResponse(false, null, e.message); }
-    }
-  }
-
-  class TerminalProvider extends BaseProvider {
-    constructor() { super('TerminalProvider'); }
-    canHandle(intent) { return intent.scheme === SCHEMES.TERMINAL; }
-    async execute(intent) {
-      const { action, data = {} } = intent;
-      if (action === 'exec') {
-        if (window.terminal && typeof window.terminal.exec === 'function') {
-          const output = await window.terminal.exec(data.command);
-          return this.normalizeResponse(true, { output });
-        }
-        return this.normalizeResponse(false, null, 'Terminal plugin not found or exec missing');
-      }
-      return this.normalizeResponse(false, null, `Action ${action} not supported`);
-    }
-  }
+  const PLUGIN_ID = 'com.leion.intentrouter';
+  const PLUGIN_VERSION = '1.2.0';
 
   class IntentRouter {
     constructor() {
-      this.providers = [
-        new SystemProvider(), 
-        new FileProvider(), 
-        new AIProvider(), 
-        new GitHubProvider(), 
-        new TerminalProvider()
-      ];
+      this.commands = new Map();
       this.logs = [];
+      this.isInitialized = false;
+      this.$page = null;
+      this.baseUrl = null;
+      this.context = null;
+      this.fsOperation = null;
     }
-    async execute(intent) {
-      if (!intent || !intent.scheme) return { success: false, error: 'Invalid intent' };
-      const provider = this.providers.find(p => p.canHandle(intent));
-      if (!provider) return { success: false, error: `No provider for scheme: ${intent.scheme}` };
-      const result = await provider.execute(intent);
-      this.logs.push({ intent, result, time: new Date().toISOString() });
-      if (this.logs.length > 50) this.logs.shift();
-      return result;
-    }
-    getLogs() { return this.logs; }
-  }
 
-  class IntentRouterPlugin {
-    constructor() {
-      this.router = new IntentRouter();
+    async init(baseUrl, $page, context) {
+      if (this.isInitialized) return;
+      this.baseUrl = baseUrl;
+      this.$page = $page;
+      this.context = context || {};
+
+      try {
+        this.fsOperation = acode.require('fsOperation');
+      } catch (_) {
+        this.fsOperation = null;
+      }
+
+      this.setupCommands();
+      this.registerAcodeCommands();
+      window.intentRouter = this;
+      this.isInitialized = true;
+      this.log('Intent Router initialized');
+      this.toast('Intent Router Active');
     }
-    async init(baseUrl) {
-      window.intentRouter = this.router;
-      window.runIntentTests = async () => {
-        if (window.acode) acode.toast('Starting Tests...');
-        const tests = [
-          { scheme: 'system', action: 'toast', data: { message: 'Test Success!' } },
-          { scheme: 'ai', action: 'prompt', data: { prompt: 'Test' } }
-        ];
-        for (const test of tests) {
-          await this.router.execute(test);
+
+    toast(message, timeout = 3000) {
+      try {
+        if (window.acode && typeof acode.toast === 'function') {
+          acode.toast(message, timeout);
+          return;
         }
-      };
-      if (window.acode) {
-        acode.addCommand({
-          name: 'Intent Router: Run Tests',
-          description: 'Execute internal test suite',
-          exec: () => window.runIntentTests()
-        });
-        acode.addCommand({
-          name: 'Intent Router: About',
-          description: 'Plugin Information',
-          exec: () => acode.alert('Intent Router', 'v1.1.6 - Stable')
-        });
-        acode.addCommand({
-          name: 'Intent Router: View Logs',
-          description: 'Show execution history',
-          exec: () => console.table(this.router.getLogs())
-        });
+      } catch (_) {}
+      try {
+        if (typeof window.toast === 'function') window.toast(message, timeout);
+      } catch (_) {}
+    }
+
+    log(message) {
+      const entry = `[${new Date().toISOString()}] ${message}`;
+      this.logs.push(entry);
+      if (this.logs.length > 100) this.logs.shift();
+      console.log(`[Intent Router] ${message}`);
+    }
+
+    register(name, handler) {
+      this.commands.set(name, handler);
+      this.log(`Registered command: ${name}`);
+    }
+
+    async route(intent = {}) {
+      const action = intent.action;
+      const data = intent.data || {};
+      if (!action || typeof action !== 'string') {
+        return { status: 'error', message: 'intent.action is required' };
+      }
+      const handler = this.commands.get(action);
+      if (!handler) {
+        this.log(`Command not found: ${action}`);
+        return { status: 'error', message: `Command ${action} not found` };
+      }
+      try {
+        this.log(`Routing action: ${action}`);
+        const result = await handler(data, intent);
+        return { status: 'success', result: result === undefined ? null : result };
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        this.log(`Error executing ${action}: ${message}`);
+        return { status: 'error', message };
       }
     }
-    destroy() {
-      delete window.intentRouter;
-      delete window.runIntentTests;
+
+    requireFs() {
+      if (!this.fsOperation) throw new Error('Acode fsOperation API is unavailable');
+      return this.fsOperation;
+    }
+
+    setupCommands() {
+      this.commands.clear();
+
+      this.register('system:toast', (data) => {
+        this.toast(data.message || 'No message', data.timeout || 3000);
+        return { shown: true };
+      });
+
+      this.register('system:info', () => ({
+        pluginId: PLUGIN_ID,
+        version: PLUGIN_VERSION,
+        userAgent: navigator.userAgent,
+        platform: navigator.platform || 'unknown',
+        baseUrl: this.baseUrl
+      }));
+
+      this.register('system:vibrate', (data) => {
+        if (typeof navigator.vibrate !== 'function') throw new Error('Vibration not supported');
+        navigator.vibrate(Number(data.ms) || 200);
+        return { vibrated: true };
+      });
+
+      this.register('system:copy_to_clipboard', async (data) => {
+        if (data.text === undefined) throw new Error('text is required');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(String(data.text));
+          return { copied: true, method: 'navigator.clipboard' };
+        }
+        const clipboard = window.cordova && window.cordova.plugins && window.cordova.plugins.clipboard;
+        if (!clipboard || typeof clipboard.copy !== 'function') throw new Error('Clipboard API unavailable');
+        await new Promise((resolve, reject) => clipboard.copy(String(data.text), resolve, reject));
+        return { copied: true, method: 'cordova' };
+      });
+
+      this.register('system:open_url', (data) => {
+        if (!data.url) throw new Error('url is required');
+        window.open(data.url, '_system');
+        return { opened: true };
+      });
+
+      this.register('file:read', async (data) => {
+        if (!data.path) throw new Error('path is required');
+        return await this.requireFs()(data.path).readFile(data.encoding || 'utf8');
+      });
+
+      this.register('file:write', async (data) => {
+        if (!data.path) throw new Error('path is required');
+        if (data.content === undefined) throw new Error('content is required');
+        await this.requireFs()(data.path).writeFile(data.content);
+        return { written: true };
+      });
+
+      this.register('file:list', async (data) => {
+        if (!data.path) throw new Error('path is required');
+        return await this.requireFs()(data.path).lsDir();
+      });
+
+      this.register('file:exists', async (data) => {
+        if (!data.path) throw new Error('path is required');
+        return { exists: await this.requireFs()(data.path).exists() };
+      });
+
+      this.register('file:delete', async (data) => {
+        if (!data.path) throw new Error('path is required');
+        await this.requireFs()(data.path).delete();
+        return { deleted: true };
+      });
+
+      this.register('editor:get_content', () => {
+        if (!window.editorManager || !editorManager.editor) throw new Error('Editor unavailable');
+        return editorManager.editor.getValue();
+      });
+
+      this.register('editor:set_content', (data) => {
+        if (!window.editorManager || !editorManager.editor) throw new Error('Editor unavailable');
+        editorManager.editor.setValue(data.content || '', -1);
+        return { updated: true };
+      });
+
+      this.register('editor:get_selected_text', () => {
+        if (!window.editorManager || !editorManager.editor) throw new Error('Editor unavailable');
+        return editorManager.editor.getSelectedText();
+      });
+
+      this.register('editor:get_cursor', () => {
+        if (!window.editorManager || !editorManager.editor) throw new Error('Editor unavailable');
+        return editorManager.editor.getCursorPosition();
+      });
+
+      this.register('network:request', async (data) => {
+        if (!data.url) throw new Error('url is required');
+        const options = { method: data.method || 'GET', headers: data.headers || {} };
+        if (data.body !== undefined && data.body !== null) {
+          options.body = typeof data.body === 'string' ? data.body : JSON.stringify(data.body);
+        }
+        const response = await fetch(data.url, options);
+        const contentType = response.headers.get('content-type') || '';
+        const body = contentType.includes('application/json') ? await response.json() : await response.text();
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
+        }
+        return { status: response.status, body };
+      });
+
+      this.register('github:fetch_repo', async (data) => {
+        if (!data.repo) throw new Error('repo is required (owner/repo)');
+        const path = data.path ? `/${String(data.path).replace(/^\/+/, '')}` : '';
+        const routed = await this.route({
+          action: 'network:request',
+          data: {
+            url: `https://api.github.com/repos/${data.repo}/contents${path}`,
+            headers: data.token ? { Authorization: `Bearer ${data.token}` } : {}
+          }
+        });
+        if (routed.status !== 'success') throw new Error(routed.message || 'GitHub request failed');
+        return routed.result;
+      });
+    }
+
+    registerAcodeCommands() {
+      try {
+        if (typeof acode.addCommand === 'function') {
+          acode.addCommand({
+            name: 'Intent Router: Test',
+            description: 'Run Intent Router smoke test',
+            exec: () => this.runTest()
+          });
+          acode.addCommand({
+            name: 'Intent Router: Logs',
+            description: 'Show Intent Router logs',
+            exec: () => this.showLogs()
+          });
+          return;
+        }
+      } catch (error) {
+        this.log(`acode.addCommand unavailable: ${error.message || error}`);
+      }
+      try {
+        if (window.editorManager && editorManager.editor && editorManager.editor.commands) {
+          editorManager.editor.commands.addCommand({ name: 'intent_router:test', exec: () => this.runTest() });
+        }
+      } catch (error) {
+        this.log(`Editor command registration skipped: ${error.message || error}`);
+      }
+    }
+
+    async runTest() {
+      const result = await this.route({ action: 'system:toast', data: { message: 'Intent Router test successful' } });
+      console.log('[Intent Router] smoke test:', result);
+      return result;
+    }
+
+    showLogs() {
+      const text = this.logs.join('\n') || 'No logs yet.';
+      try {
+        if (this.$page) {
+          if (this.$page.header) this.$page.header.title = 'Intent Router Logs';
+          this.$page.content = `<pre style="padding:12px;white-space:pre-wrap;overflow:auto">${this.escapeHtml(text)}</pre>`;
+          if (typeof this.$page.show === 'function') this.$page.show();
+          return;
+        }
+      } catch (_) {}
+      console.log(text);
+      this.toast('Intent Router logs written to console');
+    }
+
+    escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    async destroy() {
+      if (window.intentRouter === this) delete window.intentRouter;
+      this.commands.clear();
+      this.isInitialized = false;
+      this.$page = null;
+      this.context = null;
+      this.log('Intent Router destroyed');
     }
   }
 
   if (typeof window.acode !== 'undefined') {
-    const plugin = new IntentRouterPlugin();
-    acode.setPluginInit('com.leion.intentrouter', async (baseUrl) => {
-      await plugin.init(baseUrl);
+    const router = new IntentRouter();
+    acode.setPluginInit(PLUGIN_ID, async (baseUrl, $page, context) => {
+      await router.init(baseUrl, $page, context);
     });
-    acode.setPluginUnmount('com.leion.intentrouter', () => {
-      plugin.destroy();
+    acode.setPluginUnmount(PLUGIN_ID, () => {
+      router.destroy();
     });
   }
 })();
