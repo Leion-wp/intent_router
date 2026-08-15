@@ -254,7 +254,24 @@ class IntentRouterPlugin {
       window.toast('Intent Router Ready', 2000);
     }
     console.log('Intent Router Plugin Initialized');
+    console.log('Intent Router Plugin Initialized');
+    
+    // Ajout des commandes à Acode
+    if (window.acode) {
+      acode.addCommand({
+        name: 'Intent Router: Run Tests',
+        description: 'Execute internal test suite',
+        exec: () => window.runIntentTests()
+      });
+      
+      acode.addCommand({
+        name: 'Intent Router: View Logs',
+        description: 'Show execution history in console',
+        exec: () => console.table(this.router.getLogs())
+      });
+    }
   }
+
 
   async destroy() {
     delete window.intentRouter;
