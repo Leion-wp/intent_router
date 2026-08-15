@@ -198,7 +198,6 @@ class IntentRouter {
 
     async route(intent) {
         if (!intent) return false;
-        if (intent.steps && Array.isArray(intent.steps)) {
             let res;
             for (const s of intent.steps) {
                 res = await this.route(s);
