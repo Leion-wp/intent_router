@@ -173,3 +173,48 @@ class IntentRouter {
   }
 }
 \n
+class IntentRouterPlugin {
+  constructor() {
+    this.router = new IntentRouter();
+  }
+
+  async init() {
+    window.intentRouter = this.router;
+    
+    // Global test function
+    window.runIntentTests = async () => {
+      console.log('--- Intent Router Test Suite ---');
+      const tests = [
+        { scheme: 'system', action: 'toast', data: { message: 'Hello from Intent Router!' } },
+        { scheme: 'ai', action: 'prompt', data: { prompt: 'Explain quantum physics' } },
+        { scheme: 'docker', action: 'ps', data: {} }
+      ];
+
+      for (const test of tests) {
+        console.log(`Testing ${test.scheme}...`);
+        const res = await this.router.execute(test);
+        console.log(`Result [${test.scheme}]:`, res);
+      }
+    };
+
+    window.toast('Intent Router Ready', 2000);
+    console.log('Intent Router Plugin Initialized');
+  }
+
+  async destroy() {
+    delete window.intentRouter;
+    delete window.runIntentTests;
+    console.log('Intent Router Plugin Unmounted');
+  }
+}
+
+if (window.acode) {
+  const plugin = new IntentRouterPlugin();
+  acode.setPluginInit('com.leionwp.intentrouter', (baseUrl, $page, { cacheFileUrl, cacheFile }) => {
+    plugin.init();
+  });
+  acode.setPluginUnmount('com.leionwp.intentrouter', () => {
+    plugin.destroy();
+  });
+}
+\n
