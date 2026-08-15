@@ -1,5 +1,231 @@
 /**
  * Intent Router for Acode - Android Edition
+ * Version: 1.0.0
+ * Author: Rutex (Autonomous AI)
+ */
+
+// --- TYPES & CONSTANTS ---
+const IntentScheme = {
+  SYSTEM: 'system',
+  AI: 'ai',
+  GIT: 'git',
+  HTTP: 'http',
+  TERMINAL: 'terminal',
+  DOCKER: 'docker'
+};
+
+const ErrorCodes = {
+  PROVIDER_NOT_FOUND: 'PROVIDER_NOT_FOUND',
+  CAPABILITY_MISSING: 'CAPABILITY_MISSING',
+  EXECUTION_FAILED: 'EXECUTION_FAILED',
+  INVALID_INTENT: 'INVALID_INTENT',
+  TIMEOUT: 'TIMEOUT'
+};
+
+// --- BASE PROVIDER ---
+class BaseProvider {
+  constructor(name, capabilities = []) {
+    this.name = name;
+    this.capabilities = capabilities;
+  }
+
+  async canHandle(intent) {
+    return false;
+  }
+
+  async execute(intent, context) {
+    throw new Error('Method not implemented');
+  }
+
+  normalizeResponse(success, data = null, error = null, metadata = {}) {
+    return {
+      success,
+      data,
+      error: error ? (typeof error === 'string' ? error : error.message) : null,
+      metadata: {
+        provider: this.name,
+        timestamp: Date.now(),
+        ...metadata
+      }
+    };
+  }
+}
+
+// --- SYSTEM PROVIDER ---
+class SystemProvider extends BaseProvider {
+  constructor() {
+    super('system', ['ui', 'fs']);
+  }
+
+  async canHandle(intent) {
+    return intent.scheme === IntentScheme.SYSTEM;
+  }
+
+  async execute(intent, context) {
+    try {
+      const { action, params } = intent;
+      switch (action) {
+        case 'toast':
+          window.toast(params.message, 3000);
+          return this.normalizeResponse(true, { displayed: true });
+        case 'alert':
+          window.alert(params.title, params.message);
+          return this.normalizeResponse(true, { displayed: true });
+        default:
+          return this.normalizeResponse(false, null, `Action ${action} not supported by SystemProvider`);
+      }
+    } catch (e) {
+      return this.normalizeResponse(false, null, e);
+    }
+  }
+}
+
+// --- TERMINAL PROVIDER ---
+class TerminalProvider extends BaseProvider {
+  constructor() {
+    super('terminal', ['shell']);
+  }
+
+  async canHandle(intent) {
+    return intent.scheme === IntentScheme.TERMINAL;
+  }
+
+  async execute(intent, context) {
+    if (!context.capabilities.terminal) {
+      return this.normalizeResponse(false, null, ErrorCodes.CAPABILITY_MISSING);
+    }
+    try {
+      // Integration with Acode Terminal Plugin if available
+      const terminal = window.acode?.require('terminal');
+      if (terminal) {
+        terminal.run(intent.params.command);
+        return this.normalizeResponse(true, { status: 'sent_to_terminal' });
+      }
+      return this.normalizeResponse(false, null, 'Acode Terminal plugin not found');
+    } catch (e) {
+      return this.normalizeResponse(false, null, e);
+    }
+  }
+}
+
+// --- INTENT ROUTER CORE ---
+class IntentRouter {
+  constructor() {
+    this.providers = [];
+    this.capabilities = {
+      terminal: !!window.acode?.require('terminal'),
+      git: false, // Will be checked dynamically
+      android: true,
+      termux: false
+    };
+    this.logs = [];
+  }
+
+  registerProvider(provider) {
+    this.providers.push(provider);
+    console.log(`[IntentRouter] Registered: ${provider.name}`);
+  }
+
+  async init() {
+    // Detect environment
+    this.capabilities.termux = await this.checkTermux();
+    this.capabilities.git = await this.checkGit();
+  }
+
+  async checkTermux() {
+    return /Termux/.test(navigator.userAgent) || !!window.termux;
+  }
+
+  async checkGit() {
+    // Simplified check for Android environment
+    return this.capabilities.terminal; 
+  }
+
+  async execute(intent) {
+    const logEntry = { intent, startTime: Date.now() };
+    
+    try {
+      if (!intent || !intent.scheme) {
+        throw new Error(ErrorCodes.INVALID_INTENT);
+      }
+
+      const provider = this.providers.find(p => p.canHandle(intent));
+      
+      if (!provider) {
+        const errorRes = { success: false, error: ErrorCodes.PROVIDER_NOT_FOUND };
+        this.log(logEntry, errorRes);
+        return errorRes;
+      }
+
+      const response = await provider.execute(intent, { capabilities: this.capabilities });
+      this.log(logEntry, response);
+      return response;
+
+    } catch (error) {
+      const errorRes = { success: false, error: error.message || ErrorCodes.EXECUTION_FAILED };
+      this.log(logEntry, errorRes);
+      return errorRes;
+    }
+  }
+
+  log(entry, response) {
+    entry.endTime = Date.now();
+    entry.duration = entry.endTime - entry.startTime;
+    entry.response = response;
+    this.logs.push(entry);
+    if (this.logs.length > 50) this.logs.shift();
+  }
+}
+
+// --- PLUGIN INTEGRATION ---
+let router;
+
+async function initPlugin() {
+  router = new IntentRouter();
+  
+  // Register default providers
+  router.registerProvider(new SystemProvider());
+  router.registerProvider(new TerminalProvider());
+  
+  await router.init();
+
+  // Export to global scope for other plugins/scripts
+  window.intentRouter = router;
+  
+  window.toast('Intent Router Ready', 2000);
+}
+
+if (window.acode) {
+  acode.setPluginInit(initPlugin);
+} else {
+  initPlugin();
+}
+
+// --- TEST SUITE ---
+window.testIntentRouter = async () => {
+  console.log('--- STARTING INTENT ROUTER TESTS ---');
+  
+  // Test 1: System Toast
+  console.log('Test 1: System Toast...');
+  const res1 = await router.execute({
+    scheme: 'system',
+    action: 'toast',
+    params: { message: 'Test Success!' }
+  });
+  console.log('Result 1:', res1);
+
+  // Test 2: Invalid Provider
+  console.log('Test 2: Invalid Provider...');
+  const res2 = await router.execute({
+    scheme: 'unknown',
+    action: 'none'
+  });
+  console.log('Result 2 (Should fail):', res2);
+
+  console.log('--- TESTS COMPLETE ---');
+};
+
+ * Intent Router for Acode - Android Edition
  * Developed by Rutex (AI Agent)
  */
 
