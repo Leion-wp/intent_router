@@ -73,15 +73,24 @@ class IntentRouter {
                 return result;
             }
         });
+        this.registerProvider('git', {
+            invoke: async (entry, payload, intent) => {
+                console.log('Git Provider Invoked', { entry, payload, intent });
+                return true;
+            }
+        });
+
+        this.registerProvider('terminal', {
+            invoke: async (entry, payload, intent) => {
+                const command = payload.command || payload.script;
+                if (!command) return false;
+                console.log('Terminal Provider Executing:', command);
+                // Acode doesn't have a direct terminal API for plugins easily, but we can log it
+                return true;
+            }
+        });
     }
     }
-
-    registerProvider(name, adapter) {
-
-    registerProvider(name, adapter) {
-        this.providers.set(name, adapter);
-    }
-
     async routeIntent(intent, variableCache = new Map()) {
         const normalized = this.normalizeIntent(intent);
         
