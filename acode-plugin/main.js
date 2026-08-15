@@ -75,7 +75,15 @@ class SystemProvider extends BaseProvider {
       return this.normalizeResponse(false, null, e.message);
     }
   }
-}
+        case 'open_file':
+          if (window.editorManager && data.path) {
+            window.editorManager.addNewFile(data.path, {
+              text: data.content || '',
+              isUnsaved: !!data.isUnsaved
+            });
+            return this.normalizeResponse(true, { status: 'opened' });
+          }
+          return this.normalizeResponse(false, null, 'editorManager or path missing');
 
 class AIProvider extends BaseProvider {
   constructor() {
@@ -123,6 +131,17 @@ class GitHubProvider extends BaseProvider {
 
       if (!response.ok) throw new Error(`GitHub API: ${response.statusText}`);
       const result = await response.json();
+      
+      // Auto-decode base64 for file contents
+      if (action === 'get_file' && result.encoding === 'base64' && result.content) {
+        try {
+          result.decodedContent = atob(result.content.replace(/\n/g, ''));
+        } catch (e) {
+          result.decodeError = 'Failed to decode base64';
+        }
+      }
+      
+      return this.normalizeResponse(true, result);
       return this.normalizeResponse(true, result);
     } catch (e) {
       return this.normalizeResponse(false, null, e.message);
@@ -223,7 +242,15 @@ class IntentRouter {
     }
   }
 
-  getLogs() {
+  getHelp() {
+    return {
+      version: '1.0.0',
+      schemes: Object.values(SCHEMES),
+      capabilities: this.getCapabilities()
+    };
+  }
+
+
     return this.logs;
   }
 }
