@@ -45,7 +45,55 @@ class BaseProvider {
     };
   }
 }
-\n
+
+class SystemProvider extends BaseProvider {
+  constructor() {
+    super('SystemProvider');
+  }
+
+  canHandle(intent) {
+    return intent.scheme === SCHEMES.SYSTEM;
+  }
+
+  async execute(intent) {
+    const { action, data } = intent;
+    try {
+      switch (action) {
+        case 'toast':
+          window.toast(data.message || 'Default Toast', 3000);
+          return this.normalizeResponse(true, { status: 'sent' });
+        case 'alert':
+          window.alert(data.message || 'Default Alert');
+          return this.normalizeResponse(true, { status: 'displayed' });
+        case 'confirm':
+          const result = window.confirm(data.message || 'Confirm?');
+          return this.normalizeResponse(true, result);
+        default:
+          return this.normalizeResponse(false, null, `Action ${action} not supported`);
+      }
+    } catch (e) {
+      return this.normalizeResponse(false, null, e.message);
+    }
+  }
+}
+
+class AIProvider extends BaseProvider {
+  constructor() {
+    super('AIProvider');
+  }
+
+  canHandle(intent) {
+    return intent.scheme === SCHEMES.AI;
+  }
+
+  async execute(intent) {
+    const { action, data } = intent;
+    return this.normalizeResponse(true, { 
+      answer: `AI Response to ${action}: ${data.prompt || 'No prompt provided'}` 
+    }, null, { model: data.model || 'gpt-3.5-turbo' });
+  }
+}
+
 class GitHubProvider extends BaseProvider {
   constructor() {
     super('GitHubProvider');
