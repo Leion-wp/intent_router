@@ -323,7 +323,20 @@ class GitHubProvider extends BaseProvider {
     } catch (error) {
       return this.normalizeResponse(false, null, error.message);
     }
+
+/**
+ * Docker Provider (Stub/Experimental)
+ */
+class DockerProvider extends BaseProvider {
+  canHandle(intent) {
+    return intent.scheme === 'docker';
   }
+
+  async execute(intent) {
+    return this.normalizeResponse(false, null, "Docker is not supported on Android environment yet.");
+  }
+}
+
 }
 
   constructor() {
