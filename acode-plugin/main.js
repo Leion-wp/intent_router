@@ -113,7 +113,18 @@ class IntentRouter {
                     const fs = acode.require('fs');
                     await fs.writeFile(payload.path, payload.content);
                     return true;
-                } catch (e) {
+            exec: async () => {
+                const intentStr = await acode.prompt('Enter Intent JSON', '{"intent": "ui.toast", "payload": {"message": "Hello from Acode"}}', 'textarea');
+                if (intentStr) {
+                    try {
+                        const intent = JSON.parse(intentStr);
+                        await this.router.route(intent);
+                    } catch (e) {
+                        window.toast('Invalid JSON', 3000);
+                    }
+                }
+            }
+
                     window.toast(e.message, 3000);
                     return false;
                 }
