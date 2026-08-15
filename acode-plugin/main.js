@@ -288,6 +288,44 @@ class AIProvider extends BaseProvider {
   }
 }
 
+/**
+ * GitHub Provider
+ * Handles GitHub-related intents using the GitHub API
+ */
+class GitHubProvider extends BaseProvider {
+  canHandle(intent) {
+    return intent.scheme === 'github';
+  }
+
+  async execute(intent) {
+    const { action, data } = intent;
+    const token = data.token;
+
+    if (!token && action !== 'get-repo') {
+       // some actions might not need token if public, but let's assume we want it for now
+    }
+
+    try {
+      switch (action) {
+        case 'get-repo':
+          const repoRes = await fetch(`https://api.github.com/repos/${data.owner}/${data.repo}`);
+          const repoData = await repoRes.json();
+          return this.normalizeResponse(true, repoData);
+        
+        case 'list-files':
+          const filesRes = await fetch(`https://api.github.com/repos/${data.owner}/${data.repo}/contents/${data.path || ''}`);
+          const filesData = await filesRes.json();
+          return this.normalizeResponse(true, filesData);
+
+        default:
+          return this.normalizeResponse(false, null, `GitHub action '${action}' not supported`);
+      }
+    } catch (error) {
+      return this.normalizeResponse(false, null, error.message);
+    }
+  }
+}
+
   constructor() {
     this.providers = [];
     this.logs = [];
