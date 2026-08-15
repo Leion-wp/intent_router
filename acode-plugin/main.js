@@ -208,7 +208,13 @@ class IntentRouter {
 
     registerDefaultProviders() {
         this.registerProvider('system', new SystemProvider());
-        this.registerProvider('http', new HttpProvider());
+                case 'copy':
+                    if (!payload.text) return this.fail('MISSING_PARAM', 'Text is required');
+                    if (context.capabilities.clipboard) {
+                        await new Promise((res, rej) => cordova.plugins.clipboard.copy(payload.text, res, rej));
+                        return this.success({ copied: true });
+                    }
+                    return this.fail('CAPABILITY_MISSING', 'Clipboard API not available');
         this.registerProvider('ai', new AIProvider());
         this.registerProvider('terminal', new TerminalProvider());
         this.registerProvider('git', new GitProvider());
