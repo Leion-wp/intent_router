@@ -16,6 +16,15 @@ class IntentRouter {
             docker: false,
             termux: false,
             system: true,
+            network: navigator.onLine,
+            clipboard: false
+        };
+            terminal: false,
+            git: false,
+            github: true, 
+            docker: false,
+            termux: false,
+            system: true,
             network: navigator.onLine
         };
         this.logs = [];
@@ -41,6 +50,22 @@ class IntentRouter {
         });
 
         // 2. Terminal & Termux detection
+        try {
+            this.capabilities.termux = !!(window.cordova && cordova.plugins && cordova.plugins.termux);
+            this.capabilities.terminal = !!(window.acode && (window.acode.terminal || window.terminal)) || this.capabilities.termux;
+            
+            // 3. Git detection
+            this.capabilities.git = this.capabilities.terminal;
+
+            // 4. Clipboard detection
+            this.capabilities.clipboard = !!(window.cordova && cordova.plugins && cordova.plugins.clipboard);
+        } catch (e) {
+            this.log('warn', 'Capability detection partially failed', e.message);
+        }
+
+        // 5. Docker detection (mocked or via remote check)
+        this.capabilities.docker = false; 
+    }
         try {
             this.capabilities.termux = !!(window.cordova && cordova.plugins && cordova.plugins.termux);
             this.capabilities.terminal = !!(window.acode && (window.acode.terminal || window.terminal)) || this.capabilities.termux;
