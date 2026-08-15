@@ -193,3 +193,109 @@ acode.setPluginUnmount('com.leion.intent_router', () => {
     delete window.intentRouter;
     delete window.runIntentTests;
 });
+
+
+// --- Terminal Provider ---
+class TerminalProvider extends BaseProvider {
+    constructor() {
+        super(IntentScheme.TERMINAL);
+    }
+
+    async execute(intent, context) {
+        try {
+            const { command, args = [], cwd } = intent.params;
+            
+            if (!context.capabilities.terminal) {
+                return this.normalizeResponse(false, null, 'Terminal capability not available');
+            }
+
+            // Check for Acode Terminal plugin
+            if (window.terminal) {
+                const fullCommand = `${command} ${args.join(' ')}`;
+                window.terminal.run(fullCommand); // Assuming Acode terminal API
+                return this.normalizeResponse(true, { message: 'Command sent to terminal' });
+            }
+
+            return this.normalizeResponse(false, null, 'No terminal plugin found');
+        } catch (error) {
+            return this.normalizeResponse(false, null, error);
+        }
+    }
+}
+
+// --- Docker Provider (Experimental/Stub) ---
+class DockerProvider extends BaseProvider {
+    constructor() {
+        super(IntentScheme.DOCKER);
+    }
+
+    async execute(intent, context) {
+        return this.normalizeResponse(false, null, 'Docker is not supported on this platform yet.');
+    }
+}
+
+// --- Main Router ---
+class IntentRouter {
+    constructor() {
+        this.providers = new Map();
+        this.logs = [];
+        this.capabilities = {
+            terminal: !!window.terminal,
+            git: false, // Will be checked
+            android: true
+        };
+    }
+
+    registerProvider(provider) {
+        this.providers.set(provider.name, provider);
+        console.log(`[IntentRouter] Registered provider: ${provider.name}`);
+    }
+
+    async init() {
+        this.registerProvider(new SystemProvider());
+        this.registerProvider(new AIProvider());
+        this.registerProvider(new GitHubProvider());
+        this.registerProvider(new TerminalProvider());
+        this.registerProvider(new DockerProvider());
+        
+        await this.checkCapabilities();
+    }
+
+    async checkCapabilities() {
+        // Check for Git
+        if (this.capabilities.terminal && window.terminal) {
+            // Logic to check git version via terminal if possible
+            // For now, we assume false until verified
+        }
+    }
+
+    async execute(intent) {
+        const startTime = Date.now();
+        try {
+            const providerName = intent.provider || intent.intent.split(':')[0];
+            const provider = this.providers.get(providerName);
+
+            if (!provider) {
+                throw new Error(`Provider not found: ${providerName}`);
+            }
+
+            const response = await provider.execute(intent, { capabilities: this.capabilities });
+            
+            this.logs.push({
+                intent,
+                response,
+                duration: Date.now() - startTime
+            });
+
+            return response;
+        } catch (error) {
+            const errorResponse = {
+                success: false,
+                error: error.message,
+                metadata: { timestamp: Date.now(), provider: 'router' }
+            };
+            this.logs.push({ intent, response: errorResponse, duration: Date.now() - startTime });
+            return errorResponse;
+        }
+    }
+}
