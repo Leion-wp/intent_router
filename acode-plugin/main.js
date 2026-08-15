@@ -362,7 +362,125 @@ class AIProvider extends BaseProvider {
 
 class GitProvider extends BaseProvider {
     constructor() {
-        super('git');
+
+class IntentRouter {
+    constructor() {
+        this.providers = new Map();
+        this.logs = [];
+        this.capabilities = {
+            terminal: false,
+            git: false,
+            github: true, // Assuming web-based interaction
+            docker: false,
+            termux: false,
+            system: true
+        };
+    }
+
+    async init() {
+        this.registerProvider(new SystemProvider());
+        this.registerProvider(new AIProvider());
+        this.registerProvider(new GitProvider());
+        this.registerProvider(new TerminalProvider());
+        
+        await this.detectCapabilities();
+    }
+
+    registerProvider(provider) {
+        this.providers.set(provider.name, provider);
+    }
+
+    async detectCapabilities() {
+        // Check for Termux
+        try {
+            // Simple check if we can reach termux-api or similar
+            // For now, we'll use a placeholder logic
+            this.capabilities.termux = typeof cordova !== 'undefined' && cordova.plugins && cordova.plugins.termux;
+            this.capabilities.terminal = this.capabilities.termux;
+            this.capabilities.git = this.capabilities.termux; // Often git is used via termux
+        } catch (e) {
+            this.log('Capability detection failed', e);
+        }
+    }
+
+    log(message, data = null) {
+        const entry = {
+            timestamp: new Date().toISOString(),
+            message,
+            data
+        };
+        this.logs.push(entry);
+        console.log(`[IntentRouter] ${message}`, data);
+    }
+
+    async execute(intent) {
+        this.log('Executing intent', intent);
+        
+        try {
+            // 1. Validation
+            if (!intent || !intent.intent) {
+                throw new Error("Invalid intent object");
+            }
+
+            // 2. Resolution
+            let targetProvider = null;
+            if (intent.provider) {
+                targetProvider = this.providers.get(intent.provider);
+            } else {
+                // Find provider that can handle the intent
+                for (const provider of this.providers.values()) {
+                    if (await provider.canHandle(intent)) {
+                        targetProvider = provider;
+                        break;
+                    }
+                }
+            }
+
+            if (!targetProvider) {
+                const error = `No provider found for intent: ${intent.intent}`;
+                this.log(error);
+                return { success: false, error, code: 'PROVIDER_NOT_FOUND' };
+            }
+
+            // 3. Execution
+            const response = await targetProvider.execute(intent, { capabilities: this.capabilities });
+            
+            if (!response.success) {
+                this.log(`Intent execution failed: ${response.error}`, response);
+                window.toast(`Error: ${response.error}`, 4000);
+            } else {
+                this.log(`Intent execution success`, response.data);
+            }
+
+            return response;
+
+        } catch (error) {
+            const errorMsg = `Global error during execution: ${error.message}`;
+            this.log(errorMsg, error);
+            window.toast(errorMsg, 5000);
+            return { success: false, error: errorMsg, code: 'INTERNAL_ERROR' };
+        }
+    }
+
+    getLogs() {
+        return this.logs;
+    }
+}
+
+if (window.acode) {
+    const intentRouter = new IntentRouter();
+    
+    acode.setPluginInit('com.hallofcodes.intentrouter', async (baseUrl, $page, { cacheFileUrl, cacheFile }) => {
+        await intentRouter.init();
+        window.intentRouter = intentRouter;
+        window.toast('Intent Router Initialized', 2000);
+    });
+
+    acode.setPluginUnmount('com.hallofcodes.intentrouter', () => {
+        delete window.intentRouter;
+    });
+}
+
         this.capabilities.set('git.status', { command: 'status' });
         this.capabilities.set('git.commit', { command: 'commit' });
     }
