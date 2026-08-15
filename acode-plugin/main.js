@@ -188,13 +188,30 @@ class IntentRouter {
         this.registerCapability({ intent: 'git.pull', handler: () => git('pull') });
         this.registerCapability({ intent: 'git.commit', handler: (p) => git(`commit -m "${p.message}"`) });
         this.registerCapability({ intent: 'git.checkout', handler: (p) => git(`checkout ${p.branch}`) });
+        this.registerCapability({ intent: 'git.checkout', handler: (p) => git(`checkout ${p.branch}`) });
+        this.registerCapability({ intent: 'git.add', handler: (p) => git(`add ${p.path || '.'}`) });
+        this.registerCapability({ intent: 'git.branch', handler: (p) => git(`branch ${p.args || ''}`) });
 
         // --- GITHUB (via gh CLI) ---
         const gh = (cmd) => this.route({ intent: 'terminal.exec', payload: { command: `gh ${cmd}` } });
         this.registerCapability({
             intent: 'github.openPr',
             handler: (p) => gh(`pr create --title "${p.title}" --body "${p.body || ''}" --base ${p.base} --head ${p.head}`)
+            handler: (p) => gh(`pr create --title "${p.title}" --body "${p.body || ''}" --base ${p.base} --head ${p.head}`)
         });
+        this.registerCapability({
+            intent: 'github.prChecks',
+            handler: (p) => gh(`pr checks ${p.number || ''}`)
+        });
+        this.registerCapability({
+            intent: 'github.listIssues',
+            handler: (p) => gh(`issue list --limit ${p.limit || 10}`)
+        });
+        this.registerCapability({
+            intent: 'github.createIssue',
+            handler: (p) => gh(`issue create --title "${p.title}" --body "${p.body || ''}"`)
+        });
+
         this.registerCapability({
             intent: 'github.prChecks',
             handler: (p) => gh(`pr checks ${p.number || ''}`)
@@ -209,7 +226,13 @@ class IntentRouter {
         this.registerCapability({
             intent: 'docker.run',
             handler: (p) => docker(`run ${p.detach ? '-d' : ''} ${p.image}`)
+            handler: (p) => docker(`run ${p.detach ? '-d' : ''} ${p.image}`)
         });
+        this.registerCapability({ intent: 'docker.stop', handler: (p) => docker(`stop ${p.container}`) });
+        this.registerCapability({ intent: 'docker.ps', handler: (p) => docker(`ps ${p.all ? '-a' : ''}`) });
+        this.registerCapability({ intent: 'docker.rm', handler: (p) => docker(`rm ${p.container}`) });
+        this.registerCapability({ intent: 'docker.logs', handler: (p) => docker(`logs ${p.container}`) });
+
 
         // --- AI ---
         this.registerCapability({
@@ -221,7 +244,70 @@ class IntentRouter {
                 if (payload.var) this.variableCache.set(payload.var, res);
                 return res;
             }
+                return res;
+            }
         });
+
+        this.registerCapability({
+            intent: 'ai.team',
+            handler: async (payload) => {
+                let results = [];
+                for (const member of payload.members) {
+                    window.toast(`Agent ${member.role} is working...`, 2000);
+                    const res = await this.route({
+                        intent: 'ai.generate',
+                        payload: {
+                            instruction: member.instruction,
+                            role: member.role,
+                            contextFiles: member.contextFiles || payload.contextFiles
+                        }
+                    });
+                    results.push({ role: member.role, output: res });
+                }
+                return results;
+            }
+        });
+
+        // --- ACODE SPECIFIC ---
+        this.registerCapability({
+            intent: 'acode.runCommand',
+            handler: async (payload) => {
+                acode.exec(payload.command);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'acode.openFile',
+            handler: async (payload) => {
+                acode.require('editorManager').addNewFile(payload.filename, {
+                    isUnsaved: false,
+                    render: true,
+                    uri: payload.path
+                });
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'system.wait',
+            handler: async (payload) => {
+                return new Promise(resolve => setTimeout(resolve, payload.ms || 1000));
+            }
+        });
+
+        this.registerCapability({
+            intent: 'system.notification',
+            handler: async (payload) => {
+                if (window.Notification && Notification.permission === "granted") {
+                    new Notification(payload.title, { body: payload.message });
+                } else {
+                    window.toast(`${payload.title}: ${payload.message}`, 4000);
+                }
+                return true;
+            }
+        });
+
     }
 
     async route(intent) {
