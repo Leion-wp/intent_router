@@ -45,7 +45,6 @@ class BaseProvider {
     };
   }
 }
-
 class SystemProvider extends BaseProvider {
   constructor() {
     super('SystemProvider');
@@ -108,7 +107,6 @@ class GitHubProvider extends BaseProvider {
     const baseUrl = 'https://api.github.com';
     const headers = data.token ? { 'Authorization': `token ${data.token}` } : {};
 
-    try {
       let response;
       switch (action) {
         case 'get_repo':
@@ -156,7 +154,6 @@ class TerminalProvider extends BaseProvider {
     return this.normalizeResponse(false, null, `Action ${action} not supported`);
   }
 }
-\n
 class DockerProvider extends BaseProvider {
   constructor() {
     super('DockerProvider');
@@ -172,7 +169,6 @@ class DockerProvider extends BaseProvider {
 }
 
 class IntentRouter {
-  constructor() {
     this.providers = [
       new SystemProvider(),
       new AIProvider(),
@@ -220,7 +216,6 @@ class IntentRouter {
     }
   }
 }
-\n
 class IntentRouterPlugin {
   constructor() {
     this.router = new IntentRouter();
@@ -265,4 +260,3 @@ if (window.acode) {
     plugin.destroy();
   });
 }
-\n
