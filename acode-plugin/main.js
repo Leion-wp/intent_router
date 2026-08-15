@@ -78,7 +78,55 @@ class SystemProvider extends BaseProvider {
         } catch (e) {
             return this.normalizeResponse(false, null, e);
         }
+
+// --- AI Provider ---
+class AIProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.AI);
     }
+
+    async execute(intent, context) {
+        try {
+            if (intent.action === 'prompt') {
+                // Mocking AI response for Android
+                return this.normalizeResponse(true, { 
+                    answer: "AI logic for Android: Integration with Acode AI or external API needed." 
+                });
+            }
+            throw new Error(`Action ${intent.action} not supported by AIProvider`);
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
+// --- Terminal Provider ---
+class TerminalProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.TERMINAL);
+    }
+
+    async canHandle(intent) {
+        return intent.scheme === this.name && !!window.terminal;
+    }
+
+    async execute(intent, context) {
+        if (!window.terminal) {
+            return this.normalizeResponse(false, null, {
+                message: 'Terminal plugin not found',
+                code: ERROR_CODES.CAPABILITY_MISSING
+            });
+        }
+
+        try {
+            const result = await window.terminal.run(intent.data.command);
+            return this.normalizeResponse(true, { output: result });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
 }
 
  * Intent Router for Acode - Android Edition
