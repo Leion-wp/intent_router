@@ -286,7 +286,7 @@ class GitProvider extends BaseProvider {
 286:         switch (command) {
 287:             case 'extension/install':
 288:                 return this.success({ action: 'mock_install', id: url.searchParams.get('id') });
-289:             default:
+        { name: 'VSCode Mock', intent: { intent: 'vscode://extension/install?id=test.ext' } },
 300:                 return this.fail('NOT_SUPPORTED', `VS Code intent '${command}' not supported on mobile.`);
 301:         }
 302:     }
