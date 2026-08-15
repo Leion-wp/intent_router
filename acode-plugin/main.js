@@ -116,7 +116,93 @@ class TerminalProvider extends BaseProvider {
             throw { message: `Action ${intent.action} not supported`, code: ERROR_CODES.VALIDATION_ERROR };
         } catch (e) {
             return this.normalizeResponse(false, null, e);
+
+// --- GIT PROVIDER ---
+class GitProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.GIT);
+    }
+
+    async canHandle(intent) {
+        const terminal = window.terminal || (window.acode && window.acode.require('terminal'));
+        return intent.scheme === this.name && !!terminal;
+    }
+
+    async execute(intent, context) {
+        const terminal = window.terminal || (window.acode && window.acode.require('terminal'));
+        try {
+            const { action, data } = intent;
+            let command = '';
+
+            switch (action) {
+                case 'status': command = 'git status'; break;
+                case 'commit': command = `git commit -m "${data.message}"`; break;
+                case 'push': command = 'git push'; break;
+                default:
+                    command = `git ${action} ${data?.args || ''}`;
+            }
+
+            const output = await terminal.run(command);
+            return this.normalizeResponse(true, { output });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
         }
+    }
+}
+
+// --- GITHUB PROVIDER ---
+class GitHubProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.GITHUB);
+    }
+
+    async execute(intent, context) {
+        const { action, data } = intent;
+        try {
+            switch (action) {
+                case 'get-repo':
+                    const repoRes = await fetch(`https://api.github.com/repos/${data.owner}/${data.repo}`);
+                    const repoData = await repoRes.json();
+                    return this.normalizeResponse(true, repoData);
+                case 'list-files':
+                    const filesRes = await fetch(`https://api.github.com/repos/${data.owner}/${data.repo}/contents/${data.path || ''}`);
+                    const filesData = await filesRes.json();
+                    return this.normalizeResponse(true, filesData);
+                default:
+                    throw { message: `GitHub action '${action}' not supported`, code: ERROR_CODES.VALIDATION_ERROR };
+            }
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
+// --- HTTP PROVIDER ---
+class HttpProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.HTTP);
+    }
+
+    async execute(intent, context) {
+        try {
+            const { url, method = 'GET', headers = {}, body } = intent.data;
+            const response = await fetch(url, {
+                method,
+                headers,
+                body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined
+            });
+
+            const responseData = await response.json().catch(() => null);
+            return this.normalizeResponse(response.ok, responseData, response.ok ? null : {
+                message: `HTTP Error: ${response.status}`,
+                code: response.status
+            });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
     }
 }
 
