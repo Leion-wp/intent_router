@@ -173,7 +173,7 @@ class IntentRouter {
 
     registerDefaultProviders() {
         this.registerProvider('system', new SystemProvider());
-        this.registerProvider('http', new HttpProvider());
+        this.registerProvider('vscode', new VSCodeProvider());
         this.registerProvider('ai', new AIProvider());
         this.registerProvider('terminal', new TerminalProvider());
         this.registerProvider('git', new GitProvider());
@@ -276,6 +276,22 @@ class GitProvider extends BaseProvider {
     }
 }
 
+279: class VSCodeProvider extends BaseProvider {
+280:     constructor() { super('vscode'); }
+281:     async canHandle(intent) { return intent.intent.startsWith('vscode://'); }
+282:     async execute(intent, context) {
+283:         const url = new URL(intent.intent);
+284:         const command = url.hostname + url.pathname;
+285:         // Map common VS Code intents to local ones
+286:         switch (command) {
+287:             case 'extension/install':
+288:                 return this.success({ action: 'mock_install', id: url.searchParams.get('id') });
+289:             default:
+300:                 return this.fail('NOT_SUPPORTED', `VS Code intent '${command}' not supported on mobile.`);
+301:         }
+302:     }
+303: }
+304: 
 class DockerProvider extends BaseProvider {
     constructor() { super('docker'); }
     async canHandle(intent) { return intent.intent.startsWith('docker://'); }
