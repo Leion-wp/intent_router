@@ -38,6 +38,45 @@ class IntentRouter {
     registerDefaultProviders() {
         this.registerProvider('system', {
             invoke: async (entry, payload, intent) => {
+                switch (entry.capability) {
+                    case 'system.pause':
+                        return await acode.confirm(payload.message || 'Pipeline paused for review.');
+                    case 'system.setVar':
+                        if (payload.name) {
+                            this.variableCache.set(payload.name, payload.value);
+                        }
+                        return true;
+                    case 'system.setCwd':
+                        // Acode doesn't have a global CWD in the same way, but we can store it
+                        this.variableCache.set('cwd', payload.path);
+                        return true;
+                    case 'system.alert':
+                        window.alert(payload.message || 'Alert');
+                        return true;
+                    case 'system.toast':
+                        window.toast(payload.message || 'Toast', payload.duration || 3000);
+                        return true;
+                    default:
+                        console.log('System Provider Invoked', { entry, payload, intent });
+                        return true;
+                }
+            }
+        });
+
+        this.registerProvider('ai', {
+            invoke: async (entry, payload, intent) => {
+                // For now, let's mock AI or use a prompt if no real AI adapter is available
+                const result = await acode.prompt(`AI Instruction: ${payload.instruction}`, 'Simulated AI Response');
+                if (payload.outputVar) {
+                    this.variableCache.set(payload.outputVar, result);
+                }
+                return result;
+            }
+        });
+    }
+
+        this.registerProvider('system', {
+            invoke: async (entry, payload, intent) => {
                 console.log('System Provider Invoked', { entry, payload, intent });
                 return true;
             }
