@@ -1,3 +1,132 @@
+/**
+ * Intent Router for Acode
+ * Developed by Leion-wp & Rutex AI
+ */
+
+class Registry {
+  constructor() {
+    this.providers = [];
+  }
+
+  register(provider) {
+    this.providers.push(provider);
+  }
+
+  getProviderFor(intent) {
+    return this.providers.find(p => p.canHandle(intent));
+  }
+}
+
+class IntentRouter {
+  constructor() {
+    this.registry = new Registry();
+    this.settings = {
+      githubToken: null,
+      logLevel: 'debug'
+    };
+    this.logs = [];
+  }
+
+  async init() {
+    this.log("Intent Router Initialized", "info");
+    // Load settings from Acode if available
+  }
+
+  log(msg, level = 'info') {
+    const entry = {
+      timestamp: new Date().toISOString(),
+      level,
+      message: msg
+    };
+    this.logs.push(entry);
+    if (this.logs.length > 1000) this.logs.shift();
+    
+    console[level === 'error' ? 'error' : 'log'](`[IntentRouter] ${msg}`);
+  }
+
+  async getCapabilities() {
+    return {
+      terminal: typeof window.terminal !== 'undefined' || !!window.acode?.require('terminal'),
+      git: true, // Assuming git is available in environment
+      github: !!this.settings.githubToken,
+      docker: false, // Experimental/Disabled for now
+      termux: typeof window.arguments !== 'undefined', // Rough check for termux environment
+      fs: true,
+      http: true
+    };
+  }
+
+  /**
+   * Main Execution Engine
+   * @param {Object} intent { intent: string, payload: object, meta: object }
+   */
+  async execute(intent, context = {}) {
+    const traceId = intent.meta?.traceId || Math.random().toString(36).substring(7);
+    this.log(`[${traceId}] Executing: ${intent.intent}`, 'info');
+
+    try {
+      // 1. Validation
+      if (!intent || !intent.intent) {
+        throw new Error('INVALID_INTENT: Intent URI/Name is required');
+      }
+
+      // 2. Resolution
+      const provider = this.registry.getProviderFor(intent);
+      if (!provider) {
+        throw new Error(`PROVIDER_NOT_FOUND: No provider handles "${intent.intent}"`);
+      }
+
+      // 3. Capability Check
+      const capabilities = await this.getCapabilities();
+      const required = provider.getRequiredCapability ? provider.getRequiredCapability(intent) : null;
+      
+      if (required && !capabilities[required]) {
+        throw new Error(`CAPABILITY_MISSING: Environment lacks "${required}" for this intent`);
+      }
+
+      // 4. Execution
+      const result = await provider.execute(intent, { ...context, traceId, capabilities });
+
+      // 5. Normalization
+      const response = {
+        success: result.success !== false,
+        data: result.data || null,
+        error: result.error || null,
+        metadata: {
+          ...result.metadata,
+          traceId,
+          provider: provider.id,
+          timestamp: Date.now()
+        }
+      };
+
+      if (!response.success) {
+        this.log(`[${traceId}] Provider Error: ${JSON.stringify(response.error)}`, 'error');
+      }
+
+      return response;
+
+    } catch (error) {
+      const errorMsg = error.message || 'Unknown execution error';
+      this.log(`[${traceId}] Critical Failure: ${errorMsg}`, 'error');
+      
+      // User feedback
+      if (typeof window.toast !== 'undefined') {
+        window.toast(`Intent Error: ${errorMsg.split(':')[0]}`, 4000);
+      }
+
+      return {
+        success: false,
+        data: null,
+        error: {
+          message: errorMsg,
+          code: errorMsg.includes(':') ? errorMsg.split(':')[1].trim() : 'INTERNAL_ERROR'
+        },
+        metadata: { traceId, timestamp: Date.now() }
+      };
+    }
+  }
+}
 
 
 /**
