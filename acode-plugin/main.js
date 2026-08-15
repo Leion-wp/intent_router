@@ -261,7 +261,33 @@ class IntentRouter {
             ]);
 
 
-class IntentRouter {
+
+/**
+ * AI Provider
+ * Handles AI-related intents like prompt generation
+ */
+class AIProvider extends BaseProvider {
+  canHandle(intent) {
+    return intent.scheme === 'ai';
+  }
+
+  async execute(intent) {
+    const { action, data } = intent;
+    
+    switch (action) {
+      case 'prompt':
+        // This is a placeholder. In a real scenario, this would call an AI API.
+        // For now, we simulate a response.
+        return this.normalizeResponse(true, {
+          answer: `AI response to: ${data.prompt}`,
+          model: data.model || 'default'
+        });
+      default:
+        return this.normalizeResponse(false, null, `AI action '${action}' not supported`);
+    }
+  }
+}
+
   constructor() {
     this.providers = [];
     this.logs = [];
