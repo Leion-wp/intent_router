@@ -26,6 +26,36 @@ class IntentRouter {
 
         let str = typeof payload === 'string' ? payload : JSON.stringify(payload);
         
+        // Resolve {{var}}, ${var:key}, ${input:key}
+        str = str.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+            const val = this.variableCache.get(key.trim());
+            if (val === undefined) return match;
+            return typeof val === 'object' ? JSON.stringify(val) : val;
+        });
+
+        str = str.replace(/\$\{(var|input):([^}]+)\}/g, (match, type, key) => {
+            const val = this.variableCache.get(key.trim());
+            if (val === undefined) return match;
+            return typeof val === 'object' ? JSON.stringify(val) : val;
+        });
+
+        // Resolve ${workspaceRoot} and ${cwd}
+        const workspace = (window.addedFolder && window.addedFolder[0]) ? window.addedFolder[0].url : '/';
+        str = str.replace(/\$\{workspaceRoot\}/g, workspace);
+        str = str.replace(/\$\{cwd\}/g, this.cwd);
+
+        try {
+            return JSON.parse(str);
+        } catch (e) {
+            return str;
+        }
+    }
+
+        if (!payload) return payload;
+        if (typeof payload !== 'object' && typeof payload !== 'string') return payload;
+
+        let str = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        
         // Resolve {{var}}
         str = str.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
             const val = this.variableCache.get(key.trim());
@@ -98,6 +128,41 @@ class IntentRouter {
             }
         });
         this.registerCapability({
+            intent: 'system.conditional',
+            handler: async (p) => {
+                const val = this.variableCache.get(p.variable);
+                if (val == p.value) {
+                    return await this.route(p.then);
+                } else if (p.else) {
+                    return await this.route(p.else);
+                }
+                return true;
+            }
+        });
+        this.registerCapability({
+            intent: 'memory.save',
+            handler: async (p) => {
+                const data = p.data || Array.from(this.variableCache.entries());
+                localStorage.setItem(`leion_memory_${p.sessionId || 'default'}`, JSON.stringify(data));
+                return true;
+            }
+        });
+        this.registerCapability({
+            intent: 'memory.load',
+            handler: async (p) => {
+                const data = localStorage.getItem(`leion_memory_${p.sessionId || 'default'}`);
+                if (data) {
+                    const parsed = JSON.parse(data);
+                    if (Array.isArray(parsed)) {
+                        parsed.forEach(([k, v]) => this.variableCache.set(k, v));
+                    } else if (p.var) {
+                        this.variableCache.set(p.var, parsed);
+                    }
+                }
+                return true;
+            }
+        });
+
             intent: 'system.switch',
             handler: async (p) => {
                 const value = await this.resolveVariables(p.value);
@@ -167,7 +232,30 @@ class IntentRouter {
         this.registerCapability({
             intent: 'editor.get_value',
             handler: async (p) => {
-                const val = editorManager.editor.getValue();
+        this.registerCapability({ intent: 'git.status', handler: () => term('git status') });
+        this.registerCapability({ intent: 'git.add', handler: (p) => term(`git add ${p.path || '.'}`) });
+        this.registerCapability({ intent: 'git.commit', handler: (p) => term(`git commit -m "${p.message}"`) });
+        this.registerCapability({ intent: 'git.push', handler: (p) => term(`git push ${p.remote || 'origin'} ${p.branch || 'main'}`) });
+        this.registerCapability({ intent: 'git.pull', handler: (p) => term(`git pull ${p.remote || ''} ${p.branch || ''}`) });
+        this.registerCapability({ intent: 'git.clone', handler: (p) => term(`git clone ${p.url} ${p.dir || ''}`) });
+        this.registerCapability({ intent: 'git.checkout', handler: (p) => term(`git checkout ${p.create ? '-b ' : ''}${p.branch}`) });
+        this.registerCapability({
+            intent: 'github.openPr',
+            handler: (p) => term(`gh pr create --title "${p.title}" --body "${p.body || ''}" --base ${p.base} --head ${p.head}`)
+        });
+        this.registerCapability({
+            intent: 'github.prChecks',
+            handler: (p) => term(`gh pr checks ${p.url || p.number || ''}`)
+        });
+        this.registerCapability({
+            intent: 'github.prRerunFailedChecks',
+            handler: (p) => term(`gh pr checks ${p.url || p.number || ''} --rerun-failed`)
+        });
+        this.registerCapability({
+            intent: 'github.prComment',
+            handler: (p) => term(`gh pr comment ${p.url || p.number || ''} --body "${p.body}"`)
+        });
+
                 if (p.var) this.variableCache.set(p.var, val);
                 return val;
             }
@@ -323,7 +411,32 @@ class IntentRouter {
                 const res = await handler(payload);
                 if (intent.var && res !== undefined) this.variableCache.set(intent.var, res);
                 return res;
-            } catch (e) {
+    openCockpit() {
+        const sidePanel = acode.require('sidePanel');
+        if (sidePanel) {
+            let varsHtml = '<ul>';
+            this.router.variableCache.forEach((v, k) => {
+                varsHtml += `<li><b>${k}</b>: ${typeof v === 'object' ? JSON.stringify(v).substring(0, 50) + '...' : v}</li>`;
+            });
+            varsHtml += '</ul>';
+            sidePanel.set('Leion Cockpit', `
+                <div style="padding:10px; color: var(--text-color); background: var(--primary-color);">
+                    <h3>Leion Roots</h3>
+                    <p>Status: <span style="color: #4caf50;">Active</span></p>
+                    <hr/>
+                    <p>Capabilities: <b>${this.router.capabilities.size}</b></p>
+                    <h4>Variable Cache:</h4>
+                    <div style="max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.1); padding: 5px; border-radius: 5px;">
+                        ${varsHtml}
+                    </div>
+                </div>
+            `);
+            sidePanel.open();
+        } else {
+            window.toast('Leion Cockpit Ready', 2000);
+        }
+    }
+
                 window.toast(`Error: ${e.message}`, 5000);
                 return false;
             }
