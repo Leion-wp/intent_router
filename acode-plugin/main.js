@@ -340,7 +340,6 @@ if (window.acode) {
     });
 }
 
- * Intent Router for Acode
  * Developed by Rutex (Hall Of Codes)
  * Version: 1.0.0
  * 
