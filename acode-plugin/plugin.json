@@ -3,7 +3,7 @@
   "id": "com.leion.intentrouter",
   "name": "Intent Router",
   "main": "main.js",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "icon": "icon.png",
   "readme": "README.md",
   "minVersionCode": 290,
