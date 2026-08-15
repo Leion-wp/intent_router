@@ -268,6 +268,123 @@ if (window.acode) {
     });
 }
 
+class BaseProvider {
+    constructor(name) {
+        this.name = name;
+        this.capabilities = new Map();
+    }
+
+    async canHandle(intent) {
+        return this.capabilities.has(intent.intent);
+    }
+
+    async execute(intent, context) {
+        try {
+            const capability = this.capabilities.get(intent.intent);
+            if (!capability) {
+                throw new Error(`Capability ${intent.intent} not found in provider ${this.name}`);
+            }
+            const result = await this.handle(intent, context);
+            return this.normalizeResponse(true, result);
+        } catch (error) {
+            return this.normalizeResponse(false, null, error.message);
+        }
+    }
+
+    normalizeResponse(success, data = null, error = null, metadata = {}) {
+        return {
+            success,
+            data,
+            error,
+            metadata: {
+                ...metadata,
+                provider: this.name,
+                timestamp: Date.now()
+            }
+        };
+    }
+
+    async handle(intent, context) {
+        throw new Error("Method 'handle' must be implemented");
+    }
+}
+
+class SystemProvider extends BaseProvider {
+    constructor() {
+        super('system');
+        this.capabilities.set('system.openUrl', { command: 'openUrl' });
+        this.capabilities.set('system.share', { command: 'share' });
+        this.capabilities.set('system.copyToClipboard', { command: 'copyToClipboard' });
+    }
+
+    async handle(intent, context) {
+        const { intent: action, payload } = intent;
+        switch (action) {
+            case 'system.openUrl':
+                if (!payload.url) throw new Error("URL is required");
+                window.open(payload.url, '_system');
+                return { opened: true };
+            case 'system.share':
+                if (!payload.text) throw new Error("Text is required");
+                // Acode doesn't have a direct share API, but we can use web share if available
+                if (navigator.share) {
+                    await navigator.share({
+                        title: payload.title || 'Share',
+                        text: payload.text,
+                        url: payload.url
+                    });
+                } else {
+                    throw new Error("Web Share API not supported");
+                }
+                return { shared: true };
+            case 'system.copyToClipboard':
+                if (!payload.text) throw new Error("Text is required");
+                await cordova.plugins.clipboard.copy(payload.text);
+                return { copied: true };
+            default:
+                throw new Error(`Unsupported system action: ${action}`);
+        }
+    }
+}
+
+class AIProvider extends BaseProvider {
+    constructor() {
+        super('ai');
+        this.capabilities.set('ai.prompt', { command: 'prompt' });
+    }
+
+    async handle(intent, context) {
+        // Implementation for AI prompt
+        // This would typically call an AI service
+        return { message: "AI response simulation" };
+    }
+}
+
+class GitProvider extends BaseProvider {
+    constructor() {
+        super('git');
+        this.capabilities.set('git.status', { command: 'status' });
+        this.capabilities.set('git.commit', { command: 'commit' });
+    }
+
+    async handle(intent, context) {
+        // Implementation for Git
+        return { message: "Git command execution simulation" };
+    }
+}
+
+class TerminalProvider extends BaseProvider {
+    constructor() {
+        super('terminal');
+        this.capabilities.set('terminal.exec', { command: 'exec' });
+    }
+
+    async handle(intent, context) {
+        // Implementation for Terminal
+        return { message: "Terminal command execution simulation" };
+    }
+}
+
  * Intent Router for Acode
  * Developed by Rutex (Hall Of Codes)
  */
