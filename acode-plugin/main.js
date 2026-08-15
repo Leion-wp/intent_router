@@ -306,7 +306,49 @@ class IntentRouter {
       return { success: false, error: errorMsg };
     }
   }
+
+class AcodeIntentRouter {
+  constructor() {
+    this.router = new IntentRouter();
+  }
+
+  async init() {
+    window.intentRouter = this.router;
+    window.toast('Intent Router Initialized', 2000);
+    
+    // Global test function
+    window.testIntentRouter = async () => {
+      console.log('--- Intent Router Test Suite ---');
+      
+      const tests = [
+        { scheme: 'system', payload: { action: 'alert', message: 'Test System Intent' } },
+        { scheme: 'ai', payload: { action: 'prompt', text: 'Hello AI' } }
+      ];
+
+      for (const intent of tests) {
+        console.log(`Testing: ${intent.scheme}...`);
+        const res = await this.router.execute(intent);
+        console.log(`Result for ${intent.scheme}:`, res);
+      }
+    };
+  }
+
+  async destroy() {
+    delete window.intentRouter;
+    delete window.testIntentRouter;
+  }
 }
+
+if (window.acode) {
+  const plugin = new AcodeIntentRouter();
+  acode.setPluginInit('com.leionwp.intentrouter', (baseUrl, $page, { cacheFileUrl, cacheFile }) => {
+    plugin.init();
+  });
+  acode.setPluginUnmount('com.leionwp.intentrouter', () => {
+    plugin.destroy();
+  });
+}
+
 
  */
 
