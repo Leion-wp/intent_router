@@ -1,4 +1,305 @@
 /**
+2:  * Leion Roots - Intent Router for Acode
+3:  * Orchestration layer for human-centric automation on mobile.
+4:  */
+5: 
+6: class IntentRouter {
+7:     constructor() {
+8:         this.capabilities = new Map();
+9:         this.variableCache = new Map();
+10:         this.cwd = '/';
+11:     }
+12: 
+13:     async init() {
+14:         this.registerInternalProviders();
+15:     }
+16: 
+17:     registerCapability(cap) {
+18:         this.capabilities.set(cap.intent, cap.handler);
+19:     }
+20: 
+21:     async resolveVariables(payload) {
+22:         if (!payload) return payload;
+23:         if (typeof payload !== 'object' && typeof payload !== 'string') return payload;
+24: 
+25:         let str = typeof payload === 'string' ? payload : JSON.stringify(payload);
+26:         
+27:         // Resolve {{var}}
+28:         str = str.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+29:             const val = this.variableCache.get(key.trim());
+30:             if (val === undefined) return match;
+31:             return typeof val === 'object' ? JSON.stringify(val) : val;
+32:         });
+33: 
+34:         // Resolve ${workspaceRoot}
+35:         const workspace = (window.addedFolder && window.addedFolder[0]) ? window.addedFolder[0].url : '/';
+36:         str = str.replace(/\$\{workspaceRoot\}/g, workspace);
+37:         str = str.replace(/\$\{cwd\}/g, this.cwd);
+38: 
+39:         try {
+40:             return JSON.parse(str);
+41:         } catch (e) {
+42:             return str;
+43:         }
+44:     }
+45: 
+46:     registerInternalProviders() {
+47:         const fs = acode.require('fs');
+48: 
+49:         // --- SYSTEM ---
+50:         this.registerCapability({
+51:             intent: 'system.pause',
+52:             handler: async (payload) => {
+53:                 return new Promise((resolve) => {
+54:                     acode.confirm('Leion Roots', payload.message || 'Pause for human validation', (res) => resolve(res));
+55:                 });
+56:             }
+57:         });
+58: 
+59:         this.registerCapability({
+60:             intent: 'system.setVar',
+61:             handler: async (payload) => {
+62:                 this.variableCache.set(payload.name, payload.value);
+63:                 return true;
+64:             }
+65:         });
+66: 
+67:         this.registerCapability({
+68:             intent: 'system.setCwd',
+69:             handler: async (payload) => {
+70:                 this.cwd = payload.path;
+71:                 return true;
+72:             }
+73:         });
+74: 
+75:         // --- UI ---
+76:         this.registerCapability({
+77:             intent: 'ui.toast',
+78:             handler: async (payload) => {
+79:                 window.toast(payload.message, 3000);
+80:                 return true;
+81:             }
+82:         });
+83: 
+84:         this.registerCapability({
+85:             intent: 'ui.prompt',
+86:             handler: async (payload) => {
+87:                 const res = await acode.prompt(payload.title, payload.defaultValue || '', payload.type || 'text');
+88:                 if (payload.var) this.variableCache.set(payload.var, res);
+89:                 return res;
+90:             }
+91:         });
+92: 
+93:         // --- FILE SYSTEM ---
+94:         this.registerCapability({
+95:             intent: 'fs.read',
+96:             handler: async (payload) => {
+97:                 const content = await fs.readFile(payload.path);
+98:                 if (payload.var) this.variableCache.set(payload.var, content);
+99:                 return content;
+100:             }
+101:         });
+102: 
+103:         this.registerCapability({
+104:             intent: 'fs.write',
+105:             handler: async (payload) => {
+106:                 await fs.writeFile(payload.path, payload.content);
+107:                 return true;
+108:             }
+109:         });
+110: 
+111:         this.registerCapability({
+112:             intent: 'fs.list',
+113:             handler: async (payload) => {
+114:                 const list = await fs.readdir(payload.path);
+115:                 if (payload.var) this.variableCache.set(payload.var, list);
+116:                 return list;
+117:             }
+118:         });
+119: 
+120:         this.registerCapability({
+121:             intent: 'fs.exists',
+122:             handler: async (payload) => {
+123:                 return await fs.exists(payload.path);
+124:             }
+125:         });
+126: 
+127:         // --- EDITOR ---
+128:         this.registerCapability({
+129:             intent: 'editor.insert',
+130:             handler: async (payload) => {
+131:                 editorManager.editor.insert(payload.text);
+132:                 return true;
+133:             }
+134:         });
+135: 
+136:         this.registerCapability({
+137:             intent: 'editor.get_value',
+138:             handler: async (payload) => {
+139:                 const val = editorManager.editor.getValue();
+140:                 if (payload.var) this.variableCache.set(payload.var, val);
+141:                 return val;
+142:             }
+143:         });
+144: 
+145:         // --- TERMINAL ---
+146:         this.registerCapability({
+147:             intent: 'terminal.exec',
+148:             handler: async (payload) => {
+149:                 return new Promise((resolve) => {
+150:                     if (window.acode && acode.exec) {
+151:                         acode.exec(payload.command, (res) => resolve(res));
+152:                     } else {
+153:                         window.toast('Terminal API not found', 3000);
+154:                         resolve(null);
+155:                     }
+156:                 });
+157:             }
+158:         });
+159: 
+160:         // --- HTTP ---
+161:         this.registerCapability({
+162:             intent: 'http.request',
+163:             handler: async (payload) => {
+164:                 const response = await fetch(payload.url, {
+165:                     method: payload.method || 'GET',
+166:                     headers: payload.headers || { 'Content-Type': 'application/json' },
+167:                     body: payload.body ? (typeof payload.body === 'string' ? payload.body : JSON.stringify(payload.body)) : undefined
+168:                 });
+169:                 const text = await response.text();
+170:                 let data; try { data = JSON.parse(text); } catch(e) { data = text; }
+171:                 if (payload.var) this.variableCache.set(payload.var, data);
+172:                 return data;
+173:             }
+174:         });
+175: 
+176:         // --- GIT ---
+177:         const git = (cmd) => this.route({ intent: 'terminal.exec', payload: { command: `git ${cmd}` } });
+178:         this.registerCapability({ intent: 'git.status', handler: () => git('status') });
+179:         this.registerCapability({ intent: 'git.push', handler: () => git('push') });
+180:         this.registerCapability({ intent: 'git.pull', handler: () => git('pull') });
+181:         this.registerCapability({ intent: 'git.commit', handler: (p) => git(`commit -m "${p.message}"`) });
+182:         this.registerCapability({ intent: 'git.add', handler: (p) => git(`add ${p.path || '.'}`) });
+183: 
+184:         // --- GITHUB ---
+185:         const gh = (cmd) => this.route({ intent: 'terminal.exec', payload: { command: `gh ${cmd}` } });
+186:         this.registerCapability({
+187:             intent: 'github.openPr',
+188:             handler: (p) => gh(`pr create --title "${p.title}" --body "${p.body || ''}" --base ${p.base} --head ${p.head}`)
+189:         });
+190:         this.registerCapability({
+191:             intent: 'github.prChecks',
+192:             handler: (p) => gh(`pr checks ${p.number || ''}`)
+193:         });
+194: 
+195:         // --- DOCKER ---
+196:         const docker = (cmd) => this.route({ intent: 'terminal.exec', payload: { command: `docker ${cmd}` } });
+197:         this.registerCapability({ intent: 'docker.ps', handler: () => docker('ps') });
+198:         this.registerCapability({ intent: 'docker.run', handler: (p) => docker(`run ${p.detach ? '-d' : ''} ${p.image}`) });
+199: 
+200:         // --- AI ---
+201:         this.registerCapability({
+202:             intent: 'ai.generate',
+203:             handler: async (payload) => {
+204:                 window.toast('AI thinking...', 2000);
+205:                 const res = "[AI Simulation] Response for: " + payload.instruction;
+206:                 if (payload.var) this.variableCache.set(payload.var, res);
+207:                 return res;
+208:             }
+209:         });
+210: 
+211:         // --- VSCODE COMPAT ---
+212:         this.registerCapability({
+213:             intent: 'vscode.reviewDiff',
+214:             handler: async (p) => {
+215:                 const confirmed = await new Promise(resolve => {
+216:                     acode.confirm('Review Changes', `Apply changes to ${p.path}?\n\nPROPOSAL:\n${p.proposal.substring(0, 100)}...`, resolve);
+217:                 });
+218:                 if (confirmed) {
+219:                     await fs.writeFile(p.path, p.proposal);
+220:                     return true;
+221:                 }
+222:                 return false;
+223:             }
+224:         });
+225:     }
+226: 
+227:     async route(intent) {
+228:         if (intent.steps && Array.isArray(intent.steps)) {
+229:             let lastResult;
+230:             for (const step of intent.steps) {
+231:                 lastResult = await this.route(step);
+232:                 if (lastResult === false) break;
+233:             }
+234:             return lastResult;
+235:         }
+236: 
+237:         const resolvedPayload = await this.resolveVariables(intent.payload);
+238:         const handler = this.capabilities.get(intent.intent);
+239:         
+240:         if (handler) {
+241:             try {
+242:                 const result = await handler(resolvedPayload);
+243:                 if (intent.var && result !== undefined) this.variableCache.set(intent.var, result);
+244:                 return result;
+245:             } catch (e) {
+246:                 window.toast(`Error: ${e.message}`, 5000);
+247:                 return false;
+248:             }
+249:         }
+250:         window.toast(`Unknown intent: ${intent.intent}`, 3000);
+251:         return false;
+252:     }
+253: }
+254: 
+255: class LeionRootsPlugin {
+256:     async init() {
+257:         this.router = new IntentRouter();
+258:         await this.router.init();
+259: 
+260:         acode.setSideButton({
+261:             id: 'leion-roots-cockpit',
+262:             icon: 'account_tree',
+263:             name: 'Leion Cockpit',
+264:             onclick: () => this.openCockpit()
+265:         });
+266: 
+267:         acode.addCommand({
+268:             name: 'Leion: Run Intent',
+269:             description: 'Run Intent JSON',
+270:             exec: async () => {
+271:                 const str = await acode.prompt('Intent JSON', '', 'textarea');
+272:                 if (str) {
+273:                     try { await this.router.route(JSON.parse(str)); }
+274:                     catch (e) { window.toast('Invalid JSON', 3000); }
+275:                 }
+276:             }
+277:         });
+278:     }
+279: 
+280:     openCockpit() {
+281:         const sidePanel = acode.require('sidePanel');
+282:         if (sidePanel) {
+283:             sidePanel.set('Leion Cockpit', '<div style="padding:10px;"><h3>Leion Roots</h3><p>Engine: <b>Active</b></p><hr/><p>Ready to orchestrate.</p></div>');
+284:             sidePanel.open();
+285:         } else {
+286:             window.toast('Leion Cockpit Ready', 2000);
+287:         }
+288:     }
+289: 
+290:     async destroy() {
+291:         acode.unSetSideButton('leion-roots-cockpit');
+292:     }
+293: }
+294: 
+295: if (window.acode) {
+296:     const plugin = new LeionRootsPlugin();
+297:     acode.define('leion.roots', {
+298:         init: async () => await plugin.init(),
+299:         destroy: () => plugin.destroy()
+300:     });
+301: }
+
  * Leion Roots - Intent Router for Acode
  * Orchestration layer for human-centric automation on mobile.
  */
