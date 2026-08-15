@@ -83,7 +83,9 @@ class SystemProvider extends BaseProvider {
     } catch (e) {
       return this.normalizeResponse(false, null, e.message);
     }
+    }
   }
+
 
 class AIProvider extends BaseProvider {
   constructor() {
@@ -141,7 +143,6 @@ class GitHubProvider extends BaseProvider {
         }
       }
       
-      return this.normalizeResponse(true, result);
       return this.normalizeResponse(true, result);
     } catch (e) {
       return this.normalizeResponse(false, null, e.message);
@@ -250,7 +251,7 @@ class IntentRouter {
     };
   }
 
-
+  getLogs() {
     return this.logs;
   }
 }
@@ -280,7 +281,6 @@ class IntentRouterPlugin {
     if (window.toast) {
       window.toast('Intent Router Ready', 2000);
     }
-    console.log('Intent Router Plugin Initialized');
     console.log('Intent Router Plugin Initialized');
     
     // Ajout des commandes à Acode
