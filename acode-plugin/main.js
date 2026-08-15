@@ -222,7 +222,82 @@ class IntentRouter {
         this.registerCapability({
             intent: 'docker.build',
             handler: (p) => docker(`build -t ${p.tag} ${p.path || '.'}`)
+
+        this.registerCapability({
+            intent: 'ai.team',
+            handler: async (payload) => {
+                const { strategy = 'sequential', members = [] } = payload;
+                window.toast(`Starting AI Team (${strategy})...`, 2000);
+                let lastResult = null;
+                for (const member of members) {
+                    window.toast(`Agent ${member.role || 'member'} working...`, 2000);
+                    lastResult = await this.route({
+                        intent: 'ai.generate',
+                        payload: {
+                            instruction: member.instruction || payload.instruction,
+                            role: member.role,
+                            model: member.model || payload.model,
+                            systemPrompt: member.systemPrompt || payload.systemPrompt
+                        }
+                    });
+                    if (member.outputVar) this.variableCache.set(member.outputVar, lastResult);
+                }
+                return lastResult;
+            }
         });
+
+        // --- EXTENDED EDITOR ---
+        this.registerCapability({
+            intent: 'editor.open',
+            handler: async (payload) => {
+                await acode.openFile(payload.path);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'editor.close',
+            handler: async (payload) => {
+                const file = editorManager.getFile(payload.path || editorManager.activeFile.uri);
+                if (file) file.close();
+                return true;
+            }
+        });
+
+        // --- ADVANCED UI ---
+        this.registerCapability({
+            intent: 'ui.reviewDiff',
+            handler: async (payload) => {
+                return new Promise((resolve) => {
+                    const content = `
+                        <div style="display:flex; flex-direction:column; height:100%;">
+                            <div style="flex:1; overflow:auto; padding:10px; background:#1d1d1d; color:#fff; font-family:monospace; white-space:pre-wrap;">
+                                ${payload.proposal}
+                            </div>
+                            <div style="padding:10px; border-top:1px solid #444; display:flex; justify-content:flex-end; gap:10px;">
+                                <button id="leion-diff-cancel" style="padding:8px 16px;">Reject</button>
+                                <button id="leion-diff-apply" style="padding:8px 16px; background:#4caf50; color:white; border:none;">Apply Change</button>
+                            </div>
+                        </div>
+                    `;
+                    const dialog = acode.require('box')(payload.title || 'Review Changes', content);
+                    dialog.onhide = () => resolve(false);
+                    
+                    const $apply = dialog.querySelector('#leion-diff-apply');
+                    const $cancel = dialog.querySelector('#leion-diff-cancel');
+                    
+                    $apply.onclick = () => {
+                        dialog.hide();
+                        resolve(true);
+                    };
+                    $cancel.onclick = () => {
+                        dialog.hide();
+                        resolve(false);
+                    };
+                });
+            }
+        });
+
         this.registerCapability({
             intent: 'docker.run',
             handler: (p) => docker(`run ${p.detach ? '-d' : ''} ${p.image}`)
