@@ -294,7 +294,28 @@ class TerminalProvider extends BaseProvider {
             const result = await term.run(command);
             return this.success(result);
         } catch (e) { return this.fail('TERMINAL_ERROR', e.message); }
+class DockerProvider extends BaseProvider {
+    constructor() { super('docker'); }
+    async canHandle(intent) { return intent.intent.startsWith('docker://'); }
+    async execute(intent, context) {
+        const action = intent.intent.split('://')[1];
+        
+        // 1. Local Docker (Capability check)
+        if (context.capabilities.docker) {
+             return this.success(`Executed ${action} on local docker (mocked)`);
+        }
+
+        // 2. Remote Docker via SSH (Intent payload)
+        if (intent.payload?.ssh) {
+             this.router.log('info', `Routing docker command ${action} to remote host ${intent.payload.ssh.host}`);
+             // Logic to execute via SSH provider (if exists) or direct fetch/websocket
+             return this.success(`Executed ${action} on remote docker via SSH (mocked)`);
+        }
+
+        // 3. Fallback/Error
+        return this.fail('CAPABILITY_MISSING', 'Docker is not natively supported on Android. Use a remote host or Termux setup.');
     }
+}
 }
 
 class AIProvider extends BaseProvider {
