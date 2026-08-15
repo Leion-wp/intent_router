@@ -283,7 +283,63 @@ class IntentRouter {
     logExecution(intent, response, duration) {
         this.logs.push({ intent, response, duration, timestamp: new Date().toISOString() });
         if (this.logs.length > 50) this.logs.shift();
+
+// --- PLUGIN INTEGRATION ---
+class IntentRouterPlugin {
+    constructor() {
+        this.router = new IntentRouter();
     }
+
+    async init() {
+        window.intentRouter = this.router;
+        
+        if (window.acode) {
+            acode.addCommand({
+                name: 'intent_router:status',
+                description: 'Show Intent Router Status',
+                exec: async () => {
+                    const info = await this.router.execute({ scheme: 'system', action: 'get_info' });
+                    window.alert('Intent Router Status', JSON.stringify(info.data, null, 2));
+                }
+            });
+        }
+        console.log('Intent Router Plugin Initialized');
+    }
+
+    async destroy() {
+        delete window.intentRouter;
+    }
+}
+
+if (window.acode) {
+    const plugin = new IntentRouterPlugin();
+    acode.setPluginInit('com.leion.roots', () => plugin.init());
+    acode.setPluginUnmount('com.leion.roots', () => plugin.destroy());
+} else {
+    const plugin = new IntentRouterPlugin();
+    plugin.init();
+}
+
+// --- GLOBAL TEST SUITE ---
+window.runIntentTests = async () => {
+    console.log('--- STARTING INTENT ROUTER TESTS ---');
+    const router = window.intentRouter;
+    if (!router) return console.error('Router not found');
+
+    const tests = [
+        { name: 'System Toast', intent: { scheme: 'system', action: 'toast', data: { message: 'Test Success!' } } },
+        { name: 'System Info', intent: { scheme: 'system', action: 'get_info' } },
+        { name: 'Invalid Scheme', intent: { scheme: 'invalid', action: 'test' } }
+    ];
+
+    for (const test of tests) {
+        console.log(`Running: ${test.name}...`);
+        const res = await router.execute(test.intent);
+        console.log(`Result:`, res);
+    }
+    console.log('--- TESTS COMPLETE ---');
+};
+
 }
 
         });
