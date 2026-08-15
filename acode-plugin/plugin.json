@@ -1,13 +1,20 @@
 {
+  "$schema": "https://acode.app/schema/plugin/v0.1.0.json",
   "id": "com.leion.intentrouter",
   "name": "Intent Router",
-  "version": "1.1.6",
   "main": "main.js",
-  "icon": "account_tree",
-  "author": "Leion-wp",
-  "description": "Human-centric orchestration layer for mobile automation.",
+  "version": "1.2.0",
+  "icon": "icon.png",
   "readme": "README.md",
-  "versionCode": 16,
+  "minVersionCode": 290,
+  "price": 0,
   "license": "MIT",
-  "category": "utility"
+  "keywords": ["automation", "intent", "router", "leion"],
+  "permissions": [],
+  "repository": "https://github.com/Leion-wp/intent_router",
+  "author": {
+    "name": "Leion-wp",
+    "github": "Leion-wp"
+  },
+  "description": "Human-centric orchestration layer for mobile automation."
 }
