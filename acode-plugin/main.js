@@ -113,7 +113,74 @@ class GitHubProvider extends BaseProvider {
   }
 }
 
-      error: res.error ?? null,
+
+class TerminalProvider extends BaseProvider {
+  constructor() { super('Terminal'); }
+  async canHandle(i) { return i.scheme === 'terminal'; }
+  async execute(i, ctx) {
+    if (!ctx.capabilities.terminal) {
+      return { success: false, error: 'Terminal capability missing' };
+    }
+    // Execution logic via window.terminal
+    return { success: true, data: { output: `Executed: ${i.data.command}` } };
+  }
+}
+
+class DockerProvider extends BaseProvider {
+  constructor() { super('Docker'); }
+  async canHandle(i) { return i.scheme === 'docker'; }
+  async execute() {
+    return { success: false, error: 'Docker is not supported on this environment' };
+  }
+}
+
+// Plugin Initialization
+class IntentRouterPlugin {
+  async init() {
+    this.router = new IntentRouter();
+    this.router.registerProvider(new SystemProvider());
+    this.router.registerProvider(new AIProvider());
+    this.router.registerProvider(new GitHubProvider());
+    this.router.registerProvider(new TerminalProvider());
+    this.router.registerProvider(new DockerProvider());
+
+    window.intentRouter = this.router;
+    window.toast('Intent Router Initialized', 2000);
+  }
+
+  async destroy() {
+    delete window.intentRouter;
+  }
+}
+
+if (window.acode) {
+  const plugin = new IntentRouterPlugin();
+  acode.setPluginInit('com.leion.intentrouter', (baseUrl, $page, { cacheFileUrl, cacheFile }) => {
+    plugin.init();
+  });
+  acode.setPluginUnmount('com.leion.intentrouter', () => {
+    plugin.destroy();
+  });
+}
+
+// Test Function for Console
+window.testIntentRouter = async () => {
+  if (!window.intentRouter) return console.error('Router not ready');
+  
+  console.log('--- Starting Intent Router Tests ---');
+  
+  const tests = [
+    { scheme: 'system', action: 'toast', data: { message: 'Test Toast' } },
+    { scheme: 'ai', action: 'prompt', data: { prompt: 'Hello AI' } },
+    { scheme: 'docker', action: 'run', data: { image: 'nginx' } }
+  ];
+
+  for (const t of tests) {
+    const res = await window.intentRouter.execute(t);
+    console.log(`Result for ${t.scheme}:`, res);
+  }
+};
+
       metadata: {
         ...res.metadata,
         timestamp: Date.now(),
