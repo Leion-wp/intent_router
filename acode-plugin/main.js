@@ -352,7 +352,53 @@ if (window.acode) {
 
  */
 
-// --- Constants & Types ---
+
+class SystemProvider extends BaseProvider {
+    canHandle(intent) {
+        return intent.scheme === 'system';
+    }
+
+    async execute(intent) {
+        const { action, data } = intent;
+        switch (action) {
+            case 'alert':
+                window.alert(data.message || 'System Alert');
+                return { success: true, data: 'Alert displayed' };
+            case 'toast':
+                window.toast(data.message || 'System Notification', 3000);
+                return { success: true, data: 'Toast displayed' };
+            case 'confirm':
+                const result = window.confirm(data.message || 'Are you sure?');
+                return { success: true, data: result };
+            default:
+                throw new Error(`System action "${action}" not implemented`);
+        }
+    }
+}
+
+class GithubProvider extends BaseProvider {
+    canHandle(intent) {
+        return intent.scheme === 'github';
+    }
+
+    async execute(intent) {
+        const { action, data } = intent;
+        const baseUrl = 'https://api.github.com';
+        const headers = data.token ? { 'Authorization': `token ${data.token}` } : {};
+
+        switch (action) {
+            case 'get_repo':
+                const repoRes = await fetch(`${baseUrl}/repos/${data.owner}/${data.repo}`, { headers });
+                return { success: repoRes.ok, data: await repoRes.json() };
+            case 'get_file':
+                const fileRes = await fetch(`${baseUrl}/repos/${data.owner}/${data.repo}/contents/${data.path}`, { headers });
+                return { success: fileRes.ok, data: await fileRes.json() };
+            default:
+                throw new Error(`Github action "${action}" not implemented`);
+        }
+    }
+}
+
 const SCHEMES = {
   SYSTEM: 'system',
   AI: 'ai',
