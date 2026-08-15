@@ -124,7 +124,70 @@ class TerminalProvider extends BaseProvider {
         } catch (e) {
             return this.normalizeResponse(false, null, e);
         }
+
+// --- Git Provider ---
+class GitProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.GIT);
     }
+
+    async canHandle(intent) {
+        return intent.scheme === this.name && !!window.terminal;
+    }
+
+    async execute(intent, context) {
+        if (!context.capabilities.terminal) {
+            return this.normalizeResponse(false, null, {
+                message: 'Git requires terminal capability',
+                code: ERROR_CODES.CAPABILITY_MISSING
+            });
+        }
+
+        try {
+            const { action, data } = intent;
+            let command = '';
+
+            switch (action) {
+                case 'status': command = 'git status'; break;
+                case 'commit': command = `git commit -m "${data.message}"`; break;
+                case 'push': command = 'git push'; break;
+                default: throw new Error(`Git action ${action} not implemented`);
+            }
+
+            const output = await window.terminal.run(command);
+            return this.normalizeResponse(true, { output });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
+// --- HTTP Provider ---
+class HttpProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.HTTP);
+    }
+
+    async execute(intent, context) {
+        try {
+            const { url, method = 'GET', headers = {}, body } = intent.data;
+            const response = await fetch(url, {
+                method,
+                headers,
+                body: body ? JSON.stringify(body) : undefined
+            });
+
+            const responseData = await response.json().catch(() => null);
+            return this.normalizeResponse(response.ok, responseData, response.ok ? null : {
+                message: `HTTP Error: ${response.status}`,
+                code: response.status
+            });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
 }
 
 }
