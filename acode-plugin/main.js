@@ -225,6 +225,9 @@ class IntentRouter {
   }
 }
 
+  }
+}
+
 }
 
 class IntentRouterPlugin {
