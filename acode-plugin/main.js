@@ -166,7 +166,134 @@ class HttpProvider extends BaseProvider {
                 code: response.status
             });
         } catch (e) {
-            return this.normalizeResponse(false, null, e);
+// --- Intent Router (Main Engine) ---
+class IntentRouter {
+    constructor() {
+        this.providers = [
+            new SystemProvider(),
+            new AIProvider(),
+            new TerminalProvider(),
+            new GitProvider(),
+            new HttpProvider(),
+            new DockerProvider()
+        ];
+        this.logs = [];
+    }
+
+    async execute(intent) {
+        const startTime = Date.now();
+        try {
+            // 1. Validation
+            if (!intent || !intent.scheme || !intent.action) {
+                throw { message: 'Invalid intent format', code: ERROR_CODES.VALIDATION_ERROR };
+            }
+
+            // 2. Find Provider
+            const provider = this.providers.find(p => p.canHandle && p.scheme === intent.scheme); // Simplified for now
+            // Wait, I used p.scheme but it should be p.name or call canHandle
+            
+            let targetProvider = null;
+            for (const p of this.providers) {
+                if (await p.canHandle(intent)) {
+                    targetProvider = p;
+                    break;
+                }
+            }
+
+            if (!targetProvider) {
+                throw { message: `No provider found for scheme: ${intent.scheme}`, code: ERROR_CODES.PROVIDER_NOT_FOUND };
+            }
+
+            // 3. Execution with Timeout
+            const context = { capabilities: this.getCapabilities() };
+            const result = await Promise.race([
+                targetProvider.execute(intent, context),
+                new Promise((_, reject) => setTimeout(() => reject({ message: 'Execution timeout', code: ERROR_CODES.TIMEOUT }), 30000))
+            ]);
+
+            this.logExecution(intent, result, Date.now() - startTime);
+            return result;
+
+        } catch (e) {
+            const errorResponse = {
+                success: false,
+                error: {
+                    message: e.message || e,
+                    code: e.code || ERROR_CODES.EXECUTION_FAILED
+                },
+                metadata: { timestamp: Date.now(), duration: Date.now() - startTime }
+            };
+            this.logExecution(intent, errorResponse, Date.now() - startTime);
+            return errorResponse;
+        }
+    }
+
+    getCapabilities() {
+        return {
+            terminal: !!window.terminal,
+            git: !!window.terminal, // Simplistic check
+            network: navigator.onLine,
+            docker: false,
+            android: true
+        };
+    }
+
+    logExecution(intent, response, duration) {
+        this.logs.push({
+            intent,
+            response,
+            duration,
+            timestamp: new Date().toISOString()
+        });
+        if (this.logs.length > 50) this.logs.shift();
+    }
+}
+
+// --- Plugin Integration ---
+class IntentRouterPlugin {
+    async init() {
+        this.router = new IntentRouter();
+        
+        // Register to Acode
+        if (window.acode) {
+            window.acode.registerPlugin('intent_router', this);
+            
+            // Add a command to test the router
+            acode.addCommand({
+                name: 'intent_router:test',
+                description: 'Test Intent Router',
+                exec: async () => {
+                    const result = await this.router.execute({
+                        scheme: 'system',
+                        action: 'toast',
+                        data: { message: 'Intent Router is Active!' }
+                    });
+                    console.log('Test Result:', result);
+                }
+            });
+        }
+    }
+
+    async destroy() {
+        // Cleanup
+    }
+
+    // Public API for other plugins
+    async sendIntent(intent) {
+        return await this.router.execute(intent);
+    }
+}
+
+if (window.acode) {
+    const plugin = new IntentRouterPlugin();
+    acode.setPluginInit('intent_router', (baseUrl, $page, { cacheFile, cacheFileUrl }) => {
+        plugin.init();
+    });
+    acode.setPluginUnmount('intent_router', () => {
+        plugin.destroy();
+    });
+}
+
         }
     }
 }
