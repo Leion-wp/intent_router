@@ -192,7 +192,51 @@ class IntentRouter {
 }
 
     }
+
+// --- Acode Plugin Lifecycle ---
+class IntentRouterPlugin {
+    async init() {
+        window.intentRouter = new IntentRouter();
+        
+        // Add a command to test the router
+        editorManager.editor.commands.addCommand({
+            name: 'intent-router:test',
+            bindKey: { win: 'Ctrl-Shift-I', mac: 'Command-Shift-I' },
+            exec: () => this.runTests()
+        });
+
+        window.toast('Intent Router Initialized', 2000);
+    }
+
+    async destroy() {
+        delete window.intentRouter;
+    }
+
+    async runTests() {
+        const tests = [
+            { scheme: 'system', action: 'toast', data: { message: 'Hello from Router!' } },
+            { scheme: 'system', action: 'get_info', data: {} },
+            { scheme: 'invalid', action: 'none', data: {} }
+        ];
+
+        window.toast('Running Intent Router Tests...', 2000);
+
+        for (const intent of tests) {
+            const res = await window.intentRouter.execute(intent);
+            console.log(`Test Result for ${intent.scheme}:`, res);
+            if (!res.success) {
+                window.toast(`Test Failed: ${res.error.message}`, 4000);
+            }
+        }
+    }
 }
+
+if (window.acode) {
+    const plugin = new IntentRouterPlugin();
+    acode.setPluginInit(plugin.init.bind(plugin));
+    acode.setPluginUnmount(plugin.destroy.bind(plugin));
+}
+
 
             }
         } catch (e) {
