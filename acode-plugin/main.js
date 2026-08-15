@@ -933,7 +933,7 @@ if (window.acode) {
   acode.setPluginInit('com.leion.roots', (baseUrl, $page, { cacheFileUrl, cacheFile }) => {
     plugin.init();
   });
-  acode.setPluginUnmount('com.leion.roots', () => {
     plugin.destroy();
+  acode.setPluginUnmount('com.leion.roots', () => {
   });
 }
