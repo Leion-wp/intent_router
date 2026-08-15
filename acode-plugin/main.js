@@ -116,38 +116,6 @@ if (window.acode) {
     });
 }
 
-class IntentRouter {
-    constructor() {
-        this.capabilities = new Map();
-        this.variableCache = new Map();
-    }
-
-    async init() {
-        console.log('Intent Router for Acode initialized');
-        this.registerInternalProviders();
-    }
-
-    registerInternalProviders() {
-        // Mocking the registry logic for Acode
-        this.registerCapability({
-            intent: 'system.pause',
-            handler: async (payload) => {
-                return new Promise((resolve) => {
-                    acode.confirm('Intent Router', payload.message || 'Pause for human validation', (res) => {
-                        resolve(res);
-                    });
-                });
-            }
-        });
-
-        this.registerCapability({
-            intent: 'terminal.run',
-            handler: async (payload) => {
-                // Acode doesn't have a direct terminal API like VS Code
-                // We might need to use a plugin or a custom implementation
-                window.alert('Terminal execution: ' + payload.command);
-                return true;
-            }
         });
     }
 
