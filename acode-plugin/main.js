@@ -203,6 +203,130 @@ class HttpProvider extends BaseProvider {
     }
 }
 
+// --- AI PROVIDER ---
+class AIProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.AI);
+    }
+
+    async execute(intent, context) {
+        const { action, data } = intent;
+        switch (action) {
+            case 'prompt':
+                return this.normalizeResponse(true, {
+                    answer: `AI response to: ${data.prompt}`,
+                    model: data.model || 'default'
+                });
+            default:
+                return this.normalizeResponse(false, null, `AI action '${action}' not supported`);
+        }
+    }
+}
+
+// --- DOCKER PROVIDER ---
+class DockerProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.DOCKER);
+    }
+
+    async execute(intent, context) {
+        return this.normalizeResponse(false, null, {
+            message: 'Docker is not supported on Android environment natively.',
+            code: ERROR_CODES.CAPABILITY_MISSING
+        });
+    }
+}
+
+// --- INTENT ROUTER CORE ---
+class IntentRouter {
+    constructor() {
+        this.providers = [
+            new SystemProvider(),
+            new AIProvider(),
+            new TerminalProvider(),
+            new GitProvider(),
+            new GitHubProvider(),
+            new HttpProvider(),
+            new DockerProvider()
+        ];
+        this.logs = [];
+    }
+
+    async getCapabilities() {
+        const terminalAvailable = !!(window.terminal || (window.acode && window.acode.require('terminal')));
+        return {
+            terminal: terminalAvailable,
+            git: terminalAvailable,
+            network: navigator.onLine,
+            docker: false,
+            android: true,
+            termux: /Termux/.test(navigator.userAgent)
+        };
+    }
+
+    async execute(intent) {
+        const startTime = Date.now();
+        try {
+            if (!intent || !intent.scheme || !intent.action) {
+                throw { message: 'Invalid intent format', code: ERROR_CODES.VALIDATION_ERROR };
+            }
+
+            let targetProvider = null;
+            for (const p of this.providers) {
+                if (await p.canHandle(intent)) {
+                    targetProvider = p;
+                    break;
+                }
+            }
+
+            if (!targetProvider) {
+                throw { message: `No provider found for scheme: ${intent.scheme}`, code: ERROR_CODES.PROVIDER_NOT_FOUND };
+            }
+
+            const context = { 
+                capabilities: await this.getCapabilities(),
+                timestamp: startTime
+            };
+
+            const result = await Promise.race([
+                targetProvider.execute(intent, context),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject({ message: 'Execution timeout', code: ERROR_CODES.TIMEOUT }), 30000)
+                )
+            ]);
+
+            const duration = Date.now() - startTime;
+            result.metadata.duration = duration;
+            this.logExecution(intent, result, duration);
+            return result;
+
+        } catch (e) {
+            const duration = Date.now() - startTime;
+            const errorResponse = {
+                success: false,
+                data: null,
+                error: {
+                    message: e.message || String(e),
+                    code: e.code || ERROR_CODES.EXECUTION_FAILED
+                },
+                metadata: { 
+                    timestamp: Date.now(), 
+                    duration, 
+                    provider: intent?.scheme || 'unknown' 
+                }
+            };
+            this.logExecution(intent, errorResponse, duration);
+            return errorResponse;
+        }
+    }
+
+    logExecution(intent, response, duration) {
+        this.logs.push({ intent, response, duration, timestamp: new Date().toISOString() });
+        if (this.logs.length > 50) this.logs.shift();
+        console.log(`[IntentRouter] ${intent.scheme}:${intent.action} -> ${response.success ? 'SUCCESS' : 'FAILED'} (${duration}ms)`);
+    }
+}
+
     }
 }
 
