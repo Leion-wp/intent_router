@@ -1,4 +1,14 @@
 {
+  "id": "com.leion.intent.router",
+  "name": "Leion Roots",
+  "main": "main.js",
+  "version": "1.0.0",
+  "author": "LeionCorp",
+  "icon": "icon.png",
+  "description": "Human-centric visual orchestration runtime for Acode",
+  "readme": "README.md",
+  "license": "MIT"
+}
     "id": "com.leion.roots",
     "name": "Leion Roots",
     "main": "main.js",
