@@ -121,7 +121,76 @@ class GitProvider extends BaseProvider {
             return this.normalizeResponse(true, { output });
         } catch (e) {
             return this.normalizeResponse(false, null, e);
+
+// --- Intent Router Core ---
+class IntentRouter {
+    constructor() {
+        this.providers = new Map();
+        this.logs = [];
+        this.init();
+    }
+
+    init() {
+        this.registerProvider(new SystemProvider());
+        this.registerProvider(new TerminalProvider());
+        this.registerProvider(new GitProvider());
+    }
+
+    registerProvider(provider) {
+        this.providers.set(provider.name, provider);
+    }
+
+    async getCapabilities() {
+        return {
+            terminal: !!window.terminal,
+            git: !!window.terminal, // Simplified
+            termux: navigator.userAgent.toLowerCase().includes('termux'),
+            docker: false
+        };
+    }
+
+    async execute(intent) {
+        const context = {
+            capabilities: await this.getCapabilities(),
+            startTime: Date.now()
+        };
+
+        const provider = this.providers.get(intent.scheme);
+
+        if (!provider) {
+            const err = { message: `No provider found for scheme: ${intent.scheme}`, code: ERROR_CODES.PROVIDER_NOT_FOUND };
+            this.logError(err, intent);
+            return { success: false, error: err };
         }
+
+        if (!(await provider.canHandle(intent))) {
+            const err = { message: `Provider ${intent.scheme} cannot handle this intent (missing capabilities)`, code: ERROR_CODES.CAPABILITY_MISSING };
+            this.logError(err, intent);
+            return provider.normalizeResponse(false, null, err);
+        }
+
+        try {
+            console.log(`[IntentRouter] Executing ${intent.scheme}:${intent.action}`);
+            const response = await provider.execute(intent, context);
+            this.logResponse(response, intent);
+            return response;
+        } catch (e) {
+            const err = { message: e.message || 'Internal Router Error', code: ERROR_CODES.EXECUTION_FAILED };
+            this.logError(err, intent);
+            return provider.normalizeResponse(false, null, err);
+        }
+    }
+
+    logError(err, intent) {
+        this.logs.push({ type: 'error', intent, err, time: Date.now() });
+        console.error(`[IntentRouter Error]`, err, intent);
+    }
+
+    logResponse(res, intent) {
+        this.logs.push({ type: 'response', intent, res, time: Date.now() });
+    }
+}
+
     }
 }
 
