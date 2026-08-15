@@ -191,7 +191,66 @@ window.testIntentRouter = async () => {
 }
 
  * Intent Router for Acode
- * Clean Architecture Implementation
+
+class GitHubProvider extends BaseProvider {
+  canHandle(intent) {
+    return intent.scheme === 'github';
+  }
+
+  async execute(intent) {
+    const { action, repo, path: filePath, token } = intent.payload;
+    const headers = token ? { Authorization: `token ${token}` } : {};
+
+    try {
+      if (action === 'get_file') {
+        const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+        const response = await fetch(url, { headers });
+        if (!response.ok) throw new Error(`GitHub API error: ${response.statusText}`);
+        const data = await response.json();
+        return this.normalizeResponse(true, {
+          content: atob(data.content.replace(/\n/g, '')),
+          sha: data.sha
+        });
+      }
+      
+      if (action === 'list_repo') {
+        const url = `https://api.github.com/repos/${repo}/contents/`;
+        const response = await fetch(url, { headers });
+        if (!response.ok) throw new Error(`GitHub API error: ${response.statusText}`);
+        const data = await response.json();
+        return this.normalizeResponse(true, data);
+      }
+
+      return this.normalizeResponse(false, null, `Action ${action} not supported by GitHubProvider`);
+    } catch (error) {
+      return this.normalizeResponse(false, null, error.message);
+    }
+  }
+}
+
+class TerminalProvider extends BaseProvider {
+  canHandle(intent) {
+    return intent.scheme === 'terminal';
+  }
+
+  async execute(intent, context) {
+    if (!context.capabilities.terminal) {
+      return this.normalizeResponse(false, null, 'Terminal capability not available');
+    }
+
+    const { command, args = [] } = intent.payload;
+    try {
+      // Logic to interact with Acode terminal or Termux
+      // This usually involves window.acode.exec(command) or similar
+      const fullCommand = `${command} ${args.join(' ')}`;
+      const result = await window.acode.exec(fullCommand); 
+      return this.normalizeResponse(true, result);
+    } catch (error) {
+      return this.normalizeResponse(false, null, error.message);
+    }
+  }
+}
+
  */
 
 // --- Constants & Types ---
