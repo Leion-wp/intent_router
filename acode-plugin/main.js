@@ -101,6 +101,70 @@ class AIProvider extends BaseProvider {
     }
 }
 
+// --- Terminal Provider ---
+class TerminalProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.TERMINAL);
+    }
+
+    async canHandle(intent) {
+        return intent.scheme === this.name && !!window.terminal;
+    }
+
+    async execute(intent, context) {
+        if (!window.terminal) {
+            return this.normalizeResponse(false, null, {
+                message: 'Terminal plugin not found',
+                code: ERROR_CODES.CAPABILITY_MISSING
+            });
+        }
+
+        try {
+            const result = await window.terminal.run(intent.data.command);
+            return this.normalizeResponse(true, { output: result });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
+// --- Git Provider ---
+class GitProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.GIT);
+    }
+
+    async canHandle(intent) {
+        return intent.scheme === this.name && !!window.terminal;
+    }
+
+    async execute(intent, context) {
+        if (!context.capabilities.terminal) {
+            return this.normalizeResponse(false, null, {
+                message: 'Git requires terminal capability',
+                code: ERROR_CODES.CAPABILITY_MISSING
+            });
+        }
+
+        try {
+            const { action, data } = intent;
+            let command = '';
+
+            switch (action) {
+                case 'status': command = 'git status'; break;
+                case 'commit': command = `git commit -m "${data.message}"`; break;
+                case 'push': command = 'git push'; break;
+                default: throw new Error(`Git action ${action} not implemented`);
+            }
+
+            const output = await window.terminal.run(command);
+            return this.normalizeResponse(true, { output });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
  * Intent Router for Acode - Android Edition
  * Developed by Rutex (AI Agent)
  */
