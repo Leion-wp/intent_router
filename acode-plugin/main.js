@@ -309,8 +309,8 @@ class DockerProvider extends BaseProvider {
 async function runTests() {
     console.log("--- Starting Intent Router E2E Tests ---");
     const tests = [
-        { name: 'System Toast', intent: { intent: 'system://toast', payload: { message: 'Test Success!' } } },
-        { name: 'HTTP Get', intent: { intent: 'https://jsonplaceholder.typicode.com/todos/1' } },
+        window.intentRouter.getLogs = () => router.logs;
+        acode.addCommand('Intent Router: Run Tests', 'run_intent_tests', () => window.intentRouter.runTests());
         { name: 'AI Mock', intent: { intent: 'ai://prompt', payload: { prompt: 'Hello' } } },
         { name: 'Terminal Fail (No Param)', intent: { intent: 'terminal://run', payload: {} } },
         { name: 'Invalid Intent', intent: { intent: 'unknown://action' } }
