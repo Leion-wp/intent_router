@@ -72,7 +72,59 @@ class SystemProvider extends BaseProvider {
                         acode_version: window.acode?.version || 'unknown'
                     });
                 default:
-                    throw { message: `Action ${intent.action} not supported`, code: ERROR_CODES.VALIDATION_ERROR };
+
+// --- Terminal Provider ---
+class TerminalProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.TERMINAL);
+    }
+
+    async canHandle(intent) {
+        return intent.scheme === this.name && !!window.terminal;
+    }
+
+    async execute(intent, context) {
+        if (!window.terminal) {
+            return this.normalizeResponse(false, null, {
+                message: 'Terminal plugin not found',
+                code: ERROR_CODES.CAPABILITY_MISSING
+            });
+        }
+
+        try {
+            const result = await window.terminal.run(intent.data.command);
+            return this.normalizeResponse(true, { output: result });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
+// --- Git Provider ---
+class GitProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.GIT);
+    }
+
+    async execute(intent, context) {
+        if (!context.capabilities.terminal) {
+            return this.normalizeResponse(false, null, {
+                message: 'Git requires terminal capability',
+                code: ERROR_CODES.CAPABILITY_MISSING
+            });
+        }
+
+        try {
+            // Simplified git check for demo
+            const command = intent.action === 'status' ? 'git status' : `git ${intent.action}`;
+            const output = await window.terminal.run(command);
+            return this.normalizeResponse(true, { output });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
             }
         } catch (e) {
             return this.normalizeResponse(false, null, e);
