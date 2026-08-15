@@ -64,3 +64,40 @@ class TerminalProvider {
         }
     }
 }
+
+
+// Acode Plugin Entry Point
+let router;
+
+function init() {
+    router = new IntentRouter();
+    router.init().then(() => {
+        // Registering to Acode (if applicable)
+        // For example, adding a command to the command palette
+        if (typeof editorManager !== 'undefined') {
+            editorManager.editor.commands.addCommand({
+                name: "intentRouter:execute",
+                bindKey: { win: "Ctrl-Shift-I", mac: "Command-Shift-I" },
+                exec: async () => {
+                    const input = await window.prompt("Enter Intent (JSON or URI):");
+                    if (input) {
+                        try {
+                            const intent = input.startsWith('{') ? JSON.parse(input) : { intent: input };
+                            const result = await router.execute(intent);
+                            console.log("Intent Result:", result);
+                        } catch (e) {
+                            window.toast("Invalid Intent format");
+                        }
+                    }
+                }
+            });
+        }
+    });
+}
+
+if (window.acode) {
+    acode.setPluginInit(init);
+} else {
+    // Fallback or dev environment
+    init();
+}
