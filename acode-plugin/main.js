@@ -65,6 +65,47 @@ class IntentRouter {
             intent: 'system.wait',
             handler: async (p) => new Promise(r => setTimeout(r, p.ms || 1000))
         });
+        this.registerCapability({
+            intent: 'system.form',
+            handler: async (p) => {
+                const results = {};
+                for (const field of p.fields || []) {
+                    const res = await acode.prompt(field.label || field.name, field.defaultValue || '', field.type || 'text');
+                    results[field.name] = res;
+                    if (field.var) this.variableCache.set(field.var, res);
+                }
+                return results;
+            }
+        });
+        this.registerCapability({
+            intent: 'system.subPipeline',
+            handler: async (p) => {
+                const content = await fs.readFile(p.path);
+                const pipeline = JSON.parse(content);
+                return await this.runPipeline(pipeline);
+            }
+        });
+        this.registerCapability({
+            intent: 'system.loop',
+            handler: async (p) => {
+                const iterations = p.iterations || 1;
+                let lastRes;
+                for (let i = 0; i < iterations; i++) {
+                    this.variableCache.set(p.indexVar || 'i', i);
+                    lastRes = await this.route({ steps: p.steps });
+                }
+                return lastRes;
+            }
+        });
+        this.registerCapability({
+            intent: 'system.switch',
+            handler: async (p) => {
+                const value = await this.resolveVariables(p.value);
+                const caseStep = p.cases[value] || p.default;
+                if (caseStep) return await this.route(caseStep);
+                return null;
+            }
+        });
 
         // --- UI ---
         this.registerCapability({
