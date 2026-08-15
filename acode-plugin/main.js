@@ -85,4 +85,69 @@ class SystemProvider extends BaseProvider {
             return this.normalizeResponse(false, null, e);
         }
     }
+
+// --- TERMINAL PROVIDER ---
+class TerminalProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.TERMINAL);
+    }
+
+    async canHandle(intent) {
+        const terminal = window.terminal || (window.acode && window.acode.require('terminal'));
+        return intent.scheme === this.name && !!terminal;
+    }
+
+    async execute(intent, context) {
+        const terminal = window.terminal || (window.acode && window.acode.require('terminal'));
+        if (!terminal) {
+            return this.normalizeResponse(false, null, {
+                message: 'Terminal plugin not found',
+                code: ERROR_CODES.CAPABILITY_MISSING
+            });
+        }
+
+        try {
+            if (intent.action === 'run') {
+                const result = await terminal.run(intent.data.command);
+                return this.normalizeResponse(true, { output: result });
+            }
+            throw { message: `Action ${intent.action} not supported`, code: ERROR_CODES.VALIDATION_ERROR };
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
 }
+
+// --- GIT PROVIDER ---
+class GitProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.GIT);
+    }
+
+    async canHandle(intent) {
+        const terminal = window.terminal || (window.acode && window.acode.require('terminal'));
+        return intent.scheme === this.name && !!terminal;
+    }
+
+    async execute(intent, context) {
+        const terminal = window.terminal || (window.acode && window.acode.require('terminal'));
+        try {
+            const { action, data } = intent;
+            let command = '';
+
+            switch (action) {
+                case 'status': command = 'git status'; break;
+                case 'commit': command = `git commit -m "${data.message}"`; break;
+                case 'push': command = 'git push'; break;
+                default:
+                    command = `git ${action} ${data?.args || ''}`;
+            }
+
+            const output = await terminal.run(command);
+            return this.normalizeResponse(true, { output });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
