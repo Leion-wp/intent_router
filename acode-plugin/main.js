@@ -42,56 +42,70 @@ class BaseProvider {
         timestamp: Date.now(),
         provider: this.name
       }
-class SystemProvider extends BaseProvider {
+    };
+  }
+}
+\n
+class GitHubProvider extends BaseProvider {
   constructor() {
-    super('SystemProvider');
+    super('GitHubProvider');
   }
 
   canHandle(intent) {
-    return intent.scheme === SCHEMES.SYSTEM;
+    return intent.scheme === SCHEMES.GITHUB;
   }
 
   async execute(intent) {
     const { action, data } = intent;
+    const baseUrl = 'https://api.github.com';
+    const headers = data.token ? { 'Authorization': `token ${data.token}` } : {};
+
     try {
+      let response;
       switch (action) {
-        case 'toast':
-          window.toast(data.message || 'Notification', 3000);
-          return this.normalizeResponse(true, { status: 'displayed' });
-        case 'alert':
-          window.alert(data.message || 'System Alert');
-          return this.normalizeResponse(true, { status: 'acknowledged' });
-        case 'confirm':
-          const result = window.confirm(data.message || 'Are you sure?');
-          return this.normalizeResponse(true, { confirmed: result });
+        case 'get_repo':
+          response = await fetch(`${baseUrl}/repos/${data.owner}/${data.repo}`, { headers });
+          break;
+        case 'get_file':
+          response = await fetch(`${baseUrl}/repos/${data.owner}/${data.repo}/contents/${data.path}`, { headers });
+          break;
         default:
           return this.normalizeResponse(false, null, `Action ${action} not supported`);
       }
+
+      if (!response.ok) throw new Error(`GitHub API: ${response.statusText}`);
+      const result = await response.json();
+      return this.normalizeResponse(true, result);
     } catch (e) {
       return this.normalizeResponse(false, null, e.message);
     }
   }
 }
 
-class AIProvider extends BaseProvider {
+class TerminalProvider extends BaseProvider {
   constructor() {
-    super('AIProvider');
+    super('TerminalProvider');
   }
 
   canHandle(intent) {
-    return intent.scheme === SCHEMES.AI;
+    return intent.scheme === SCHEMES.TERMINAL;
   }
 
-  async execute(intent) {
+  async execute(intent, context) {
+    if (!context.capabilities.terminal) {
+      return this.normalizeResponse(false, null, 'Terminal capability not available');
+    }
+
     const { action, data } = intent;
-    // Mock AI response
-    return this.normalizeResponse(true, {
-      response: `AI simulated response for ${action}: "${data.prompt || data.text || ''}"`,
-      model: data.model || 'gpt-3.5-turbo'
-    });
-  }
-}
-\n
+    if (action === 'exec') {
+      // Logic for Acode Terminal plugin
+      if (window.terminal && typeof window.terminal.exec === 'function') {
+        const output = await window.terminal.exec(data.command);
+        return this.normalizeResponse(true, { output });
+      }
+      return this.normalizeResponse(false, null, 'Terminal plugin found but exec function missing');
+    }
+    return this.normalizeResponse(false, null, `Action ${action} not supported`);
   }
 }
 \n
