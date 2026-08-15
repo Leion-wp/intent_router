@@ -1,4 +1,85 @@
 /**
+ * Intent Router for Acode - Android Edition
+ * Developed by Rutex (AI Agent)
+ */
+
+// --- Constants & Types ---
+const PROVIDERS = {
+    SYSTEM: 'system',
+    AI: 'ai',
+    GIT: 'git',
+    HTTP: 'http',
+    TERMINAL: 'terminal',
+    DOCKER: 'docker'
+};
+
+const ERROR_CODES = {
+    PROVIDER_NOT_FOUND: 'PROVIDER_NOT_FOUND',
+    CAPABILITY_MISSING: 'CAPABILITY_MISSING',
+    EXECUTION_FAILED: 'EXECUTION_FAILED',
+    VALIDATION_ERROR: 'VALIDATION_ERROR',
+    TIMEOUT: 'TIMEOUT'
+};
+
+// --- Base Provider Class ---
+class BaseProvider {
+    constructor(name) {
+        this.name = name;
+    }
+
+    async canHandle(intent) {
+        return intent.scheme === this.name;
+    }
+
+    async execute(intent, context) {
+        throw new Error('Method execute() must be implemented');
+    }
+
+    normalizeResponse(success, data = null, error = null, metadata = {}) {
+        return {
+            success,
+            data,
+            error: error ? {
+                message: error.message || error,
+                code: error.code || ERROR_CODES.EXECUTION_FAILED,
+                stack: error.stack
+            } : null,
+            metadata: {
+                ...metadata,
+                provider: this.name,
+                timestamp: Date.now()
+            }
+        };
+    }
+}
+
+// --- System Provider ---
+class SystemProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.SYSTEM);
+    }
+
+    async execute(intent, context) {
+        try {
+            switch (intent.action) {
+                case 'toast':
+                    window.toast(intent.data.message, 3000);
+                    return this.normalizeResponse(true, { displayed: true });
+                case 'get_info':
+                    return this.normalizeResponse(true, {
+                        version: '1.0.0',
+                        platform: 'android',
+                        acode_version: window.acode?.version || 'unknown'
+                    });
+                default:
+                    throw { message: `Action ${intent.action} not supported`, code: ERROR_CODES.VALIDATION_ERROR };
+            }
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
  * Intent Router for Acode (Android)
  * Created by Rutex (AI Agent)
  */
