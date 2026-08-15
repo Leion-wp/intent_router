@@ -72,6 +72,37 @@ class SystemProvider extends BaseProvider {
                         acode_version: window.acode?.version || 'unknown'
                     });
                 default:
+                default:
+                    throw new Error(`Action ${intent.action} not supported by SystemProvider`);
+            }
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
+// --- AI Provider ---
+class AIProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.AI);
+    }
+
+    async execute(intent, context) {
+        try {
+            // Logic to interface with Acode AI or external API
+            // For now, let's assume we use a prompt-based action
+            if (intent.action === 'prompt') {
+                // Mocking AI response for now
+                return this.normalizeResponse(true, { 
+                    answer: "AI logic for Android would go here. Check connectivity or Acode AI plugin." 
+                });
+            }
+            throw new Error(`Action ${intent.action} not supported by AIProvider`);
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
 
 // --- Terminal Provider ---
 class TerminalProvider extends BaseProvider {
