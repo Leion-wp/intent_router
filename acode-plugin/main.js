@@ -999,6 +999,177 @@ class IntentRouter {
             intent: 'github.prComment',
             handler: (p) => gh(`pr comment ${p.number} --body "${p.body}"`)
         });
+1002: 
+1003:         // --- AI (Acode AI Bridge) ---
+1004:         this.registerCapability({
+1005:             intent: 'ai.generate',
+1006:             handler: async (payload) => {
+1007:                 // We try to use Acode's AI capabilities if available, or fallback to an HTTP API (e.g., Gemini)
+1008:                 // For now, let's implement a prompt-based simulation or a direct API call if keys are provided
+1009:                 const systemPrompt = payload.systemPrompt || "You are an AI assistant integrated into Acode editor.";
+1010:                 const instruction = payload.instruction;
+1011:                 
+1012:                 window.toast("AI: Generating...", 2000);
+1013:                 
+1014:                 // Example using a generic HTTP endpoint (placeholder)
+1015:                 // In a real scenario, this would use the user's configured provider
+1016:                 try {
+1017:                     const result = await this.route({
+1018:                         intent: 'http.request',
+1019:                         payload: {
+1020:                             url: 'https://api.leion.io/v1/ai/generate', // Placeholder
+1021:                             method: 'POST',
+1022:                             body: { instruction, systemPrompt, model: payload.model || 'gemini' }
+1023:                         }
+1024:                     });
+1025:                     if (payload.outputVar) this.variableCache.set(payload.outputVar, result);
+1026:                     return result;
+1027:                 } catch (e) {
+1028:                     console.error("AI Generation failed", e);
+1029:                     const manualInput = await acode.prompt("AI Error - Manual Input Required", "Paste AI response here");
+1030:                     if (payload.outputVar) this.variableCache.set(payload.outputVar, manualInput);
+1031:                     return manualInput;
+1032:                 }
+1033:             }
+1034:         });
+1035: 
+1036:         // --- DOCKER (Mobile Limitation) ---
+1037:         this.registerCapability({
+1038:             intent: 'docker.run',
+1039:             handler: async (payload) => {
+1040:                 window.toast("Docker is not natively supported on Android. Attempting remote execution...", 5000);
+1041:                 // This could be implemented via a remote SSH connection or a cloud builder
+1042:                 return { error: "Native Docker not available on mobile", status: "failed" };
+1043:             }
+1044:         });
+1045:     }
+1046: 
+1047:     async route(intentObj) {
+1048:         const { intent, payload } = intentObj;
+1049:         const handler = this.capabilities.get(intent);
+1050:         
+1051:         if (!handler) {
+1052:             throw new Error(`Capability not found: ${intent}`);
+1053:         }
+1054: 
+1055:         const resolvedPayload = await this.resolveVariables(payload);
+1056:         console.log(`[Leion Router] Executing: ${intent}`, resolvedPayload);
+1057:         
+1058:         try {
+1059:             return await handler(resolvedPayload);
+1060:         } catch (error) {
+1061:             console.error(`[Leion Router] Error in ${intent}:`, error);
+1062:             throw error;
+1063:         }
+1064:     }
+1065: 
+1066:     async runPipeline(pipeline) {
+1067:         const { name, steps } = pipeline;
+1068:         window.toast(`Starting Pipeline: ${name}`, 2000);
+1069:         
+1070:         const results = [];
+1071:         for (const step of steps) {
+1072:             try {
+1073:                 const result = await this.route(step);
+1074:                 results.push({ step: step.intent, status: 'success', result });
+1075:             } catch (error) {
+1076:                 results.push({ step: step.intent, status: 'failed', error: error.message });
+1077:                 const resume = await new Promise(resolve => {
+1078:                     acode.confirm("Pipeline Error", `Step ${step.intent} failed: ${error.message}. Continue?`, (res) => resolve(res));
+1079:                 });
+1080:                 if (!resume) break;
+1081:             }
+1082:         }
+1083:         
+1084:         window.toast(`Pipeline Finished: ${name}`, 3000);
+1085:         return results;
+1086:     }
+1087: }
+1088: 
+1089: class LeionRootsPlugin {
+1090:     async init() {
+1091:         this.router = new IntentRouter();
+1092:         await this.router.init();
+1093: 
+1094:         this.addCommands();
+1095:         this.addIcon();
+1096:     }
+1097: 
+1098:     addCommands() {
+1099:         editorManager.editor.commands.addCommand({
+1100:             name: 'leion:run_pipeline',
+1101:             description: 'Leion: Run Pipeline File',
+1102:             exec: async () => {
+1103:                 const file = await acode.fileBrowser('file', 'Select .intent.json');
+1104:                 if (file) {
+1105:                     const content = await acode.require('fs').readFile(file.url);
+1106:                     const pipeline = JSON.parse(content);
+1107:                     await this.router.runPipeline(pipeline);
+1108:                 }
+1109:             }
+1110:         });
+1111: 
+1112:         editorManager.editor.commands.addCommand({
+1113:             name: 'leion:cockpit',
+1114:             description: 'Leion: Open Cockpit',
+1115:             exec: () => this.openCockpit()
+1116:         });
+1117:     }
+1118: 
+1119:     addIcon() {
+1120:         const $header = document.querySelector('header');
+1121:         if (!$header) return;
+1122: 
+1123:         const $icon = document.createElement('span');
+1124:         $icon.className = 'icon leion-roots-icon';
+1125:         $icon.innerHTML = '&#xe900;'; // Replace with actual Leion icon font code if available
+1126:         $icon.style.fontSize = '1.5rem';
+1127:         $icon.onclick = () => this.openCockpit();
+1128:         
+1129:         $header.insertBefore($icon, $header.firstChild);
+1130:     }
+1131: 
+1132:     openCockpit() {
+1133:         const page = acode.require('page');
+1134:         const cockpitPage = page('Leion Cockpit', () => {
+1135:             console.log('Cockpit closed');
+1136:         });
+1137: 
+1138:         cockpitPage.content = `
+1139:             <div style="padding: 20px; color: white;">
+1140:                 <h1>Leion Cockpit</h1>
+1141:                 <p>Welcome to the mobile automation hub.</p>
+1142:                 <div id="pipeline-list">
+1143:                     <h3>Active Pipelines</h3>
+1144:                     <ul>
+1145:                         <li>No active pipelines</li>
+1146:                     </ul>
+1147:                 </div>
+1148:                 <button class="btn" onclick="editorManager.editor.execCommand('leion:run_pipeline')">Run New Pipeline</button>
+1149:             </div>
+1150:         `;
+1151:         
+1152:         cockpitPage.show();
+1153:     }
+1154: 
+1155:     async destroy() {
+1156:         // Cleanup
+1157:         const $icon = document.querySelector('.leion-roots-icon');
+1158:         if ($icon) $icon.remove();
+1159:     }
+1160: }
+1161: 
+1162: if (window.acode) {
+1163:     const leionPlugin = new LeionRootsPlugin();
+1164:     acode.setPluginInit('com.leion.roots', (baseUrl, $page, { cacheFileUrl, cacheFile }) => {
+1165:         leionPlugin.baseUrl = baseUrl;
+1166:         leionPlugin.init();
+1167:     });
+1168:     acode.setPluginUnmount('com.leion.roots', () => {
+1169:         leionPlugin.destroy();
+1170:     });
+1171: }
+
         this.registerCapability({
             intent: 'github.repoClone',
             handler: (p) => gh(`repo clone ${p.repo} ${p.path || ''}`)
