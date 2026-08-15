@@ -1,4 +1,101 @@
 /**
+ * Intent Router for Acode (Android)
+ * Created by Rutex (AI Agent)
+ */
+
+const { toast, alert } = window;
+
+// --- TYPES & CONSTANTS ---
+
+const IntentScheme = {
+  SYSTEM: 'system',
+  AI: 'ai',
+  GIT: 'git',
+  HTTP: 'http',
+  TERMINAL: 'terminal',
+  DOCKER: 'docker'
+};
+
+const ErrorCode = {
+  PROVIDER_NOT_FOUND: 'PROVIDER_NOT_FOUND',
+  CAPABILITY_MISSING: 'CAPABILITY_MISSING',
+  EXECUTION_FAILED: 'EXECUTION_FAILED',
+  TIMEOUT: 'TIMEOUT',
+  INVALID_INTENT: 'INVALID_INTENT'
+};
+
+// --- BASE PROVIDER ---
+
+class BaseProvider {
+  constructor(name) {
+    this.name = name;
+  }
+
+  async canHandle(intent) {
+    return false;
+  }
+
+  async execute(intent, context) {
+    throw new Error('Method not implemented');
+  }
+
+  normalizeResponse(success, data, error = null, metadata = {}) {
+    return {
+      success,
+      data,
+      error: error ? {
+        message: typeof error === 'string' ? error : error.message,
+        code: error.code || ErrorCode.EXECUTION_FAILED
+      } : null,
+      metadata: {
+        ...metadata,
+        provider: this.name,
+        timestamp: Date.now()
+      }
+    };
+  }
+}
+
+// --- SYSTEM PROVIDER ---
+
+class SystemProvider extends BaseProvider {
+  constructor() {
+    super('system');
+  }
+
+  async canHandle(intent) {
+    return intent.scheme === IntentScheme.SYSTEM;
+  }
+
+  async execute(intent, context) {
+    try {
+      const { action, params } = intent;
+      
+      switch (action) {
+        case 'toast':
+          toast(params.message || 'No message');
+          return this.normalizeResponse(true, { status: 'shown' });
+        
+        case 'alert':
+          await alert(params.title || 'Alert', params.message || '');
+          return this.normalizeResponse(true, { status: 'dismissed' });
+
+        case 'get_info':
+          return this.normalizeResponse(true, {
+            version: '1.0.0',
+            platform: 'android',
+            acode: typeof acode !== 'undefined' ? 'available' : 'unavailable'
+          });
+
+        default:
+          throw { message: `Unknown system action: ${action}`, code: ErrorCode.INVALID_INTENT };
+      }
+    } catch (err) {
+      return this.normalizeResponse(false, null, err);
+    }
+  }
+}
+
  * Intent Router for Acode
  * Developed by Rutex (Dave Conco & Hall Of Codes)
  */
