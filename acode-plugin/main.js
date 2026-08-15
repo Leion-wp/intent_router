@@ -260,7 +260,62 @@ class IntentRouter {
                 )
             ]);
 
-            const duration = Date.now() - startTime;
+
+class IntentRouter {
+  constructor() {
+    this.providers = [];
+    this.logs = [];
+    this.capabilities = this._detectCapabilities();
+  }
+
+  registerProvider(provider) {
+    this.providers.push(provider);
+  }
+
+  _detectCapabilities() {
+    return {
+      terminal: !!window.terminal,
+      git: !!window.terminal, // Simplified check
+      filesystem: true,
+      network: navigator.onLine,
+      android: /Android/i.test(navigator.userAgent)
+    };
+  }
+
+  async execute(intent) {
+    const startTime = Date.now();
+    try {
+      const provider = this.providers.find(p => p.canHandle(intent));
+      
+      if (!provider) {
+        return this._normalizeResponse(false, null, `No provider found for scheme: ${intent.scheme}`, startTime);
+      }
+
+      // Check for required capabilities if any (future proofing)
+      const context = { capabilities: this.capabilities, timestamp: new Date() };
+      const result = await provider.execute(intent, context);
+      
+      return this._normalizeResponse(result.success, result.data, result.error, startTime, result.metadata);
+    } catch (error) {
+      console.error("[IntentRouter] Execution error:", error);
+      return this._normalizeResponse(false, null, error.message, startTime);
+    }
+  }
+
+  _normalizeResponse(success, data, error, startTime, metadata = {}) {
+    return {
+      success,
+      data,
+      error: error || null,
+      metadata: {
+        ...metadata,
+        duration: Date.now() - startTime,
+        timestamp: new Date().toISOString()
+      }
+    };
+  }
+}
+
             this.logExecution(intent, result, duration);
             return result;
 
