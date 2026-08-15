@@ -221,7 +221,10 @@ class IntentRouter {
       this.logs.push({ intent, error, timestamp: Date.now() });
       return { success: false, error, code: ERROR_CODES.EXECUTION_FAILED };
     }
+    }
   }
+}
+
 }
 
 class IntentRouterPlugin {
