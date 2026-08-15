@@ -997,6 +997,267 @@ class IntentRouter {
             console.log(logMsg, details);
         }
     }
+    registerProvider(name, provider) {
+        if (typeof provider.canHandle !== 'function' || typeof provider.execute !== 'function') {
+            this.log('error', `Provider ${name} does not follow the contract.`);
+            return;
+        }
+        this.providers.set(name, provider);
+        this.log('info', `Provider registered: ${name}`);
+    }
+
+    async execute(intent) {
+        const traceId = Math.random().toString(36).substring(7);
+        this.log('info', `Executing intent: ${intent.intent}`, { traceId, intent });
+
+        try {
+            // 1. Validation
+            if (!intent || !intent.intent) {
+                return this.createErrorResponse('INVALID_INTENT', 'Intent is missing or malformed', traceId);
+            }
+
+            // 2. Provider Resolution
+            let targetProvider = null;
+            let providerName = null;
+
+            for (const [name, provider] of this.providers) {
+                if (await provider.canHandle(intent)) {
+                    targetProvider = provider;
+                    providerName = name;
+                    break;
+                }
+            }
+
+            if (!targetProvider) {
+                return this.createErrorResponse('PROVIDER_NOT_FOUND', `No provider found for: ${intent.intent}`, traceId);
+            }
+
+            // 3. Capability Check
+            if (targetProvider.requiredCapability && !this.capabilities[targetProvider.requiredCapability]) {
+                return this.createErrorResponse('CAPABILITY_MISSING', `Capability '${targetProvider.requiredCapability}' required by ${providerName} is unavailable.`, traceId);
+            }
+
+            // 4. Execution with Timeout
+            const timeout = intent.timeout || 30000;
+            const context = {
+                traceId,
+                capabilities: this.capabilities,
+                router: this
+            };
+
+            const result = await Promise.race([
+                targetProvider.execute(intent, context),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), timeout))
+            ]);
+
+            // 5. Normalization
+            return this.normalizeResponse(result, providerName, traceId);
+
+        } catch (error) {
+            const code = error.message === 'TIMEOUT' ? 'TIMEOUT' : 'EXECUTION_FAILED';
+            this.log('error', `Execution failed: ${error.message}`, { traceId, error });
+            return this.createErrorResponse(code, error.message, traceId);
+        }
+    }
+
+    normalizeResponse(result, providerName, traceId) {
+        const response = {
+            success: result.success ?? true,
+            data: result.data ?? null,
+            error: result.error ? (typeof result.error === 'string' ? { message: result.error } : result.error) : null,
+            metadata: {
+                provider: providerName,
+                traceId,
+                timestamp: new Date().toISOString(),
+                ...result.metadata
+            }
+        };
+
+        if (!response.success && !response.error) {
+            response.error = { message: 'Unknown error during provider execution', code: 'UNKNOWN_PROVIDER_ERROR' };
+        }
+
+        if (response.error) {
+            window.toast(`Intent Error: ${response.error.message}`, 4000);
+        }
+
+        return response;
+    }
+
+    createErrorResponse(code, message, traceId) {
+        window.toast(`Intent Error: ${message}`, 4000);
+        return {
+            success: false,
+            data: null,
+            error: { code, message },
+            metadata: {
+                traceId,
+                timestamp: new Date().toISOString()
+            }
+        };
+    }
+
+    registerDefaultProviders() {
+        this.registerProvider('system', new SystemProvider());
+        this.registerProvider('http', new HttpProvider());
+        this.registerProvider('ai', new AIProvider());
+        this.registerProvider('terminal', new TerminalProvider());
+        this.registerProvider('git', new GitProvider());
+    }
+}
+
+// --- Provider Implementations ---
+
+class SystemProvider {
+    constructor() {
+        this.requiredCapability = 'system';
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('system://') || intent.intent.startsWith('acode://');
+    }
+
+    async execute(intent, context) {
+        const action = intent.intent.split('://')[1];
+        const { payload } = intent;
+
+        switch (action) {
+            case 'open-url':
+                window.open(payload.url, '_system');
+                return { success: true, data: { opened: true } };
+            case 'toast':
+                window.toast(payload.message, 3000);
+                return { success: true };
+            case 'copy':
+                if (window.cordova && cordova.plugins.clipboard) {
+                    await new Promise((res, rej) => cordova.plugins.clipboard.copy(payload.text, res, rej));
+                    return { success: true };
+                }
+                throw new Error('Clipboard API not available');
+            default:
+                throw new Error(`Unsupported system action: ${action}`);
+        }
+    }
+}
+
+class HttpProvider {
+    constructor() {
+        this.requiredCapability = 'http';
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('http://') || intent.intent.startsWith('https://');
+    }
+
+    async execute(intent, context) {
+        const response = await fetch(intent.intent, {
+            method: intent.payload?.method || 'GET',
+            headers: intent.payload?.headers || {},
+            body: intent.payload?.body ? JSON.stringify(intent.payload.body) : undefined
+        });
+        
+        const contentType = response.headers.get('content-type');
+        const data = contentType && contentType.includes('application/json') 
+            ? await response.json() 
+            : await response.text();
+
+        return {
+            success: response.ok,
+            data,
+            metadata: { status: response.status, statusText: response.statusText }
+        };
+    }
+}
+
+class TerminalProvider {
+    constructor() {
+        this.requiredCapability = 'terminal';
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('terminal://') || intent.intent.startsWith('shell://');
+    }
+
+    async execute(intent, context) {
+        const { command } = intent.payload;
+        if (!command) throw new Error('Command is required for terminal intent');
+
+        if (window.acode && window.acode.terminal) {
+            const result = await window.acode.terminal.run(command);
+            return { success: true, data: result };
+        } else if (context.capabilities.termux) {
+            return { success: false, error: 'Termux execution not yet fully implemented' };
+        }
+        
+        throw new Error('No terminal environment found');
+    }
+}
+
+class AIProvider {
+    constructor() {
+        this.requiredCapability = 'ai';
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('ai://');
+    }
+
+    async execute(intent, context) {
+        return { success: true, data: { response: "AI Processed: " + (intent.payload?.prompt || "") } };
+    }
+}
+
+class GitProvider {
+    constructor() {
+        this.requiredCapability = 'git';
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('git://') || intent.intent.startsWith('github://');
+    }
+
+    async execute(intent, context) {
+        return { success: true, data: { message: "Git intent received" } };
+    }
+}
+
+// --- Test Suite ---
+async function runTests() {
+    console.log("--- Starting Intent Router Tests ---");
+    
+    const tests = [
+        { name: 'System Toast', intent: { intent: 'system://toast', payload: { message: 'Test Success!' } } },
+        { name: 'HTTP Get', intent: { intent: 'https://jsonplaceholder.typicode.com/todos/1' } },
+        { name: 'AI Mock', intent: { intent: 'ai://prompt', payload: { prompt: 'Hello' } } },
+        { name: 'Invalid Intent', intent: { intent: 'invalid://test' } }
+    ];
+
+    for (const test of tests) {
+        console.log(`Running test: ${test.name}`);
+        const res = await window.intentRouter.execute(test.intent);
+        console.log(`Result for ${test.name}:`, res);
+    }
+}
+
+// --- Plugin Entry ---
+
+if (window.acode) {
+    const router = new IntentRouter();
+    
+    acode.setPluginInit('com.hallofcodes.intentrouter', async (data) => {
+        await router.init();
+        window.intentRouter = {
+            execute: (intent) => router.execute(intent),
+            getLogs: () => router.logs,
+            getCapabilities: () => router.capabilities,
+            runTests: runTests
+        };
+    });
+
+    acode.setPluginUnmount('com.hallofcodes.intentrouter', () => {
+        delete window.intentRouter;
+    });
+}
 
     registerProvider(name, provider) {
         if (typeof provider.canHandle !== 'function' || typeof provider.execute !== 'function') {
