@@ -1245,7 +1245,88 @@ class IntentRouter {
 
         this.registerCapability({
             intent: 'fs.list',
+
+        // --- GITHUB ---
+        this.registerCapability({
+            intent: 'github.openPr',
             handler: async (payload) => {
+                const { head, base, title, body, cwd } = payload;
+                const command = `gh pr create --head "${head}" --base "${base}" --title "${title}" --body "${body || ''}"`;
+                return await this.capabilities.get('terminal.exec')({ command, cwd });
+            }
+        });
+
+        this.registerCapability({
+            intent: 'github.prChecks',
+            handler: async (payload) => {
+                const { url, cwd } = payload;
+                const command = `gh pr checks ${url || ''}`;
+                return await this.capabilities.get('terminal.exec')({ command, cwd });
+            }
+        });
+
+        // --- AI (Acode AI equivalent) ---
+        this.registerCapability({
+            intent: 'ai.generate',
+            handler: async (payload) => {
+                const { instruction, contextFiles, model } = payload;
+                // Check if an AI plugin is installed (like Acode AI)
+                if (window.acodeAi) {
+                    return await window.acodeAi.generate({ prompt: instruction, context: contextFiles, model });
+                }
+                
+                // Fallback to a generic prompt if no AI plugin
+                return new Promise((resolve) => {
+                    acode.prompt('AI Instruction (No AI Plugin Found)', instruction, (res) => {
+                        resolve(res);
+                    });
+                });
+            }
+        });
+
+        // --- VSCODE / ACODE UI ---
+        this.registerCapability({
+            intent: 'vscode.reviewDiff',
+            handler: async (payload) => {
+                const { path: filePath, proposal } = payload;
+                const fs = acode.require('fs');
+                const content = await fs(filePath).readFile('utf-8');
+                
+                return new Promise((resolve) => {
+                    const sideBySide = `
+                        <div style="display:flex; height:100%; overflow:auto;">
+                            <div style="flex:1; border-right:1px solid #ccc; padding:10px;">
+                                <h4>Current</h4>
+                                <pre>${content}</pre>
+                            </div>
+                            <div style="flex:1; padding:10px;">
+                                <h4>Proposal</h4>
+                                <pre>${proposal}</pre>
+                            </div>
+                        </div>
+                    `;
+                    
+                    const dialog = acode.confirm('Review Changes', sideBySide, (res) => {
+                        resolve(res);
+                    });
+                });
+            }
+        });
+
+        this.registerCapability({
+            intent: 'vscode.runCommand',
+            handler: async (payload) => {
+                const { commandId, argsJson } = payload;
+                const args = argsJson ? JSON.parse(argsJson) : [];
+                // Map VSCode commands to Acode commands where possible
+                if (commandId === 'editor.action.formatDocument') {
+                    acode.exec('format');
+                    return true;
+                }
+                return acode.exec(commandId, ...args);
+            }
+        });
+
                 const list = await fs.readdir(payload.path);
                 if (payload.var) this.variableCache.set(payload.var, list);
                 return list;
