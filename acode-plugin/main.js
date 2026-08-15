@@ -465,39 +465,6 @@ if (window.acode) {
     });
 }
 
- * Leion Roots - Intent Router for Acode
- * Orchestration Layer for Android Mobile Development
- * Created by Dave Conco & Hall Of Codes Team
- */
-
-class IntentRouter {
-    constructor() {
-        this.capabilities = new Map();
-        this.variableCache = new Map();
-        this.cwd = '/';
-    }
-
-    async init() {
-        console.log('[Leion Router] Initializing...');
-        this.registerInternalProviders();
-    }
-
-    registerCapability(cap) {
-        this.capabilities.set(cap.intent, cap.handler);
-    }
-
-    async resolveVariables(payload) {
-        if (!payload) return payload;
-        if (typeof payload !== 'object' && typeof payload !== 'string') return payload;
-
-        let str = typeof payload === 'string' ? payload : JSON.stringify(payload);
-        
-        // Resolve {{var}}, ${var:key}, ${input:key}
-        str = str.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
-            const val = this.variableCache.get(key.trim());
-            if (val === undefined) return match;
-            return typeof val === 'object' ? JSON.stringify(val) : val;
-        });
 
         str = str.replace(/\$\{(var|input):([^}]+)\}/g, (match, type, key) => {
             const val = this.variableCache.get(key.trim());
