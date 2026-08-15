@@ -1,5 +1,325 @@
 import './style.scss';
 
+/**
+ * @typedef {Object} IntentResult
+ * @property {boolean} success
+ * @property {any} [data]
+ * @property {string} [error]
+ * @property {Object} [metadata]
+ */
+
+class IntentRouter {
+    constructor() {
+        this.registry = [];
+        this.compositeRegistry = [];
+        this.providers = new Map();
+        this.variableCache = new Map();
+        this.systemCapabilities = {
+            terminal: false,
+            git: false,
+            github: true,
+            docker: false,
+            termux: false,
+            ai: true,
+            http: true,
+            system: true
+        };
+        this.logs = [];
+    }
+
+    async init($page) {
+        this.$page = $page;
+        await this.detectSystemCapabilities();
+        this.setupCommands();
+        this.registerDefaultProviders();
+        console.log('Intent Router Initialized with capabilities:', this.systemCapabilities);
+    }
+
+    async detectSystemCapabilities() {
+        // Simple detection logic for Android/Acode environment
+        if (window.cordova) {
+            this.systemCapabilities.termux = await this.checkCommand('termux-info');
+            this.systemCapabilities.git = await this.checkCommand('git --version');
+            this.systemCapabilities.terminal = this.systemCapabilities.termux;
+        }
+    }
+
+    async checkCommand(cmd) {
+        // Placeholder for actual command check logic
+        return false; 
+    }
+
+    setupCommands() {
+        acode.addCommand({
+            name: 'intent-router:route',
+            description: 'Route Intent',
+            exec: this.promptRouteIntent.bind(this),
+        });
+
+        acode.addCommand({
+            name: 'intent-router:register-capability',
+            description: 'Register Capability',
+            exec: this.promptRegisterCapability.bind(this),
+        });
+        
+        acode.addCommand({
+            name: 'intent-router:view-logs',
+            description: 'View Intent Router Logs',
+            exec: () => {
+                const logStr = this.logs.map(l => `[${l.timestamp}] ${l.level}: ${l.message}`).join('\n');
+                acode.alert('Intent Router Logs', `<pre>${logStr}</pre>`);
+            }
+        });
+    }
+
+    registerDefaultProviders() {
+        this.registerProvider('system', {
+            canHandle: (intent) => intent.intent.startsWith('system.'),
+            invoke: async (entry, payload, intent) => {
+                try {
+                    switch (entry.command || entry.capability) {
+                        case 'system.pause':
+                            const confirmed = await acode.confirm(payload.message || 'Pipeline paused for review.');
+                            return { success: confirmed, data: confirmed };
+                        case 'system.setVar':
+                            if (payload.name) {
+                                this.variableCache.set(payload.name, payload.value);
+                            }
+                            return { success: true };
+                        case 'system.alert':
+                            window.alert(payload.message || 'Alert');
+                            return { success: true };
+                        case 'system.toast':
+                            window.toast(payload.message || 'Toast', payload.duration || 3000);
+                            return { success: true };
+                        default:
+                            return { success: false, error: `Unknown system command: ${entry.command}` };
+                    }
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            }
+        });
+
+        this.registerProvider('ai', {
+            canHandle: (intent) => intent.intent.startsWith('ai://') || intent.provider === 'ai',
+            invoke: async (entry, payload, intent) => {
+                try {
+                    const result = await acode.prompt(`AI Instruction: ${payload.instruction}`, '');
+                    if (result && payload.outputVar) {
+                        this.variableCache.set(payload.outputVar, result);
+                    }
+                    return { success: !!result, data: result };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            }
+        });
+
+        this.registerProvider('terminal', {
+            canHandle: (intent) => intent.intent.startsWith('terminal://') || intent.provider === 'terminal',
+            invoke: async (entry, payload, intent) => {
+                if (!this.systemCapabilities.terminal) {
+                    return { success: false, error: 'Terminal capability not available on this device' };
+                }
+                const command = payload.command || payload.script;
+                this.log(`Executing terminal command: ${command}`);
+                // Implementation would go here
+                return { success: true, data: 'Command sent to terminal' };
+            }
+        });
+    }
+
+    registerProvider(name, provider) {
+        this.providers.set(name, provider);
+    }
+
+    registerCapability(args) {
+        if (!args || !args.capabilities) return;
+        const base = {
+            provider: args.provider || 'system',
+            target: args.target,
+        };
+
+        for (const cap of args.capabilities) {
+            const entry = typeof cap === 'string' ? { capability: cap, command: args.command } : cap;
+            if (entry.capabilityType === 'composite') {
+                this.compositeRegistry.push({ ...entry, ...base });
+            } else {
+                this.registry.push({ ...entry, ...base });
+            }
+        }
+    }
+
+    async routeIntent(intent) {
+        const normalized = this.normalizeIntent(intent);
+        this.log(`Routing intent: ${normalized.intent}`, 'DEBUG');
+
+        if (normalized.steps && normalized.steps.length > 0) {
+            let lastResult = { success: true };
+            for (const step of normalized.steps) {
+                lastResult = await this.routeIntent(step);
+                if (!lastResult.success && !normalized.continueOnError) {
+                    return lastResult;
+                }
+            }
+            return lastResult;
+        }
+
+        const resolved = this.resolveCapabilities(normalized);
+        if (resolved.length === 0) {
+            const err = `No provider found for: ${normalized.intent}`;
+            this.log(err, 'ERROR');
+            window.toast(err, 3000);
+            return { success: false, error: err };
+        }
+
+        let finalResult = { success: true };
+        for (const entry of resolved) {
+            const result = await this.executeResolution(normalized, entry);
+            if (!result.success && !normalized.continueOnError) {
+                return result;
+            }
+            finalResult = result;
+        }
+
+        return finalResult;
+    }
+
+    normalizeIntent(intent) {
+        if (typeof intent === 'string') {
+            return { intent, capabilities: [intent] };
+        }
+        if (!intent.capabilities && intent.intent) {
+            intent.capabilities = [intent.intent];
+        }
+        return intent;
+    }
+
+    resolveCapabilities(intent) {
+        const resolved = [];
+        const capsToResolve = intent.capabilities || [intent.intent];
+
+        for (const cap of capsToResolve) {
+            const matches = this.registry.filter(c => c.capability === cap);
+            for (const match of matches) {
+                resolved.push({ ...match, capabilityType: 'atomic', source: 'registry' });
+            }
+
+            const composite = this.compositeRegistry.find(c => c.capability === cap);
+            if (composite) {
+                resolved.push({ ...composite, capabilityType: 'composite', source: 'registry' });
+            }
+
+            if (matches.length === 0 && !composite) {
+                // Try to find a provider that can handle it directly
+                for (const [name, provider] of this.providers) {
+                    if (provider.canHandle && provider.canHandle(intent)) {
+                        resolved.push({ capability: cap, command: cap, provider: name, capabilityType: 'atomic', source: 'fallback' });
+                        break;
+                    }
+                }
+            }
+        }
+        return resolved;
+    }
+
+    async executeResolution(intent, entry) {
+        const providerName = entry.provider || 'system';
+        const provider = this.providers.get(providerName);
+        
+        if (!provider) {
+            return { success: false, error: `Provider not found: ${providerName}` };
+        }
+
+        const payload = this.preparePayload(intent, entry);
+        
+        try {
+            this.log(`Invoking provider ${providerName} for ${entry.capability}`);
+            const result = await provider.invoke(entry, payload, intent);
+            
+            // Normalize result if it's not already in the correct format
+            const normalizedResult = (result && typeof result === 'object' && 'success' in result) 
+                ? result 
+                : { success: !!result, data: result };
+
+            if (!normalizedResult.success) {
+                this.log(`Execution failed: ${normalizedResult.error}`, 'ERROR');
+            }
+
+            return normalizedResult;
+        } catch (error) {
+            const errMessage = `Panic during execution: ${error.message}`;
+            this.log(errMessage, 'ERROR');
+            return { success: false, error: errMessage };
+        }
+    }
+
+    preparePayload(intent, entry) {
+        let payload = entry.mapPayload ? (typeof entry.mapPayload === 'function' ? entry.mapPayload(intent) : intent.payload) : (intent.payload || {});
+        
+        if (typeof payload === 'object' && payload !== null) {
+            try {
+                const str = JSON.stringify(payload);
+                const substituted = str.replace(/\${(\w+)}/g, (_, name) => {
+                    return this.variableCache.get(name) || `\${${name}}`;
+                });
+                return JSON.parse(substituted);
+            } catch (e) {
+                return payload;
+            }
+        }
+        return payload;
+    }
+
+    log(message, level = 'INFO') {
+        const entry = { timestamp: new Date().toISOString(), message, level };
+        this.logs.push(entry);
+        if (this.logs.length > 100) this.logs.shift();
+        console.log(`[IntentRouter] [${level}] ${message}`);
+    }
+
+    async promptRouteIntent() {
+        const intentStr = await acode.prompt('Enter Intent (JSON or string)', '');
+        if (!intentStr) return;
+
+        try {
+            const intent = intentStr.startsWith('{') ? JSON.parse(intentStr) : intentStr;
+            const result = await this.routeIntent(intent);
+            if (result.success) {
+                window.toast('Intent executed successfully', 2000);
+            } else {
+                acode.alert('Intent Failed', result.error || 'Unknown error');
+            }
+        } catch (e) {
+            acode.alert('Invalid Intent Format', e.message);
+        }
+    }
+
+    async promptRegisterCapability() {
+        const capStr = await acode.prompt('Register Capability (JSON)', '');
+        if (!capStr) return;
+        try {
+            const args = JSON.parse(capStr);
+            this.registerCapability(args);
+            window.toast('Capability Registered', 2000);
+        } catch (e) {
+            acode.alert('Invalid JSON', e.message);
+        }
+    }
+
+    destroy() {
+        this.providers.clear();
+        this.variableCache.clear();
+    }
+}
+
+if (window.acode) {
+    const router = new IntentRouter();
+    acode.setPluginInit(router.init.bind(router), router.destroy.bind(router));
+}
+
+
 class IntentRouter {
     constructor() {
         this.capabilities = [];
