@@ -308,7 +308,31 @@ class DockerProvider extends BaseProvider {
         // 2. Remote Docker via SSH (Intent payload)
         if (intent.payload?.ssh) {
              this.router.log('info', `Routing docker command ${action} to remote host ${intent.payload.ssh.host}`);
-             // Logic to execute via SSH provider (if exists) or direct fetch/websocket
+async function runTests() {
+    console.log("--- Starting Intent Router E2E Tests ---");
+    const router = window.intentRouter;
+    const tests = [
+        { name: 'System Toast', intent: { intent: 'system://toast', payload: { message: 'Test Success!' } } },
+        { name: 'HTTP Get (JSON)', intent: { intent: 'https://jsonplaceholder.typicode.com/todos/1' } },
+        { name: 'AI Mock', intent: { intent: 'ai://prompt', payload: { prompt: 'Hello Rutex' } } },
+        { name: 'VSCode Extension Mock', intent: { intent: 'vscode://extension/install?id=rutex.intent-router' } },
+        { name: 'Terminal Missing Command', intent: { intent: 'terminal://run', payload: {} } },
+        { name: 'Docker Missing Capability', intent: { intent: 'docker://ps' } },
+        { name: 'Invalid Scheme', intent: { intent: 'unknown://action' } },
+        { name: 'Timeout Test', intent: { intent: 'https://httpbin.org/delay/5', timeout: 1000 } }
+    ];
+
+    for (const test of tests) {
+        console.log(`[TEST] Running: ${test.name}`);
+        try {
+            const res = await router.execute(test.intent);
+            console.log(`[TEST] Result for ${test.name}:`, JSON.stringify(res, null, 2));
+        } catch (e) {
+            console.error(`[TEST] Critical failure in test ${test.name}:`, e);
+        }
+    }
+    console.log("--- E2E Tests Completed ---");
+}
              return this.success(`Executed ${action} on remote docker via SSH (mocked)`);
         }
 
