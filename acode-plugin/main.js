@@ -200,3 +200,80 @@ if (window.acode) {
     console[level](`[IntentRouter] ${msg}`);
   }
 }
+
+
+/**
+ * SYSTEM PROVIDER
+ * Handles: file://, http://, system://, share://
+ */
+class SystemProvider {
+  constructor(router) {
+    this.id = 'system';
+    this.router = router;
+  }
+
+  canHandle(intent) {
+    return /^(file|http|https|system|share|open):/.test(intent.intent);
+  }
+
+  async execute(intent, context) {
+    const uri = intent.intent;
+    
+    if (uri.startsWith('share://')) {
+      const text = intent.payload?.text || uri.replace('share://', '');
+      if (window.system && window.system.share) {
+        await window.system.share(text);
+        return { success: true };
+      }
+      throw new Error('COMMAND_UNAVAILABLE: System share not supported');
+    }
+
+    if (uri.startsWith('http')) {
+      // Logic for opening URL or fetching
+      window.open(uri, '_blank');
+      return { success: true, data: { url: uri } };
+    }
+
+    if (uri.startsWith('file://')) {
+      // Logic for opening file in Acode
+      const path = uri.replace('file://', '');
+      this.router.log(`Opening file: ${path}`);
+      // Acode specific file opening logic would go here
+      return { success: true };
+    }
+
+    return { success: false, error: 'UNSUPPORTED_SYSTEM_INTENT' };
+  }
+}
+
+/**
+ * TERMINAL PROVIDER
+ * Handles: term://, exec://
+ */
+class TerminalProvider {
+  constructor(router) {
+    this.id = 'terminal';
+    this.router = router;
+  }
+
+  canHandle(intent) {
+    return /^(term|exec):/.test(intent.intent);
+  }
+
+  getRequiredCapability() {
+    return 'terminal';
+  }
+
+  async execute(intent, context) {
+    const command = intent.payload?.command || intent.intent.split('://')[1];
+    
+    if (!context.capabilities.terminal) {
+      throw new Error('COMMAND_UNAVAILABLE: Terminal plugin not installed');
+    }
+
+    // Execute in Acode terminal
+    this.router.log(`Executing: ${command}`);
+    // Mocking execution for now
+    return { success: true, data: { command, output: 'Command sent to terminal' } };
+  }
+}
