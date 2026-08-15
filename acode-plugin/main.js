@@ -221,7 +221,13 @@ class IntentRouter {
       this.logs.push({ intent, error, timestamp: Date.now() });
       return { success: false, error, code: ERROR_CODES.EXECUTION_FAILED };
     }
-    }
+  }
+
+  getLogs() {
+    return this.logs;
+  }
+}
+
   }
 }
 
@@ -268,7 +274,6 @@ class IntentRouterPlugin {
 
 if (window.acode) {
   const plugin = new IntentRouterPlugin();
-  acode.setPluginInit('com.leion.roots', (baseUrl, $page, { cacheFileUrl, cacheFile }) => {
     plugin.init();
   });
   acode.setPluginUnmount('com.leion.roots', () => {
