@@ -1,114 +1,66 @@
+
+
 /**
- * Intent Router for Acode
- * Orchestration layer for mobile automation.
+ * Base Provider Logic & Default Providers
  */
 
-class IntentRouter {
-    constructor() {
-        this.providers = new Map();
-        this.capabilities = {
-            terminal: false,
-            git: false,
-            github: false,
-            docker: false,
-            termux: false,
-            system: true,
-            http: true,
-            ai: true
-        };
-        this.logger = console;
+class SystemProvider {
+    canHandle(intent) {
+        return intent.intent.startsWith('system://') || intent.intent.startsWith('file://');
     }
 
-    async init() {
-        this.detectCapabilities();
-        this.registerDefaultProviders();
-        this.logger.log("Intent Router initialized");
-    }
-
-    detectCapabilities() {
-        // Basic detection for Acode environment
-        this.capabilities.terminal = typeof acode !== 'undefined' && !!acode.exec;
-        this.capabilities.termux = typeof window.termux !== 'undefined';
-        
-        // Check for git/github via terminal or specific plugins
-        if (this.capabilities.terminal) {
-            this.capabilities.git = true; // Assume git if terminal is there for now
-            this.capabilities.github = true;
-        }
-
-        this.logger.log("Capabilities detected:", this.capabilities);
-    }
-
-    registerProvider(name, provider) {
-        if (!provider.canHandle || !provider.execute) {
-            throw new Error(`Provider ${name} does not follow the contract.`);
-        }
-        this.providers.set(name, provider);
-    }
-
-    async execute(intent, context = {}) {
-        const startTime = Date.now();
-        const traceId = intent.meta?.traceId || Math.random().toString(36).substring(7);
-
-        this.logger.log(`[${traceId}] Executing intent: ${intent.intent}`);
-
+    async execute(intent, context) {
         try {
-            // 1. Resolution
-            const provider = this.resolveProvider(intent);
-            if (!provider) {
-                return this.errorResponse("PROVIDER_NOT_FOUND", `No provider found for intent: ${intent.intent}`, traceId);
+            if (intent.intent.startsWith('file://')) {
+                // Handle file operations via Acode API
+                return { success: true, data: { action: 'file_handled' } };
             }
-
-            // 2. Execution
-            const result = await provider.execute(intent, { ...context, traceId, capabilities: this.capabilities });
-
-            // 3. Normalization & Validation
-            return this.normalizeResponse(result, traceId, startTime);
-
-        } catch (error) {
-            this.logger.error(`[${traceId}] Critical execution error:`, error);
-            return this.errorResponse("EXECUTION_FAILED", error.message, traceId);
+            
+            // Example system action
+            window.toast(`System action: ${intent.intent}`);
+            return { success: true, data: { action: intent.intent } };
+        } catch (e) {
+            return { success: false, error: { code: 'SYSTEM_ERROR', message: e.message } };
         }
     }
+}
 
-    resolveProvider(intent) {
-        for (const [name, provider] of this.providers) {
-            if (provider.canHandle(intent)) {
-                return provider;
-            }
+class HttpProvider {
+    canHandle(intent) {
+        return intent.intent.startsWith('http://') || intent.intent.startsWith('https://');
+    }
+
+    async execute(intent, context) {
+        try {
+            const response = await fetch(intent.intent, {
+                method: intent.payload?.method || 'GET',
+                body: intent.payload?.body ? JSON.stringify(intent.payload.body) : undefined,
+                headers: intent.payload?.headers || {}
+            });
+            const data = await response.json();
+            return { success: true, data };
+        } catch (e) {
+            return { success: false, error: { code: 'HTTP_ERROR', message: e.message } };
         }
-        return null;
+    }
+}
+
+class TerminalProvider {
+    canHandle(intent) {
+        return intent.intent.startsWith('terminal://') || intent.intent.startsWith('sh://');
     }
 
-    normalizeResponse(result, traceId, startTime) {
-        const duration = Date.now() - startTime;
-        return {
-            success: result.success ?? false,
-            data: result.data ?? null,
-            error: result.error ?? null,
-            metadata: {
-                ...result.metadata,
-                traceId,
-                duration,
-                timestamp: new Date().toISOString()
-            }
-        };
-    }
-
-    errorResponse(code, message, traceId) {
-        window.toast(`Intent Error: ${message}`, 4000);
-        return {
-            success: false,
-            data: null,
-            error: { code, message },
-            metadata: { traceId, timestamp: new Date().toISOString() }
-        };
-    }
-
-    registerDefaultProviders() {
-        this.registerProvider('system', new SystemProvider());
-        this.registerProvider('http', new HttpProvider());
-        this.registerProvider('terminal', new TerminalProvider());
-        // More to be added
+    async execute(intent, context) {
+        if (!context.capabilities.terminal) {
+            return { success: false, error: { code: 'CAPABILITY_MISSING', message: 'Terminal not available' } };
+        }
+        
+        try {
+            // Placeholder for Acode terminal execution
+            // const result = await acode.exec(intent.payload.command);
+            return { success: true, data: { stdout: 'Command executed (simulated)' } };
+        } catch (e) {
+            return { success: false, error: { code: 'TERMINAL_ERROR', message: e.message } };
+        }
     }
 }
