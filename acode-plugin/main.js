@@ -71,7 +71,48 @@ class IntentRouter {
   normalizeResponse(res) {
     return {
       success: res.success ?? false,
-      data: res.data ?? null,
+
+class SystemProvider extends BaseProvider {
+  constructor() { super('System'); }
+  async canHandle(i) { return i.scheme === 'system'; }
+  async execute(i) {
+    switch(i.action) {
+      case 'alert':
+        window.alert(i.data.message);
+        return { success: true };
+      case 'toast':
+        window.toast(i.data.message, 3000);
+        return { success: true };
+      default:
+        return { success: false, error: 'Unknown action' };
+    }
+  }
+}
+
+class AIProvider extends BaseProvider {
+  constructor() { super('AI'); }
+  async canHandle(i) { return i.scheme === 'ai'; }
+  async execute(i) {
+    // Integration with Acode AI or external API
+    return { success: true, data: { response: "AI Intent Received: " + i.data.prompt } };
+  }
+}
+
+class GitHubProvider extends BaseProvider {
+  constructor() { super('GitHub'); }
+  async canHandle(i) { return i.scheme === 'github'; }
+  async execute(i) {
+    const { repo, path } = i.data;
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`);
+      const data = await res.json();
+      return { success: true, data };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+}
+
       error: res.error ?? null,
       metadata: {
         ...res.metadata,
