@@ -43,82 +43,60 @@ class BaseProvider {
     }
 }
 
-class BaseProvider {
-    constructor(router) {
-        this.router = router;
-    }
-    async canHandle(intent) {
-        return false;
-    }
-    async execute(intent, context) {
-        throw new Error('Method not implemented');
-    }
-    normalizeResponse(success, data, error = null, metadata = {}) {
-        return {
-            success,
-            data,
-            error: error ? (typeof error === 'string' ? error : error.message) : null,
-            metadata: {
-                ...metadata,
-                timestamp: Date.now(),
-                provider: this.constructor.name
-            }
-        };
-    }
-}
 
-class SystemProvider extends BaseProvider {
+class AIProvider extends BaseProvider {
     async canHandle(intent) {
-        return intent.scheme === 'system';
-    }
-    async execute(intent, context) {
-        try {
-            switch (intent.action) {
-                case 'alert':
-                    window.alert(intent.data.message || 'System Alert');
-                    return this.normalizeResponse(true, { message: 'Alert displayed' });
-                case 'toast':
-                    window.toast(intent.data.message || 'System Toast', 3000);
-                    return this.normalizeResponse(true, { message: 'Toast displayed' });
-                case 'confirm':
-                    const result = window.confirm(intent.data.message || 'Are you sure?');
-                    return this.normalizeResponse(true, { confirmed: result });
-                default:
-                    return this.normalizeResponse(false, null, `Action ${intent.action} not supported by SystemProvider`);
-            }
-        } catch (e) {
-            return this.normalizeResponse(false, null, e);
-        }
-    }
-}
-
-class GitHubProvider extends BaseProvider {
-    async canHandle(intent) {
-        return intent.scheme === 'github';
+        return intent.scheme === 'ai';
     }
     async execute(intent, context) {
         const { action, data } = intent;
-        const token = context.config?.github_token;
-        
         try {
             switch (action) {
-                case 'get_repo':
-                    const repoRes = await fetch(`https://api.github.com/repos/${data.owner}/${data.repo}`, {
-                        headers: token ? { 'Authorization': `token ${token}` } : {}
+                case 'prompt':
+                    // Simulation d'appel AI (à connecter à un service réel plus tard)
+                    console.log('AI Prompt:', data.prompt);
+                    return this.normalizeResponse(true, { 
+                        response: `Simulated AI response for: ${data.prompt}`,
+                        model: data.model || 'default'
                     });
-                    const repoData = await repoRes.json();
-                    return this.normalizeResponse(true, repoData);
-                case 'get_contents':
-                    const contentRes = await fetch(`https://api.github.com/repos/${data.owner}/${data.repo}/contents/${data.path || ''}`, {
-                        headers: token ? { 'Authorization': `token ${token}` } : {}
-                    });
-                    const contentData = await contentRes.json();
-                    return this.normalizeResponse(true, contentData);
                 default:
-                    return this.normalizeResponse(false, null, `Action ${action} not supported by GitHubProvider`);
+                    return this.normalizeResponse(false, null, `Action ${action} not supported by AIProvider`);
             }
         } catch (e) {
             return this.normalizeResponse(false, null, e);
         }
+    }
+}
+
+class TerminalProvider extends BaseProvider {
+    async canHandle(intent) {
+        return intent.scheme === 'terminal' && this.router.capabilities.terminal;
+    }
+    async execute(intent, context) {
+        const { action, data } = intent;
+        if (!this.router.capabilities.terminal) {
+            return this.normalizeResponse(false, null, 'Terminal capability not available');
+        }
+        
+        try {
+            switch (action) {
+                case 'exec':
+                    const result = await window.terminal.run(data.command);
+                    return this.normalizeResponse(true, { output: result });
+                default:
+                    return this.normalizeResponse(false, null, `Action ${action} not supported by TerminalProvider`);
+            }
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
+class DockerProvider extends BaseProvider {
+    async canHandle(intent) {
+        return intent.scheme === 'docker';
+    }
+    async execute(intent, context) {
+        return this.normalizeResponse(false, null, 'Docker is not supported on Android environment yet');
     }
 }
