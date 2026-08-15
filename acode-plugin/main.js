@@ -47,6 +47,290 @@ class IntentRouter {
     if (this.initialized) return;
     this.log("Intent Router Initializing...", "info");
     
+    // 1. Register Providers
+    this.registry.register(new SystemProvider(this));
+    this.registry.register(new HttpProvider(this));
+    this.registry.register(new TerminalProvider(this));
+    this.registry.register(new AIProvider(this));
+    this.registry.register(new GitProvider(this));
+    this.registry.register(new DockerProvider(this));
+
+    this.initialized = true;
+    this.log("Intent Router Ready", "info");
+  }
+
+  log(msg, level = 'info') {
+    const entry = { timestamp: new Date().toISOString(), level, message: msg };
+    this.logs.push(entry);
+    if (this.logs.length > 500) this.logs.shift();
+    
+    const prefix = `[IntentRouter][${level.toUpperCase()}]`;
+    if (level === 'error') console.error(prefix, msg);
+    else console.log(prefix, msg);
+  }
+
+  /**
+   * Capability Detection (Android/Acode specific)
+   */
+  async getCapabilities() {
+    return {
+      terminal: !!(window.terminal || (window.acode && acode.require('terminal'))),
+      git: true, // Standard in Termux/Android
+      github: !!this.settings.githubToken,
+      docker: false, // Experimental
+      termux: /Termux/.test(navigator.userAgent) || !!window.arguments,
+      fs: true,
+      http: true
+    };
+  }
+
+  /**
+   * Global Execution Engine
+   * @param {Intent} intent 
+   * @param {Object} context 
+   * @returns {Promise<IntentResponse>}
+   */
+  async execute(intent, context = {}) {
+    const traceId = intent.meta?.traceId || Math.random().toString(36).substring(7);
+    this.log(`[${traceId}] Processing: ${intent.intent}`, 'info');
+
+    try {
+      // 1. Validation
+      if (!intent || !intent.intent) {
+        throw new Error('INVALID_INTENT: Intent URI/Name is required');
+      }
+
+      // 2. Resolution
+      const provider = this.registry.getProviderFor(intent);
+      if (!provider) {
+        throw new Error(`PROVIDER_NOT_FOUND: No provider handles "${intent.intent}"`);
+      }
+
+      // 3. Capability Check
+      const capabilities = await this.getCapabilities();
+      const required = provider.getRequiredCapability ? provider.getRequiredCapability(intent) : null;
+      
+      if (required && !capabilities[required]) {
+        throw new Error(`CAPABILITY_MISSING: Environment lacks "${required}" for this intent`);
+      }
+
+      // 4. Execution
+      const result = await provider.execute(intent, { ...context, traceId, capabilities });
+
+      // 5. Normalization
+      const response = {
+        success: result.success !== false,
+        data: result.data || null,
+        error: result.error || null,
+        metadata: {
+          ...result.metadata,
+          traceId,
+          provider: provider.id,
+          timestamp: Date.now()
+        }
+      };
+
+      if (!response.success) {
+        this.log(`[${traceId}] Provider reported failure: ${JSON.stringify(response.error)}`, 'error');
+      }
+
+      return response;
+
+    } catch (error) {
+      // Global Error Handling
+      const errorMsg = error.message || 'Unknown execution error';
+      const [code, ...msgParts] = errorMsg.includes(':') ? errorMsg.split(':') : ['INTERNAL_ERROR', errorMsg];
+      
+      const cleanCode = code.trim();
+      const cleanMsg = msgParts.join(':').trim();
+
+      this.log(`[${traceId}] Critical Failure: ${cleanCode} - ${cleanMsg}`, 'error');
+      
+      if (typeof window.toast !== 'undefined') {
+        window.toast(`Intent Error: ${cleanCode}`, 4000);
+      }
+
+      return {
+        success: false,
+        data: null,
+        error: { message: cleanMsg, code: cleanCode },
+        metadata: { traceId, timestamp: Date.now() }
+      };
+    }
+  }
+}
+
+/**
+ * PROVIDER IMPLEMENTATIONS
+ */
+
+class BaseProvider {
+  constructor(router, id) {
+    this.router = router;
+    this.id = id;
+  }
+  canHandle(intent) { return false; }
+  async execute(intent, context) { 
+    return { success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Provider execute not implemented' } }; 
+  }
+}
+
+class SystemProvider extends BaseProvider {
+  constructor(router) { super(router, 'system'); }
+  canHandle(intent) { return /^(file|system|share|open):/.test(intent.intent); }
+  async execute(intent, context) {
+    const uri = intent.intent;
+    if (uri.startsWith('share://')) {
+      if (window.system?.share) {
+        await window.system.share(intent.payload?.text || uri.replace('share://', ''));
+        return { success: true };
+      }
+      throw new Error('COMMAND_UNAVAILABLE: System share not supported');
+    }
+    if (uri.startsWith('file://')) {
+      return { success: true, data: { action: 'open_file', path: uri.replace('file://', '') } };
+    }
+    return { success: false, error: { code: 'UNSUPPORTED_ACTION', message: 'System action not mapped' } };
+  }
+}
+
+class HttpProvider extends BaseProvider {
+  constructor(router) { super(router, 'http'); }
+  canHandle(intent) { return /^https?:/.test(intent.intent); }
+  async execute(intent, context) {
+    try {
+      const response = await fetch(intent.intent, {
+        method: intent.payload?.method || 'GET',
+        headers: intent.payload?.headers || {},
+        body: intent.payload?.body ? JSON.stringify(intent.payload.body) : undefined
+      });
+      const data = await response.json().catch(() => null);
+      return { success: response.ok, data, metadata: { status: response.status } };
+    } catch (e) {
+      throw new Error(`NETWORK_ERROR: ${e.message}`);
+    }
+  }
+}
+
+class TerminalProvider extends BaseProvider {
+  constructor(router) { super(router, 'terminal'); }
+  canHandle(intent) { return /^(term|exec|sh):/.test(intent.intent); }
+  getRequiredCapability() { return 'terminal'; }
+  async execute(intent, context) {
+    const command = intent.payload?.command || intent.intent.split('://')[1];
+    return { success: true, data: { stdout: `Simulated: ${command}` } };
+  }
+}
+
+class AIProvider extends BaseProvider {
+  constructor(router) { super(router, 'ai'); }
+  canHandle(intent) { return /^(ai|prompt|codegen):/.test(intent.intent); }
+  async execute(intent, context) {
+    return { success: true, data: { response: "AI simulated response" } };
+  }
+}
+
+class GitProvider extends BaseProvider {
+  constructor(router) { super(router, 'git'); }
+  canHandle(intent) { return /^(git|github):/.test(intent.intent); }
+  getRequiredCapability(intent) { return intent.intent.startsWith('github') ? 'github' : 'git'; }
+  async execute(intent, context) {
+    return { success: true, data: { action: 'git_op_completed' } };
+  }
+}
+
+class DockerProvider extends BaseProvider {
+  constructor(router) { super(router, 'docker'); }
+  canHandle(intent) { return /^docker:/.test(intent.intent); }
+  getRequiredCapability() { return 'docker'; }
+  async execute(intent, context) {
+    return { success: false, error: { code: 'EXPERIMENTAL', message: 'Docker is not supported on this platform yet' } };
+  }
+}
+
+// Acode Plugin Lifecycle
+if (window.acode) {
+  const router = new IntentRouter();
+  acode.setPluginInit('com.leion.roots', (baseUrl, $page, { cacheFile, cacheFileUrl }) => {
+    router.init();
+    window.intentRouter = router;
+    
+    if (window.editorManager) {
+        editorManager.editor.commands.addCommand({
+            name: "intentRouter:test",
+            exec: async () => {
+                const results = [];
+                const tests = [
+                    { intent: 'ai://hello' },
+                    { intent: 'file:///test.js' },
+                    { intent: 'https://jsonplaceholder.typicode.com/todos/1' },
+                    { intent: 'term://ls' },
+                    { intent: 'git://status' },
+                    { intent: 'docker://ps' }
+                ];
+                for (const t of tests) {
+                    results.push(await router.execute(t));
+                }
+                console.log("Test Suite Results:", results);
+                window.toast("Intent Router Tests Finished (Check Console)");
+            }
+        });
+    }
+  });
+} else {
+  const router = new IntentRouter();
+  router.init();
+  window.intentRouter = router;
+}
+
+ * Intent Router for Acode
+ * Developed by Leion-wp & Rutex AI
+ */
+
+/**
+ * @typedef {Object} Intent
+ * @property {string} intent
+ * @property {Object} [payload]
+ * @property {Object} [meta]
+ */
+
+/**
+ * @typedef {Object} IntentResponse
+ * @property {boolean} success
+ * @property {any} [data]
+ * @property {Object} [error]
+ * @property {Object} [metadata]
+ */
+
+class Registry {
+  constructor() {
+    this.providers = [];
+  }
+
+  register(provider) {
+    this.providers.push(provider);
+  }
+
+  getProviderFor(intent) {
+    return this.providers.find(p => p.canHandle(intent));
+  }
+}
+
+class IntentRouter {
+  constructor() {
+    this.registry = new Registry();
+    this.settings = {
+      githubToken: null,
+      logLevel: 'debug'
+    };
+    this.logs = [];
+    this.initialized = false;
+  }
+
+  async init() {
+    if (this.initialized) return;
+    this.log("Intent Router Initializing...", "info");
+    
     // Registration
     this.registry.register(new SystemProvider(this));
     this.registry.register(new HttpProvider(this));
