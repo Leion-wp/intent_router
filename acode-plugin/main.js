@@ -1,5 +1,256 @@
 /**
  * Leion Roots - Intent Router for Acode
+ * Orchestration layer for human-centric automation on mobile.
+ */
+
+class IntentRouter {
+    constructor() {
+        this.capabilities = new Map();
+        this.variableCache = new Map();
+    }
+
+    async init() {
+        console.log('Intent Router for Acode initialized');
+        this.registerInternalProviders();
+    }
+
+    registerCapability(cap) {
+        this.capabilities.set(cap.intent, cap.handler);
+    }
+
+    async resolveVariables(payload) {
+        if (!payload) return payload;
+        let str = JSON.stringify(payload);
+        str = str.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+            const val = this.variableCache.get(key.trim());
+            if (val === undefined) return match;
+            return typeof val === 'object' ? JSON.stringify(val) : val;
+        });
+        try {
+            return JSON.parse(str);
+        } catch (e) {
+            return str;
+        }
+    }
+
+    registerInternalProviders() {
+        const fs = acode.require('fs');
+
+        // --- SYSTEM & UI ---
+        this.registerCapability({
+            intent: 'system.pause',
+            handler: async (payload) => {
+                return new Promise((resolve) => {
+                    acode.confirm('Intent Router', payload.message || 'Pause for human validation', (res) => {
+                        resolve(res);
+                    });
+                });
+            }
+        });
+
+        this.registerCapability({
+            intent: 'ui.toast',
+            handler: async (payload) => {
+                window.toast(payload.message, 3000);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'ui.prompt',
+            handler: async (payload) => {
+                const res = await acode.prompt(payload.title, payload.defaultValue || '', payload.type || 'text');
+                return res;
+            }
+        });
+
+        // --- FILE SYSTEM ---
+        this.registerCapability({
+            intent: 'fs.read',
+            handler: async (payload) => {
+                const content = await fs.readFile(payload.path);
+                return content;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'fs.write',
+            handler: async (payload) => {
+                await fs.writeFile(payload.path, payload.content);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'fs.list',
+            handler: async (payload) => {
+                return await fs.readdir(payload.path);
+            }
+        });
+
+        this.registerCapability({
+            intent: 'fs.exists',
+            handler: async (payload) => {
+                return await fs.exists(payload.path);
+            }
+        });
+
+        // --- EDITOR ---
+        this.registerCapability({
+            intent: 'editor.insert',
+            handler: async (payload) => {
+                editorManager.editor.insert(payload.text);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'editor.get_value',
+            handler: async () => {
+                return editorManager.editor.getValue();
+            }
+        });
+
+        // --- TERMINAL / SHELL ---
+        this.registerCapability({
+            intent: 'terminal.exec',
+            handler: async (payload) => {
+                return new Promise((resolve) => {
+                    if (window.acode && acode.exec) {
+                        acode.exec(payload.command, (res) => resolve(res));
+                    } else {
+                        window.toast('Terminal API not found', 3000);
+                        resolve(null);
+                    }
+                });
+            }
+        });
+
+        // --- HTTP ---
+        this.registerCapability({
+            intent: 'http.request',
+            handler: async (payload) => {
+                const response = await fetch(payload.url, {
+                    method: payload.method || 'GET',
+                    headers: payload.headers || { 'Content-Type': 'application/json' },
+                    body: payload.body ? (typeof payload.body === 'string' ? payload.body : JSON.stringify(payload.body)) : undefined
+                });
+                const text = await response.text();
+                try { return JSON.parse(text); } catch(e) { return text; }
+            }
+        });
+
+        // --- GIT (via Terminal) ---
+        this.registerCapability({
+            intent: 'git.status',
+            handler: async () => this.route({ intent: 'terminal.exec', payload: { command: 'git status' } })
+        });
+        
+        this.registerCapability({
+            intent: 'git.commit',
+            handler: async (payload) => this.route({ intent: 'terminal.exec', payload: { command: `git commit -m "${payload.message}"` } })
+        });
+
+        this.registerCapability({
+            intent: 'git.push',
+            handler: async () => this.route({ intent: 'terminal.exec', payload: { command: 'git push' } })
+        });
+
+        // --- DOCKER ---
+        this.registerCapability({
+            intent: 'docker.ps',
+            handler: async () => this.route({ intent: 'terminal.exec', payload: { command: 'docker ps' } })
+        });
+
+        // --- AI ---
+        this.registerCapability({
+            intent: 'ai.generate',
+            handler: async (payload) => {
+                window.toast('AI Generating...', 2000);
+                return "AI Simulation: " + payload.instruction;
+            }
+        });
+    }
+
+    async route(intent) {
+        console.log('[IntentRouter] Routing:', intent.intent);
+        
+        if (intent.steps && Array.isArray(intent.steps)) {
+            let lastResult;
+            for (const step of intent.steps) {
+                lastResult = await this.route(step);
+                if (lastResult === false) break;
+            }
+            return lastResult;
+        }
+
+        const resolvedPayload = await this.resolveVariables(intent.payload);
+        const handler = this.capabilities.get(intent.intent);
+        
+        if (handler) {
+            try {
+                const result = await handler(resolvedPayload);
+                if (intent.var && result !== undefined) {
+                    this.variableCache.set(intent.var, result);
+                }
+                return result;
+            } catch (error) {
+                window.toast(`Error: ${error.message}`, 5000);
+                return false;
+            }
+        } else {
+            window.toast(`Missing handler: ${intent.intent}`, 3000);
+            return false;
+        }
+    }
+}
+
+class LeionRootsPlugin {
+    async init() {
+        this.router = new IntentRouter();
+        await this.router.init();
+
+        acode.setSideButton({
+            id: 'leion-roots-cockpit',
+            icon: 'account_tree',
+            name: 'Leion Cockpit',
+            onclick: () => this.openCockpit()
+        });
+
+        acode.addCommand({
+            name: 'Leion: Run Intent',
+            description: 'Run Leion Intent JSON',
+            exec: async () => {
+                const intentStr = await acode.prompt('Intent JSON', '', 'textarea');
+                if (intentStr) {
+                    try {
+                        const intent = JSON.parse(intentStr);
+                        await this.router.route(intent);
+                    } catch (e) {
+                        window.toast('Invalid JSON', 3000);
+                    }
+                }
+            }
+        });
+    }
+
+    openCockpit() {
+        window.toast('Leion Cockpit Ready', 2000);
+    }
+
+    async destroy() {
+        acode.unSetSideButton('leion-roots-cockpit');
+    }
+}
+
+if (window.acode) {
+    const leionPlugin = new LeionRootsPlugin();
+    acode.define('leion-roots', {
+        init: async () => await leionPlugin.init(),
+        destroy: () => leionPlugin.destroy()
+    });
+}
+ * Leion Roots - Intent Router for Acode
  * Orchestration Layer for Android Mobile Development
  */
 
