@@ -62,9 +62,13 @@
     }
 
     normalizeAction(intent = {}) {
-      if (typeof intent.action === 'string' && intent.action.includes(':')) return intent.action;
-      if (intent.scheme && intent.action) return `${intent.scheme}:${intent.action}`;
-      return typeof intent.action === 'string' ? intent.action : '';
+      const actionName = intent.intent || intent.action;
+      if (typeof actionName === 'string' && actionName.includes(':')) return actionName;
+      if (typeof actionName === 'string' && actionName.includes('.')) {
+        return actionName.replace(/\./g, ':');
+      }
+      if (intent.scheme && actionName) return `${intent.scheme}:${actionName}`;
+      return typeof actionName === 'string' ? actionName : '';
     }
 
     ok(data = null, metadata = {}) {
@@ -80,12 +84,73 @@
       this.log(`Registered command: ${name}`);
     }
 
-    async route(intent = {}) {
+    async resolveVariables(input, cache) {
+      if (!cache) cache = new Map();
+      if (typeof input === 'string') {
+        const regex = /\$\{input:([^}]+)\}/g;
+        let match;
+        let result = input;
+        while ((match = regex.exec(input)) !== null) {
+          const fullMatch = match[0];
+          const promptText = match[1];
+          let value = cache.get(promptText);
+          if (value === undefined) {
+            const prompt = this.safeRequire('prompt');
+            if (!prompt) {
+              value = window.prompt(`Value for ${promptText}`);
+            } else {
+              value = await prompt(promptText, '', 'text', { required: true });
+            }
+            if (value === undefined || value === null) throw new Error(`Input cancelled for variable: ${promptText}`);
+            cache.set(promptText, value);
+          }
+          result = result.replace(fullMatch, value);
+        }
+        return result;
+      } else if (Array.isArray(input)) {
+        return Promise.all(input.map(item => this.resolveVariables(item, cache)));
+      } else if (typeof input === 'object' && input !== null) {
+        const resolved = {};
+        for (const key of Object.keys(input)) {
+          resolved[key] = await this.resolveVariables(input[key], cache);
+        }
+        return resolved;
+      }
+      return input;
+    }
+
+    async route(intent = {}, variableCache) {
+      if (!variableCache) variableCache = new Map();
+
+      if (intent.steps && Array.isArray(intent.steps) && intent.steps.length > 0) {
+        this.log(`Routing composite intent with ${intent.steps.length} steps`);
+        let lastResult = true;
+        for (const childStep of intent.steps) {
+          const childIntent = Object.assign({}, childStep, {
+            meta: Object.assign({}, intent.meta || {}, childStep.meta || {})
+          });
+          lastResult = await this.route(childIntent, variableCache);
+          if (!lastResult || (lastResult && lastResult.success === false)) {
+            this.log('Composite step failed');
+            return lastResult;
+          }
+        }
+        return lastResult;
+      }
+
       const action = this.normalizeAction(intent);
-      const data = intent.data || {};
-      if (!action) return this.fail('intent.action is required');
+      let data = intent.payload !== undefined ? intent.payload : (intent.data || {});
+
+      if (!action) return this.fail('intent.action or intent.intent is required');
       const handler = this.commands.get(action);
       if (!handler) return this.fail(`Command ${action} not found`, { action });
+
+      try {
+        data = await this.resolveVariables(data, variableCache);
+      } catch (error) {
+        return this.fail(error.message, { action });
+      }
+
       try {
         this.log(`Routing action: ${action}`);
         const output = await handler(data, intent);
