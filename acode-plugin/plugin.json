@@ -1,4 +1,15 @@
 {
+  "id": "leion.roots",
+  "name": "Leion Roots",
+  "version": "1.0.0",
+  "main": "main.js",
+  "icon": "account_tree",
+  "author": "Leion-wp",
+  "description": "Human-centric orchestration layer for mobile automation.",
+  "readme": "README.md",
+  "minVersionCode": 200
+}
+
   "id": "com.leion.roots",
   "name": "Leion Roots",
   "main": "main.js",
