@@ -145,7 +145,144 @@ class IntentRouter {
         window.toast(`Intent Error: ${message}`, 4000);
         return {
             success: false,
-            data: null,
+
+// --- Provider Implementations ---
+
+class SystemProvider {
+    constructor() {
+        this.requiredCapability = 'system';
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('system://') || intent.intent.startsWith('acode://');
+    }
+
+    async execute(intent, context) {
+        const action = intent.intent.split('://')[1];
+        const { payload } = intent;
+
+        switch (action) {
+            case 'open-url':
+                window.open(payload.url, '_system');
+                return { success: true, data: { opened: true } };
+            case 'toast':
+                window.toast(payload.message, 3000);
+                return { success: true };
+            case 'copy':
+                if (window.cordova && cordova.plugins.clipboard) {
+                    await new Promise((res, rej) => cordova.plugins.clipboard.copy(payload.text, res, rej));
+                    return { success: true };
+                }
+                throw new Error('Clipboard API not available');
+            default:
+                throw new Error(`Unsupported system action: ${action}`);
+        }
+    }
+}
+
+class HttpProvider {
+    constructor() {
+        this.requiredCapability = 'http';
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('http://') || intent.intent.startsWith('https://');
+    }
+
+    async execute(intent, context) {
+        const response = await fetch(intent.intent, {
+            method: intent.payload?.method || 'GET',
+            headers: intent.payload?.headers || {},
+            body: intent.payload?.body ? JSON.stringify(intent.payload.body) : undefined
+        });
+        
+        const contentType = response.headers.get('content-type');
+        const data = contentType && contentType.includes('application/json') 
+            ? await response.json() 
+            : await response.text();
+
+        return {
+            success: response.ok,
+            data,
+            metadata: { status: response.status, statusText: response.statusText }
+        };
+    }
+}
+
+class TerminalProvider {
+    constructor() {
+        this.requiredCapability = 'terminal';
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('terminal://') || intent.intent.startsWith('shell://');
+    }
+
+    async execute(intent, context) {
+        const { command } = intent.payload;
+        if (!command) throw new Error('Command is required for terminal intent');
+
+        if (window.acode && window.acode.terminal) {
+            const result = await window.acode.terminal.run(command);
+            return { success: true, data: result };
+        } else if (context.capabilities.termux) {
+            // Placeholder for Termux-specific execution via cordova-plugin-termux
+            return { success: false, error: 'Termux execution not yet fully implemented' };
+        }
+        
+        throw new Error('No terminal environment found');
+    }
+}
+
+class AIProvider {
+    constructor() {
+        this.requiredCapability = 'ai';
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('ai://');
+    }
+
+    async execute(intent, context) {
+        // AI implementation logic (mocked for now)
+        return { success: true, data: { response: "AI Processed: " + (intent.payload?.prompt || "") } };
+    }
+}
+
+class GitProvider {
+    constructor() {
+        this.requiredCapability = 'git';
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('git://') || intent.intent.startsWith('github://');
+    }
+
+    async execute(intent, context) {
+        // Git logic usually delegates to terminal or a git plugin
+        return { success: true, data: { message: "Git intent received" } };
+    }
+}
+
+// --- Plugin Entry ---
+
+if (window.acode) {
+    const router = new IntentRouter();
+    
+    acode.setPluginInit('com.hallofcodes.intentrouter', async (data) => {
+        await router.init();
+        window.intentRouter = {
+            execute: (intent) => router.execute(intent),
+            getLogs: () => router.logs,
+            getCapabilities: () => router.capabilities
+        };
+    });
+
+    acode.setPluginUnmount('com.hallofcodes.intentrouter', () => {
+        delete window.intentRouter;
+    });
+}
+
             error: { code, message },
             metadata: {
                 traceId,
