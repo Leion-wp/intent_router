@@ -104,7 +104,8 @@ class GitHubProvider extends BaseProvider {
 
   async execute(intent) {
     const { action, data } = intent;
-    const baseUrl = 'https://api.github.com';
+    try {
+
     const headers = data.token ? { 'Authorization': `token ${data.token}` } : {};
 
       let response;
@@ -168,7 +169,8 @@ class DockerProvider extends BaseProvider {
   }
 }
 
-class IntentRouter {
+  constructor() {
+
     this.providers = [
       new SystemProvider(),
       new AIProvider(),
