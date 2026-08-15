@@ -306,7 +306,6 @@ async function runTests() {
     }
 }
 
-if (window.acode) {
     const router = new IntentRouter();
     acode.setPluginInit('com.leion.roots', async () => {
         await router.init();
