@@ -163,7 +163,47 @@ class GitProvider extends BaseProvider {
             return this.normalizeResponse(false, null, e);
         }
     }
+
+// --- HTTP Provider ---
+class HttpProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.HTTP);
+    }
+
+    async execute(intent, context) {
+        try {
+            const { url, method = 'GET', headers = {}, body } = intent.data;
+            const response = await fetch(url, {
+                method,
+                headers,
+                body: body ? JSON.stringify(body) : undefined
+            });
+
+            const responseData = await response.json().catch(() => null);
+            return this.normalizeResponse(response.ok, responseData, response.ok ? null : {
+                message: `HTTP Error: ${response.status}`,
+                code: response.status
+            });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
 }
+
+// --- Docker Provider (Stub) ---
+class DockerProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.DOCKER);
+    }
+
+    async execute(intent, context) {
+        return this.normalizeResponse(false, null, {
+            message: 'Docker is not supported on Android natively yet.',
+            code: ERROR_CODES.CAPABILITY_MISSING
+        });
+    }
+}
+
 
  * Intent Router for Acode - Android Edition
  * Developed by Rutex (AI Agent)
