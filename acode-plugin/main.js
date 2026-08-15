@@ -441,7 +441,57 @@ class DockerProvider extends BaseProvider {
     }
 
     async execute() {
-        return { success: false, error: 'Docker is not supported on Android environment' };
+
+// Plugin Initialization
+class IntentRouterPlugin {
+    async init() {
+        this.router = new IntentRouter();
+        
+        // Register default providers
+        this.router.registerProvider(new SystemProvider());
+        this.router.registerProvider(new GithubProvider());
+        this.router.registerProvider(new AIProvider());
+        this.router.registerProvider(new TerminalProvider());
+        this.router.registerProvider(new DockerProvider());
+
+        // Global access for other plugins
+        window.intentRouter = this.router;
+        
+        console.log('Intent Router Plugin Initialized');
+        window.toast('Intent Router Ready', 2000);
+        
+        // Expose test suite
+        window.intentRouter.runTests = async () => {
+            console.log('Starting Intent Router Tests...');
+            
+            const tests = [
+                { scheme: 'system', action: 'toast', data: { message: 'Test Toast' } },
+                { scheme: 'ai', action: 'prompt', data: { prompt: 'Hello AI' } },
+                { scheme: 'docker', action: 'ps', data: {} }
+            ];
+
+            for (const t of tests) {
+                const res = await window.intentRouter.execute(t);
+                console.log(`Test ${t.scheme}:${t.action} ->`, res);
+            }
+        };
+    }
+
+    async destroy() {
+        delete window.intentRouter;
+    }
+}
+
+if (window.acode) {
+    const plugin = new IntentRouterPlugin();
+    acode.setPluginInit('com.leion.intent.router', (baseUrl, $page, { cacheFile, cacheFileUrl }) => {
+        plugin.init();
+    });
+    acode.setPluginUnmount('com.leion.intent.router', () => {
+        plugin.destroy();
+    });
+}
+
     }
 }
 
