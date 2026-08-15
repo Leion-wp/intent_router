@@ -155,3 +155,71 @@ class TerminalProvider extends BaseProvider {
     return this.normalizeResponse(false, null, `Action ${action} not supported`);
   }
 }
+
+class DockerProvider extends BaseProvider {
+  constructor() {
+    super('DockerProvider');
+  }
+
+  canHandle(intent) {
+    return intent.scheme === SCHEMES.DOCKER;
+  }
+
+  async execute() {
+    return this.normalizeResponse(false, null, 'Docker is not supported on Android/Acode environment');
+  }
+}
+
+class IntentRouter {
+  constructor() {
+    this.providers = [
+      new SystemProvider(),
+      new AIProvider(),
+      new GitHubProvider(),
+      new TerminalProvider(),
+      new DockerProvider()
+    ];
+    this.logs = [];
+  }
+
+  async getCapabilities() {
+    const isAndroid = /Android/i.test(navigator.userAgent || '');
+    const hasTerminal = !!window.terminal;
+    
+    return {
+      terminal: hasTerminal,
+      git: hasTerminal,
+      android: isAndroid,
+      docker: false
+    };
+  }
+
+  async execute(intent) {
+    if (!intent || !intent.scheme) {
+      return { success: false, error: 'Invalid intent structure', code: ERROR_CODES.INVALID_INTENT };
+    }
+
+    const context = {
+      capabilities: await this.getCapabilities(),
+      timestamp: Date.now()
+    };
+
+    const provider = this.providers.find(p => p.canHandle(intent));
+    
+    if (!provider) {
+      const error = `No provider found for scheme: ${intent.scheme}`;
+      this.logs.push({ intent, error, timestamp: Date.now() });
+      return { success: false, error, code: ERROR_CODES.PROVIDER_NOT_FOUND };
+    }
+
+    try {
+      const response = await provider.execute(intent, context);
+      this.logs.push({ intent, response, timestamp: Date.now() });
+      return response;
+    } catch (e) {
+      const error = `Execution failed: ${e.message}`;
+      this.logs.push({ intent, error, timestamp: Date.now() });
+      return { success: false, error, code: ERROR_CODES.EXECUTION_FAILED };
+    }
+  }
+}
