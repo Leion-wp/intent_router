@@ -87,6 +87,7 @@ class SystemProvider extends BaseProvider {
   }
 
 
+
 class AIProvider extends BaseProvider {
   constructor() {
     super('AIProvider');
@@ -142,7 +143,6 @@ class GitHubProvider extends BaseProvider {
           result.decodeError = 'Failed to decode base64';
         }
       }
-      
       return this.normalizeResponse(true, result);
     } catch (e) {
       return this.normalizeResponse(false, null, e.message);
@@ -250,6 +250,9 @@ class IntentRouter {
       capabilities: this.getCapabilities()
     };
   }
+253: 
+254:   getLogs() {
+
 
   getLogs() {
     return this.logs;
@@ -281,7 +284,6 @@ class IntentRouterPlugin {
     if (window.toast) {
       window.toast('Intent Router Ready', 2000);
     }
-    console.log('Intent Router Plugin Initialized');
     
     // Ajout des commandes à Acode
     if (window.acode) {
