@@ -128,7 +128,17 @@ class IntentRouter {
                         targetProvider = provider;
                         providerName = name;
                         break;
-                    }
+        } catch (error) {
+            let code = 'EXECUTION_FAILED';
+            let message = error.message;
+
+            if (error.message === 'TIMEOUT') code = 'TIMEOUT';
+            else if (error.name === 'TypeError' && error.message.includes('fetch')) code = 'NETWORK_ERROR';
+            else if (error.message.includes('not found')) code = 'NOT_FOUND';
+
+            this.log('error', `Execution error for ${intent?.intent}`, { code, message, stack: error.stack });
+            return this.createErrorResponse(code, message, traceId, error);
+        }
                 }
             }
 
