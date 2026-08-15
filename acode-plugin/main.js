@@ -400,6 +400,159 @@ if (window.acode) {
             }
         });
 
+        this.registerCapability({
+            intent: 'ai.team',
+            handler: async (p) => {
+                const { members = [] } = p;
+                let lastResult = null;
+                for (const member of members) {
+                    window.toast(`Agent ${member.role || 'member'} working...`, 2000);
+                    lastResult = await this.route({
+                        intent: 'ai.generate',
+                        payload: {
+                            instruction: member.instruction || p.instruction,
+                            role: member.role,
+                            contextFiles: member.contextFiles || p.contextFiles
+                        }
+                    });
+                    if (member.outputVar) this.variableCache.set(member.outputVar, lastResult);
+                }
+                return lastResult;
+            }
+        });
+
+        // --- VSCODE COMPAT (vscodeAdapter.ts equivalent) ---
+        this.registerCapability({
+            intent: 'vscode.reviewDiff',
+            handler: async (p) => {
+                const confirmed = await new Promise(resolve => {
+                    acode.confirm('Review Changes', `Apply changes to ${p.path}?\n\nPROPOSAL:\n${p.proposal.substring(0, 100)}...`, resolve);
+                });
+                if (confirmed) {
+                    await fs.writeFile(p.path, p.proposal);
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'vscode.runCommand',
+            handler: async (p) => {
+                if (p.commandId === 'editor.action.formatDocument') {
+                    acode.exec('format');
+                    return true;
+                }
+                return acode.exec(p.commandId);
+            }
+        });
+
+        // --- DOCKER (dockerAdapter.ts equivalent) ---
+        const docker = (cmd) => this.route({ intent: 'terminal.exec', payload: { command: `docker ${cmd}` } });
+        this.registerCapability({ intent: 'docker.ps', handler: () => docker('ps') });
+        this.registerCapability({ intent: 'docker.build', handler: (p) => docker(`build -t ${p.tag} ${p.path || '.'}`) });
+        this.registerCapability({ intent: 'docker.run', handler: (p) => docker(`run ${p.detach ? '-d' : ''} ${p.image}`) });
+    }
+
+    async route(intent) {
+        if (!intent) return false;
+        if (intent.steps && Array.isArray(intent.steps)) {
+            let res;
+            for (const s of intent.steps) {
+                res = await this.route(s);
+                if (res === false) break;
+            }
+            return res;
+        }
+
+        const payload = await this.resolveVariables(intent.payload);
+        const handler = this.capabilities.get(intent.intent);
+        if (handler) {
+            try {
+                const res = await handler(payload);
+                if (intent.var && res !== undefined) this.variableCache.set(intent.var, res);
+                return res;
+            } catch (e) {
+                window.toast(`Error: ${e.message}`, 5000);
+                return false;
+            }
+        }
+        window.toast(`Unknown intent: ${intent.intent}`, 3000);
+        return false;
+    }
+
+    async runPipeline(pipeline) {
+        window.toast(`Starting: ${pipeline.name || 'Pipeline'}`, 2000);
+        return await this.route({ steps: pipeline.steps });
+    }
+}
+
+class LeionRootsPlugin {
+    async init() {
+        this.router = new IntentRouter();
+        await this.router.init();
+
+        acode.setSideButton({
+            id: 'leion-roots-cockpit',
+            icon: 'account_tree',
+            name: 'Leion Cockpit',
+            onclick: () => this.openCockpit()
+        });
+
+        acode.addCommand({
+            name: 'Leion: Run Intent',
+            description: 'Run Intent JSON',
+            exec: async () => {
+                const str = await acode.prompt('Intent JSON', '', 'textarea');
+                if (str) {
+                    try { await this.router.route(JSON.parse(str)); }
+                    catch (e) { window.toast('Invalid JSON', 3000); }
+                }
+            }
+        });
+
+        acode.addCommand({
+            name: 'Leion: Run Pipeline File',
+            description: 'Run .intent.json file',
+            exec: () => this.runActiveFile()
+        });
+    }
+
+    async runActiveFile() {
+        const { editor } = editorManager;
+        const content = editor.getValue();
+        try {
+            const pipeline = JSON.parse(content);
+            await this.router.runPipeline(pipeline);
+        } catch (e) {
+            window.toast('Invalid pipeline JSON', 3000);
+        }
+    }
+
+    openCockpit() {
+        const sidePanel = acode.require('sidePanel');
+        if (sidePanel) {
+            sidePanel.set('Leion Cockpit', '<div style="padding:10px;"><h3>Leion Roots</h3><p>Status: <b>Active</b></p><hr/><p>Capabilities: <b>' + this.router.capabilities.size + '</b></p></div>');
+            sidePanel.open();
+        } else {
+            window.toast('Leion Cockpit Ready', 2000);
+        }
+    }
+
+    destroy() {
+        acode.unSetSideButton('leion-roots-cockpit');
+    }
+}
+
+if (window.acode) {
+    const plugin = new LeionRootsPlugin();
+    acode.define('leion.roots', {
+        init: async () => await plugin.init(),
+        destroy: () => plugin.destroy()
+    });
+}
+
+
         // --- VSCODE COMPAT (vscodeAdapter.ts equivalent) ---
         this.registerCapability({
             intent: 'vscode.reviewDiff',
