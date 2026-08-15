@@ -1,5 +1,5 @@
 {
-  "id": "leion.roots",
+  "id": "com.leion.roots",
   "name": "Leion Roots",
   "version": "1.0.0",
   "main": "main.js",
@@ -7,17 +7,7 @@
   "author": "Leion-wp",
   "description": "Human-centric orchestration layer for mobile automation.",
   "readme": "README.md",
-  "minVersionCode": 200
-}
-
-  "id": "com.leion.roots",
-  "name": "Leion Roots",
-  "main": "main.js",
-  "version": "1.0.0",
-  "author": "LeionCorp",
-  "icon": "account_tree",
-  "description": "Human-centric visual orchestration runtime for Acode",
-  "readme": "README.md",
+  "minVersionCode": 200,
   "license": "MIT",
   "category": "utility"
 }
