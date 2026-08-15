@@ -76,3 +76,82 @@ class SystemProvider extends BaseProvider {
     }
   }
 }
+
+class AIProvider extends BaseProvider {
+  constructor() {
+    super('AIProvider');
+  }
+
+  canHandle(intent) {
+    return intent.scheme === SCHEMES.AI;
+  }
+
+  async execute(intent) {
+    const { action, data } = intent;
+    return this.normalizeResponse(true, { 
+      answer: `AI Response to ${action}: ${data.prompt || 'No prompt provided'}` 
+    }, null, { model: data.model || 'gpt-3.5-turbo' });
+  }
+}
+
+class GitHubProvider extends BaseProvider {
+  constructor() {
+    super('GitHubProvider');
+  }
+
+  canHandle(intent) {
+    return intent.scheme === SCHEMES.GITHUB;
+  }
+
+  async execute(intent) {
+    const { action, data } = intent;
+    const baseUrl = 'https://api.github.com';
+    const headers = data.token ? { 'Authorization': `token ${data.token}` } : {};
+
+    try {
+      let response;
+      switch (action) {
+        case 'get_repo':
+          response = await fetch(`${baseUrl}/repos/${data.owner}/${data.repo}`, { headers });
+          break;
+        case 'get_file':
+          response = await fetch(`${baseUrl}/repos/${data.owner}/${data.repo}/contents/${data.path}`, { headers });
+          break;
+        default:
+          return this.normalizeResponse(false, null, `Action ${action} not supported`);
+      }
+
+      if (!response.ok) throw new Error(`GitHub API: ${response.statusText}`);
+      const result = await response.json();
+      return this.normalizeResponse(true, result);
+    } catch (e) {
+      return this.normalizeResponse(false, null, e.message);
+    }
+  }
+}
+
+class TerminalProvider extends BaseProvider {
+  constructor() {
+    super('TerminalProvider');
+  }
+
+  canHandle(intent) {
+    return intent.scheme === SCHEMES.TERMINAL;
+  }
+
+  async execute(intent, context) {
+    if (!context.capabilities.terminal) {
+      return this.normalizeResponse(false, null, 'Terminal capability not available');
+    }
+
+    const { action, data } = intent;
+    if (action === 'exec') {
+      if (window.terminal && typeof window.terminal.exec === 'function') {
+        const output = await window.terminal.exec(data.command);
+        return this.normalizeResponse(true, { output });
+      }
+      return this.normalizeResponse(false, null, 'Terminal plugin found but exec function missing');
+    }
+    return this.normalizeResponse(false, null, `Action ${action} not supported`);
+  }
+}
