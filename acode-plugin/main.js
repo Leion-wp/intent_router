@@ -1,6 +1,159 @@
 /**
  * Intent Router for Acode
  * Developed by Rutex (Hall Of Codes)
+ * Version: 1.1.0
+ */
+
+class IntentRouter {
+    constructor() {
+        this.providers = new Map();
+        this.capabilities = {
+            terminal: false,
+            git: false,
+            github: true,
+            docker: false,
+            termux: false,
+            system: true,
+            network: navigator.onLine,
+            clipboard: false
+        };
+        this.logs = [];
+        this.maxLogs = 200;
+    }
+
+    async init() {
+        this.log('info', 'Initializing Intent Router...');
+        await this.detectCapabilities();
+        this.registerDefaultProviders();
+        this.log('info', 'Intent Router initialized', { capabilities: this.capabilities });
+    }
+
+    async detectCapabilities() {
+        try {
+            this.capabilities.network = navigator.onLine;
+            window.addEventListener('online', () => this.capabilities.network = true);
+            window.addEventListener('offline', () => this.capabilities.network = false);
+
+            this.capabilities.termux = !!(window.cordova && cordova.plugins && cordova.plugins.termux);
+            this.capabilities.terminal = !!(window.acode && (window.acode.terminal || window.terminal)) || this.capabilities.termux;
+            this.capabilities.git = this.capabilities.terminal;
+            this.capabilities.clipboard = !!(window.cordova && cordova.plugins && cordova.plugins.clipboard);
+            
+            // Docker is always false by default on Android unless we have a remote bridge
+            this.capabilities.docker = false; 
+        } catch (e) {
+            this.log('warn', 'Capability detection failed', e.message);
+        }
+    }
+
+    log(level, message, details = null) {
+        const entry = {
+            timestamp: new Date().toISOString(),
+            level,
+            message,
+            details,
+            id: Math.random().toString(36).substr(2, 9)
+        };
+        this.logs.push(entry);
+        if (this.logs.length > this.maxLogs) this.logs.shift();
+        console[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'](`[IntentRouter] ${message}`, details || '');
+    }
+
+    registerProvider(name, provider) {
+        if (typeof provider.canHandle !== 'function' || typeof provider.execute !== 'function') {
+            this.log('error', `Provider '${name}' invalid: missing canHandle or execute`);
+            return;
+        }
+        this.providers.set(name, provider);
+        this.log('info', `Provider registered: ${name}`);
+    }
+
+    async execute(intent) {
+        const traceId = intent?.meta?.traceId || Math.random().toString(36).substring(7);
+        try {
+            if (!intent || !intent.intent) {
+                throw { code: 'INVALID_INTENT', message: 'Intent string is required' };
+            }
+
+            let provider = null;
+            let providerName = intent.provider;
+
+            if (providerName) {
+                provider = this.providers.get(providerName);
+            } else {
+                for (const [name, p] of this.providers) {
+                    if (await p.canHandle(intent)) {
+                        provider = p;
+                        providerName = name;
+                        break;
+                    }
+                }
+            }
+
+            if (!provider) {
+                throw { code: 'PROVIDER_NOT_FOUND', message: `No provider for intent: ${intent.intent}` };
+            }
+
+            if (provider.requiredCapability && !this.capabilities[provider.requiredCapability]) {
+                throw { code: 'CAPABILITY_MISSING', message: `Capability '${provider.requiredCapability}' not available` };
+            }
+
+            const timeoutMs = intent.timeout || 30000;
+            const context = { traceId, capabilities: this.capabilities, router: this };
+
+            const result = await Promise.race([
+                provider.execute(intent, context),
+                new Promise((_, reject) => setTimeout(() => reject({ code: 'TIMEOUT', message: 'Execution timed out' }), timeoutMs))
+            ]);
+
+            return this.normalizeResponse(result, providerName, traceId);
+        } catch (error) {
+            return this.createErrorResponse(error.code || 'EXECUTION_FAILED', error.message || String(error), traceId);
+        }
+    }
+
+    normalizeResponse(result, providerName, traceId) {
+        const response = {
+            success: result?.success !== false,
+            data: result?.data || (result?.success !== false ? result : null),
+            error: result?.success === false ? result.error : null,
+            metadata: {
+                provider: providerName,
+                traceId,
+                timestamp: new Date().toISOString(),
+                ...result?.metadata
+            }
+        };
+        if (!response.success && !response.error) {
+            response.error = { code: 'UNKNOWN_ERROR', message: 'Provider failed without details' };
+        }
+        return response;
+    }
+
+    createErrorResponse(code, message, traceId) {
+        this.log('error', message, { code, traceId });
+        window.toast(`Intent Error: ${message}`, 4000);
+        return {
+            success: false,
+            data: null,
+            error: { code, message },
+            metadata: { traceId, timestamp: new Date().toISOString() }
+        };
+    }
+
+    registerDefaultProviders() {
+        this.registerProvider('system', new SystemProvider());
+        this.registerProvider('http', new HttpProvider());
+        this.registerProvider('ai', new AIProvider());
+        this.registerProvider('terminal', new TerminalProvider());
+        this.registerProvider('git', new GitProvider());
+        this.registerProvider('vscode', new VSCodeProvider());
+        this.registerProvider('docker', new DockerProvider());
+    }
+}
+
+ * Intent Router for Acode
+ * Developed by Rutex (Hall Of Codes)
  * Version: 1.0.0
  * 
  * A unified orchestration layer for mobile automation on Android.
