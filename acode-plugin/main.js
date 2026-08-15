@@ -137,7 +137,113 @@ class IntentRouter {
             success: false,
             data: null,
             error: { code, message },
-            metadata: { traceId, timestamp: new Date().toISOString() }
+
+class BaseProvider {
+    constructor(name, requiredCapability = null) {
+        this.name = name;
+        this.requiredCapability = requiredCapability;
+    }
+    async canHandle(intent) { return false; }
+    async execute(intent, context) { throw new Error("Not implemented"); }
+    success(data = null, metadata = {}) { return { success: true, data, metadata }; }
+    fail(code, message) { return { success: false, error: { code, message } }; }
+}
+
+class SystemProvider extends BaseProvider {
+    constructor() { super('system', 'system'); }
+    async canHandle(intent) { return intent.intent.startsWith('system://') || intent.intent.startsWith('acode://'); }
+    async execute(intent, context) {
+        const action = intent.intent.split('://')[1];
+        const payload = intent.payload || {};
+        try {
+            switch (action) {
+                case 'toast':
+                    window.toast(payload.message || 'Hello', payload.duration || 3000);
+                    return this.success();
+                case 'open-url':
+                    if (!payload.url) return this.fail('MISSING_PARAM', 'URL required');
+                    window.open(payload.url, '_system');
+                    return this.success();
+                case 'copy':
+                    if (!payload.text) return this.fail('MISSING_PARAM', 'Text required');
+                    if (context.capabilities.clipboard) {
+                        await new Promise((res, rej) => cordova.plugins.clipboard.copy(payload.text, res, rej));
+                        return this.success({ copied: true });
+                    }
+                    return this.fail('CAPABILITY_MISSING', 'Clipboard not available');
+                default:
+                    return this.fail('UNKNOWN_ACTION', `Action ${action} not supported`);
+            }
+        } catch (e) { return this.fail('SYSTEM_ERROR', e.message); }
+    }
+}
+
+class HttpProvider extends BaseProvider {
+    constructor() { super('http', 'network'); }
+    async canHandle(intent) { return /^https?:\/\//.test(intent.intent); }
+    async execute(intent, context) {
+        try {
+            const res = await fetch(intent.intent, {
+                method: intent.payload?.method || 'GET',
+                headers: intent.payload?.headers || {},
+                body: intent.payload?.body ? JSON.stringify(intent.payload.body) : undefined
+            });
+            const data = res.headers.get('content-type')?.includes('application/json') ? await res.json() : await res.text();
+            return res.ok ? this.success(data, { status: res.status }) : this.fail('HTTP_ERROR', `Status ${res.status}`);
+        } catch (e) { return this.fail('NETWORK_ERROR', e.message); }
+    }
+}
+
+class AIProvider extends BaseProvider {
+    constructor() { super('ai'); }
+    async canHandle(intent) { return intent.intent.startsWith('ai://'); }
+    async execute(intent, context) {
+        return this.success({ response: `AI Response for: ${intent.payload?.prompt || 'nothing'}` });
+    }
+}
+
+class TerminalProvider extends BaseProvider {
+    constructor() { super('terminal', 'terminal'); }
+    async canHandle(intent) { return intent.intent.startsWith('terminal://'); }
+    async execute(intent, context) {
+        const cmd = intent.payload?.command;
+        if (!cmd) return this.fail('MISSING_PARAM', 'Command required');
+        try {
+            const term = window.acode.terminal || window.terminal;
+            const result = await term.run(cmd);
+            return this.success(result);
+        } catch (e) { return this.fail('TERMINAL_ERROR', e.message); }
+    }
+}
+
+class GitProvider extends BaseProvider {
+    constructor() { super('git', 'git'); }
+    async canHandle(intent) { return intent.intent.startsWith('git://'); }
+    async execute(intent, context) {
+        const action = intent.intent.split('://')[1];
+        const cmd = `git ${action} ${intent.payload?.args || ''}`;
+        return context.router.execute({ intent: 'terminal://run', payload: { command: cmd } });
+    }
+}
+
+class VSCodeProvider extends BaseProvider {
+    constructor() { super('vscode'); }
+    async canHandle(intent) { return intent.intent.startsWith('vscode://'); }
+    async execute(intent, context) {
+        return this.success({ mock: true, intent: intent.intent });
+    }
+}
+
+class DockerProvider extends BaseProvider {
+    constructor() { super('docker'); }
+    async canHandle(intent) { return intent.intent.startsWith('docker://'); }
+    async execute(intent, context) {
+        if (context.capabilities.docker) return this.success("Local Docker Mock");
+        if (intent.payload?.ssh) return this.success("Remote Docker via SSH Mock");
+        return this.fail('CAPABILITY_MISSING', 'Docker not supported natively on Android. Use SSH.');
+    }
+}
+
         };
     }
 
