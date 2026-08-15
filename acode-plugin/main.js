@@ -299,3 +299,32 @@ class IntentRouter {
         }
     }
 }
+
+
+// --- Acode Plugin Entry Point ---
+class AcodeIntentRouter {
+    async init() {
+        this.router = new IntentRouter();
+        await this.router.init();
+
+        // Expose to global window for other plugins to use
+        window.intentRouter = this.router;
+
+        window.toast('Intent Router Initialized', 2000);
+        console.log('Intent Router Plugin Loaded');
+    }
+
+    async destroy() {
+        delete window.intentRouter;
+    }
+}
+
+if (window.acode) {
+    const plugin = new AcodeIntentRouter();
+    acode.setPluginInit(PLUGIN_ID, (baseUrl, $page, { cacheFileUrl, cacheFile }) => {
+        plugin.init();
+    });
+    acode.setPluginUnmount(PLUGIN_ID, () => {
+        plugin.destroy();
+    });
+}
