@@ -36,6 +36,34 @@ class IntentRouter {
                 }
             }
         });
+        // Editor Provider
+        this.registerCapability({
+            intent: 'editor.insert',
+            handler: async (payload) => {
+                const { text } = payload;
+                const { editor } = editorManager;
+                editor.insert(text);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'editor.set_value',
+            handler: async (payload) => {
+                const { value } = payload;
+                const { editor } = editorManager;
+                editor.setValue(value);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'ui.toast',
+            handler: async (payload) => {
+                window.toast(payload.message, 3000);
+                return true;
+            }
+        });
     }
 
     registerCapability(cap) {
