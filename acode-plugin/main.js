@@ -257,7 +257,49 @@ class IntentRouter {
             this.logExecution(intent, errorResponse, Date.now() - startTime);
             return errorResponse;
         }
+
+// --- Plugin Integration ---
+class IntentRouterPlugin {
+    async init() {
+        this.router = new IntentRouter();
+        
+        if (window.acode) {
+            window.acode.registerPlugin('intent_router', this);
+            
+            acode.addCommand({
+                name: 'intent_router:test',
+                description: 'Test Intent Router',
+                exec: async () => {
+                    const result = await this.router.execute({
+                        scheme: 'system',
+                        action: 'toast',
+                        data: { message: 'Intent Router is Active!' }
+                    });
+                    console.log('Test Result:', result);
+                }
+            });
+        }
     }
+
+    async destroy() {
+        // Cleanup if necessary
+    }
+
+    async sendIntent(intent) {
+        return await this.router.execute(intent);
+    }
+}
+
+if (window.acode) {
+    const plugin = new IntentRouterPlugin();
+    acode.setPluginInit('intent_router', (baseUrl, $page, { cacheFile, cacheFileUrl }) => {
+        plugin.init();
+    });
+    acode.setPluginUnmount('intent_router', () => {
+        plugin.destroy();
+    });
+}
+
 
     logExecution(intent, response, duration) {
         this.logs.push({ intent, response, duration, timestamp: new Date().toISOString() });
