@@ -335,64 +335,7 @@ class DockerProvider extends BaseProvider {
   async execute(intent) {
     return this.normalizeResponse(false, null, "Docker is not supported on Android environment yet.");
   }
-
-/**
- * Intent Router Core
- * Orchestrates intent execution across providers
- */
-class IntentRouter {
-  constructor() {
-    this.providers = [
-      new SystemProvider(),
-      new TerminalProvider(),
-      new AIProvider(),
-      new GitHubProvider(),
-      new DockerProvider()
-    ];
-    this.logs = [];
-  }
-
-  async execute(intent) {
-    const provider = this.providers.find(p => p.canHandle(intent));
-
-    if (!provider) {
-      const error = `No provider found for scheme: ${intent.scheme}`;
-      this.log('error', error);
-      return { success: false, error };
-    }
-
-    try {
-      this.log('info', `Executing intent: ${intent.scheme}:${intent.action}`);
-      const response = await provider.execute(intent);
-      
-      if (!response.success) {
-        this.log('warn', `Intent failed: ${response.error}`);
-      }
-      
-      return response;
-    } catch (error) {
-      const msg = `Critical error during intent execution: ${error.message}`;
-      this.log('error', msg);
-      return { success: false, error: msg };
-    }
-  }
-
-  log(level, message) {
-    const entry = { timestamp: new Date().toISOString(), level, message };
-    this.logs.push(entry);
-    console[level === 'error' ? 'error' : 'log'](`[IntentRouter] ${message}`);
-  }
-
-  getCapabilities() {
-    return {
-      terminal: !!window.terminal || !!window.termux,
-      git: !!window.terminal, // Simplified check
-      docker: false,
-      android: true
-    };
-  }
 }
-
 
 }
 
@@ -445,7 +388,43 @@ class IntentRouter {
         ...metadata,
         duration: Date.now() - startTime,
         timestamp: new Date().toISOString()
+
+/**
+ * Acode Plugin Entry Point
+ */
+class IntentRouterPlugin {
+  constructor() {
+    this.router = new IntentRouter();
+  }
+
+  async init() {
+    // Register the router globally so other plugins can use it
+    window.intentRouter = this.router;
+    
+    // Add a command to Acode to show capabilities
+    editorManager.editor.commands.addCommand({
+      name: "intent-router:capabilities",
+      description: "Show Intent Router Capabilities",
+      exec: () => {
+        const caps = this.router.getCapabilities();
+        window.alert("Intent Router Capabilities:\n" + JSON.stringify(caps, null, 2));
       }
+    });
+
+    window.toast("Intent Router Initialized", 2000);
+  }
+
+  async destroy() {
+    delete window.intentRouter;
+  }
+}
+
+if (window.acode) {
+  const plugin = new IntentRouterPlugin();
+  acode.setPluginInit(plugin.init.bind(plugin));
+  acode.setPluginUnmount(plugin.destroy.bind(plugin));
+}
+
     };
   }
 }
