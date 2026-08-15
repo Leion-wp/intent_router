@@ -151,3 +151,58 @@ class GitProvider extends BaseProvider {
     }
 }
 
+
+
+// --- HTTP PROVIDER ---
+class HttpProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.HTTP);
+    }
+
+    async execute(intent, context) {
+        try {
+            const { url, method = 'GET', headers = {}, body } = intent.data;
+            const response = await fetch(url, {
+                method,
+                headers,
+                body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined
+            });
+
+            const responseData = await response.json().catch(() => null);
+            return this.normalizeResponse(response.ok, responseData, response.ok ? null : {
+                message: `HTTP Error: ${response.status}`,
+                code: response.status
+            });
+        } catch (e) {
+            return this.normalizeResponse(false, null, e);
+        }
+    }
+}
+
+// --- AI PROVIDER ---
+class AIProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.AI);
+    }
+
+    async execute(intent, context) {
+        return this.normalizeResponse(true, { 
+            message: "AI Intent received. Integration pending.",
+            intent_data: intent.data 
+        });
+    }
+}
+
+// --- DOCKER PROVIDER ---
+class DockerProvider extends BaseProvider {
+    constructor() {
+        super(PROVIDERS.DOCKER);
+    }
+
+    async execute(intent, context) {
+        return this.normalizeResponse(false, null, {
+            message: 'Docker is not supported on Android natively.',
+            code: ERROR_CODES.CAPABILITY_MISSING
+        });
+    }
+}
