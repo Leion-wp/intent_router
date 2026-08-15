@@ -247,7 +247,39 @@ class DockerProvider extends BaseProvider {
         };
     }
 
-    registerDefaultProviders() {
+
+async function runTests() {
+    const router = window.intentRouter;
+    if (!router) return console.error("Router not found");
+    
+    console.log("--- Starting Intent Router Tests ---");
+    const tests = [
+        { name: 'Toast', intent: { intent: 'system://toast', payload: { message: 'Test!' } } },
+        { name: 'HTTP', intent: { intent: 'https://jsonplaceholder.typicode.com/posts/1' } },
+        { name: 'AI', intent: { intent: 'ai://prompt', payload: { prompt: 'Hi' } } },
+        { name: 'Git (Fail expected)', intent: { intent: 'git://status' } },
+        { name: 'Docker (Capability check)', intent: { intent: 'docker://ps' } },
+        { name: 'Invalid', intent: { intent: 'bad://scheme' } }
+    ];
+
+    for (const t of tests) {
+        console.log(`Testing: ${t.name}`);
+        const res = await router.execute(t.intent);
+        console.log(`Result:`, res);
+    }
+}
+
+if (window.acode) {
+    const router = new IntentRouter();
+    acode.setPluginInit('com.leion.roots', async () => {
+        await router.init();
+        window.intentRouter = router;
+        acode.addCommand('Intent Router: Run Tests', 'run_intent_tests', runTests);
+        window.toast('Intent Router Loaded', 2000);
+    });
+    acode.setPluginUnmount('com.leion.roots', () => { delete window.intentRouter; });
+}
+
         this.registerProvider('system', new SystemProvider());
         this.registerProvider('http', new HttpProvider());
         this.registerProvider('ai', new AIProvider());
