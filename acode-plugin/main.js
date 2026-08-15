@@ -1,6 +1,453 @@
 /**
  * Intent Router for Acode
  * Developed by Rutex (Hall Of Codes)
+ * Version: 1.0.0
+ *
+ * A unified orchestration layer for executing intents across various providers on Android.
+ */
+
+class IntentRouter {
+    constructor() {
+        this.providers = new Map();
+        this.capabilities = {
+            terminal: false,
+            git: false,
+            github: true, // Generally available via API
+            docker: false,
+            termux: false,
+            system: true,
+            network: navigator.onLine
+        };
+        this.logs = [];
+        this.maxLogs = 200;
+    }
+
+    async init() {
+        this.log('info', 'Initializing Intent Router...');
+        await this.detectCapabilities();
+        this.registerDefaultProviders();
+        this.log('info', 'Intent Router initialized', { capabilities: this.capabilities });
+    }
+
+    async detectCapabilities() {
+        // 1. Network status
+        window.addEventListener('online', () => {
+            this.capabilities.network = true;
+            this.log('info', 'Network is online');
+        });
+        window.addEventListener('offline', () => {
+            this.capabilities.network = false;
+            this.log('warn', 'Network is offline');
+        });
+
+        // 2. Terminal & Termux detection
+        this.capabilities.terminal = !!(window.acode && (window.acode.terminal || window.terminal));
+        
+        // Check for Termux specifically
+        this.capabilities.termux = !!(window.cordova && window.cordova.plugins && window.cordova.plugins.termux);
+
+        // 3. Git detection
+        // If terminal is available, we assume git might be available (or we could try 'git --version')
+        this.capabilities.git = this.capabilities.terminal || this.capabilities.termux;
+
+        // 4. Docker detection
+        // Usually false on Android unless specialized environment
+        this.capabilities.docker = false; 
+    }
+
+    log(level, message, details = null) {
+        const entry = {
+            timestamp: new Date().toISOString(),
+            level,
+            message,
+            details,
+            id: Math.random().toString(36).substr(2, 9)
+        };
+        this.logs.push(entry);
+        if (this.logs.length > this.maxLogs) this.logs.shift();
+        
+        const logMsg = `[IntentRouter][${level.toUpperCase()}] ${message}`;
+        if (level === 'error') console.error(logMsg, details || '');
+        else if (level === 'warn') console.warn(logMsg, details || '');
+        else if (details && details.debug) console.log(logMsg, details);
+        else console.log(logMsg);
+    }
+
+    registerProvider(name, provider) {
+        if (typeof provider.canHandle !== 'function' || typeof provider.execute !== 'function') {
+            this.log('error', `Provider '${name}' rejected: Missing required methods.`);
+            return;
+        }
+        this.providers.set(name, provider);
+        this.log('info', `Provider registered: ${name}`);
+    }
+
+    async execute(intent) {
+        const traceId = intent?.meta?.traceId || Math.random().toString(36).substring(7);
+        this.log('info', `Executing intent: ${intent?.intent}`, { traceId, intent });
+
+        try {
+            // 1. Validation
+            if (!intent || typeof intent.intent !== 'string') {
+                return this.createErrorResponse('INVALID_INTENT', 'Intent is missing or not a string', traceId);
+            }
+
+            // 2. Provider Resolution
+            let targetProvider = null;
+            let providerName = intent.provider;
+
+            if (providerName) {
+                targetProvider = this.providers.get(providerName);
+            } else {
+                for (const [name, provider] of this.providers) {
+                    if (await provider.canHandle(intent)) {
+                        targetProvider = provider;
+                        providerName = name;
+                        break;
+                    }
+                }
+            }
+
+            if (!targetProvider) {
+                return this.createErrorResponse('PROVIDER_NOT_FOUND', `No provider found for intent: ${intent.intent}`, traceId);
+            }
+
+            // 3. Capability Check
+            if (targetProvider.requiredCapability && !this.capabilities[targetProvider.requiredCapability]) {
+                return this.createErrorResponse('CAPABILITY_MISSING', `Capability '${targetProvider.requiredCapability}' required by provider '${providerName}' is not available.`, traceId);
+            }
+
+            // 4. Execution with Timeout
+            const timeoutMs = intent.timeout || 30000;
+            const context = {
+                traceId,
+                capabilities: this.capabilities,
+                router: this
+            };
+
+            const executionPromise = targetProvider.execute(intent, context);
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
+            );
+
+            const result = await Promise.race([executionPromise, timeoutPromise]);
+
+            // 5. Normalization
+            return this.normalizeResponse(result, providerName, traceId);
+
+        } catch (error) {
+            let code = 'EXECUTION_FAILED';
+            let message = error.message;
+
+            if (message === 'TIMEOUT') {
+                code = 'TIMEOUT';
+                message = `Execution timed out after ${intent.timeout || 30000}ms`;
+            }
+
+            this.log('error', `Execution error for ${intent?.intent}`, { code, message, error });
+            return this.createErrorResponse(code, message, traceId, error);
+        }
+    }
+
+    normalizeResponse(result, providerName, traceId) {
+        const normalized = {
+            success: result && typeof result.success === 'boolean' ? result.success : false,
+            data: result?.data ?? null,
+            error: result?.error ?? null,
+            metadata: {
+                provider: providerName,
+                traceId,
+                timestamp: new Date().toISOString(),
+                ...(result?.metadata || {})
+            }
+        };
+
+        if (!normalized.success && !normalized.error) {
+            normalized.error = { code: 'UNKNOWN_ERROR', message: 'Provider returned failure without error details' };
+        }
+
+        if (!normalized.success) {
+            const errorMsg = normalized.error.message || normalized.error.code || 'Unknown error';
+            this.log('warn', `Intent failed (${providerName}): ${errorMsg}`, normalized.error);
+        }
+
+        return normalized;
+    }
+
+    createErrorResponse(code, message, traceId, details = null) {
+        const response = {
+            success: false,
+            data: null,
+            error: {
+                code,
+                message,
+                details: details?.message || details
+            },
+            metadata: {
+                traceId,
+                timestamp: new Date().toISOString()
+            }
+        };
+        window.toast(`Intent Router: ${message}`, 5000);
+        return response;
+    }
+
+    registerDefaultProviders() {
+        this.registerProvider('system', new SystemProvider());
+        this.registerProvider('http', new HttpProvider());
+        this.registerProvider('ai', new AIProvider());
+        this.registerProvider('terminal', new TerminalProvider());
+        this.registerProvider('git', new GitProvider());
+        this.registerProvider('docker', new DockerProvider());
+    }
+
+    getLogs() {
+        return this.logs;
+    }
+
+    getCapabilities() {
+        return { ...this.capabilities };
+    }
+}
+
+// --- Base Provider Class ---
+
+class BaseProvider {
+    constructor(name, requiredCapability = null) {
+        this.name = name;
+        this.requiredCapability = requiredCapability;
+    }
+
+    async canHandle(intent) {
+        return false;
+    }
+
+    async execute(intent, context) {
+        throw new Error("Method 'execute' must be implemented");
+    }
+
+    success(data = null, metadata = {}) {
+        return { success: true, data, metadata };
+    }
+
+    fail(code, message, metadata = {}) {
+        return { success: false, error: { code, message }, metadata };
+    }
+}
+
+// --- Specific Providers ---
+
+class SystemProvider extends BaseProvider {
+    constructor() {
+        super('system', 'system');
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('system.') || intent.intent.startsWith('acode.');
+    }
+
+    async execute(intent, context) {
+        const action = intent.intent.replace(/^(system|acode)\./, '');
+        const payload = intent.payload || {};
+
+        try {
+            switch (action) {
+                case 'toast':
+                    window.toast(payload.message || 'No message', payload.duration || 3000);
+                    return this.success();
+                case 'openUrl':
+                    if (!payload.url) return this.fail('MISSING_PARAM', 'URL is required');
+                    window.open(payload.url, '_system');
+                    return this.success();
+                case 'copyToClipboard':
+                    if (!payload.text) return this.fail('MISSING_PARAM', 'Text is required');
+                    if (window.cordova && cordova.plugins && cordova.plugins.clipboard) {
+                        await new Promise((res, rej) => cordova.plugins.clipboard.copy(payload.text, res, rej));
+                        return this.success({ copied: true });
+                    }
+                    throw new Error('Clipboard API not available');
+                case 'share':
+                    if (!payload.text) return this.fail('MISSING_PARAM', 'Text is required');
+                    if (navigator.share) {
+                        await navigator.share({
+                            title: payload.title || 'Share',
+                            text: payload.text,
+                            url: payload.url
+                        });
+                        return this.success({ shared: true });
+                    }
+                    throw new Error('Web Share API not supported');
+                default:
+                    return this.fail('UNKNOWN_ACTION', `System action '${action}' not supported`);
+            }
+        } catch (e) {
+            return this.fail('SYSTEM_ERROR', e.message);
+        }
+    }
+}
+
+class HttpProvider extends BaseProvider {
+    constructor() {
+        super('http', 'network');
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('http.') || intent.intent.startsWith('https.') || intent.intent.startsWith('http://') || intent.intent.startsWith('https://');
+    }
+
+    async execute(intent, context) {
+        let url = intent.intent;
+        if (url.startsWith('http.') || url.startsWith('https.')) {
+            url = url.replace('http.', 'http://').replace('https.', 'https://');
+        }
+        
+        const options = {
+            method: intent.payload?.method || 'GET',
+            headers: intent.payload?.headers || {},
+            body: intent.payload?.body ? (typeof intent.payload.body === 'string' ? intent.payload.body : JSON.stringify(intent.payload.body)) : undefined
+        };
+
+        try {
+            const response = await fetch(url, options);
+            let data;
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                data = await response.json();
+            } else {
+                data = await response.text();
+            }
+            
+            if (!response.ok) {
+                return this.fail('HTTP_ERROR', `Request failed with status ${response.status}`, { status: response.status, data });
+            }
+            
+            return this.success(data, { status: response.status });
+        } catch (e) {
+            return this.fail('NETWORK_ERROR', e.message);
+        }
+    }
+}
+
+class AIProvider extends BaseProvider {
+    constructor() {
+        super('ai', 'ai');
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('ai.');
+    }
+
+    async execute(intent, context) {
+        // Mock AI implementation
+        return this.success({ response: "AI processing simulation for: " + (intent.payload?.prompt || intent.intent) });
+    }
+}
+
+class TerminalProvider extends BaseProvider {
+    constructor() {
+        super('terminal', 'terminal');
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('terminal.') || intent.intent.startsWith('shell.');
+    }
+
+    async execute(intent, context) {
+        const command = intent.payload?.command || intent.intent.split('.').slice(1).join('.');
+        if (!command) return this.fail('MISSING_PARAM', 'Command is required');
+
+        try {
+            const term = window.acode.terminal || window.terminal;
+            if (!term) throw new Error('Terminal API not found');
+            const result = await term.run(command);
+            return this.success(result);
+        } catch (e) {
+            return this.fail('TERMINAL_ERROR', e.message);
+        }
+    }
+}
+
+class GitProvider extends BaseProvider {
+    constructor() {
+        super('git', 'git');
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('git.') || intent.intent.startsWith('github.');
+    }
+
+    async execute(intent, context) {
+        const action = intent.intent.replace(/^(git|github)\./, '');
+        // For now, delegate to terminal if it's a simple git command
+        if (context.capabilities.terminal) {
+            const command = `git ${action} ${intent.payload?.args || ''}`;
+            return context.router.execute({ intent: 'terminal.run', payload: { command } });
+        }
+        return this.fail('NOT_IMPLEMENTED', 'Native Git provider is being finalized');
+    }
+}
+
+class DockerProvider extends BaseProvider {
+    constructor() {
+        super('docker', 'docker');
+    }
+
+    async canHandle(intent) {
+        return intent.intent.startsWith('docker.');
+    }
+
+    async execute(intent, context) {
+        return this.fail('EXPERIMENTAL', 'Docker support is experimental and capability not detected on Android.');
+    }
+}
+
+// --- Test Suite ---
+async function runTests() {
+    console.log("--- Starting Intent Router E2E Tests ---");
+    const router = window.intentRouter;
+    if (!router) {
+        console.error("Intent Router not found on window");
+        return;
+    }
+
+    const tests = [
+        { name: 'System Toast', intent: { intent: 'system.toast', payload: { message: 'Test Success!' } } },
+        { name: 'HTTP Get', intent: { intent: 'https://jsonplaceholder.typicode.com/todos/1' } },
+        { name: 'AI Mock', intent: { intent: 'ai.prompt', payload: { prompt: 'Hello' } } },
+        { name: 'Missing Provider', intent: { intent: 'unknown.action' } }
+    ];
+
+    for (const test of tests) {
+        console.log(`Running test: ${test.name}`);
+        try {
+            const res = await router.execute(test.intent);
+            console.log(`Result for ${test.name}:`, res);
+        } catch (e) {
+            console.error(`Test ${test.name} threw:`, e);
+        }
+    }
+    console.log("--- Tests Completed ---");
+}
+
+// --- Plugin Entry Point ---
+
+if (window.acode) {
+    const router = new IntentRouter();
+    
+    acode.setPluginInit('com.leion.roots', async (data) => {
+        await router.init();
+        window.intentRouter = router;
+        window.intentRouter.runTests = runTests;
+        window.toast('Intent Router Ready', 2000);
+    });
+
+    acode.setPluginUnmount('com.leion.roots', () => {
+        delete window.intentRouter;
+    });
+}
+
+ * Intent Router for Acode
+ * Developed by Rutex (Hall Of Codes)
  */
 
 class IntentRouter {
