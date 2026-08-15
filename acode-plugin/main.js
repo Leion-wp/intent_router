@@ -202,7 +202,84 @@ class DockerProvider extends BaseProvider {
             code: ERROR_CODES.CAPABILITY_MISSING
         });
     }
+
+// --- Intent Router (Main Engine) ---
+class IntentRouter {
+    constructor() {
+        this.providers = [
+            new SystemProvider(),
+            new AIProvider(),
+            new TerminalProvider(),
+            new GitProvider(),
+            new HttpProvider(),
+            new DockerProvider()
+        ];
+        this.logs = [];
+    }
+
+    async execute(intent) {
+        const startTime = Date.now();
+        try {
+            if (!intent || !intent.scheme || !intent.action) {
+                throw { message: 'Invalid intent format', code: ERROR_CODES.VALIDATION_ERROR };
+            }
+
+            let targetProvider = null;
+            for (const p of this.providers) {
+                if (await p.canHandle(intent)) {
+                    targetProvider = p;
+                    break;
+                }
+            }
+
+            if (!targetProvider) {
+                throw { message: `No provider found for scheme: ${intent.scheme}`, code: ERROR_CODES.PROVIDER_NOT_FOUND };
+            }
+
+            const context = { capabilities: await this.getCapabilities() };
+            const result = await Promise.race([
+                targetProvider.execute(intent, context),
+                new Promise((_, reject) => setTimeout(() => reject({ message: 'Execution timeout', code: ERROR_CODES.TIMEOUT }), 30000))
+            ]);
+
+            this.logExecution(intent, result, Date.now() - startTime);
+            return result;
+
+        } catch (e) {
+            const errorResponse = {
+                success: false,
+                error: {
+                    message: e.message || e,
+                    code: e.code || ERROR_CODES.EXECUTION_FAILED
+                },
+                metadata: { timestamp: Date.now(), duration: Date.now() - startTime }
+            };
+            this.logExecution(intent, errorResponse, Date.now() - startTime);
+            return errorResponse;
+        }
+    }
+
+    async getCapabilities() {
+        return {
+            terminal: !!window.terminal,
+            git: !!window.terminal,
+            network: navigator.onLine,
+            docker: false,
+            android: true
+        };
+    }
+
+    logExecution(intent, response, duration) {
+        this.logs.push({
+            intent,
+            response,
+            duration,
+            timestamp: new Date().toISOString()
+        });
+        if (this.logs.length > 50) this.logs.shift();
+    }
 }
+
 
 
  * Intent Router for Acode - Android Edition
