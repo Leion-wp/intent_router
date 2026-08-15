@@ -255,7 +255,30 @@ class GitProvider {
     }
 
     async canHandle(intent) {
-        return intent.intent.startsWith('git://') || intent.intent.startsWith('github://');
+
+// --- Test Suite ---
+async function runTests() {
+    console.log("--- Starting Intent Router Tests ---");
+    
+    const tests = [
+        { name: 'System Toast', intent: { intent: 'system://toast', payload: { message: 'Test Success!' } } },
+        { name: 'HTTP Get', intent: { intent: 'https://jsonplaceholder.typicode.com/todos/1' } },
+        { name: 'AI Mock', intent: { intent: 'ai://prompt', payload: { prompt: 'Hello' } } },
+        { name: 'Invalid Intent', intent: { intent: 'invalid://test' } }
+    ];
+
+    for (const test of tests) {
+        console.log(`Running test: ${test.name}`);
+        const res = await window.intentRouter.execute(test.intent);
+        console.log(`Result for ${test.name}:`, res);
+    }
+}
+
+// Expose test runner
+if (window.intentRouter) {
+    window.intentRouter.runTests = runTests;
+}
+
     }
 
     async execute(intent, context) {
