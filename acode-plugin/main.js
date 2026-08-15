@@ -251,6 +251,63 @@ class TerminalProvider extends BaseProvider {
   }
 }
 
+class DockerProvider extends BaseProvider {
+  canHandle(intent) {
+    return intent.scheme === 'docker';
+  }
+
+  async execute() {
+    return this.normalizeResponse(false, null, 'Docker is not supported in this environment yet.');
+  }
+}
+
+class IntentRouter {
+  constructor() {
+    this.providers = [
+      new SystemProvider(),
+      new AIProvider(),
+      new GitHubProvider(),
+      new TerminalProvider(),
+      new DockerProvider()
+    ];
+    this.logs = [];
+  }
+
+  getCapabilities() {
+    return {
+      terminal: !!window.terminal || !!window.acode?.exec,
+      git: !!window.git,
+      termux: /Android/i.test(navigator.userAgent) && !!window.acode,
+      docker: false
+    };
+  }
+
+  async execute(intent) {
+    const context = {
+      capabilities: this.getCapabilities(),
+      timestamp: Date.now()
+    };
+
+    const provider = this.providers.find(p => p.canHandle(intent));
+    
+    if (!provider) {
+      const errorMsg = `No provider found for scheme: ${intent.scheme}`;
+      this.logs.push({ intent, error: errorMsg, context });
+      return { success: false, error: errorMsg };
+    }
+
+    try {
+      const response = await provider.execute(intent, context);
+      this.logs.push({ intent, response, context });
+      return response;
+    } catch (error) {
+      const errorMsg = `Execution error: ${error.message}`;
+      this.logs.push({ intent, error: errorMsg, context });
+      return { success: false, error: errorMsg };
+    }
+  }
+}
+
  */
 
 // --- Constants & Types ---
