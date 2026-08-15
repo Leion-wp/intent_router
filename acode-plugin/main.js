@@ -64,13 +64,145 @@ class IntentRouter {
                 return true;
             }
         });
+
     }
+
+    async resolveVariables(payload) {
+        if (!payload) return payload;
+        let str = JSON.stringify(payload);
+        // Replace {{var}} with values from cache
+        str = str.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+            return this.variableCache.has(key.trim()) ? this.variableCache.get(key.trim()) : match;
+        });
+        return JSON.parse(str);
+    }
+
+    registerInternalProviders() {
+        // System Provider
+        this.registerCapability({
+            intent: 'system.pause',
+            handler: async (payload) => {
+                return new Promise((resolve) => {
+                    acode.confirm('Intent Router', payload.message || 'Pause for human validation', (res) => {
+                        resolve(res);
+                    });
+                });
+            }
+        });
+
+        // File System Provider (Acode specific)
+        this.registerCapability({
+            intent: 'fs.read',
+            handler: async (payload) => {
+                try {
+                    const fs = acode.require('fs');
+                    const content = await fs.readFile(payload.path);
+                    if (payload.var) this.variableCache.set(payload.var, content);
+                    return content;
+                } catch (e) {
+                    window.toast(e.message, 3000);
+                    return null;
+                }
+            }
+        });
+
+        this.registerCapability({
+            intent: 'fs.write',
+            handler: async (payload) => {
+                try {
+                    const fs = acode.require('fs');
+                    await fs.writeFile(payload.path, payload.content);
+                    return true;
+                } catch (e) {
+                    window.toast(e.message, 3000);
+                    return false;
+                }
+            }
+        });
+
+        // Editor Provider
+        this.registerCapability({
+            intent: 'editor.insert',
+            handler: async (payload) => {
+                const { text } = payload;
+                const { editor } = editorManager;
+                editor.insert(text);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'editor.set_value',
+            handler: async (payload) => {
+                const { value } = payload;
+                const { editor } = editorManager;
+                editor.setValue(value);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'ui.toast',
+            handler: async (payload) => {
+                window.toast(payload.message, 3000);
+                return true;
+            }
+        });
+
+        // Git Provider (Simulation via Terminal for now, or basic git if available)
+        this.registerCapability({
+            intent: 'git.commit',
+            handler: async (payload) => {
+                // In Acode, we might need to use a terminal plugin or execute shell if available
+                window.toast(`Git Commit: ${payload.message}`, 2000);
+                return true;
+            }
+        });
+    }
+
 
     registerCapability(cap) {
         this.capabilities.set(cap.intent, cap.handler);
     }
 
     async route(intent) {
+        console.log('Routing intent:', intent.intent);
+        
+        // Resolve variables in payload before execution
+        if (intent.payload) {
+            intent.payload = await this.resolveVariables(intent.payload);
+        }
+
+        // Composite Intent Logic (Steps)
+        if (intent.steps && Array.isArray(intent.steps)) {
+            let lastResult = true;
+            for (const step of intent.steps) {
+                lastResult = await this.route(step);
+                if (!lastResult) break;
+            }
+            return lastResult;
+        }
+
+        const handler = this.capabilities.get(intent.intent);
+        if (handler) {
+            try {
+                const result = await handler(intent.payload);
+                // Auto-capture result if 'var' is specified in the intent (extension of the protocol)
+                if (intent.var && result !== undefined) {
+                    this.variableCache.set(intent.var, result);
+                }
+                return result;
+            } catch (err) {
+                console.error(`Error executing ${intent.intent}:`, err);
+                return false;
+            }
+        } else {
+            console.warn('No handler for intent:', intent.intent);
+            window.toast(`Missing handler: ${intent.intent}`, 3000);
+            return false;
+        }
+    }
+
         console.log('Routing intent:', intent.intent);
         
         // Composite Intent Logic (Steps)
