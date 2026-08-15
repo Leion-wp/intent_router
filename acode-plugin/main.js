@@ -210,7 +210,24 @@ class IntentRouter {
         const term = (cmd) => this.route({ intent: 'terminal.exec', payload: { command: cmd } });
         this.registerCapability({ intent: 'git.status', handler: () => term('git status') });
         this.registerCapability({ intent: 'git.add', handler: (p) => term(`git add ${p.path || '.'}`) });
-        this.registerCapability({ intent: 'git.commit', handler: (p) => term(`git commit -m "${p.message}"`) });
+                        }
+                    });
+                    if (member.outputVar) this.variableCache.set(member.outputVar, lastResult);
+                }
+                return lastResult;
+            }
+        });
+
+        // --- PIPELINE MANAGEMENT ---
+        this.registerCapability({
+            intent: 'pipeline.run',
+            handler: async (p) => {
+                const res = await fetch(p.url);
+                const pipeline = await res.json();
+                return await this.runPipeline(pipeline);
+            }
+        });
+
         this.registerCapability({ intent: 'git.push', handler: (p) => term(`git push ${p.remote || 'origin'} ${p.branch || 'main'}`) });
         this.registerCapability({
             intent: 'github.openPr',
