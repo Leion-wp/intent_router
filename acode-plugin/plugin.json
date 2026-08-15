@@ -1,4 +1,15 @@
 {
+  "id": "leion.roots",
+  "name": "Leion Roots",
+  "version": "1.0.0",
+  "main": "main.js",
+  "icon": "account_tree",
+  "description": "Human-centric orchestration for Android",
+  "author": "Leion-wp",
+  "license": "MIT",
+  "category": "utility"
+}
+
   "id": "com.leion.roots",
   "name": "Leion Roots",
   "main": "main.js",
