@@ -227,15 +227,6 @@ class IntentRouter {
     return this.logs;
   }
 }
-
-  }
-}
-
-  }
-}
-
-}
-
 class IntentRouterPlugin {
   constructor() {
     this.router = new IntentRouter();
@@ -274,11 +265,10 @@ class IntentRouterPlugin {
 
 if (window.acode) {
   const plugin = new IntentRouterPlugin();
+  acode.setPluginInit('com.leion.roots', (baseUrl, $page, { cacheFileUrl, cacheFile }) => {
     plugin.init();
   });
   acode.setPluginUnmount('com.leion.roots', () => {
     plugin.destroy();
   });
-}
-
 }
