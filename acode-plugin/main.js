@@ -277,3 +277,81 @@ class TerminalProvider {
     return { success: true, data: { command, output: 'Command sent to terminal' } };
   }
 }
+
+
+/**
+ * AI PROVIDER
+ * Handles: ai://, prompt://, codegen://
+ */
+class AIProvider {
+  constructor(router) {
+    this.id = 'ai';
+    this.router = router;
+  }
+
+  canHandle(intent) {
+    return /^(ai|prompt|codegen):/.test(intent.intent);
+  }
+
+  async execute(intent, context) {
+    const prompt = intent.payload?.prompt || intent.intent.split('://')[1];
+    this.router.log(`AI Prompt: ${prompt}`);
+    
+    // Here we would integrate with an AI service or another Acode plugin
+    return { 
+      success: true, 
+      data: { response: "AI processing not yet fully linked to a backend" },
+      metadata: { model: "mock-v1" }
+    };
+  }
+}
+
+/**
+ * GIT PROVIDER
+ * Handles: git://, github://
+ */
+class GitProvider {
+  constructor(router) {
+    this.id = 'git';
+    this.router = router;
+  }
+
+  canHandle(intent) {
+    return /^(git|github):/.test(intent.intent);
+  }
+
+  getRequiredCapability(intent) {
+    return intent.intent.startsWith('github') ? 'github' : 'git';
+  }
+
+  async execute(intent, context) {
+    const action = intent.intent.split('://')[1];
+    
+    if (intent.intent.startsWith('github')) {
+      if (!context.capabilities.github) {
+        throw new Error('PERMISSION_DENIED: GitHub token missing in settings');
+      }
+      // GitHub API Logic
+      return { success: true, data: { action, status: 'github_action_initiated' } };
+    }
+
+    // Local Git Logic
+    return { success: true, data: { action, status: 'git_action_queued' } };
+  }
+}
+
+// Initialization
+if (window.acode) {
+  const router = new IntentRouter();
+  
+  // Registering providers in order
+  router.registry.register(new SystemProvider(router));
+  router.registry.register(new TerminalProvider(router));
+  router.registry.register(new AIProvider(router));
+  router.registry.register(new GitProvider(router));
+
+  acode.setPluginInit('com.leion.roots', (baseUrl, $page, { cacheFile, cacheFileUrl }) => {
+    router.init();
+    window.intentRouter = router; // Expose for other plugins
+  });
+}
