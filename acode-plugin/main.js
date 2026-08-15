@@ -345,7 +345,6 @@ if (window.acode) {
     });
 }
             intent: 'fs.write',
-            handler: async (p) => { await fs.writeFile(p.path, p.content); return true; }
         });
         this.registerCapability({
             intent: 'fs.list',
