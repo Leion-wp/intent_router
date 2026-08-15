@@ -130,7 +130,140 @@ class GitHubProvider extends BaseProvider {
   }
 }
 
- * Intent Router for Acode
+class TerminalProvider extends BaseProvider {
+  constructor() {
+    super('TerminalProvider');
+  }
+
+  canHandle(intent) {
+    return intent.scheme === SCHEMES.TERMINAL;
+  }
+
+  async execute(intent, context) {
+    if (!context.capabilities.terminal) {
+      return this.normalizeResponse(false, null, 'Terminal capability not available');
+    }
+
+    const { action, data } = intent;
+    if (action === 'exec') {
+      if (window.terminal && typeof window.terminal.exec === 'function') {
+        const output = await window.terminal.exec(data.command);
+        return this.normalizeResponse(true, { output });
+      }
+      return this.normalizeResponse(false, null, 'Terminal plugin found but exec function missing');
+    }
+    return this.normalizeResponse(false, null, `Action ${action} not supported`);
+  }
+}
+
+class DockerProvider extends BaseProvider {
+  constructor() {
+    super('DockerProvider');
+  }
+
+  canHandle(intent) {
+    return intent.scheme === SCHEMES.DOCKER;
+  }
+
+  async execute() {
+    return this.normalizeResponse(false, null, 'Docker is not supported on Android/Acode environment');
+  }
+}
+
+class IntentRouter {
+  constructor() {
+    this.providers = [
+      new SystemProvider(),
+      new AIProvider(),
+      new GitHubProvider(),
+      new TerminalProvider(),
+      new DockerProvider()
+    ];
+    this.logs = [];
+  }
+
+  async getCapabilities() {
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const hasTerminal = !!window.terminal || (window.acode && typeof window.acode.exec === 'function');
+    
+    return {
+      terminal: hasTerminal,
+      git: hasTerminal,
+      android: isAndroid,
+      docker: false
+    };
+  }
+
+  async execute(intent) {
+    const context = {
+      capabilities: await this.getCapabilities(),
+      timestamp: Date.now()
+    };
+
+    const provider = this.providers.find(p => p.canHandle(intent));
+    
+    if (!provider) {
+      const error = `No provider found for scheme: ${intent.scheme}`;
+      this.logs.push({ intent, error, timestamp: Date.now() });
+      return { success: false, error, code: ERROR_CODES.PROVIDER_NOT_FOUND };
+    }
+
+    try {
+      const response = await provider.execute(intent, context);
+      this.logs.push({ intent, response, timestamp: Date.now() });
+      return response;
+    } catch (e) {
+      const error = `Execution failed: ${e.message}`;
+      this.logs.push({ intent, error, timestamp: Date.now() });
+      return { success: false, error, code: ERROR_CODES.EXECUTION_FAILED };
+    }
+  }
+}
+
+class IntentRouterPlugin {
+  constructor() {
+    this.router = new IntentRouter();
+  }
+
+  async init() {
+    window.intentRouter = this.router;
+    
+    window.runIntentTests = async () => {
+      console.log('--- Intent Router Test Suite ---');
+      const tests = [
+        { scheme: 'system', action: 'toast', data: { message: 'Hello from Intent Router!' } },
+        { scheme: 'ai', action: 'prompt', data: { prompt: 'Explain quantum physics' } },
+        { scheme: 'docker', action: 'ps', data: {} }
+      ];
+
+      for (const test of tests) {
+        console.log(`Testing ${test.scheme}...`);
+        const res = await this.router.execute(test);
+        console.log(`Result [${test.scheme}]:`, res);
+      }
+    };
+
+    window.toast('Intent Router Ready', 2000);
+    console.log('Intent Router Plugin Initialized');
+  }
+
+  async destroy() {
+    delete window.intentRouter;
+    delete window.runIntentTests;
+    console.log('Intent Router Plugin Unmounted');
+  }
+}
+
+if (window.acode) {
+  const plugin = new IntentRouterPlugin();
+  acode.setPluginInit('com.leionwp.intentrouter', (baseUrl, $page, { cacheFileUrl, cacheFile }) => {
+    plugin.init();
+  });
+  acode.setPluginUnmount('com.leionwp.intentrouter', () => {
+    plugin.destroy();
+  });
+}
+
  * Version: 1.0.0
  * Developed by Rutex (Hall Of Codes)
  */
