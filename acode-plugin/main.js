@@ -999,6 +999,241 @@ class IntentRouter {
         this.registerInternalProviders();
     }
 
+    registerInternalProviders() {
+        const fs = acode.require('fs');
+
+        // --- SYSTEM & UI ---
+        this.registerCapability({
+            intent: 'system.pause',
+            handler: async (payload) => {
+                return new Promise((resolve) => {
+                    acode.confirm('Intent Router', payload.message || 'Pause for human validation', (res) => resolve(res));
+                });
+            }
+        });
+
+        this.registerCapability({
+            intent: 'ui.toast',
+            handler: async (payload) => {
+                window.toast(payload.message, 3000);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'ui.prompt',
+            handler: async (payload) => {
+                const res = await acode.prompt(payload.title, payload.defaultValue || '', payload.type || 'text');
+                return res;
+            }
+        });
+
+        // --- FILE SYSTEM ---
+        this.registerCapability({
+            intent: 'fs.read',
+            handler: async (payload) => {
+                const content = await fs.readFile(payload.path);
+                return content;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'fs.write',
+            handler: async (payload) => {
+                await fs.writeFile(payload.path, payload.content);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'fs.list',
+            handler: async (payload) => {
+                return await fs.readdir(payload.path);
+            }
+        });
+
+        this.registerCapability({
+            intent: 'fs.exists',
+            handler: async (payload) => {
+                return await fs.exists(payload.path);
+            }
+        });
+
+        // --- EDITOR ---
+        this.registerCapability({
+            intent: 'editor.insert',
+            handler: async (payload) => {
+                editorManager.editor.insert(payload.text);
+                return true;
+            }
+        });
+
+        this.registerCapability({
+            intent: 'editor.get_value',
+            handler: async () => {
+                return editorManager.editor.getValue();
+            }
+        });
+
+        this.registerCapability({
+            intent: 'editor.set_value',
+            handler: async (payload) => {
+                editorManager.editor.setValue(payload.value);
+                return true;
+            }
+        });
+
+        // --- TERMINAL / SHELL ---
+        this.registerCapability({
+            intent: 'terminal.exec',
+            handler: async (payload) => {
+                return new Promise((resolve) => {
+                    if (window.acode && acode.exec) {
+                        acode.exec(payload.command, (res) => resolve(res));
+                    } else {
+                        window.toast('Terminal API not found', 3000);
+                        resolve(null);
+                    }
+                });
+            }
+        });
+
+        // --- HTTP ---
+        this.registerCapability({
+            intent: 'http.request',
+            handler: async (payload) => {
+                const response = await fetch(payload.url, {
+                    method: payload.method || 'GET',
+                    headers: payload.headers || { 'Content-Type': 'application/json' },
+                    body: payload.body ? (typeof payload.body === 'string' ? payload.body : JSON.stringify(payload.body)) : undefined
+                });
+                const text = await response.text();
+                try { return JSON.parse(text); } catch(e) { return text; }
+            }
+        });
+
+        // --- GIT (via Terminal) ---
+        const gitCmd = async (cmd) => this.route({ intent: 'terminal.exec', payload: { command: `git ${cmd}` } });
+        this.registerCapability({ intent: 'git.status', handler: () => gitCmd('status') });
+        this.registerCapability({ intent: 'git.commit', handler: (p) => gitCmd(`commit -m "${p.message}"`) });
+        this.registerCapability({ intent: 'git.push', handler: () => gitCmd('push') });
+        this.registerCapability({ intent: 'git.pull', handler: () => gitCmd('pull') });
+        this.registerCapability({ intent: 'git.add', handler: (p) => gitCmd(`add ${p.path || '.'}`) });
+        this.registerCapability({ intent: 'git.checkout', handler: (p) => gitCmd(`checkout ${p.branch}`) });
+
+        // --- GITHUB (via gh CLI) ---
+        this.registerCapability({
+            intent: 'github.openPr',
+            handler: async (p) => this.route({ intent: 'terminal.exec', payload: { command: `gh pr create --title "${p.title}" --body "${p.body || ''}" --base ${p.base} --head ${p.head}` } })
+        });
+        this.registerCapability({
+            intent: 'github.prChecks',
+            handler: async (p) => this.route({ intent: 'terminal.exec', payload: { command: `gh pr checks ${p.number || ''}` } })
+        });
+
+        // --- DOCKER (via terminal) ---
+        this.registerCapability({
+            intent: 'docker.build',
+            handler: async (p) => this.route({ intent: 'terminal.exec', payload: { command: `docker build -t ${p.tag} ${p.path || '.'}` } })
+        });
+        this.registerCapability({
+            intent: 'docker.run',
+            handler: async (p) => this.route({ intent: 'terminal.exec', payload: { command: `docker run ${p.detach ? '-d' : ''} ${p.image}` } })
+        });
+        this.registerCapability({
+            intent: 'docker.ps',
+            handler: async () => this.route({ intent: 'terminal.exec', payload: { command: 'docker ps' } })
+        });
+
+        // --- AI ---
+        this.registerCapability({
+            intent: 'ai.generate',
+            handler: async (payload) => {
+                window.toast('AI Thinking...', 2000);
+                // In Acode, we might want to integrate with a specific provider or another plugin
+                return "AI Simulation: " + payload.instruction;
+            }
+        });
+    }
+
+    async route(intent) {
+        if (intent.steps && Array.isArray(intent.steps)) {
+            let lastResult;
+            for (const step of intent.steps) {
+                lastResult = await this.route(step);
+                if (lastResult === false) break;
+            }
+            return lastResult;
+        }
+
+        const payload = await this.resolveVariables(intent.payload);
+        const handler = this.capabilities.get(intent.intent);
+        
+        if (handler) {
+            try {
+                const result = await handler(payload);
+                if (intent.var && result !== undefined) {
+                    this.variableCache.set(intent.var, result);
+                }
+                return result;
+            } catch (error) {
+                window.toast(`Error: ${error.message}`, 5000);
+                return false;
+            }
+        } else {
+            window.toast(`Missing handler: ${intent.intent}`, 3000);
+            return false;
+        }
+    }
+}
+
+class LeionRootsPlugin {
+    async init() {
+        this.router = new IntentRouter();
+        await this.router.init();
+
+        acode.setSideButton({
+            id: 'leion-roots-cockpit',
+            icon: 'account_tree',
+            name: 'Leion Cockpit',
+            onclick: () => this.openCockpit()
+        });
+
+        acode.addCommand({
+            name: 'Leion: Run Intent',
+            description: 'Run a Leion Intent JSON',
+            exec: async () => {
+                const intentStr = await acode.prompt('Enter Intent JSON', '', 'textarea');
+                if (intentStr) {
+                    try {
+                        const intent = JSON.parse(intentStr);
+                        await this.router.route(intent);
+                    } catch (e) {
+                        window.toast('Invalid JSON', 3000);
+                    }
+                }
+            }
+        });
+    }
+
+    openCockpit() {
+        window.toast('Leion Cockpit Ready', 2000);
+    }
+
+    async destroy() {
+        acode.unSetSideButton('leion-roots-cockpit');
+    }
+}
+
+if (window.acode) {
+    const leionPlugin = new LeionRootsPlugin();
+    acode.define('leion-roots', {
+        init: async () => await leionPlugin.init(),
+        destroy: () => leionPlugin.destroy()
+    });
+}
+
+
     registerCapability(cap) {
         this.capabilities.set(cap.intent, cap.handler);
     }
