@@ -74,14 +74,9 @@ class IntentRouter {
             }
         });
     }
-
-        this.registerProvider('system', {
-            invoke: async (entry, payload, intent) => {
-                console.log('System Provider Invoked', { entry, payload, intent });
-                return true;
-            }
-        });
     }
+
+    registerProvider(name, adapter) {
 
     registerProvider(name, adapter) {
         this.providers.set(name, adapter);
