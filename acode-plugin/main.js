@@ -395,7 +395,56 @@ class GithubProvider extends BaseProvider {
                 return { success: fileRes.ok, data: await fileRes.json() };
             default:
                 throw new Error(`Github action "${action}" not implemented`);
+
+class AIProvider extends BaseProvider {
+    canHandle(intent) {
+        return intent.scheme === 'ai';
+    }
+
+    async execute(intent) {
+        const { action, data } = intent;
+        // Simple mock for AI integration
+        return { 
+            success: true, 
+            data: `AI response for ${action}: Processing "${data.prompt || ''}"...`,
+            metadata: { model: data.model || 'default-gpt' }
+        };
+    }
+}
+
+class TerminalProvider extends BaseProvider {
+    canHandle(intent) {
+        return intent.scheme === 'terminal';
+    }
+
+    async execute(intent, context) {
+        if (!context.capabilities.terminal) {
+            throw new Error('Terminal capability not available');
         }
+        
+        const { action, data } = intent;
+        if (action === 'exec') {
+            // Integration with Acode Terminal plugin if available
+            if (window.terminal) {
+                const result = await window.terminal.exec(data.command);
+                return { success: true, data: result };
+            }
+            return { success: false, error: 'Terminal plugin not found in window object' };
+        }
+        throw new Error(`Terminal action "${action}" not implemented`);
+    }
+}
+
+class DockerProvider extends BaseProvider {
+    canHandle(intent) {
+        return intent.scheme === 'docker';
+    }
+
+    async execute() {
+        return { success: false, error: 'Docker is not supported on Android environment' };
+    }
+}
+
     }
 }
 
