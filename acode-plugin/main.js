@@ -6,82 +6,76 @@
 class IntentRouter {
     constructor() {
         this.providers = new Map();
-        this.logs = [];
         this.capabilities = {
             terminal: false,
             git: false,
-            github: true,
+            github: true, // Web-based always possible
             docker: false,
             termux: false,
             system: true,
             http: true,
             ai: true
         };
+        this.logs = [];
     }
 
     async init() {
-        this.log('Initializing Intent Router...');
         await this.detectCapabilities();
         this.registerDefaultProviders();
-        this.log('Initialization complete', this.capabilities);
+        this.log('info', 'Intent Router initialized', { capabilities: this.capabilities });
     }
 
     async detectCapabilities() {
+        // Detect Termux/Terminal
         try {
-            // Terminal detection
-            this.capabilities.terminal = !!(window.acode && (window.acode.terminal || window.terminal));
-            
-            // Termux detection (via cordova-plugin-termux if available)
-            this.capabilities.termux = typeof cordova !== 'undefined' && !!(cordova.plugins && cordova.plugins.termux);
-            
-            // Git detection (if terminal is available, we assume git might be)
-            this.capabilities.git = this.capabilities.terminal || this.capabilities.termux;
-
-            // Docker detection (usually false on Android)
-            this.capabilities.docker = false; 
-
+            this.capabilities.termux = !!(window.cordova && cordova.plugins && cordova.plugins.termux);
+            this.capabilities.terminal = !!(window.acode && window.acode.terminal) || this.capabilities.termux;
+            this.capabilities.git = this.capabilities.terminal; // Git usually depends on terminal
         } catch (e) {
-            this.log('Capability detection failed', e, 'error');
+            this.log('warn', 'Capability detection partially failed', e.message);
         }
     }
 
-    log(message, details = null, level = 'info') {
+    log(level, message, details = null) {
         const entry = {
             timestamp: new Date().toISOString(),
             level,
             message,
-            details: details instanceof Error ? { message: details.message, stack: details.stack } : details,
+            details,
             id: Math.random().toString(36).substr(2, 9)
         };
         this.logs.push(entry);
-        if (this.logs.length > 100) this.logs.shift();
-
-        const logFn = level === 'error' ? console.error : (level === 'warn' ? console.warn : console.log);
-        logFn(`[IntentRouter][${level.toUpperCase()}] ${message}`, details || '');
+        if (this.logs.length > 200) this.logs.shift();
+        
+        if (level === 'error') {
+            console.error(`[IntentRouter] ${message}`, details);
+        } else {
+            console.log(`[IntentRouter] ${message}`, details || '');
+        }
     }
 
     registerProvider(name, provider) {
         if (typeof provider.canHandle !== 'function' || typeof provider.execute !== 'function') {
-            this.log(`Failed to register provider ${name}: Invalid Contract`, null, 'error');
+            this.log('error', `Provider ${name} failed contract validation.`);
             return;
         }
         this.providers.set(name, provider);
-        this.log(`Provider registered: ${name}`);
+        this.log('info', `Provider registered: ${name}`);
     }
 
     async execute(intent) {
         const traceId = Math.random().toString(36).substring(7);
-        this.log(`Executing intent: ${intent?.intent}`, { traceId, intent });
+        this.log('info', `Executing intent: ${intent.intent}`, { traceId, intent });
 
         try {
             // 1. Validation
             if (!intent || !intent.intent) {
-                return this.createErrorResponse('INVALID_INTENT', 'Intent is missing or malformed', null, traceId);
+                return this.createErrorResponse('INVALID_INTENT', 'Intent is missing or malformed', traceId);
             }
 
-            // 2. Resolution
+            // 2. Provider Resolution
             let targetProvider = null;
-            let providerName = '';
+            let providerName = null;
 
             for (const [name, provider] of this.providers) {
                 if (await provider.canHandle(intent)) {
@@ -92,12 +86,83 @@ class IntentRouter {
             }
 
             if (!targetProvider) {
-                return this.createErrorResponse('PROVIDER_NOT_FOUND', `No provider found for intent: ${intent.intent}`, null, traceId);
+                return this.createErrorResponse('PROVIDER_NOT_FOUND', `No provider found for: ${intent.intent}`, traceId);
             }
 
-            // 3. Capability Check (Provider level)
+            // 3. Capability Check
             if (targetProvider.requiredCapability && !this.capabilities[targetProvider.requiredCapability]) {
-                return this.createErrorResponse('CAPABILITY_MISSING', `Capability '${targetProvider.requiredCapability}' required by provider '${providerName}' is missing.`, null, traceId);
+                return this.createErrorResponse('CAPABILITY_MISSING', `Capability '${targetProvider.requiredCapability}' required by ${providerName} is unavailable.`, traceId);
+            }
+
+            // 4. Execution with Timeout
+            const timeout = intent.timeout || 30000;
+            const context = {
+                traceId,
+                capabilities: this.capabilities,
+                router: this
+            };
+
+            const result = await Promise.race([
+                targetProvider.execute(intent, context),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), timeout))
+            ]);
+
+            // 5. Normalization
+            return this.normalizeResponse(result, providerName, traceId);
+
+        } catch (error) {
+            const code = error.message === 'TIMEOUT' ? 'TIMEOUT' : 'EXECUTION_FAILED';
+            this.log('error', `Execution failed: ${error.message}`, { traceId, error });
+            return this.createErrorResponse(code, error.message, traceId);
+        }
+    }
+
+    normalizeResponse(result, providerName, traceId) {
+        const response = {
+            success: result.success ?? true,
+            data: result.data ?? null,
+            error: result.error ? (typeof result.error === 'string' ? { message: result.error } : result.error) : null,
+            metadata: {
+                provider: providerName,
+                traceId,
+                timestamp: new Date().toISOString(),
+                ...result.metadata
+            }
+        };
+
+        if (!response.success && !response.error) {
+            response.error = { message: 'Unknown error during provider execution', code: 'UNKNOWN_PROVIDER_ERROR' };
+        }
+
+        if (response.error) {
+            window.toast(`Intent Error: ${response.error.message}`, 4000);
+        }
+
+        return response;
+    }
+
+    createErrorResponse(code, message, traceId) {
+        window.toast(`Intent Error: ${message}`, 4000);
+        return {
+            success: false,
+            data: null,
+            error: { code, message },
+            metadata: {
+                traceId,
+                timestamp: new Date().toISOString()
+            }
+        };
+    }
+
+    registerDefaultProviders() {
+        this.registerProvider('system', new SystemProvider());
+        this.registerProvider('http', new HttpProvider());
+        this.registerProvider('ai', new AIProvider());
+        this.registerProvider('terminal', new TerminalProvider());
+        this.registerProvider('git', new GitProvider());
+    }
+}
+
             }
 
             // 4. Execution with Timeout
