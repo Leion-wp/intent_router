@@ -90,7 +90,10 @@ class IntentRouter {
             }
         });
     }
+    registerProvider(name, provider) {
+        this.providers.set(name, provider);
     }
+
     async routeIntent(intent, variableCache = new Map()) {
         const normalized = this.normalizeIntent(intent);
         
