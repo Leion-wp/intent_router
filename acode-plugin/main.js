@@ -68,13 +68,6 @@ class SystemProvider extends BaseProvider {
         case 'confirm':
           const result = window.confirm(data.message || 'Confirm?');
           return this.normalizeResponse(true, result);
-        default:
-          return this.normalizeResponse(false, null, `Action ${action} not supported`);
-      }
-    } catch (e) {
-      return this.normalizeResponse(false, null, e.message);
-    }
-  }
         case 'open_file':
           if (window.editorManager && data.path) {
             window.editorManager.addNewFile(data.path, {
@@ -84,6 +77,13 @@ class SystemProvider extends BaseProvider {
             return this.normalizeResponse(true, { status: 'opened' });
           }
           return this.normalizeResponse(false, null, 'editorManager or path missing');
+        default:
+          return this.normalizeResponse(false, null, `Action ${action} not supported`);
+      }
+    } catch (e) {
+      return this.normalizeResponse(false, null, e.message);
+    }
+  }
 
 class AIProvider extends BaseProvider {
   constructor() {
