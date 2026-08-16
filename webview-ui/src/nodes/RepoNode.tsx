@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import { memo, useState, useEffect, useContext } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext } from '../App';
@@ -46,7 +47,7 @@ const RepoNode = ({ data, id }: NodeProps) => {
   const handleBrowse = () => {
       // Send message to extension
       if (window.vscode) {
-          window.vscode.postMessage({
+          hostBridge.postMessage({
               type: 'selectPath',
               id: id,
               argName: 'path'
@@ -57,10 +58,10 @@ const RepoNode = ({ data, id }: NodeProps) => {
               if (message.type === 'pathSelected' && message.id === id && message.argName === 'path') {
                   setPath(message.path);
                   updateNodeData(id, { path: message.path });
-                  window.removeEventListener('message', handleMessage);
+                  cleanup();
               }
           };
-          window.addEventListener('message', handleMessage);
+          const cleanup = hostBridge.onMessage(handleMessage);
       } else {
           console.log('Browse clicked (Mock): path');
           setPath('/mock/path/repo');

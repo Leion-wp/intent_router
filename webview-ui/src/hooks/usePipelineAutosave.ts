@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import { useEffect, useRef } from 'react';
 
 type UsePipelineAutosaveOptions = {
@@ -42,7 +43,7 @@ export function usePipelineAutosave(options: UsePipelineAutosaveOptions) {
       if (latestSerialized === lastAutosavedRef.current) return;
       lastAutosavedRef.current = latestSerialized;
 
-      vscode.postMessage({
+      hostBridge.postMessage({
         type: 'savePipeline',
         pipeline: latestPipeline,
         silent: true

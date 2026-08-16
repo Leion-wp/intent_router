@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChromeTab } from './ChromeTabsPanel';
 
@@ -91,8 +92,8 @@ export default function ChromeLiveViewer({ tabId, tab, onClose }: Props) {
             }
         };
 
-        window.addEventListener('message', handle);
-        return () => window.removeEventListener('message', handle);
+        const cleanup = hostBridge.onMessage(handle);
+        return () => cleanup();
     }, [tabId]);
 
     // ── Mouse event relay ──

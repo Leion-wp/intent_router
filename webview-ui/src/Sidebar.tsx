@@ -1,3 +1,4 @@
+import { hostBridge } from './utils/HostBridge';
 import React, { useDeferredValue, useMemo, useState, useEffect, useRef } from 'react';
 import { WebviewOutboundMessage } from './types/messages';
 import { normalizeUiPreset, SidebarTabPreset, SidebarTabType, UiPreset } from './types/theme';
@@ -228,45 +229,45 @@ function Sidebar({
   const clearHistory = () => {
     if (!window.vscode) return;
     const msg: WebviewOutboundMessage = { type: 'clearHistory' };
-    window.vscode.postMessage(msg);
+    hostBridge.postMessage(msg);
   };
 
   const openExternal = (url: string) => {
     if (!window.vscode) return;
     const msg: WebviewOutboundMessage = { type: 'openExternal', url };
-    window.vscode.postMessage(msg);
+    hostBridge.postMessage(msg);
   };
 
   const copyToClipboard = (text: string) => {
     if (!window.vscode) return;
     const msg: WebviewOutboundMessage = { type: 'copyToClipboard', text };
-    window.vscode.postMessage(msg);
+    hostBridge.postMessage(msg);
   };
 
   const exportRunAudit = (runId: string) => {
     if (!window.vscode) return;
     const msg: WebviewOutboundMessage = { type: 'exportRunAudit', runId };
-    window.vscode.postMessage(msg);
+    hostBridge.postMessage(msg);
     onExportRunAudit?.(runId);
   };
 
   const fetchPrChecks = (url: string) => {
     if (!window.vscode) return;
     const msg: WebviewOutboundMessage = { type: 'githubPrChecks', url };
-    window.vscode.postMessage(msg);
+    hostBridge.postMessage(msg);
   };
 
   const rerunPrChecks = (url: string) => {
     if (!window.vscode) return;
     const msg: WebviewOutboundMessage = { type: 'githubPrRerunFailed', url };
-    window.vscode.postMessage(msg);
+    hostBridge.postMessage(msg);
   };
 
   const commentPr = (url: string) => {
     const body = window.prompt('PR comment');
     if (!body || !window.vscode) return;
     const msg: WebviewOutboundMessage = { type: 'githubPrComment', url, body };
-    window.vscode.postMessage(msg);
+    hostBridge.postMessage(msg);
   };
 
   useEffect(() => {

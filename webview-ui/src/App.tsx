@@ -1,3 +1,4 @@
+import { hostBridge } from './utils/HostBridge';
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
 import {
   ReactFlow,
@@ -167,7 +168,7 @@ function emitPipelineBuildError(message: string): null {
     action: 'Fix the graph configuration then retry.'
   });
   if (vscode) {
-    vscode.postMessage({ type: 'error', message: userMessage });
+    hostBridge.postMessage({ type: 'error', message: userMessage });
   } else {
     alert(userMessage);
   }
@@ -261,7 +262,7 @@ function Flow({
 
   useEffect(() => {
     try {
-      const st = vscode?.getState?.() || {};
+      const st = (window as any).vscode?.getState?.() || {};
       const chrome = st.chrome || {};
       if (typeof chrome.opacity === 'number') {
         setChromeOpacity(Math.max(0.3, Math.min(1, chrome.opacity)));

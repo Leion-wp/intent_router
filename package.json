@@ -1,800 +1,801 @@
 {
-    "name": "leion-roots",
-    "displayName": "Leion Roots",
-    "description": "Human-centric visual orchestration runtime for VS Code",
-    "publisher": "LeionCorp",
-    "icon": "media/leion_roots_icon.png",
-    "version": "0.0.5",
-    "license": "MIT",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/Leion-wp/intent_router.git"
-    },
-    "engines": {
-        "vscode": "^1.75.0"
-    },
-    "main": "./out/extension.js",
-    "activationEvents": [
-        "onCommand:intentRouter.route",
-        "onCommand:intentRouter.registerCapabilities",
-        "onCommand:intentRouter.routeFromJson",
-        "onCommand:intentRouter.createPipeline",
-        "onCommand:intentRouter.runPipeline",
-        "onCommand:intentRouter.dryRunPipeline",
-        "onCommand:intentRouter.pipelines.new",
-        "onCommand:intentRouter.pipelines.run",
-        "onCommand:intentRouter.pipelines.dryRun",
-        "onCommand:intentRouter.pipelines.openJson",
-        "onCommand:intentRouter.pipelines.refresh",
-        "onCommand:intentRouter.pipelines.openBuilder",
-        "onCommand:intentRouter.pipelines.addCluster",
-        "onCommand:intentRouter.pipelines.renameCluster",
-        "onCommand:intentRouter.pipelines.deleteCluster",
-        "onCommand:intentRouter.pipelines.addPipeline",
-        "onCommand:intentRouter.pipelines.assignCluster",
-        "onCommand:intentRouter.pipelines.removeCluster",
-        "onCommand:intentRouter.pipelines.rename",
-        "onCommand:intentRouter.pipelines.delete",
-        "onCommand:intentRouter.pipelines.sortByUpdated",
-        "onCommand:intentRouter.pipelines.sortManual",
-        "onCommand:intentRouter.generatePipelinePrompt",
-        "onCommand:intentRouter.importPipelineFromClipboard",
-        "onCommand:intentRouter.openCodex",
-        "onCommand:intentRouter.generatePromptAndOpenCodex",
-        "onCommand:intentRouter.importPipelineFromClipboardAndRun",
-        "onView:intentRouterPipelines",
-        "onCommand:intentRouter.openChromeTabs"
+  "name": "leion-roots",
+  "displayName": "Leion Roots",
+  "description": "Human-centric visual orchestration runtime for VS Code",
+  "publisher": "LeionCorp",
+  "icon": "media/leion_roots_icon.png",
+  "version": "0.0.5",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Leion-wp/intent_router.git"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onCommand:intentRouter.route",
+    "onCommand:intentRouter.registerCapabilities",
+    "onCommand:intentRouter.routeFromJson",
+    "onCommand:intentRouter.createPipeline",
+    "onCommand:intentRouter.runPipeline",
+    "onCommand:intentRouter.dryRunPipeline",
+    "onCommand:intentRouter.pipelines.new",
+    "onCommand:intentRouter.pipelines.run",
+    "onCommand:intentRouter.pipelines.dryRun",
+    "onCommand:intentRouter.pipelines.openJson",
+    "onCommand:intentRouter.pipelines.refresh",
+    "onCommand:intentRouter.pipelines.openBuilder",
+    "onCommand:intentRouter.pipelines.addCluster",
+    "onCommand:intentRouter.pipelines.renameCluster",
+    "onCommand:intentRouter.pipelines.deleteCluster",
+    "onCommand:intentRouter.pipelines.addPipeline",
+    "onCommand:intentRouter.pipelines.assignCluster",
+    "onCommand:intentRouter.pipelines.removeCluster",
+    "onCommand:intentRouter.pipelines.rename",
+    "onCommand:intentRouter.pipelines.delete",
+    "onCommand:intentRouter.pipelines.sortByUpdated",
+    "onCommand:intentRouter.pipelines.sortManual",
+    "onCommand:intentRouter.generatePipelinePrompt",
+    "onCommand:intentRouter.importPipelineFromClipboard",
+    "onCommand:intentRouter.openCodex",
+    "onCommand:intentRouter.generatePromptAndOpenCodex",
+    "onCommand:intentRouter.importPipelineFromClipboardAndRun",
+    "onView:intentRouterPipelines",
+    "onCommand:intentRouter.openChromeTabs"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "intentRouter.route",
+        "title": "Intent Router: Route Intent"
+      },
+      {
+        "command": "intentRouter.routeFromJson",
+        "title": "Intent Router: Route Intent (JSON)"
+      },
+      {
+        "command": "intentRouter.createPipeline",
+        "title": "Intent Router: Create Pipeline"
+      },
+      {
+        "command": "intentRouter.runPipeline",
+        "title": "Intent Router: Run Pipeline"
+      },
+      {
+        "command": "intentRouter.dryRunPipeline",
+        "title": "Intent Router: Dry Run Pipeline"
+      },
+      {
+        "command": "intentRouter.pipelines.new",
+        "title": "Intent Router: New Pipeline",
+        "icon": "$(add)"
+      },
+      {
+        "command": "intentRouter.pipelines.loadSoftwareFactoryTemplate",
+        "title": "Intent Router: Load Software Factory Template",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "intentRouter.pipelines.loadSoftwareFactoryBranchTemplate",
+        "title": "Intent Router: Load Software Factory FE/BE Branch Template",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "intentRouter.pipelines.run",
+        "title": "Intent Router: Run Selected Pipeline",
+        "icon": "$(play)"
+      },
+      {
+        "command": "intentRouter.pipelines.dryRun",
+        "title": "Intent Router: Dry Run Selected Pipeline",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "intentRouter.pipelines.openJson",
+        "title": "Intent Router: Open Pipeline JSON",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "intentRouter.pipelines.openBuilder",
+        "title": "Intent Router: Open Pipeline Builder",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "intentRouter.pipelines.addCluster",
+        "title": "Intent Router: Add Cluster",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "intentRouter.pipelines.renameCluster",
+        "title": "Intent Router: Rename Cluster",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "intentRouter.pipelines.deleteCluster",
+        "title": "Intent Router: Delete Cluster",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "intentRouter.pipelines.addPipeline",
+        "title": "Intent Router: Add Pipeline",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "intentRouter.pipelines.assignCluster",
+        "title": "Intent Router: Add Cluster Membership",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "intentRouter.pipelines.removeCluster",
+        "title": "Intent Router: Remove From Cluster",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "intentRouter.pipelines.rename",
+        "title": "Intent Router: Rename Pipeline",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "intentRouter.pipelines.delete",
+        "title": "Intent Router: Delete Pipeline",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "intentRouter.pipelines.sortByUpdated",
+        "title": "Intent Router: Sort Pipelines by Updated",
+        "icon": "$(history)"
+      },
+      {
+        "command": "intentRouter.pipelines.sortManual",
+        "title": "Intent Router: Sort Pipelines Manually",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "intentRouter.generatePipelinePrompt",
+        "title": "Intent Router: Generate Pipeline Prompt",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "intentRouter.importPipelineFromClipboard",
+        "title": "Intent Router: Import Pipeline From Clipboard",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "intentRouter.openCodex",
+        "title": "Intent Router: Open Codex",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "intentRouter.generatePromptAndOpenCodex",
+        "title": "Intent Router: Generate Prompt & Open Codex",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "intentRouter.importPipelineFromClipboardAndRun",
+        "title": "Intent Router: Import Pipeline From Clipboard & Run",
+        "icon": "$(play-circle)"
+      },
+      {
+        "command": "intentRouter.pipelines.refresh",
+        "title": "Intent Router: Refresh Pipelines",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "intentRouter.runtime.refreshTriggers",
+        "title": "Intent Router: Refresh Runtime Triggers",
+        "icon": "$(watch)"
+      },
+      {
+        "command": "intentRouter.openChromeTabs",
+        "title": "Leion Roots: Open Chrome Tabs",
+        "icon": "$(browser)"
+      }
     ],
-    "contributes": {
-        "commands": [
-            {
-                "command": "intentRouter.route",
-                "title": "Intent Router: Route Intent"
-            },
-            {
-                "command": "intentRouter.routeFromJson",
-                "title": "Intent Router: Route Intent (JSON)"
-            },
-            {
-                "command": "intentRouter.createPipeline",
-                "title": "Intent Router: Create Pipeline"
-            },
-            {
-                "command": "intentRouter.runPipeline",
-                "title": "Intent Router: Run Pipeline"
-            },
-            {
-                "command": "intentRouter.dryRunPipeline",
-                "title": "Intent Router: Dry Run Pipeline"
-            },
-            {
-                "command": "intentRouter.pipelines.new",
-                "title": "Intent Router: New Pipeline",
-                "icon": "$(add)"
-            },
-            {
-                "command": "intentRouter.pipelines.loadSoftwareFactoryTemplate",
-                "title": "Intent Router: Load Software Factory Template",
-                "icon": "$(organization)"
-            },
-            {
-                "command": "intentRouter.pipelines.loadSoftwareFactoryBranchTemplate",
-                "title": "Intent Router: Load Software Factory FE/BE Branch Template",
-                "icon": "$(git-branch)"
-            },
-            {
-                "command": "intentRouter.pipelines.run",
-                "title": "Intent Router: Run Selected Pipeline",
-                "icon": "$(play)"
-            },
-            {
-                "command": "intentRouter.pipelines.dryRun",
-                "title": "Intent Router: Dry Run Selected Pipeline",
-                "icon": "$(beaker)"
-            },
-            {
-                "command": "intentRouter.pipelines.openJson",
-                "title": "Intent Router: Open Pipeline JSON",
-                "icon": "$(file-code)"
-            },
-            {
-                "command": "intentRouter.pipelines.openBuilder",
-                "title": "Intent Router: Open Pipeline Builder",
-                "icon": "$(edit)"
-            },
-            {
-                "command": "intentRouter.pipelines.addCluster",
-                "title": "Intent Router: Add Cluster",
-                "icon": "$(new-folder)"
-            },
-            {
-                "command": "intentRouter.pipelines.renameCluster",
-                "title": "Intent Router: Rename Cluster",
-                "icon": "$(edit)"
-            },
-            {
-                "command": "intentRouter.pipelines.deleteCluster",
-                "title": "Intent Router: Delete Cluster",
-                "icon": "$(trash)"
-            },
-            {
-                "command": "intentRouter.pipelines.addPipeline",
-                "title": "Intent Router: Add Pipeline",
-                "icon": "$(new-file)"
-            },
-            {
-                "command": "intentRouter.pipelines.assignCluster",
-                "title": "Intent Router: Add Cluster Membership",
-                "icon": "$(tag)"
-            },
-            {
-                "command": "intentRouter.pipelines.removeCluster",
-                "title": "Intent Router: Remove From Cluster",
-                "icon": "$(remove)"
-            },
-            {
-                "command": "intentRouter.pipelines.rename",
-                "title": "Intent Router: Rename Pipeline",
-                "icon": "$(edit)"
-            },
-            {
-                "command": "intentRouter.pipelines.delete",
-                "title": "Intent Router: Delete Pipeline",
-                "icon": "$(trash)"
-            },
-            {
-                "command": "intentRouter.pipelines.sortByUpdated",
-                "title": "Intent Router: Sort Pipelines by Updated",
-                "icon": "$(history)"
-            },
-            {
-                "command": "intentRouter.pipelines.sortManual",
-                "title": "Intent Router: Sort Pipelines Manually",
-                "icon": "$(list-unordered)"
-            },
-            {
-                "command": "intentRouter.generatePipelinePrompt",
-                "title": "Intent Router: Generate Pipeline Prompt",
-                "icon": "$(sparkle)"
-            },
-            {
-                "command": "intentRouter.importPipelineFromClipboard",
-                "title": "Intent Router: Import Pipeline From Clipboard",
-                "icon": "$(clippy)"
-            },
-            {
-                "command": "intentRouter.openCodex",
-                "title": "Intent Router: Open Codex",
-                "icon": "$(comment-discussion)"
-            },
-            {
-                "command": "intentRouter.generatePromptAndOpenCodex",
-                "title": "Intent Router: Generate Prompt & Open Codex",
-                "icon": "$(sparkle)"
-            },
-            {
-                "command": "intentRouter.importPipelineFromClipboardAndRun",
-                "title": "Intent Router: Import Pipeline From Clipboard & Run",
-                "icon": "$(play-circle)"
-            },
-            {
-                "command": "intentRouter.pipelines.refresh",
-                "title": "Intent Router: Refresh Pipelines",
-                "icon": "$(refresh)"
-            },
-            {
-                "command": "intentRouter.runtime.refreshTriggers",
-                "title": "Intent Router: Refresh Runtime Triggers",
-                "icon": "$(watch)"
-            },
-            {
-                "command": "intentRouter.openChromeTabs",
-                "title": "Leion Roots: Open Chrome Tabs",
-                "icon": "$(browser)"
-            }
-        ],
-        "viewsContainers": {
-            "activitybar": [
-                {
-                    "id": "intentRouter",
-                    "title": "Leion Roots",
-                    "icon": "media/leion_roots_icon.png"
-                }
-            ]
-        },
-        "views": {
-            "intentRouter": [
-                {
-                    "id": "intentRouterPipelines",
-                    "name": "Intent Pipelines"
-                }
-            ]
-        },
-        "menus": {
-            "view/title": [
-                {
-                    "command": "intentRouter.pipelines.new",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.pipelines.addCluster",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.pipelines.addPipeline",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.pipelines.sortByUpdated",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.pipelines.sortManual",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.generatePromptAndOpenCodex",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.pipelines.loadSoftwareFactoryTemplate",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.pipelines.loadSoftwareFactoryBranchTemplate",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.importPipelineFromClipboardAndRun",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.openCodex",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.pipelines.run",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.pipelines.dryRun",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.pipelines.openJson",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.pipelines.refresh",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.runtime.refreshTriggers",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                },
-                {
-                    "command": "intentRouter.openChromeTabs",
-                    "when": "view == intentRouterPipelines",
-                    "group": "navigation"
-                }
-            ],
-            "view/item/context": [
-                {
-                    "command": "intentRouter.pipelines.run",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
-                    "group": "inline@1"
-                },
-                {
-                    "command": "intentRouter.pipelines.dryRun",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
-                    "group": "inline@2"
-                },
-                {
-                    "command": "intentRouter.pipelines.openJson",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
-                    "group": "inline@3"
-                },
-                {
-                    "command": "intentRouter.pipelines.openBuilder",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
-                    "group": "inline@4"
-                },
-                {
-                    "command": "intentRouter.pipelines.run",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
-                    "group": "inline@1"
-                },
-                {
-                    "command": "intentRouter.pipelines.dryRun",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
-                    "group": "inline@2"
-                },
-                {
-                    "command": "intentRouter.pipelines.openJson",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
-                    "group": "inline@3"
-                },
-                {
-                    "command": "intentRouter.pipelines.openBuilder",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
-                    "group": "inline@4"
-                },
-                {
-                    "command": "intentRouter.pipelines.renameCluster",
-                    "when": "view == intentRouterPipelines && viewItem == clusterItem",
-                    "group": "navigation@1"
-                },
-                {
-                    "command": "intentRouter.pipelines.addPipeline",
-                    "when": "view == intentRouterPipelines && viewItem == clusterItem",
-                    "group": "navigation@2"
-                },
-                {
-                    "command": "intentRouter.pipelines.deleteCluster",
-                    "when": "view == intentRouterPipelines && viewItem == clusterItem",
-                    "group": "navigation@3"
-                },
-                {
-                    "command": "intentRouter.pipelines.addPipeline",
-                    "when": "view == intentRouterPipelines && viewItem == uncategorizedClusterItem",
-                    "group": "navigation@1"
-                },
-                {
-                    "command": "intentRouter.pipelines.assignCluster",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
-                    "group": "navigation@1"
-                },
-                {
-                    "command": "intentRouter.pipelines.rename",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
-                    "group": "navigation@2"
-                },
-                {
-                    "command": "intentRouter.pipelines.delete",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineItem",
-                    "group": "navigation@3"
-                },
-                {
-                    "command": "intentRouter.pipelines.assignCluster",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
-                    "group": "navigation@1"
-                },
-                {
-                    "command": "intentRouter.pipelines.removeCluster",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
-                    "group": "navigation@2"
-                },
-                {
-                    "command": "intentRouter.pipelines.rename",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
-                    "group": "navigation@3"
-                },
-                {
-                    "command": "intentRouter.pipelines.delete",
-                    "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
-                    "group": "navigation@4"
-                }
-            ]
-        },
-        "configuration": {
-            "title": "Intent Router",
-            "properties": {
-                "intentRouter.mappings": {
-                    "type": "array",
-                    "default": [],
-                    "description": "User-defined capability mappings that override registered providers.",
-                    "items": {
-                        "type": "object",
-                        "required": [
-                            "capability",
-                            "command"
-                        ],
-                        "properties": {
-                            "capability": {
-                                "type": "string",
-                                "description": "Normalized capability identifier (ex: git.push)."
-                            },
-                            "command": {
-                                "type": "string",
-                                "description": "VS Code command to execute for this capability."
-                            },
-                            "provider": {
-                                "type": "string",
-                                "description": "Optional provider name to scope this mapping."
-                            },
-                            "target": {
-                                "type": "string",
-                                "description": "Optional target name to scope this mapping."
-                            },
-                            "type": {
-                                "type": "string",
-                                "enum": [
-                                    "vscode",
-                                    "external"
-                                ],
-                                "description": "Provider type. External is reserved for future use."
-                            }
-                        }
-                    }
-                },
-                "intentRouter.debug": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Enable verbose Intent Router logs in the console."
-                },
-                "intentRouter.logLevel": {
-                    "type": "string",
-                    "enum": [
-                        "error",
-                        "warn",
-                        "info",
-                        "debug"
-                    ],
-                    "default": "info",
-                    "description": "Minimum log level for the Intent Router output channel."
-                },
-                "intentRouter.activeProfile": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Active profile name used for profile-specific mappings and provider settings."
-                },
-                "intentRouter.profiles": {
-                    "type": "array",
-                    "default": [],
-                    "description": "Named profiles that can override mappings and provider enablement.",
-                    "items": {
-                        "type": "object",
-                        "required": [
-                            "name"
-                        ],
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "Profile name."
-                            },
-                            "mappings": {
-                                "type": "array",
-                                "default": [],
-                                "description": "Profile-specific mappings that override global mappings.",
-                                "items": {
-                                    "type": "object",
-                                    "required": [
-                                        "capability",
-                                        "command"
-                                    ],
-                                    "properties": {
-                                        "capability": {
-                                            "type": "string",
-                                            "description": "Normalized capability identifier (ex: git.push)."
-                                        },
-                                        "command": {
-                                            "type": "string",
-                                            "description": "VS Code command to execute for this capability."
-                                        },
-                                        "provider": {
-                                            "type": "string",
-                                            "description": "Optional provider name to scope this mapping."
-                                        },
-                                        "target": {
-                                            "type": "string",
-                                            "description": "Optional target name to scope this mapping."
-                                        },
-                                        "type": {
-                                            "type": "string",
-                                            "enum": [
-                                                "vscode",
-                                                "external"
-                                            ],
-                                            "description": "Provider type. External is reserved for future use."
-                                        }
-                                    }
-                                }
-                            },
-                            "enabledProviders": {
-                                "type": "array",
-                                "default": [],
-                                "items": {
-                                    "type": "string"
-                                },
-                                "description": "If set, only these providers are allowed."
-                            },
-                            "disabledProviders": {
-                                "type": "array",
-                                "default": [],
-                                "items": {
-                                    "type": "string"
-                                },
-                                "description": "Providers to block."
-                            }
-                        }
-                    }
-                },
-                "intentRouter.environment": {
-                    "type": "object",
-                    "default": {},
-                    "description": "Workspace environment variables (and secrets) injected into terminal steps and available as ${var:NAME}.",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "intentRouter.history.maxRuns": {
-                    "type": "number",
-                    "default": 50,
-                    "minimum": 1,
-                    "maximum": 500,
-                    "description": "Maximum number of pipeline runs to keep in history.json."
-                },
-                "intentRouter.history.snapshotMode": {
-                    "type": "string",
-                    "enum": [
-                        "full",
-                        "minimal",
-                        "none"
-                    ],
-                    "default": "full",
-                    "description": "Snapshot storage mode for history: full=store full pipeline, minimal=store only meta.ui snapshot, none=disable snapshot/restore."
-                },
-                "intentRouter.demoProvider": {
-                    "type": "string",
-                    "enum": [
-                        "",
-                        "git"
-                    ],
-                    "default": "",
-                    "description": "Enable a built-in demo provider (git) for quick testing."
-                },
-                "intentRouter.policy.ciStrict": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "CI strict mode: block interactive (non-deterministic) steps like system.pause or vscode.runCommand."
-                },
-                "intentRouter.policy.interactiveBehavior": {
-                    "type": "string",
-                    "enum": [
-                        "confirm",
-                        "allow"
-                    ],
-                    "default": "confirm",
-                    "description": "Behavior when an interactive step is encountered (when ciStrict=false). confirm=warn+confirm, allow=run without prompts."
-                },
-                "intentRouter.policy.review.mode": {
-                    "type": "string",
-                    "enum": [
-                        "warn",
-                        "block"
-                    ],
-                    "default": "warn",
-                    "description": "Review policy mode for ApprovalNode. warn=show violations but allow approval, block=refuse review when violations exist."
-                },
-                "intentRouter.policy.review.blockedPaths": {
-                    "type": "array",
-                    "default": [],
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "Glob-like path patterns blocked by review policy (e.g. **/secrets/**, package-lock.json)."
-                },
-                "intentRouter.policy.review.blockedExtensions": {
-                    "type": "array",
-                    "default": [],
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "Blocked file extensions for AI review apply (e.g. .pem, .key, .pfx)."
-                },
-                "intentRouter.policy.review.maxChangedLines": {
-                    "type": "number",
-                    "default": 0,
-                    "minimum": 0,
-                    "description": "Maximum total changed lines (+/-) allowed in one approval step. 0 disables this guard."
-                },
-                "intentRouter.ai.codex.command": {
-                    "type": "string",
-                    "default": "codex",
-                    "description": "Codex CLI command name/path used by ai.generate when provider=codex."
-                },
-                "intentRouter.ai.codex.args": {
-                    "type": "array",
-                    "default": [
-                        "exec",
-                        "--model",
-                        "{model}",
-                        "--reasoning-effort",
-                        "{reasoningEffort}",
-                        "{stdin}"
-                    ],
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "Codex CLI args template. Placeholders: {model}, {reasoningEffort}, {stdin}, {prompt}."
-                },
-                "intentRouter.ai.team.reviewerVoteWeight": {
-                    "type": "number",
-                    "default": 2,
-                    "minimum": 1,
-                    "description": "Vote weight multiplier for reviewer members in ai.team strategy=vote."
-                },
-                "intentRouter.ai.memory.enabled": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Enable persistent AI team session memory in workspace .intent-router/session-memory.json."
-                },
-                "intentRouter.ai.memory.ttlDays": {
-                    "type": "number",
-                    "default": 7,
-                    "minimum": 1,
-                    "description": "Session memory retention in days before pruning old entries."
-                },
-                "intentRouter.ai.memory.maxEntries": {
-                    "type": "number",
-                    "default": 40,
-                    "minimum": 5,
-                    "description": "Maximum stored session memory entries per session id."
-                },
-                "intentRouter.memory.enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable Memory v2 runtime nodes (memory.save / memory.recall / memory.clear)."
-                },
-                "intentRouter.memory.ttlDays": {
-                    "type": "number",
-                    "default": 30,
-                    "minimum": 1,
-                    "description": "Retention window for Memory v2 records in days."
-                },
-                "intentRouter.memory.maxRecordsPerSession": {
-                    "type": "number",
-                    "default": 200,
-                    "minimum": 10,
-                    "description": "Maximum Memory v2 records kept per session."
-                },
-                "intentRouter.memory.maxPayloadChars": {
-                    "type": "number",
-                    "default": 120000,
-                    "minimum": 1024,
-                    "description": "Maximum serialized payload size per Memory v2 record before truncation."
-                },
-                "intentRouter.devMode": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Dev mode: show self-packaging preset pipeline (npm install/compile/vsce package/install vsix/reload)."
-                },
-                "intentRouter.runtime.triggers.enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable autonomous runtime triggers (cron/webhook/watch) discovered from pipeline steps."
-                },
-                "intentRouter.runtime.triggers.webhookPort": {
-                    "type": "number",
-                    "default": 7781,
-                    "minimum": 1,
-                    "maximum": 65535,
-                    "description": "Local webhook server port for system.trigger.webhook."
-                },
-                "intentRouter.runtime.triggers.maxChainDepth": {
-                    "type": "number",
-                    "default": 4,
-                    "minimum": 1,
-                    "maximum": 20,
-                    "description": "Maximum onSuccess pipeline chaining depth for runtime triggers."
-                },
-                "intentRouter.runtime.subPipeline.maxDepth": {
-                    "type": "number",
-                    "default": 4,
-                    "minimum": 1,
-                    "maximum": 20,
-                    "description": "Maximum nested depth for system.subPipeline execution."
-                },
-                "intentRouter.runtime.loop.enabled": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable loop execution (system.loop) in runtime."
-                },
-                "intentRouter.runtime.loop.maxTotalOps": {
-                    "type": "number",
-                    "default": 500,
-                    "minimum": 1,
-                    "description": "Maximum total loop operations per step (iterations × body)."
-                },
-                "intentRouter.runtime.loop.maxDurationMs": {
-                    "type": "number",
-                    "default": 900000,
-                    "minimum": 1000,
-                    "description": "Maximum total duration for a loop step."
-                },
-                "intentRouter.runtime.sandbox.allowNetwork": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Default runtime sandbox policy: allow network-capable intents."
-                },
-                "intentRouter.runtime.sandbox.allowFileWrite": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Default runtime sandbox policy: allow file-writing intents."
-                },
-                "intentRouter.runtime.sandbox.timeoutMs": {
-                    "type": "number",
-                    "default": 120000,
-                    "minimum": 1000,
-                    "description": "Default per-step timeout enforced by runtime sandbox."
-                },
-                "intentRouter.runtime.reviewDiff.timeoutMs": {
-                    "type": "number",
-                    "default": 1800000,
-                    "minimum": 1000,
-                    "description": "Default timeout for vscode.reviewDiff steps when no per-step __sandbox.timeoutMs override is set."
-                },
-                "intentRouter.runtime.sandbox.maxCommandChars": {
-                    "type": "number",
-                    "default": 12000,
-                    "minimum": 256,
-                    "description": "Maximum allowed terminal command length before sandbox rejects the step."
-                },
-                "intentRouter.runtime.sandbox.allowedIntents": {
-                    "type": "array",
-                    "default": [],
-                    "items": {
-                        "type": "string"
-                    },
-                    "description": "Optional allowlist of intent prefixes for runtime execution. Empty = allow all."
-                },
-                "intentRouter.runtime.sandbox.maxNetworkOps": {
-                    "type": "number",
-                    "default": 40,
-                    "minimum": 1,
-                    "description": "Maximum number of network-capable steps per run."
-                },
-                "intentRouter.runtime.sandbox.maxFileWrites": {
-                    "type": "number",
-                    "default": 40,
-                    "minimum": 1,
-                    "description": "Maximum number of file-writing steps per run."
-                },
-                "leionRoots.adminMode": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Admin mode: enables Theme Studio draft editing for UI tokens."
-                }
-            }
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "intentRouter",
+          "title": "Leion Roots",
+          "icon": "media/leion_roots_icon.png"
         }
+      ]
     },
-    "scripts": {
-        "vscode:prepublish": "npm run compile",
-        "compile": "npm run build:webview && tsc -p ./",
-        "watch": "tsc -watch -p ./",
-        "test": "npm run compile && node ./out/test/runTest.js",
-        "test:webview-state": "node ./scripts/run-webview-ui-state-tests.js",
-        "test:stability": "node ./scripts/pr15-stability-gate.js",
-        "build:webview": "node ./scripts/build-webview-with-retry.js",
-        "build:webview:raw": "cd webview-ui && npm run build"
+    "views": {
+      "intentRouter": [
+        {
+          "id": "intentRouterPipelines",
+          "name": "Intent Pipelines"
+        }
+      ]
     },
-    "devDependencies": {
-        "@types/mocha": "^10.0.10",
-        "@types/node": "16.x",
-        "@types/vscode": "^1.75.0",
-        "@vscode/codicons": "^0.0.44",
-        "@vscode/test-electron": "^2.5.2",
-        "glob": "^13.0.0",
-        "mocha": "^11.7.5",
-        "ts-node": "^10.9.2",
-        "typescript": "^4.9.5"
+    "menus": {
+      "view/title": [
+        {
+          "command": "intentRouter.pipelines.new",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.pipelines.addCluster",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.pipelines.addPipeline",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.pipelines.sortByUpdated",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.pipelines.sortManual",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.generatePromptAndOpenCodex",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.pipelines.loadSoftwareFactoryTemplate",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.pipelines.loadSoftwareFactoryBranchTemplate",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.importPipelineFromClipboardAndRun",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.openCodex",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.pipelines.run",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.pipelines.dryRun",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.pipelines.openJson",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.pipelines.refresh",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.runtime.refreshTriggers",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        },
+        {
+          "command": "intentRouter.openChromeTabs",
+          "when": "view == intentRouterPipelines",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "intentRouter.pipelines.run",
+          "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+          "group": "inline@1"
+        },
+        {
+          "command": "intentRouter.pipelines.dryRun",
+          "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+          "group": "inline@2"
+        },
+        {
+          "command": "intentRouter.pipelines.openJson",
+          "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+          "group": "inline@3"
+        },
+        {
+          "command": "intentRouter.pipelines.openBuilder",
+          "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+          "group": "inline@4"
+        },
+        {
+          "command": "intentRouter.pipelines.run",
+          "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+          "group": "inline@1"
+        },
+        {
+          "command": "intentRouter.pipelines.dryRun",
+          "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+          "group": "inline@2"
+        },
+        {
+          "command": "intentRouter.pipelines.openJson",
+          "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+          "group": "inline@3"
+        },
+        {
+          "command": "intentRouter.pipelines.openBuilder",
+          "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+          "group": "inline@4"
+        },
+        {
+          "command": "intentRouter.pipelines.renameCluster",
+          "when": "view == intentRouterPipelines && viewItem == clusterItem",
+          "group": "navigation@1"
+        },
+        {
+          "command": "intentRouter.pipelines.addPipeline",
+          "when": "view == intentRouterPipelines && viewItem == clusterItem",
+          "group": "navigation@2"
+        },
+        {
+          "command": "intentRouter.pipelines.deleteCluster",
+          "when": "view == intentRouterPipelines && viewItem == clusterItem",
+          "group": "navigation@3"
+        },
+        {
+          "command": "intentRouter.pipelines.addPipeline",
+          "when": "view == intentRouterPipelines && viewItem == uncategorizedClusterItem",
+          "group": "navigation@1"
+        },
+        {
+          "command": "intentRouter.pipelines.assignCluster",
+          "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+          "group": "navigation@1"
+        },
+        {
+          "command": "intentRouter.pipelines.rename",
+          "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+          "group": "navigation@2"
+        },
+        {
+          "command": "intentRouter.pipelines.delete",
+          "when": "view == intentRouterPipelines && viewItem == pipelineItem",
+          "group": "navigation@3"
+        },
+        {
+          "command": "intentRouter.pipelines.assignCluster",
+          "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+          "group": "navigation@1"
+        },
+        {
+          "command": "intentRouter.pipelines.removeCluster",
+          "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+          "group": "navigation@2"
+        },
+        {
+          "command": "intentRouter.pipelines.rename",
+          "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+          "group": "navigation@3"
+        },
+        {
+          "command": "intentRouter.pipelines.delete",
+          "when": "view == intentRouterPipelines && viewItem == pipelineInClusterItem",
+          "group": "navigation@4"
+        }
+      ]
     },
-    "dependencies": {
-        "zod": "^3.25.76"
+    "configuration": {
+      "title": "Intent Router",
+      "properties": {
+        "intentRouter.mappings": {
+          "type": "array",
+          "default": [],
+          "description": "User-defined capability mappings that override registered providers.",
+          "items": {
+            "type": "object",
+            "required": [
+              "capability",
+              "command"
+            ],
+            "properties": {
+              "capability": {
+                "type": "string",
+                "description": "Normalized capability identifier (ex: git.push)."
+              },
+              "command": {
+                "type": "string",
+                "description": "VS Code command to execute for this capability."
+              },
+              "provider": {
+                "type": "string",
+                "description": "Optional provider name to scope this mapping."
+              },
+              "target": {
+                "type": "string",
+                "description": "Optional target name to scope this mapping."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vscode",
+                  "external"
+                ],
+                "description": "Provider type. External is reserved for future use."
+              }
+            }
+          }
+        },
+        "intentRouter.debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose Intent Router logs in the console."
+        },
+        "intentRouter.logLevel": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug"
+          ],
+          "default": "info",
+          "description": "Minimum log level for the Intent Router output channel."
+        },
+        "intentRouter.activeProfile": {
+          "type": "string",
+          "default": "",
+          "description": "Active profile name used for profile-specific mappings and provider settings."
+        },
+        "intentRouter.profiles": {
+          "type": "array",
+          "default": [],
+          "description": "Named profiles that can override mappings and provider enablement.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Profile name."
+              },
+              "mappings": {
+                "type": "array",
+                "default": [],
+                "description": "Profile-specific mappings that override global mappings.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "capability",
+                    "command"
+                  ],
+                  "properties": {
+                    "capability": {
+                      "type": "string",
+                      "description": "Normalized capability identifier (ex: git.push)."
+                    },
+                    "command": {
+                      "type": "string",
+                      "description": "VS Code command to execute for this capability."
+                    },
+                    "provider": {
+                      "type": "string",
+                      "description": "Optional provider name to scope this mapping."
+                    },
+                    "target": {
+                      "type": "string",
+                      "description": "Optional target name to scope this mapping."
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "vscode",
+                        "external"
+                      ],
+                      "description": "Provider type. External is reserved for future use."
+                    }
+                  }
+                }
+              },
+              "enabledProviders": {
+                "type": "array",
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "description": "If set, only these providers are allowed."
+              },
+              "disabledProviders": {
+                "type": "array",
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "description": "Providers to block."
+              }
+            }
+          }
+        },
+        "intentRouter.environment": {
+          "type": "object",
+          "default": {},
+          "description": "Workspace environment variables (and secrets) injected into terminal steps and available as ${var:NAME}.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "intentRouter.history.maxRuns": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Maximum number of pipeline runs to keep in history.json."
+        },
+        "intentRouter.history.snapshotMode": {
+          "type": "string",
+          "enum": [
+            "full",
+            "minimal",
+            "none"
+          ],
+          "default": "full",
+          "description": "Snapshot storage mode for history: full=store full pipeline, minimal=store only meta.ui snapshot, none=disable snapshot/restore."
+        },
+        "intentRouter.demoProvider": {
+          "type": "string",
+          "enum": [
+            "",
+            "git"
+          ],
+          "default": "",
+          "description": "Enable a built-in demo provider (git) for quick testing."
+        },
+        "intentRouter.policy.ciStrict": {
+          "type": "boolean",
+          "default": false,
+          "description": "CI strict mode: block interactive (non-deterministic) steps like system.pause or vscode.runCommand."
+        },
+        "intentRouter.policy.interactiveBehavior": {
+          "type": "string",
+          "enum": [
+            "confirm",
+            "allow"
+          ],
+          "default": "confirm",
+          "description": "Behavior when an interactive step is encountered (when ciStrict=false). confirm=warn+confirm, allow=run without prompts."
+        },
+        "intentRouter.policy.review.mode": {
+          "type": "string",
+          "enum": [
+            "warn",
+            "block"
+          ],
+          "default": "warn",
+          "description": "Review policy mode for ApprovalNode. warn=show violations but allow approval, block=refuse review when violations exist."
+        },
+        "intentRouter.policy.review.blockedPaths": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob-like path patterns blocked by review policy (e.g. **/secrets/**, package-lock.json)."
+        },
+        "intentRouter.policy.review.blockedExtensions": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Blocked file extensions for AI review apply (e.g. .pem, .key, .pfx)."
+        },
+        "intentRouter.policy.review.maxChangedLines": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Maximum total changed lines (+/-) allowed in one approval step. 0 disables this guard."
+        },
+        "intentRouter.ai.codex.command": {
+          "type": "string",
+          "default": "codex",
+          "description": "Codex CLI command name/path used by ai.generate when provider=codex."
+        },
+        "intentRouter.ai.codex.args": {
+          "type": "array",
+          "default": [
+            "exec",
+            "--model",
+            "{model}",
+            "--reasoning-effort",
+            "{reasoningEffort}",
+            "{stdin}"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Codex CLI args template. Placeholders: {model}, {reasoningEffort}, {stdin}, {prompt}."
+        },
+        "intentRouter.ai.team.reviewerVoteWeight": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "description": "Vote weight multiplier for reviewer members in ai.team strategy=vote."
+        },
+        "intentRouter.ai.memory.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable persistent AI team session memory in workspace .intent-router/session-memory.json."
+        },
+        "intentRouter.ai.memory.ttlDays": {
+          "type": "number",
+          "default": 7,
+          "minimum": 1,
+          "description": "Session memory retention in days before pruning old entries."
+        },
+        "intentRouter.ai.memory.maxEntries": {
+          "type": "number",
+          "default": 40,
+          "minimum": 5,
+          "description": "Maximum stored session memory entries per session id."
+        },
+        "intentRouter.memory.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Memory v2 runtime nodes (memory.save / memory.recall / memory.clear)."
+        },
+        "intentRouter.memory.ttlDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Retention window for Memory v2 records in days."
+        },
+        "intentRouter.memory.maxRecordsPerSession": {
+          "type": "number",
+          "default": 200,
+          "minimum": 10,
+          "description": "Maximum Memory v2 records kept per session."
+        },
+        "intentRouter.memory.maxPayloadChars": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1024,
+          "description": "Maximum serialized payload size per Memory v2 record before truncation."
+        },
+        "intentRouter.devMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Dev mode: show self-packaging preset pipeline (npm install/compile/vsce package/install vsix/reload)."
+        },
+        "intentRouter.runtime.triggers.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable autonomous runtime triggers (cron/webhook/watch) discovered from pipeline steps."
+        },
+        "intentRouter.runtime.triggers.webhookPort": {
+          "type": "number",
+          "default": 7781,
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Local webhook server port for system.trigger.webhook."
+        },
+        "intentRouter.runtime.triggers.maxChainDepth": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Maximum onSuccess pipeline chaining depth for runtime triggers."
+        },
+        "intentRouter.runtime.subPipeline.maxDepth": {
+          "type": "number",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Maximum nested depth for system.subPipeline execution."
+        },
+        "intentRouter.runtime.loop.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable loop execution (system.loop) in runtime."
+        },
+        "intentRouter.runtime.loop.maxTotalOps": {
+          "type": "number",
+          "default": 500,
+          "minimum": 1,
+          "description": "Maximum total loop operations per step (iterations × body)."
+        },
+        "intentRouter.runtime.loop.maxDurationMs": {
+          "type": "number",
+          "default": 900000,
+          "minimum": 1000,
+          "description": "Maximum total duration for a loop step."
+        },
+        "intentRouter.runtime.sandbox.allowNetwork": {
+          "type": "boolean",
+          "default": true,
+          "description": "Default runtime sandbox policy: allow network-capable intents."
+        },
+        "intentRouter.runtime.sandbox.allowFileWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Default runtime sandbox policy: allow file-writing intents."
+        },
+        "intentRouter.runtime.sandbox.timeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1000,
+          "description": "Default per-step timeout enforced by runtime sandbox."
+        },
+        "intentRouter.runtime.reviewDiff.timeoutMs": {
+          "type": "number",
+          "default": 1800000,
+          "minimum": 1000,
+          "description": "Default timeout for vscode.reviewDiff steps when no per-step __sandbox.timeoutMs override is set."
+        },
+        "intentRouter.runtime.sandbox.maxCommandChars": {
+          "type": "number",
+          "default": 12000,
+          "minimum": 256,
+          "description": "Maximum allowed terminal command length before sandbox rejects the step."
+        },
+        "intentRouter.runtime.sandbox.allowedIntents": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional allowlist of intent prefixes for runtime execution. Empty = allow all."
+        },
+        "intentRouter.runtime.sandbox.maxNetworkOps": {
+          "type": "number",
+          "default": 40,
+          "minimum": 1,
+          "description": "Maximum number of network-capable steps per run."
+        },
+        "intentRouter.runtime.sandbox.maxFileWrites": {
+          "type": "number",
+          "default": 40,
+          "minimum": 1,
+          "description": "Maximum number of file-writing steps per run."
+        },
+        "leionRoots.adminMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Admin mode: enables Theme Studio draft editing for UI tokens."
+        }
+      }
     }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "npm run build:webview && tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node ./out/test/runTest.js",
+    "test:webview-state": "node ./scripts/run-webview-ui-state-tests.js",
+    "test:stability": "node ./scripts/pr15-stability-gate.js",
+    "build:webview": "node ./scripts/build-webview-with-retry.js",
+    "build:webview:raw": "cd webview-ui && npm run build",
+    "build:acode": "node scripts/build-acode-plugin.js"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "16.x",
+    "@types/vscode": "^1.75.0",
+    "@vscode/codicons": "^0.0.44",
+    "@vscode/test-electron": "^2.5.2",
+    "glob": "^13.0.0",
+    "mocha": "^11.7.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^4.9.5"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  }
 }

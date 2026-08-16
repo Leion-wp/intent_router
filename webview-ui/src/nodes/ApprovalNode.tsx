@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import { memo, useState, useEffect, useContext } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext } from '../App';
@@ -77,7 +78,7 @@ const ApprovalNode = ({ data, id }: NodeProps) => {
 
   const handleDecision = (decision: 'approve' | 'reject', approvedPaths?: string[]) => {
     if (vscode) {
-        vscode.postMessage({
+        hostBridge.postMessage({
             type: 'pipelineDecision',
             nodeId: id,
             runId: reviewRunId || undefined,
@@ -98,7 +99,7 @@ const ApprovalNode = ({ data, id }: NodeProps) => {
       }
       setViewedPaths(allViewed);
     }
-    vscode.postMessage({
+    hostBridge.postMessage({
       type: 'pipelineReviewOpenDiff',
       nodeId: id,
       runId: reviewRunId || undefined,

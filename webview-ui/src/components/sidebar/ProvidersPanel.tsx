@@ -1,3 +1,4 @@
+import { hostBridge } from '../../utils/HostBridge';
 import React from 'react';
 import { WebviewOutboundMessage } from '../../types/messages';
 
@@ -89,7 +90,7 @@ function ProvidersPanel({
             onClick={() => {
               if (!window.vscode) return;
               const msg: WebviewOutboundMessage = { type: 'devPackager.loadPreset' };
-              window.vscode.postMessage(msg);
+              hostBridge.postMessage(msg);
             }}
             style={{
               width: '100%',

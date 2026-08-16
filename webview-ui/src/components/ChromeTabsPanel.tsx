@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import React, { useEffect, useState, useCallback } from 'react';
 import ChromeLiveViewer from './ChromeLiveViewer';
 
@@ -276,8 +277,8 @@ export default function ChromeTabsPanel() {
           break;
       }
     };
-    window.addEventListener('message', handle);
-    return () => window.removeEventListener('message', handle);
+    const cleanup = hostBridge.onMessage(handle);
+    return () => cleanup();
   }, []);
 
   // ── Actions (WebView → VS Code extension → Bridge → Chrome) ──

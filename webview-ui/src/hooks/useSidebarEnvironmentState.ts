@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import { useEffect, useState } from 'react';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
 
@@ -34,8 +35,8 @@ export function useSidebarEnvironmentState(): UseSidebarEnvironmentStateResult {
       if (event.data.type !== 'environmentUpdate') return;
       setEnvVars(mapEnvironmentToVars(event.data.environment));
     };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    const cleanup = hostBridge.onMessage(handleMessage);
+    return () => cleanup();
   }, []);
 
   const saveEnv = (nextVars: SidebarEnvVar[]) => {
@@ -50,7 +51,7 @@ export function useSidebarEnvironmentState(): UseSidebarEnvironmentStateResult {
         type: 'saveEnvironment',
         environment
       };
-      window.vscode.postMessage(message);
+      hostBridge.postMessage(message);
     }
   };
 

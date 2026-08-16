@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { SchemaField } from '../components/SchemaArgsForm';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
@@ -116,8 +117,8 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
         }));
       }
     };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    const cleanup = hostBridge.onMessage(handleMessage);
+    return () => cleanup();
   }, []);
 
   const startNewDraft = () => {
@@ -189,7 +190,7 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
     setLastFailedAction(null);
     if (window.vscode) {
       const message: WebviewOutboundMessage = { type: 'customNodes.upsert', node };
-      window.vscode.postMessage(message);
+      hostBridge.postMessage(message);
     }
     setStudioSelectedId(id);
   };
@@ -199,7 +200,7 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
     if (!target) return;
     if (window.vscode) {
       const message: WebviewOutboundMessage = { type: 'customNodes.delete', id: target };
-      window.vscode.postMessage(message);
+      hostBridge.postMessage(message);
     }
     if (studioSelectedId === target) {
       setStudioSelectedId('');
@@ -214,7 +215,7 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
     if (!window.vscode) return;
     const id = scope === 'one' ? String(studioSelectedId || '') : undefined;
     const message: WebviewOutboundMessage = { type: 'customNodes.export', scope, id };
-    window.vscode.postMessage(message);
+    hostBridge.postMessage(message);
   };
 
   const importFromPaste = () => {
@@ -222,7 +223,7 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
     lastImportSourceRef.current = 'paste';
     setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'customNodes.import', source: 'paste', jsonText: studioImportJson };
-    window.vscode.postMessage(message);
+    hostBridge.postMessage(message);
   };
 
   const importFromFile = () => {
@@ -230,7 +231,7 @@ export function useStudioSidebarState(): UseStudioSidebarStateResult {
     lastImportSourceRef.current = 'file';
     setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'customNodes.import', source: 'file' };
-    window.vscode.postMessage(message);
+    hostBridge.postMessage(message);
   };
 
   const retryLastAction = () => {

@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
 import {
@@ -116,8 +117,8 @@ export function useUiPresetSidebarState({
       }
     };
 
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    const cleanup = hostBridge.onMessage(handleMessage);
+    return () => cleanup();
   }, []);
 
   const setThemeToken = (path: string, value: string) => {
@@ -143,7 +144,7 @@ export function useUiPresetSidebarState({
     setThemeError('');
     setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'uiPreset.saveDraft', uiPreset: uiPresetDraft };
-    window.vscode.postMessage(message);
+    hostBridge.postMessage(message);
   };
 
   const resetThemeDraft = () => {
@@ -152,7 +153,7 @@ export function useUiPresetSidebarState({
     setThemeError('');
     setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'uiPreset.resetDraft' };
-    window.vscode.postMessage(message);
+    hostBridge.postMessage(message);
   };
 
   const exportTheme = () => {
@@ -160,7 +161,7 @@ export function useUiPresetSidebarState({
     lastAttemptedActionRef.current = 'export';
     setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'uiPreset.exportCurrent' };
-    window.vscode.postMessage(message);
+    hostBridge.postMessage(message);
   };
 
   const importTheme = (source: 'paste' | 'file') => {
@@ -173,7 +174,7 @@ export function useUiPresetSidebarState({
       source,
       jsonText: source === 'paste' ? themeImportJson : undefined
     };
-    window.vscode.postMessage(message);
+    hostBridge.postMessage(message);
   };
 
   const resetThemeDefaults = () => {
@@ -182,7 +183,7 @@ export function useUiPresetSidebarState({
     setThemeError('');
     setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'uiPreset.resetToDefaults' };
-    window.vscode.postMessage(message);
+    hostBridge.postMessage(message);
   };
 
   const propagateThemeDraft = () => {
@@ -192,7 +193,7 @@ export function useUiPresetSidebarState({
     setUiPropagateSummary('');
     setLastFailedAction(null);
     const message: WebviewOutboundMessage = { type: 'uiPreset.propagateDraft' };
-    window.vscode.postMessage(message);
+    hostBridge.postMessage(message);
   };
 
   const retryLastAction = () => {

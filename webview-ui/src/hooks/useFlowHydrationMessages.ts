@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import { useEffect } from 'react';
 import { isInboundMessage, WebviewInboundMessage } from '../types/messages';
 import {
@@ -176,8 +177,8 @@ export function useFlowHydrationMessages(options: UseFlowHydrationMessagesOption
       }
     };
 
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    const cleanup = hostBridge.onMessage(handleMessage);
+    return () => cleanup();
   }, [
     initialPipeline,
     loadPipeline,

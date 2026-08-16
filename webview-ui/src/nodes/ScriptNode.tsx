@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import { memo, useContext, useEffect, useMemo, useState } from 'react';
 import { Handle, NodeProps, Position } from '@xyflow/react';
 import { FlowEditorContext, FlowRuntimeContext } from '../App';
@@ -69,7 +70,7 @@ const ScriptNode = ({ data, id }: NodeProps) => {
       id,
       argName: 'scriptPath'
     };
-    window.vscode.postMessage(msg);
+    hostBridge.postMessage(msg);
 
     const handleMessage = (event: MessageEvent) => {
       const message = event.data;
@@ -80,11 +81,11 @@ const ScriptNode = ({ data, id }: NodeProps) => {
         const next = String(message.path || '');
         setScriptPath(next);
         updateNodeData(id, { scriptPath: next });
-        window.removeEventListener('message', handleMessage);
+        cleanup();
       }
     };
 
-    window.addEventListener('message', handleMessage);
+    const cleanup = hostBridge.onMessage(handleMessage);
   };
 
   const sharedInputStyle = {

@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import { useCallback } from 'react';
 
 type RunPillStatus = 'idle' | 'running' | 'success' | 'error';
@@ -28,7 +29,7 @@ export function usePipelineRunActions(options: UsePipelineRunActionsOptions) {
     if (!pipeline) return;
 
     if (vscode) {
-      vscode.postMessage({
+      hostBridge.postMessage({
         type: 'savePipeline',
         pipeline
       });
@@ -44,7 +45,7 @@ export function usePipelineRunActions(options: UsePipelineRunActionsOptions) {
     setRunMenuOpen(false);
 
     if (vscode) {
-      vscode.postMessage({
+      hostBridge.postMessage({
         type: 'runPipeline',
         pipeline,
         dryRun
@@ -63,7 +64,7 @@ export function usePipelineRunActions(options: UsePipelineRunActionsOptions) {
     setRunMenuOpen(false);
 
     if (vscode) {
-      vscode.postMessage({
+      hostBridge.postMessage({
         type: 'runPipeline',
         pipeline,
         dryRun,
@@ -82,7 +83,7 @@ export function usePipelineRunActions(options: UsePipelineRunActionsOptions) {
     setRunMenuOpen(false);
 
     if (vscode) {
-      vscode.postMessage({
+      hostBridge.postMessage({
         type: 'runPipeline',
         pipeline,
         dryRun,

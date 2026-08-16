@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import { Dispatch, MutableRefObject, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { applyThemeTokensToRoot, defaultThemeTokens, normalizeUiPreset, SidebarTabPreset, UiPreset } from '../types/theme';
 
@@ -101,8 +102,8 @@ export function useAppShellState(): UseAppShellStateResult {
         setAdminMode(!!event.data.adminMode);
       }
     };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    const cleanup = hostBridge.onMessage(handleMessage);
+    return () => cleanup();
   }, []);
 
   useEffect(() => {

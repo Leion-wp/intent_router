@@ -5,11 +5,8 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 
 ## Installation
 1. Navigate to the `acode-plugin` folder in your file manager.
-2. Select the following files:
-   - `main.js`
-   - `plugin.json`
-   - `README.md`
-3. Compress them into a single **ZIP** archive.
+2. Build the plugin by running `node scripts/build-acode-plugin.js` from the project root.
+3. This will create `intent_router.zip` at the root of the project which includes the compiled `webview-bundle` assets for the Studio editor.
 4. Open Acode.
 5. Go to **Settings** > **Plugins**.
 6. Tap the **+** (plus) icon or the three dots menu and select **Install from file**.

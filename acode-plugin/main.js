@@ -4,6 +4,288 @@
   const PLUGIN_ID = 'com.leion.intentrouter';
   const PLUGIN_VERSION = '1.2.1';
 
+
+  class PipelineRunner {
+    constructor(router) {
+      this.router = router;
+    }
+
+    async runPipelineFromFile(fileUrl, onProgress) {
+      try {
+        const fsOperation = this.router.requireFs();
+        if (!fsOperation) throw new Error('File system API unavailable');
+        const fileContent = await fsOperation(fileUrl).readFile('utf-8');
+        const pipelineData = JSON.parse(fileContent);
+        return await this.runPipelineFromData(pipelineData, onProgress);
+      } catch (err) {
+        this.router.log(`Pipeline run error: ${err.message}`);
+        throw err;
+      }
+    }
+
+    async runPipelineFromData(pipelineData, onProgress) {
+      if (!pipelineData || !Array.isArray(pipelineData.steps)) {
+        throw new Error('Invalid pipeline format: steps array is missing');
+      }
+
+      let stepIndex = 0;
+      const totalSteps = pipelineData.steps.length;
+      const logs = [];
+
+      for (const step of pipelineData.steps) {
+        stepIndex++;
+        const intentName = step.intent;
+        const payload = step.payload || {};
+
+        if (onProgress) {
+          onProgress({ step: stepIndex, total: totalSteps, status: 'running', intent: intentName });
+        }
+
+        try {
+          // Pass the step directly, as IntentRouter natively supports Roots format (intent, payload, etc.)
+          const result = await this.router.route(step);
+          logs.push({ step: stepIndex, intent: intentName, success: result.success, data: result.data, error: result.error });
+
+          if (!result.success) {
+             throw new Error(result.error || `Step ${stepIndex} failed`);
+          }
+        } catch (err) {
+          logs.push({ step: stepIndex, intent: intentName, success: false, error: err.message });
+          if (!step.continueOnError) {
+            if (onProgress) {
+              onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: err.message });
+            }
+            throw new Error(`Pipeline aborted at step ${stepIndex} (${intentName}): ${err.message}`);
+          }
+        }
+      }
+
+      if (onProgress) {
+        onProgress({ step: stepIndex, total: totalSteps, status: 'success' });
+      }
+
+      return { success: true, logs };
+    }
+  }
+
+
+  class PipelineUI {
+    constructor(router) {
+      this.router = router;
+      this.$container = null;
+    }
+
+    async render() {
+      if (!this.router.$page) {
+        this.router.alert('Error', 'UI page is not initialized.');
+        return;
+      }
+
+      this.router.$page.settitle('Pipelines');
+      this.router.$page.innerHTML = '';
+
+      this.$container = document.createElement('div');
+      this.$container.style.padding = '16px';
+      this.$container.style.color = 'var(--primary-text-color)';
+      this.$container.style.display = 'flex';
+      this.$container.style.flexDirection = 'column';
+      this.$container.style.gap = '16px';
+      this.$container.style.height = '100%';
+      this.$container.style.overflow = 'auto';
+
+      this.router.$page.append(this.$container);
+
+      await this.loadPipelines();
+
+      if (typeof this.router.$page.show === 'function') {
+        this.router.$page.show();
+      }
+    }
+
+    async getProjectRoot() {
+      // Trying to get current project root
+      // window.addedFolder is the array of open folders in Acode sidebar
+      if (window.addedFolder && window.addedFolder.length > 0) {
+        return window.addedFolder[0].url;
+      }
+      return null;
+    }
+
+    async loadPipelines() {
+      this.$container.innerHTML = '<div style="text-align: center; padding: 20px;">Loading pipelines...</div>';
+
+      const projectRoot = await this.getProjectRoot();
+
+      if (!projectRoot) {
+        this.$container.innerHTML = `
+          <div style="text-align: center; padding: 20px; color: #f44336;">
+            No project folder is currently open.<br><br>
+            Please open a folder in the sidebar to view its pipelines.
+          </div>
+          `;
+        return;
+      }
+
+      const pipelineFolderUrl = projectRoot.endsWith('/') ? projectRoot + 'pipeline' : projectRoot + '/pipeline';
+
+      const refreshBtn = document.createElement('button');
+      refreshBtn.textContent = 'Refresh Pipelines';
+      refreshBtn.style.padding = '8px 16px';
+      refreshBtn.style.background = 'var(--primary-color)';
+      refreshBtn.style.color = '#fff';
+      refreshBtn.style.border = 'none';
+      refreshBtn.style.borderRadius = '4px';
+      refreshBtn.style.alignSelf = 'flex-end';
+      refreshBtn.onclick = () => this.loadPipelines();
+
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'center';
+
+      const title = document.createElement('h3');
+      title.textContent = 'Project Pipelines';
+      title.style.margin = '0';
+
+      header.appendChild(title);
+      header.appendChild(refreshBtn);
+
+      const content = document.createElement('div');
+      content.style.display = 'flex';
+      content.style.flexDirection = 'column';
+      content.style.gap = '12px';
+
+      this.$container.innerHTML = '';
+      this.$container.appendChild(header);
+      this.$container.appendChild(content);
+
+      try {
+        const fsOperation = this.router.requireFs();
+        if (!fsOperation) throw new Error('File system API unavailable');
+
+        const folder = fsOperation(pipelineFolderUrl);
+        const exists = await folder.exists();
+
+        if (!exists) {
+          content.innerHTML = `<div style="padding: 16px; background: rgba(0,0,0,0.1); border-radius: 4px;">
+            No pipeline directory found (${pipelineFolderUrl}).
+          </div>`;
+          return;
+        }
+
+        const files = await folder.lsDir();
+        const pipelineFiles = files.filter(f => f.name && f.name.endsWith('.intent.json'));
+
+        if (pipelineFiles.length === 0) {
+          content.innerHTML = '<div style="padding: 16px; background: rgba(0,0,0,0.1); border-radius: 4px;">No *.intent.json files found in pipeline directory.</div>';
+          return;
+        }
+
+        for (const file of pipelineFiles) {
+          content.appendChild(this.createPipelineCard(file));
+        }
+
+      } catch (err) {
+        content.innerHTML = `<div style="padding: 16px; color: #f44336; background: rgba(244,67,54,0.1); border-radius: 4px;">
+          Error loading pipelines: ${this.router.escapeHtml(err.message)}
+        </div>`;
+      }
+    }
+
+    createPipelineCard(file) {
+      const card = document.createElement('div');
+      card.style.background = 'var(--secondary-color, rgba(0,0,0,0.2))';
+      card.style.padding = '12px';
+      card.style.borderRadius = '6px';
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.gap = '8px';
+
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'center';
+
+      const name = document.createElement('strong');
+      name.textContent = file.name;
+      header.appendChild(name);
+
+      const controls = document.createElement('div');
+      controls.style.display = 'flex';
+      controls.style.gap = '8px';
+
+      const openBtn = document.createElement('button');
+      openBtn.textContent = 'Open in Studio';
+      openBtn.style.padding = '6px 12px';
+      openBtn.style.background = 'transparent';
+      openBtn.style.border = '1px solid var(--primary-color)';
+      openBtn.style.color = 'var(--primary-color)';
+      openBtn.style.borderRadius = '4px';
+      openBtn.onclick = async () => {
+         try {
+            if (typeof this.router.openStudio === 'function') {
+               await this.router.openStudio(file.url, file.name);
+            } else {
+               await this.router.route({ action: 'editor:open_file', data: { path: file.url, name: file.name }});
+            }
+         } catch(e) {
+            this.router.toast('Error opening file: ' + e.message);
+         }
+      };
+
+      const runBtn = document.createElement('button');
+      runBtn.textContent = 'Execute';
+      runBtn.style.padding = '6px 12px';
+      runBtn.style.background = 'var(--primary-color)';
+      runBtn.style.border = 'none';
+      runBtn.style.color = '#fff';
+      runBtn.style.borderRadius = '4px';
+
+      controls.appendChild(openBtn);
+      controls.appendChild(runBtn);
+
+      header.appendChild(controls);
+      card.appendChild(header);
+
+      const statusArea = document.createElement('div');
+      statusArea.style.fontSize = '0.9em';
+      statusArea.style.color = 'var(--text-color, #ccc)';
+      statusArea.style.display = 'none';
+      card.appendChild(statusArea);
+
+      runBtn.onclick = () => {
+        runBtn.disabled = true;
+        openBtn.disabled = true;
+        runBtn.style.opacity = '0.5';
+        statusArea.style.display = 'block';
+        statusArea.style.color = '#fff';
+        statusArea.innerHTML = 'Starting pipeline...';
+
+        this.router.pipelineRunner.runPipelineFromFile(file.url, (progress) => {
+           if (progress.status === 'running') {
+              statusArea.innerHTML = `Step ${progress.step}/${progress.total}: ${progress.intent} - Running...`;
+           } else if (progress.status === 'success') {
+              statusArea.style.color = '#4caf50';
+              statusArea.innerHTML = `Success! (${progress.total}/${progress.total} steps completed)`;
+           } else if (progress.status === 'error') {
+              statusArea.style.color = '#f44336';
+              statusArea.innerHTML = `Failed at step ${progress.step}: ${this.router.escapeHtml(progress.error)}`;
+           }
+        }).then(result => {
+           runBtn.disabled = false;
+           openBtn.disabled = false;
+           runBtn.style.opacity = '1';
+        }).catch(err => {
+           runBtn.disabled = false;
+           openBtn.disabled = false;
+           runBtn.style.opacity = '1';
+        });
+      };
+
+      return card;
+    }
+  }
+
   class IntentRouter {
     constructor() {
       this.commands = new Map();
@@ -14,6 +296,8 @@
       this.context = null;
       this.modules = {};
       this.registeredAcodeCommands = [];
+      this.pipelineRunner = new PipelineRunner(this);
+      this.pipelineUI = new PipelineUI(this);
     }
 
     safeRequire(name) {
@@ -426,6 +710,7 @@
         return;
       }
       const defs = [
+        { name: 'leion.intentRouter.pipelines', description: 'Intent Router: Show Pipelines', exec: () => this.pipelineUI.render() },
         { name: 'leion.intentRouter.test', description: 'Intent Router: Run smoke test', exec: () => this.runTest() },
         { name: 'leion.intentRouter.logs', description: 'Intent Router: View logs', exec: () => this.showLogs() },
         { name: 'leion.intentRouter.capabilities', description: 'Intent Router: Show capabilities', exec: () => this.showCapabilities() }
@@ -449,6 +734,118 @@
     async showCapabilities() {
       const result = await this.route({ action: 'router:capabilities' });
       this.showObject('Intent Router Capabilities', result.data || result);
+    }
+
+
+    async openStudio(fileUrl, fileName) {
+      if (!this.$page) return;
+
+      this.$page.settitle('Studio: ' + fileName);
+      this.$page.innerHTML = '<div id="roots-studio-container" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #1e1e1e; color: #fff;">Loading Studio...</div>';
+      if (typeof this.$page.show === 'function') this.$page.show();
+
+      try {
+        const fsOperation = this.requireFs();
+
+        // Ensure webview bundle assets are loaded
+        const htmlFile = fsOperation(this.baseUrl + 'webview-bundle/index.html');
+        const cssFile = fsOperation(this.baseUrl + 'webview-bundle/index.css');
+        const jsFile = fsOperation(this.baseUrl + 'webview-bundle/index.js');
+
+        const htmlExists = await htmlFile.exists();
+        if (!htmlExists) {
+           throw new Error("Webview bundle not found. Please reinstall the plugin.");
+        }
+
+        const cssContent = await cssFile.readFile('utf-8');
+        const jsContent = await jsFile.readFile('utf-8');
+
+        // Setup Acode Host Bridge
+        window.acodeBridge = {
+          postMessage: (message) => this.handleStudioMessage(message, fileUrl)
+        };
+
+        const container = document.getElementById('roots-studio-container');
+        container.innerHTML = '<div id="root" style="width: 100%; height: 100%;"></div>';
+
+        const style = document.createElement('style');
+        style.innerHTML = cssContent;
+        container.appendChild(style);
+
+        const script = document.createElement('script');
+        script.innerHTML = jsContent;
+        container.appendChild(script);
+
+        // Wait a tick for React to mount, then send the initial pipeline data
+        setTimeout(async () => {
+           try {
+             const pipelineContent = await fsOperation(fileUrl).readFile('utf-8');
+             const parsed = JSON.parse(pipelineContent);
+             window.postMessage({ type: 'loadPipeline', pipeline: parsed, environment: {} }, '*');
+           } catch(e) {
+             this.toast('Failed to load pipeline data: ' + e.message);
+           }
+        }, 300);
+
+      } catch (err) {
+        this.alert('Studio Error', err.message);
+      }
+    }
+
+    async handleStudioMessage(message, fileUrl) {
+      if (!message || !message.type) return;
+
+      try {
+        switch (message.type) {
+          case 'ready':
+            // Studio is ready.
+            break;
+
+          case 'savePipeline':
+            if (message.pipeline) {
+               const fsOperation = this.requireFs();
+               const content = JSON.stringify(message.pipeline, null, 2);
+               await fsOperation(fileUrl).writeFile(content);
+               this.toast('Pipeline saved successfully.');
+               window.postMessage({ type: 'toast', level: 'info', message: 'Saved successfully.' }, '*');
+            }
+            break;
+
+          case 'runPipeline':
+             // Just trigger the runner we built
+             window.postMessage({ type: 'runPipelineStarted' }, '*');
+             this.pipelineRunner.runPipelineFromFile(fileUrl, (progress) => {
+                 let status = 'idle';
+                 if (progress.status === 'running') status = 'running';
+                 else if (progress.status === 'error') status = 'error';
+                 else if (progress.status === 'success') status = 'success';
+
+                 // Roots Webview expects 'stepLog' to update logs
+                 if (progress.status === 'error' || progress.status === 'running') {
+                    window.postMessage({
+                       type: 'stepLog',
+                       stepId: progress.step, // Requires matching step ID (we might only have index for now)
+                       success: progress.status !== 'error',
+                       data: progress.error || 'Running...'
+                    }, '*');
+                 }
+
+                 // Let's also dispatch 'runPillStatus'
+                 window.postMessage({ type: 'runPillStatus', status }, '*');
+             }).then(() => {
+                 window.postMessage({ type: 'runPillStatus', status: 'success' }, '*');
+             }).catch((err) => {
+                 window.postMessage({ type: 'runPillStatus', status: 'error' }, '*');
+             });
+             break;
+
+          default:
+             this.log('Unhandled studio message: ' + message.type);
+             break;
+        }
+      } catch(err) {
+        this.toast('Error handling studio message: ' + err.message);
+      }
     }
 
     showObject(title, value) {

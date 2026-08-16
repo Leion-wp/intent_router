@@ -1,3 +1,4 @@
+import { hostBridge } from '../utils/HostBridge';
 import React, { useEffect, useMemo, useState } from 'react';
 import { isInboundMessage, WebviewOutboundMessage } from '../types/messages';
 
@@ -45,7 +46,7 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
             command: field.options,
             argName: field.name
           };
-          window.vscode.postMessage(msg);
+          hostBridge.postMessage(msg);
         }
       }
     }
@@ -67,8 +68,8 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
         }));
       }
     };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    const cleanup = hostBridge.onMessage(handleMessage);
+    return () => cleanup();
   }, []);
 
   const toggleHelp = (key: string) => setExpandedHelp((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -91,17 +92,17 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
     }
 
     const msg: WebviewOutboundMessage = { type: 'selectPath', id: nodeId, argName: key };
-    window.vscode.postMessage(msg);
+    hostBridge.postMessage(msg);
 
     const handleMessage = (event: MessageEvent) => {
       const message = event.data;
       if (!isInboundMessage(message)) return;
       if (message.type === 'pathSelected' && message.id === nodeId && message.argName === key) {
         onChange(key, message.path);
-        window.removeEventListener('message', handleMessage);
+        cleanup();
       }
     };
-    window.addEventListener('message', handleMessage);
+    const cleanup = hostBridge.onMessage(handleMessage);
   };
 
   return (
