@@ -78,12 +78,12 @@ export async function executeHttpCommand(args: any): Promise<any> {
 
         const response = await fetchFn(url, options);
         const responseText = await response.text();
-        
+
         log(`[HTTP] Status: ${response.status} ${response.statusText}`);
-        
+
         // LOG THE RESPONSE CONTENT
         log(`[HTTP] Response Body:\n${responseText}`);
-        
+
         if (!response.ok) {
             log(`[HTTP] Error Response: ${responseText}`, 'stderr');
             throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);

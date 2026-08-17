@@ -23,7 +23,7 @@ const HttpNode = ({ data, id }: NodeProps) => {
   const [outputVar, setOutputVar] = useState<string>((data.outputVar as string) || '');
   const [status, setStatus] = useState<string>((data.status as string) || 'idle');
   const [label, setLabel] = useState<string>((data.label as string) || 'HTTP Request');
-  
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const logsRef = useRef<HTMLDivElement>(null);
@@ -79,8 +79,8 @@ const HttpNode = ({ data, id }: NodeProps) => {
       background: 'rgba(20, 25, 35, 0.9)',
       backdropFilter: 'blur(16px)',
       border: `2px solid ${isRunning ? '#00d2ff' : 'rgba(0, 210, 255, 0.4)'}`,
-      boxShadow: isRunning 
-        ? `0 0 30px rgba(0, 210, 255, 0.4), inset 0 0 15px rgba(0, 210, 255, 0.1)` 
+      boxShadow: isRunning
+        ? `0 0 30px rgba(0, 210, 255, 0.4), inset 0 0 15px rgba(0, 210, 255, 0.1)`
         : `0 10px 40px rgba(0, 0, 0, 0.6)`,
       minWidth: '320px',
       color: '#efefef',
@@ -94,17 +94,17 @@ const HttpNode = ({ data, id }: NodeProps) => {
 
       <div style={{ borderRadius: '14px', overflow: 'hidden' }}>
         {/* Header */}
-        <div style={{ 
-          padding: '12px 14px', 
-          background: 'rgba(0, 210, 255, 0.15)', 
-          display: 'flex', 
-          alignItems: 'center', 
+        <div style={{
+          padding: '12px 14px',
+          background: 'rgba(0, 210, 255, 0.15)',
+          display: 'flex',
+          alignItems: 'center',
           justifyContent: 'space-between',
           borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-            <div style={{ 
-              width: '26px', height: '24px', borderRadius: '6px', 
+            <div style={{
+              width: '26px', height: '24px', borderRadius: '6px',
               background: themeColor,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               boxShadow: isRunning ? `0 0 15px ${themeColor}` : 'none'
@@ -124,7 +124,7 @@ const HttpNode = ({ data, id }: NodeProps) => {
 
         {!collapsed && (
           <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            
+
             {/* Method & URL */}
             <div style={{ display: 'flex', gap: '8px' }}>
                 <select
@@ -150,7 +150,7 @@ const HttpNode = ({ data, id }: NodeProps) => {
 
             {/* Headers & Body Toggle */}
             <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
-                <div 
+                <div
                     onClick={() => setIsSettingsOpen(!isSettingsOpen)}
                     style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
