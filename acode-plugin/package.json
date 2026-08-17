@@ -1,0 +1,15 @@
+{
+  "name": "acode-intent-router",
+  "version": "1.2.1",
+  "description": "Acode plugin runtime for Intent Router",
+  "main": "main.js",
+  "scripts": {
+    "test": "node test/run-tests.js"
+  },
+  "keywords": [
+    "acode",
+    "intent-router"
+  ],
+  "author": "",
+  "license": "MIT"
+}
