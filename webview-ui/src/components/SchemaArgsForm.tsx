@@ -366,4 +366,3 @@ export default function SchemaArgsForm({ nodeId, fields, values, onChange, avail
     </div>
   );
 }
-

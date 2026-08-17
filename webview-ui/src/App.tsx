@@ -1146,10 +1146,10 @@ function Flow({
     setDrawerNodeId((value) => (value === nodeId ? null : value));
   }, []);
 
- 	  return (
- 	    <div className="dndflow">
-  	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
-  	        <FlowRuntimeContext.Provider value={flowRuntime}>
+	  return (
+	    <div className="dndflow">
+	      <div className="reactflow-wrapper" ref={reactFlowWrapper} style={{ width: '100%', height: '100%' }}>
+	        <FlowRuntimeContext.Provider value={flowRuntime}>
               <FlowEditorContext.Provider value={{ updateNodeData }}>
               <CustomNodesContext.Provider value={customNodesContextValue}>
               <ReactFlow
@@ -1170,22 +1170,22 @@ function Flow({
               onNodeContextMenu={onNodeContextMenu}
               >
                 {showControls && <Controls style={{ opacity: chromeOpacity }} />}
-                <Background 
-                  variant={BackgroundVariant.Lines} 
-                  gap={40} 
-                  size={1} 
-                  color="rgba(255, 255, 255, 0.03)" 
+                <Background
+                  variant={BackgroundVariant.Lines}
+                  gap={40}
+                  size={1}
+                  color="rgba(255, 255, 255, 0.03)"
                 />
-                {showMiniMap && <MiniMap 
-                  style={{ opacity: chromeOpacity }} 
-                  pannable 
-                  zoomable 
+                {showMiniMap && <MiniMap
+                  style={{ opacity: chromeOpacity }}
+                  pannable
+                  zoomable
                 />}
               </ReactFlow>
               </CustomNodesContext.Provider>
               </FlowEditorContext.Provider>
-  	        </FlowRuntimeContext.Provider>
-  	      </div>
+	        </FlowRuntimeContext.Provider>
+	      </div>
 
         <FlowToasts connectionError={connectionError} setConnectionError={setConnectionError} graphToast={graphToast} />
 

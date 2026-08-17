@@ -82,7 +82,7 @@ const AgentNode = ({ data, id }: NodeProps) => {
   const [editingLabel, setEditingLabel] = useState(false);
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  
+
   const logsRef = useRef<HTMLDivElement>(null);
   const collapsed = !!data.collapsed;
   const activeModelOptions = useMemo(
@@ -179,7 +179,7 @@ const AgentNode = ({ data, id }: NodeProps) => {
             <div className="glass-node-icon" style={{ background: `linear-gradient(135deg, ${themeColor} 0%, #bb86fc 100%)` }}>
               <span className={`codicon codicon-${isRunning ? 'loading spin' : 'sparkle'}`} style={{ color: '#fff', fontSize: '16px' }}></span>
             </div>
-            
+
             {editingLabel ? (
               <input
                 className="nodrag"
@@ -196,15 +196,15 @@ const AgentNode = ({ data, id }: NodeProps) => {
               </span>
             )}
           </div>
-          
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button
               className="nodrag"
               onClick={() => updateField({ collapsed: !collapsed })}
-              style={{ 
-                background: 'rgba(255,255,255,0.05)', 
-                border: 'none', 
-                color: '#aaa', 
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: 'none',
+                color: '#aaa',
                 cursor: 'pointer',
                 borderRadius: '6px',
                 width: '24px',
@@ -221,7 +221,7 @@ const AgentNode = ({ data, id }: NodeProps) => {
 
         {!collapsed && (
           <div className="glass-node-body">
-            
+
             {/* Main Instruction Area */}
             <div className="glass-node-input-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -239,7 +239,7 @@ const AgentNode = ({ data, id }: NodeProps) => {
             {/* Advanced Panels */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)', background: 'rgba(255,255,255,0.02)' }}>
-                  <div 
+                  <div
                       onClick={() => setIsSettingsOpen(!isSettingsOpen)}
                       style={{ padding: '12px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                   >
@@ -334,9 +334,9 @@ const AgentNode = ({ data, id }: NodeProps) => {
                                   {OUTPUT_CONTRACT_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                               </select>
                           </div>
-                          
+
                           <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', margin: '4px 0' }} />
-                          
+
                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
                               <div className="glass-node-input-group">
                                   <label className="glass-node-input-label">Content Var</label>
@@ -407,7 +407,7 @@ const AgentNode = ({ data, id }: NodeProps) => {
                           <span className="codicon codicon-library" style={{ fontSize: '14px' }}></span>
                           KNOWLEDGE CONTEXT
                       </span>
-                      <button 
+                      <button
                           onClick={() => { const nc = [...contextFiles, '']; setContextFiles(nc); updateField({ contextFiles: nc }); }}
                           className="nodrag"
                           style={{ background: 'var(--ir-accent-primary)', border: 'none', color: '#fff', cursor: 'pointer', borderRadius: '4px', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -421,9 +421,9 @@ const AgentNode = ({ data, id }: NodeProps) => {
                               <input
                                   className="nodrag"
                                   value={glob}
-                                  onChange={(e) => { 
-                                      const nc = [...contextFiles]; nc[idx] = e.target.value; 
-                                      setContextFiles(nc); updateField({ contextFiles: nc }); 
+                                  onChange={(e) => {
+                                      const nc = [...contextFiles]; nc[idx] = e.target.value;
+                                      setContextFiles(nc); updateField({ contextFiles: nc });
                                   }}
                                   placeholder="src/**/*.ts"
                                   style={{ flex: 1 }}
@@ -468,7 +468,7 @@ const AgentNode = ({ data, id }: NodeProps) => {
                               lineHeight: '1.5'
                           }}>
                           {logs.map((log: any, i: number) => (
-                              <div key={i} style={{ 
+                              <div key={i} style={{
                                   color: log.stream === 'stderr' ? '#ff4d4d' : (log.text.includes('Success') || log.text.includes('completed') ? '#00ff88' : 'inherit'),
                                   marginBottom: '4px'
                               }}>

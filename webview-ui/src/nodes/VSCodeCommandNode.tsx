@@ -100,17 +100,17 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
       <Handle id="success" type="source" position={Position.Right} style={{ ...handleStyle, top: '50%', right: '-5px', background: '#007acc' }} />
 
       <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
-        <div style={{ 
-          padding: '10px 12px', 
-          background: 'rgba(0, 122, 204, 0.15)', 
-          display: 'flex', 
-          alignItems: 'center', 
+        <div style={{
+          padding: '10px 12px',
+          background: 'rgba(0, 122, 204, 0.15)',
+          display: 'flex',
+          alignItems: 'center',
           justifyContent: 'space-between',
           borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, fontWeight: 'bold' }}>
-            <div style={{ 
-              width: '24px', height: '24px', borderRadius: '50%', 
+            <div style={{
+              width: '24px', height: '24px', borderRadius: '50%',
               background: '#007acc',
               display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}>
