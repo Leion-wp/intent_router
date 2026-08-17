@@ -98,10 +98,10 @@ const PromptNode = ({ data, id }: NodeProps) => {
           <button
             className="nodrag"
             onClick={() => updateNodeData(id, { collapsed: !collapsed })}
-            style={{ 
-              background: 'rgba(255,255,255,0.05)', 
-              border: 'none', 
-              color: '#aaa', 
+            style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: 'none',
+              color: '#aaa',
               cursor: 'pointer',
               borderRadius: '6px',
               width: '24px',

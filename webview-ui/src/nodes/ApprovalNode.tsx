@@ -34,7 +34,7 @@ const ApprovalNode = ({ data, id }: NodeProps) => {
       removed: Number(incoming?.removed || 0)
     };
   });
-  
+
   const collapsed = !!data.collapsed;
 
   useEffect(() => {
@@ -158,8 +158,8 @@ const ApprovalNode = ({ data, id }: NodeProps) => {
       background: 'rgba(30, 20, 10, 0.9)',
       backdropFilter: 'blur(16px)',
       border: `2px solid ${isRunning ? '#ffcc00' : 'rgba(255, 152, 0, 0.4)'}`,
-      boxShadow: isRunning 
-        ? `0 0 30px rgba(255, 204, 0, 0.4), inset 0 0 15px rgba(255, 204, 0, 0.1)` 
+      boxShadow: isRunning
+        ? `0 0 30px rgba(255, 204, 0, 0.4), inset 0 0 15px rgba(255, 204, 0, 0.1)`
         : `0 10px 40px rgba(0, 0, 0, 0.6)`,
       minWidth: '300px',
       color: '#efefef',
@@ -172,17 +172,17 @@ const ApprovalNode = ({ data, id }: NodeProps) => {
 
       <div style={{ borderRadius: '14px', overflow: 'hidden' }}>
         {/* Header */}
-        <div style={{ 
-          padding: '12px 14px', 
-          background: 'rgba(255, 152, 0, 0.15)', 
-          display: 'flex', 
-          alignItems: 'center', 
+        <div style={{
+          padding: '12px 14px',
+          background: 'rgba(255, 152, 0, 0.15)',
+          display: 'flex',
+          alignItems: 'center',
           justifyContent: 'space-between',
           borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-            <div style={{ 
-              width: '26px', height: '24px', borderRadius: '6px', 
+            <div style={{
+              width: '26px', height: '24px', borderRadius: '6px',
               background: themeColor,
               display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}>
@@ -194,7 +194,7 @@ const ApprovalNode = ({ data, id }: NodeProps) => {
 
         {!collapsed && (
           <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            
+
             {/* Target File */}
             <div>
                 <label style={{ fontSize: '10px', color: '#777', display: 'block', marginBottom: '6px', fontWeight: 'bold' }}>TARGET FILE</label>

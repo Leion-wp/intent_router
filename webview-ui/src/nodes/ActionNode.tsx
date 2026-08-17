@@ -54,7 +54,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
   const { commandGroups } = useContext(RegistryContext);
   const { getAvailableVars, isRunPreviewNode } = useContext(FlowRuntimeContext);
   const { updateNodeData } = useContext(FlowEditorContext);
-  
+
   const [provider, setProvider] = useState<string>((data.provider as string) || 'terminal');
   const [capability, setCapability] = useState<string>((data.capability as string) || '');
   const [args, setArgs] = useState<Record<string, any>>((data.args as Record<string, any>) || {});
@@ -187,7 +187,7 @@ const ActionNode = ({ data, id }: NodeProps) => {
           style={{ ...handleStyle, top: handleTop(index, inputHandles.length), left: '-6px', background: theme.color }}
         />
       ))}
-      
+
       {/* Source Handles */}
       <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '30%', right: '-6px', background: '#ff4d4d' }} />
       <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-6px', background: '#00ff88' }} />
@@ -219,10 +219,10 @@ const ActionNode = ({ data, id }: NodeProps) => {
           <button
             className="nodrag"
             onClick={() => updateNodeData(id, { collapsed: !collapsed })}
-            style={{ 
-              background: 'rgba(255,255,255,0.05)', 
-              border: 'none', 
-              color: '#aaa', 
+            style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: 'none',
+              color: '#aaa',
               cursor: 'pointer',
               borderRadius: '6px',
               width: '24px',
@@ -270,15 +270,15 @@ const ActionNode = ({ data, id }: NodeProps) => {
         <div className="nodrag" style={{ padding: '0 16px 16px 16px' }}>
             <div
                 onClick={() => setIsConsoleOpen(!isConsoleOpen)}
-                style={{ 
-                  fontSize: '10px', 
+                style={{
+                  fontSize: '10px',
                   fontWeight: 600,
-                  padding: '6px 10px', 
-                  cursor: 'pointer', 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  background: 'rgba(255,255,255,0.03)', 
-                  color: 'rgba(255,255,255,0.5)', 
+                  padding: '6px 10px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  background: 'rgba(255,255,255,0.03)',
+                  color: 'rgba(255,255,255,0.5)',
                   borderRadius: '6px',
                   border: '1px solid rgba(255,255,255,0.05)',
                   transition: 'all 0.2s ease'
@@ -290,17 +290,17 @@ const ActionNode = ({ data, id }: NodeProps) => {
             {isConsoleOpen && (
                 <div
                     ref={logsRef}
-                    style={{ 
-                      maxHeight: '140px', 
-                      overflowY: 'auto', 
-                      background: 'rgba(0,0,0,0.3)', 
-                      color: 'rgba(255,255,255,0.7)', 
-                      padding: '10px', 
-                      fontSize: '11px', 
-                      fontFamily: 'monospace', 
-                      whiteSpace: 'pre-wrap', 
-                      marginTop: '8px', 
-                      borderRadius: '8px', 
+                    style={{
+                      maxHeight: '140px',
+                      overflowY: 'auto',
+                      background: 'rgba(0,0,0,0.3)',
+                      color: 'rgba(255,255,255,0.7)',
+                      padding: '10px',
+                      fontSize: '11px',
+                      fontFamily: 'monospace',
+                      whiteSpace: 'pre-wrap',
+                      marginTop: '8px',
+                      borderRadius: '8px',
                       border: '1px solid rgba(255,255,255,0.05)',
                       lineHeight: '1.4'
                     }}

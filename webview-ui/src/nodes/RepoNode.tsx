@@ -108,17 +108,17 @@ const RepoNode = ({ data, id }: NodeProps) => {
       <Handle type="source" position={Position.Right} id="out_path" style={{ ...handleStyle, top: '72%', right: '-5px', background: '#8bc34a' }} />
 
       <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
-        <div style={{ 
-          padding: '10px 12px', 
-          background: 'rgba(92, 107, 192, 0.2)', 
-          display: 'flex', 
-          alignItems: 'center', 
+        <div style={{
+          padding: '10px 12px',
+          background: 'rgba(92, 107, 192, 0.2)',
+          display: 'flex',
+          alignItems: 'center',
           justifyContent: 'space-between',
           borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, fontWeight: 'bold' }}>
-            <div style={{ 
-              width: '24px', height: '24px', borderRadius: '50%', 
+            <div style={{
+              width: '24px', height: '24px', borderRadius: '50%',
               background: '#5c6bc0',
               display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}>
