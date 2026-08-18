@@ -30,6 +30,9 @@ export type PipelineEvent =
         voteScoreByMember?: Array<{ member: string; role: 'writer' | 'reviewer'; weight: number; score: number }>;
         members: Array<{ name: string; role: 'writer' | 'reviewer'; path: string; files: number }>;
         totalFiles: number;
+        providerCallsStarted?: number;
+        budgetExceeded?: boolean;
+        budgetReason?: 'timeout' | 'max_provider_calls';
     }
     | {
         type: 'githubPullRequestCreated';
