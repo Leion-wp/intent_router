@@ -377,17 +377,35 @@
         while ((match = regex.exec(input)) !== null) {
           const fullMatch = match[0];
           const promptText = match[1];
-          let value = cache.get(promptText);
-          if (value === undefined) {
-            const prompt = this.safeRequire('prompt');
-            if (!prompt) {
-              value = window.prompt(`Value for ${promptText}`);
-            } else {
-              value = await prompt(promptText, '', 'text', { required: true });
-            }
-            if (value === undefined || value === null) throw new Error(`Input cancelled for variable: ${promptText}`);
-            cache.set(promptText, value);
+          let valuePromise = cache.get(promptText);
+          if (valuePromise === undefined) {
+            const promptTask = (async () => {
+              const prompt = this.safeRequire('prompt');
+              let value;
+              if (!prompt) {
+                value = window.prompt(`Value for ${promptText}`);
+              } else {
+                value = await prompt(promptText, '', 'text', { required: true });
+              }
+              if (value === undefined || value === null) {
+                throw new Error(`Input cancelled for variable: ${promptText}`);
+              }
+              return value;
+            })();
+
+            valuePromise = promptTask.catch((err) => {
+              cache.delete(promptText);
+              throw err;
+            });
+
+            cache.set(promptText, valuePromise);
+            promptTask.then((val) => {
+              if (cache.get(promptText) === valuePromise) {
+                cache.set(promptText, val);
+              }
+            }).catch(() => {});
           }
+          const value = await valuePromise;
           result = result.replace(fullMatch, value);
         }
         return result;

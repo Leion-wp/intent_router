@@ -68,4 +68,21 @@ suite('Flow Logic Tests (Mocked)', () => {
         const result2 = await router.resolveVariables(input, cache);
         assert.strictEqual(result2, 'Checkout cached-value');
     });
+
+    test('Concurrent variable resolution deduplication', async () => {
+        const cache = new Map<string, any>();
+        let promptCount = 0;
+
+        mockVscode.window.showInputBox = async (opts: any) => {
+            promptCount++;
+            await new Promise(r => setTimeout(r, 20));
+            return 'shared-secret';
+        };
+
+        const input = ['${input:Token}', '${input:Token}'];
+        const result = await router.resolveVariables(input, cache);
+
+        assert.strictEqual(promptCount, 1, 'Input box should only be displayed once for concurrent identical placeholders');
+        assert.deepStrictEqual(result, ['shared-secret', 'shared-secret']);
+    });
 });
