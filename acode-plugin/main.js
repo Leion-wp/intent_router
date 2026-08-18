@@ -42,23 +42,32 @@
         }
 
         // Roots compatibility: file.read -> action: file:read, data: payload
-        const action = intentName.replace(/./g, ':');
+        const action = intentName.replace(/\./g, ':');
+
+        let stepSuccess = false;
+        let stepError = null;
 
         try {
           const result = await this.router.route({ action, data: payload });
-          logs.push({ step: stepIndex, intent: intentName, success: result.success, data: result.data, error: result.error });
-
-          if (!result.success) {
-             throw new Error(result.error || `Step ${stepIndex} failed`);
+          if (result && result.success) {
+            stepSuccess = true;
+            logs.push({ step: stepIndex, intent: intentName, success: true, data: result.data, error: result.error || null });
+          } else {
+            stepSuccess = false;
+            stepError = (result && result.error) ? result.error : `Step ${stepIndex} failed`;
+            logs.push({ step: stepIndex, intent: intentName, success: false, data: result ? result.data : null, error: stepError });
           }
         } catch (err) {
-          logs.push({ step: stepIndex, intent: intentName, success: false, error: err.message });
-          if (!step.continueOnError) {
-            if (onProgress) {
-              onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: err.message });
-            }
-            throw new Error(`Pipeline aborted at step ${stepIndex} (${intentName}): ${err.message}`);
+          stepSuccess = false;
+          stepError = err && err.message ? err.message : String(err);
+          logs.push({ step: stepIndex, intent: intentName, success: false, data: null, error: stepError });
+        }
+
+        if (!stepSuccess && !step.continueOnError) {
+          if (onProgress) {
+            onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: stepError });
           }
+          throw new Error(`Pipeline aborted at step ${stepIndex} (${intentName}): ${stepError}`);
         }
       }
 
