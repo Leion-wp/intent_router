@@ -659,11 +659,47 @@
         if (data.body !== undefined && data.body !== null) {
           options.body = typeof data.body === 'string' ? data.body : JSON.stringify(data.body);
         }
-        const response = await fetch(data.url, options);
-        const contentType = response.headers.get('content-type') || '';
-        const body = contentType.includes('application/json') ? await response.json() : await response.text();
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
-        return { status: response.status, headers: Object.fromEntries(response.headers.entries()), body };
+
+        let timeoutMs = undefined;
+        if (data.timeoutMs !== undefined && data.timeoutMs !== null) {
+          const parsed = Number(data.timeoutMs);
+          if (typeof data.timeoutMs === 'boolean' || isNaN(parsed) || !isFinite(parsed) || parsed <= 0) {
+            throw new Error('Invalid timeoutMs: must be a positive finite number');
+          }
+          timeoutMs = parsed;
+        }
+
+        let timer = null;
+        let timedOut = false;
+
+        if (timeoutMs !== undefined) {
+          if (typeof AbortController === 'undefined') {
+            throw new Error('Network request timeout is not supported in this environment (AbortController unavailable)');
+          }
+          const controller = new AbortController();
+          options.signal = controller.signal;
+          timer = setTimeout(() => {
+            timedOut = true;
+            try {
+              controller.abort();
+            } catch (_) {}
+          }, timeoutMs);
+        }
+
+        try {
+          const response = await fetch(data.url, options);
+          const contentType = response.headers.get('content-type') || '';
+          const body = contentType.includes('application/json') ? await response.json() : await response.text();
+          if (!response.ok) throw new Error(`HTTP ${response.status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
+          return { status: response.status, headers: Object.fromEntries(response.headers.entries()), body };
+        } catch (err) {
+          if (timedOut || err.name === 'AbortError') {
+            throw new Error(`Request timed out after ${timeoutMs}ms`);
+          }
+          throw err;
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
       });
 
       this.register('github:request', async (data) => {
@@ -672,7 +708,13 @@
         if (data.token) headers.Authorization = `Bearer ${data.token}`;
         const routed = await this.route({
           action: 'network:request',
-          data: { url: `https://api.github.com${String(data.path).startsWith('/') ? '' : '/'}${data.path}`, method: data.method || 'GET', headers, body: data.body }
+          data: {
+            url: `https://api.github.com${String(data.path).startsWith('/') ? '' : '/'}${data.path}`,
+            method: data.method || 'GET',
+            headers,
+            body: data.body,
+            timeoutMs: data.timeoutMs
+          }
         });
         if (!routed.success) throw new Error(routed.error || 'GitHub request failed');
         return routed.data;
@@ -681,7 +723,7 @@
       this.register('github:fetch_repo', async (data) => {
         if (!data.repo) throw new Error('repo is required (owner/repo)');
         const suffix = data.path ? `/contents/${String(data.path).replace(/^\/+/, '')}` : '';
-        const routed = await this.route({ action: 'github:request', data: { path: `/repos/${data.repo}${suffix}`, token: data.token } });
+        const routed = await this.route({ action: 'github:request', data: { path: `/repos/${data.repo}${suffix}`, token: data.token, timeoutMs: data.timeoutMs } });
         if (!routed.success) throw new Error(routed.error || 'GitHub request failed');
         return routed.data;
       });
@@ -786,6 +828,8 @@
       this.log('Intent Router destroyed');
     }
   }
+
+  window.IntentRouter = IntentRouter;
 
   if (typeof window.acode !== 'undefined') {
     const router = new IntentRouter();
