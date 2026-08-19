@@ -24,7 +24,9 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 
 ## Features
 - **System Routing**: Control Acode UI and files.
-- **Terminal Integration**: Execute commands directly (requires Terminal plugin).
+- **Terminal Integration**:
+  - `terminal:run` (`terminal.run`): Blocking command execution for one-shot pipeline steps using `globalThis.Executor.execute(...)`. Awaits process completion, returning `{ completed: true, stdout }`, or rejecting on error. Supports `{ command, cwd, alpine }`.
+  - `terminal:exec` (`terminal.exec`): Interactive/fire-and-forget submission using `terminal.write(...)`. Returns `{ submitted: true }`.
 - **GitHub API**: Fetch repos and files.
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
 - **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
@@ -36,6 +38,18 @@ intentRouter.execute({
   scheme: 'system',
   action: 'toast',
   data: { message: 'Hello World' }
+});
+
+// Run a blocking shell command and await stdout
+intentRouter.route({
+  action: 'terminal:run',
+  data: { command: 'npm install', cwd: '/sdcard/Projects/my-app' }
+});
+
+// Submit an interactive command to terminal session
+intentRouter.route({
+  action: 'terminal:exec',
+  data: { command: 'ls -la' }
 });
 
 // List files in a directory

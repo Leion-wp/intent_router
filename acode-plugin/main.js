@@ -32,38 +32,47 @@
       const totalSteps = pipelineData.steps.length;
       const logs = [];
 
-      for (const step of pipelineData.steps) {
-        stepIndex++;
+      while (stepIndex < pipelineData.steps.length) {
+        const step = pipelineData.steps[stepIndex];
+        const currentStepNum = stepIndex + 1;
         const intentName = step.intent;
         const payload = step.payload || {};
 
         if (onProgress) {
-          onProgress({ step: stepIndex, total: totalSteps, status: 'running', intent: intentName });
+          onProgress({ step: currentStepNum, total: totalSteps, status: 'running', intent: intentName });
         }
 
         // Roots compatibility: file.read -> action: file:read, data: payload
-        const action = intentName.replace(/./g, ':');
+        const action = intentName.replace(/\./g, ':');
 
         try {
           const result = await this.router.route({ action, data: payload });
-          logs.push({ step: stepIndex, intent: intentName, success: result.success, data: result.data, error: result.error });
-
           if (!result.success) {
-             throw new Error(result.error || `Step ${stepIndex} failed`);
+             throw new Error(result.error || `Step ${currentStepNum} failed`);
           }
+          logs.push({ step: currentStepNum, id: step.id, intent: intentName, success: true, data: result.data });
+          stepIndex++;
         } catch (err) {
-          logs.push({ step: stepIndex, intent: intentName, success: false, error: err.message });
+          logs.push({ step: currentStepNum, id: step.id, intent: intentName, success: false, error: err.message });
+          if (step.onFailure) {
+            const failureStepIndex = pipelineData.steps.findIndex(s => s.id === step.onFailure);
+            if (failureStepIndex !== -1) {
+              stepIndex = failureStepIndex;
+              continue;
+            }
+          }
           if (!step.continueOnError) {
             if (onProgress) {
-              onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: err.message });
+              onProgress({ step: currentStepNum, total: totalSteps, status: 'error', error: err.message });
             }
-            throw new Error(`Pipeline aborted at step ${stepIndex} (${intentName}): ${err.message}`);
+            throw new Error(`Pipeline aborted at step ${currentStepNum} (${intentName}): ${err.message}`);
           }
+          stepIndex++;
         }
       }
 
       if (onProgress) {
-        onProgress({ step: stepIndex, total: totalSteps, status: 'success' });
+        onProgress({ step: pipelineData.steps.length, total: totalSteps, status: 'success' });
       }
 
       return { success: true, logs };
@@ -701,6 +710,25 @@
         terminal.write(instance.id, `${data.command}\r`);
         return { submitted: true, terminalId: instance.id, command: data.command };
       });
+
+      this.register('terminal:run', async (data) => {
+        const executor = globalThis.Executor || (typeof window !== 'undefined' ? window.Executor : undefined);
+        if (!executor || typeof executor.execute !== 'function') {
+          throw new Error('terminal.run unavailable');
+        }
+        if (!data || !data.command) throw new Error('command is required');
+
+        let fullCommand = String(data.command);
+        if (data.cwd) {
+          const escapedCwd = "'" + String(data.cwd).replace(/'/g, "'\\''") + "'";
+          fullCommand = `cd ${escapedCwd} && ${data.command}`;
+        }
+
+        const alpine = data.alpine !== undefined ? Boolean(data.alpine) : undefined;
+        const stdout = await executor.execute(fullCommand, alpine);
+        const stdoutStr = stdout !== undefined ? String(stdout) : '';
+        return { completed: true, stdout: stdoutStr, output: stdoutStr };
+      });
     }
 
     registerAcodeCommands() {
@@ -787,11 +815,15 @@
     }
   }
 
-  if (typeof window.acode !== 'undefined') {
+  if (typeof window !== 'undefined' && typeof window.acode !== 'undefined') {
     const router = new IntentRouter();
     acode.setPluginInit(PLUGIN_ID, async (baseUrl, $page, context) => {
       await router.init(baseUrl, $page, context);
     });
     acode.setPluginUnmount(PLUGIN_ID, () => router.destroy());
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { IntentRouter, PipelineRunner, PipelineUI };
   }
 })();
