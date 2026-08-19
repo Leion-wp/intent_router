@@ -32,16 +32,31 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 ## API Example
 ```javascript
 // Send a toast notification
-intentRouter.execute({
-  scheme: 'system',
-  action: 'toast',
+intentRouter.route({
+  action: 'system:toast',
   data: { message: 'Hello World' }
 });
 
-// List files in a directory
-intentRouter.execute({
-  scheme: 'fs',
-  action: 'list',
-  data: { path: 'file:///sdcard/Documents' }
+// Network request with optional timeoutMs guard
+intentRouter.route({
+  action: 'network:request',
+  data: {
+    url: 'https://api.example.com/data',
+    method: 'GET',
+    timeoutMs: 5000
+  }
+});
+
+// GitHub API request with timeoutMs guard
+intentRouter.route({
+  action: 'github:request',
+  data: {
+    path: '/user',
+    token: 'ghp_xxx',
+    timeoutMs: 10000
+  }
 });
 ```
+
+### Network Timeout & Cancellation
+`network:request` and `github:request` support an optional `timeoutMs` parameter (positive finite number in milliseconds). When supplied, `AbortController` is used to cancel the request if it does not complete within the specified deadline, returning a structured timeout error (`Request timed out after <timeoutMs>ms`).
