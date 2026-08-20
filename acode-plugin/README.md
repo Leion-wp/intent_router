@@ -27,7 +27,41 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Terminal Integration**: Execute commands directly (requires Terminal plugin).
 - **GitHub API**: Fetch repos and files.
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
+- **Pipeline Run Queue**: Serialized FIFO pipeline execution runtime (`maxConcurrentRuns = 1`, bounded queue length = 20) preventing resource collisions on mobile.
 - **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
+
+## Run Queue API
+All pipeline executions pass through `intentRouter.runQueue` to ensure deterministic execution order on mobile.
+
+```javascript
+// Enqueue a pipeline from a file or data
+intentRouter.runQueue.enqueue({
+  fileUrl: 'file:///sdcard/project/pipeline/test.intent.json',
+  source: 'manual', // or 'cron', 'agent', etc.
+  onProgress: (progress) => {
+    console.log(progress.status, progress.step, progress.total);
+  }
+}).then(result => {
+  console.log('Pipeline finished', result);
+}).catch(err => {
+  console.error('Pipeline failed or queue rejected', err);
+});
+
+// Inspect the queue via router action
+const status = await intentRouter.route({ action: 'router:run_queue' });
+console.log(status.data);
+/*
+{
+  state: 'running', // 'idle' | 'queued' | 'running'
+  maxConcurrentRuns: 1,
+  maxQueueLength: 20,
+  activeCount: 1,
+  queuedCount: 1,
+  active: [ { id: 'run_...', source: 'manual', pipelineName: 'test.intent.json', startedAt: '...', status: 'running' } ],
+  pending: [ { id: 'run_...', position: 1, source: 'cron', pipelineName: 'sync.intent.json', queuedAt: '...', status: 'queued' } ]
+}
+*/
+```
 
 ## API Example
 ```javascript
