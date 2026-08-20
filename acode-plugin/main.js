@@ -23,47 +23,85 @@
       }
     }
 
-    async runPipelineFromData(pipelineData, onProgress) {
+    async runPipelineFromData(pipelineData, onProgress, options) {
       if (!pipelineData || !Array.isArray(pipelineData.steps)) {
         throw new Error('Invalid pipeline format: steps array is missing');
       }
 
-      let stepIndex = 0;
-      const totalSteps = pipelineData.steps.length;
+      const steps = pipelineData.steps;
+      const totalSteps = steps.length;
       const logs = [];
 
-      for (const step of pipelineData.steps) {
-        stepIndex++;
-        const intentName = step.intent;
-        const payload = step.payload || {};
+      const MAX_EXECUTION_MULTIPLIER = 5;
+      const MIN_EXECUTION_LIMIT = 20;
+      const maxStepsExecuted = (options && typeof options.maxExecutionLimit === 'number')
+        ? options.maxExecutionLimit
+        : Math.max(totalSteps * MAX_EXECUTION_MULTIPLIER, MIN_EXECUTION_LIMIT);
+
+      let currentIndex = 0;
+      let totalExecutedCount = 0;
+
+      while (currentIndex < steps.length) {
+        totalExecutedCount++;
+        const step = steps[currentIndex];
+        const intentName = step ? step.intent : 'unknown';
+        const payload = step ? (step.payload || {}) : {};
+        const stepId = step ? step.id : undefined;
+
+        if (totalExecutedCount > maxStepsExecuted) {
+          const stepIdStr = stepId ? ` (id: ${stepId})` : '';
+          const errorMsg = `Pipeline execution limit reached (${maxStepsExecuted} steps executed). Cycle or infinite loop detected at step ${currentIndex + 1}${stepIdStr}`;
+          if (onProgress) {
+            onProgress({ step: currentIndex + 1, total: totalSteps, status: 'error', error: errorMsg, stepId });
+          }
+          throw new Error(`Pipeline aborted at step ${currentIndex + 1}${stepIdStr} (${intentName}): ${errorMsg}`);
+        }
 
         if (onProgress) {
-          onProgress({ step: stepIndex, total: totalSteps, status: 'running', intent: intentName });
+          onProgress({ step: currentIndex + 1, total: totalSteps, status: 'running', intent: intentName, stepId });
         }
 
         // Roots compatibility: file.read -> action: file:read, data: payload
-        const action = intentName.replace(/./g, ':');
+        const action = intentName.replace(/\./g, ':');
 
         try {
-          const result = await this.router.route({ action, data: payload });
-          logs.push({ step: stepIndex, intent: intentName, success: result.success, data: result.data, error: result.error });
-
+          const result = await this.router.route({ action, data: payload, id: stepId });
           if (!result.success) {
-             throw new Error(result.error || `Step ${stepIndex} failed`);
+            throw new Error(result.error || `Step ${currentIndex + 1} failed`);
           }
+          logs.push({ step: currentIndex + 1, intent: intentName, success: true, data: result.data, stepId });
+          currentIndex++;
         } catch (err) {
-          logs.push({ step: stepIndex, intent: intentName, success: false, error: err.message });
-          if (!step.continueOnError) {
-            if (onProgress) {
-              onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: err.message });
-            }
-            throw new Error(`Pipeline aborted at step ${stepIndex} (${intentName}): ${err.message}`);
+          logs.push({ step: currentIndex + 1, intent: intentName, success: false, error: err.message, stepId });
+
+          if (step && step.continueOnError) {
+            currentIndex++;
+            continue;
           }
+
+          if (step && step.onFailure) {
+            const nextIdx = steps.findIndex(s => s && s.id === step.onFailure);
+            if (nextIdx !== -1) {
+              currentIndex = nextIdx;
+              continue;
+            } else {
+              const errorMsg = `Invalid onFailure target step ID: ${step.onFailure}`;
+              if (onProgress) {
+                onProgress({ step: currentIndex + 1, total: totalSteps, status: 'error', error: errorMsg, stepId });
+              }
+              throw new Error(`Pipeline aborted at step ${currentIndex + 1} (${intentName}): ${errorMsg}`);
+            }
+          }
+
+          if (onProgress) {
+            onProgress({ step: currentIndex + 1, total: totalSteps, status: 'error', error: err.message, stepId });
+          }
+          throw new Error(`Pipeline aborted at step ${currentIndex + 1} (${intentName}): ${err.message}`);
         }
       }
 
       if (onProgress) {
-        onProgress({ step: stepIndex, total: totalSteps, status: 'success' });
+        onProgress({ step: totalSteps, total: totalSteps, status: 'success' });
       }
 
       return { success: true, logs };
@@ -787,11 +825,15 @@
     }
   }
 
-  if (typeof window.acode !== 'undefined') {
+  if (typeof window !== 'undefined' && typeof window.acode !== 'undefined') {
     const router = new IntentRouter();
     acode.setPluginInit(PLUGIN_ID, async (baseUrl, $page, context) => {
       await router.init(baseUrl, $page, context);
     });
     acode.setPluginUnmount(PLUGIN_ID, () => router.destroy());
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { PipelineRunner, PipelineUI, IntentRouter };
   }
 })();
