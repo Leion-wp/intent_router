@@ -14,8 +14,18 @@
       try {
         const fsOperation = this.router.requireFs();
         if (!fsOperation) throw new Error('File system API unavailable');
-        const fileContent = await fsOperation(fileUrl).readFile('utf-8');
-        const pipelineData = JSON.parse(fileContent);
+        let fileContent;
+        try {
+          fileContent = await fsOperation(fileUrl).readFile('utf-8');
+        } catch (fsErr) {
+          throw new Error(`File read error: ${fsErr.message}`);
+        }
+        let pipelineData;
+        try {
+          pipelineData = JSON.parse(fileContent);
+        } catch (parseErr) {
+          throw new Error(`Invalid JSON format: ${parseErr.message}`);
+        }
         return await this.runPipelineFromData(pipelineData, onProgress);
       } catch (err) {
         this.router.log(`Pipeline run error: ${err.message}`);
@@ -42,7 +52,7 @@
         }
 
         // Roots compatibility: file.read -> action: file:read, data: payload
-        const action = intentName.replace(/./g, ':');
+        const action = intentName.replace(/\./g, ':');
 
         try {
           const result = await this.router.route({ action, data: payload });
@@ -259,17 +269,25 @@
         runBtn.style.opacity = '0.5';
         statusArea.style.display = 'block';
         statusArea.style.color = '#fff';
-        statusArea.innerHTML = 'Starting pipeline...';
+        statusArea.textContent = 'Starting pipeline...';
+
+        let progressReportedError = false;
 
         this.router.pipelineRunner.runPipelineFromFile(file.url, (progress) => {
            if (progress.status === 'running') {
-              statusArea.innerHTML = `Step ${progress.step}/${progress.total}: ${progress.intent} - Running...`;
+              statusArea.style.color = '#fff';
+              statusArea.textContent = `Step ${progress.step}/${progress.total}: ${progress.intent} - Running...`;
            } else if (progress.status === 'success') {
               statusArea.style.color = '#4caf50';
-              statusArea.innerHTML = `Success! (${progress.total}/${progress.total} steps completed)`;
+              statusArea.textContent = `Success! (${progress.total}/${progress.total} steps completed)`;
            } else if (progress.status === 'error') {
+              progressReportedError = true;
               statusArea.style.color = '#f44336';
-              statusArea.innerHTML = `Failed at step ${progress.step}: ${this.router.escapeHtml(progress.error)}`;
+              if (progress.step) {
+                 statusArea.textContent = `Failed at step ${progress.step}: ${progress.error}`;
+              } else {
+                 statusArea.textContent = `Failed: ${progress.error}`;
+              }
            }
         }).then(result => {
            runBtn.disabled = false;
@@ -279,6 +297,10 @@
            runBtn.disabled = false;
            openBtn.disabled = false;
            runBtn.style.opacity = '1';
+           if (!progressReportedError) {
+              statusArea.style.color = '#f44336';
+              statusArea.textContent = `Failed to load pipeline: ${err.message}`;
+           }
         });
       };
 
