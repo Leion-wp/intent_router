@@ -4,30 +4,173 @@
   const PLUGIN_ID = 'com.leion.intentrouter';
   const PLUGIN_VERSION = '1.2.1';
 
+  class PipelineRunQueue {
+    constructor(router, options = {}) {
+      this.router = router;
+      this.maxConcurrentRuns = options.maxConcurrentRuns || 1;
+      this.maxQueueLength = options.maxQueueLength || 20;
+      this.pending = [];
+      this.activeRuns = new Set();
+      this.nextRunId = 1;
+      this.isDestroyed = false;
+    }
+
+    enqueue(options = {}) {
+      if (this.isDestroyed) {
+        return Promise.reject(new Error('PipelineRunQueue is destroyed'));
+      }
+
+      if (this.pending.length >= this.maxQueueLength) {
+        return Promise.reject(new Error(`Queue capacity reached (max ${this.maxQueueLength} queued runs)`));
+      }
+
+      const runId = `run_${Date.now()}_${this.nextRunId++}`;
+      const source = options.source || 'manual';
+      const fileUrl = options.fileUrl || (typeof options.pipeline === 'string' ? options.pipeline : null);
+      const pipelineData = options.pipelineData || (typeof options.pipeline === 'object' ? options.pipeline : null);
+      const onProgress = options.onProgress;
+
+      const pipelineName = fileUrl
+        ? fileUrl.split('/').pop()
+        : (pipelineData && pipelineData.name ? pipelineData.name : 'unnamed_pipeline');
+
+      let runResolve, runReject;
+      const promise = new Promise((resolve, reject) => {
+        runResolve = resolve;
+        runReject = reject;
+      });
+
+      const runItem = {
+        id: runId,
+        source,
+        fileUrl,
+        pipelineData,
+        pipelineName,
+        onProgress,
+        queuedAt: new Date().toISOString(),
+        resolve: runResolve,
+        reject: runReject,
+        promise
+      };
+
+      if (this.activeRuns.size >= this.maxConcurrentRuns) {
+        if (typeof onProgress === 'function') {
+          try {
+            onProgress({ status: 'queued', position: this.pending.length + 1, runId });
+          } catch (_) {}
+        }
+      }
+
+      this.pending.push(runItem);
+      this.drain();
+
+      return promise;
+    }
+
+    drain() {
+      if (this.isDestroyed) return;
+
+      while (this.activeRuns.size < this.maxConcurrentRuns && this.pending.length > 0) {
+        const runItem = this.pending.shift();
+        this.activeRuns.add(runItem);
+        runItem.startedAt = new Date().toISOString();
+
+        const wrappedProgress = (progress) => {
+          if (typeof runItem.onProgress === 'function') {
+            runItem.onProgress(progress);
+          }
+        };
+
+        (async () => {
+          try {
+            this.router.log(`[RunQueue] Starting run ${runItem.id} (source: ${runItem.source}, pipeline: ${runItem.pipelineName})`);
+            let result;
+            if (runItem.fileUrl) {
+              result = await this.router.pipelineRunner.runPipelineFromFile(runItem.fileUrl, wrappedProgress, { source: runItem.source });
+            } else if (runItem.pipelineData) {
+              result = await this.router.pipelineRunner.runPipelineFromData(runItem.pipelineData, wrappedProgress, { source: runItem.source });
+            } else {
+              throw new Error('No valid fileUrl or pipelineData provided for pipeline execution');
+            }
+            runItem.resolve(result);
+          } catch (err) {
+            this.router.log(`[RunQueue] Run ${runItem.id} failed: ${err.message}`);
+            runItem.reject(err);
+          } finally {
+            this.activeRuns.delete(runItem);
+            this.drain();
+          }
+        })();
+      }
+    }
+
+    inspect() {
+      const active = Array.from(this.activeRuns).map(run => ({
+        id: run.id,
+        source: run.source,
+        pipelineName: run.pipelineName,
+        fileUrl: run.fileUrl,
+        startedAt: run.startedAt,
+        status: 'running'
+      }));
+
+      const queued = this.pending.map((run, index) => ({
+        id: run.id,
+        position: index + 1,
+        source: run.source,
+        pipelineName: run.pipelineName,
+        fileUrl: run.fileUrl,
+        queuedAt: run.queuedAt,
+        status: 'queued'
+      }));
+
+      const state = active.length > 0 ? 'running' : (queued.length > 0 ? 'queued' : 'idle');
+
+      return {
+        state,
+        maxConcurrentRuns: this.maxConcurrentRuns,
+        maxQueueLength: this.maxQueueLength,
+        activeCount: active.length,
+        queuedCount: queued.length,
+        active,
+        pending: queued
+      };
+    }
+
+    destroy() {
+      this.isDestroyed = true;
+      for (const item of this.pending) {
+        item.reject(new Error('PipelineRunQueue destroyed: queued run cancelled'));
+      }
+      this.pending = [];
+    }
+  }
+
 
   class PipelineRunner {
     constructor(router) {
       this.router = router;
     }
 
-    async runPipelineFromFile(fileUrl, onProgress) {
+    async runPipelineFromFile(fileUrl, onProgress, context = {}) {
       try {
         const fsOperation = this.router.requireFs();
         if (!fsOperation) throw new Error('File system API unavailable');
         const fileContent = await fsOperation(fileUrl).readFile('utf-8');
         const pipelineData = JSON.parse(fileContent);
-        return await this.runPipelineFromData(pipelineData, onProgress);
+        return await this.runPipelineFromData(pipelineData, onProgress, context);
       } catch (err) {
-        this.router.log(`Pipeline run error: ${err.message}`);
+        this.router.log(`Pipeline run error (${context.source || 'manual'}): ${err.message}`);
         throw err;
       }
     }
 
-    async runPipelineFromData(pipelineData, onProgress) {
+    async runPipelineFromData(pipelineData, onProgress, context = {}) {
       if (!pipelineData || !Array.isArray(pipelineData.steps)) {
         throw new Error('Invalid pipeline format: steps array is missing');
       }
 
+      const source = context.source || 'manual';
       let stepIndex = 0;
       const totalSteps = pipelineData.steps.length;
       const logs = [];
@@ -38,24 +181,24 @@
         const payload = step.payload || {};
 
         if (onProgress) {
-          onProgress({ step: stepIndex, total: totalSteps, status: 'running', intent: intentName });
+          onProgress({ step: stepIndex, total: totalSteps, status: 'running', intent: intentName, source });
         }
 
         // Roots compatibility: file.read -> action: file:read, data: payload
-        const action = intentName.replace(/./g, ':');
+        const action = intentName.replace(/\./g, ':');
 
         try {
           const result = await this.router.route({ action, data: payload });
-          logs.push({ step: stepIndex, intent: intentName, success: result.success, data: result.data, error: result.error });
+          logs.push({ step: stepIndex, intent: intentName, success: result.success, data: result.data, error: result.error, source });
 
           if (!result.success) {
              throw new Error(result.error || `Step ${stepIndex} failed`);
           }
         } catch (err) {
-          logs.push({ step: stepIndex, intent: intentName, success: false, error: err.message });
+          logs.push({ step: stepIndex, intent: intentName, success: false, error: err.message, source });
           if (!step.continueOnError) {
             if (onProgress) {
-              onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: err.message });
+              onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: err.message, source });
             }
             throw new Error(`Pipeline aborted at step ${stepIndex} (${intentName}): ${err.message}`);
           }
@@ -63,10 +206,10 @@
       }
 
       if (onProgress) {
-        onProgress({ step: stepIndex, total: totalSteps, status: 'success' });
+        onProgress({ step: stepIndex, total: totalSteps, status: 'success', source });
       }
 
-      return { success: true, logs };
+      return { success: true, logs, source };
     }
   }
 
@@ -226,7 +369,6 @@
       openBtn.onclick = async () => {
          try {
             await this.router.route({ action: 'editor:open_file', data: { path: file.url, name: file.name }});
-            // Try to hide the page to show the editor if it has hide method
             if (typeof this.router.$page.hide === 'function') this.router.$page.hide();
          } catch(e) {
             this.router.toast('Error opening file: ' + e.message);
@@ -259,23 +401,33 @@
         runBtn.style.opacity = '0.5';
         statusArea.style.display = 'block';
         statusArea.style.color = '#fff';
-        statusArea.innerHTML = 'Starting pipeline...';
+        statusArea.innerHTML = 'Queued...';
 
-        this.router.pipelineRunner.runPipelineFromFile(file.url, (progress) => {
-           if (progress.status === 'running') {
+        this.router.runQueue.enqueue({
+          fileUrl: file.url,
+          source: 'manual',
+          onProgress: (progress) => {
+            if (progress.status === 'queued') {
+              statusArea.style.color = '#ff9800';
+              statusArea.innerHTML = `Queued (position ${progress.position})...`;
+            } else if (progress.status === 'running') {
+              statusArea.style.color = '#fff';
               statusArea.innerHTML = `Step ${progress.step}/${progress.total}: ${progress.intent} - Running...`;
-           } else if (progress.status === 'success') {
+            } else if (progress.status === 'success') {
               statusArea.style.color = '#4caf50';
               statusArea.innerHTML = `Success! (${progress.total}/${progress.total} steps completed)`;
-           } else if (progress.status === 'error') {
+            } else if (progress.status === 'error') {
               statusArea.style.color = '#f44336';
               statusArea.innerHTML = `Failed at step ${progress.step}: ${this.router.escapeHtml(progress.error)}`;
-           }
+            }
+          }
         }).then(result => {
            runBtn.disabled = false;
            openBtn.disabled = false;
            runBtn.style.opacity = '1';
         }).catch(err => {
+           statusArea.style.color = '#f44336';
+           statusArea.innerHTML = `Error: ${this.router.escapeHtml(err.message)}`;
            runBtn.disabled = false;
            openBtn.disabled = false;
            runBtn.style.opacity = '1';
@@ -298,6 +450,7 @@
       this.registeredAcodeCommands = [];
       this.pipelineRunner = new PipelineRunner(this);
       this.pipelineUI = new PipelineUI(this);
+      this.runQueue = new PipelineRunQueue(this);
     }
 
     safeRequire(name) {
@@ -462,6 +615,7 @@
       this.register('router:list', () => Array.from(this.commands.keys()).sort());
       this.register('router:logs', () => this.logs.slice());
       this.register('router:clear_logs', () => { this.logs = []; return { cleared: true }; });
+      this.register('router:run_queue', () => this.runQueue.inspect());
       this.register('router:capabilities', () => ({
         pluginId: PLUGIN_ID,
         version: PLUGIN_VERSION,
@@ -778,6 +932,7 @@
       }
       this.registeredAcodeCommands = [];
       if (window.intentRouter === this) delete window.intentRouter;
+      if (this.runQueue) this.runQueue.destroy();
       this.commands.clear();
       this.isInitialized = false;
       this.$page = null;
@@ -787,7 +942,16 @@
     }
   }
 
-  if (typeof window.acode !== 'undefined') {
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      PipelineRunQueue,
+      PipelineRunner,
+      PipelineUI,
+      IntentRouter
+    };
+  }
+
+  if (typeof window !== 'undefined' && typeof window.acode !== 'undefined') {
     const router = new IntentRouter();
     acode.setPluginInit(PLUGIN_ID, async (baseUrl, $page, context) => {
       await router.init(baseUrl, $page, context);
