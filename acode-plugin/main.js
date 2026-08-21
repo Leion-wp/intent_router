@@ -5,25 +5,159 @@
   const PLUGIN_VERSION = '1.2.1';
 
 
+  function asBoolean(value, fallback = true) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+    }
+    return fallback;
+  }
+
+  function asPositiveInt(value, fallback) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return Math.floor(parsed);
+  }
+
+  function parseWatchEvents(raw) {
+    const output = new Set();
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        const text = String(item || '').trim().toLowerCase();
+        if (text === 'create' || text === 'change' || text === 'delete') output.add(text);
+      }
+    } else {
+      const text = String(raw || 'change').trim().toLowerCase();
+      const parts = text.split(',').map(s => s.trim()).filter(Boolean);
+      for (const part of parts) {
+        if (part === 'create' || part === 'change' || part === 'delete') output.add(part);
+      }
+    }
+    if (!output.size) output.add('change');
+    return output;
+  }
+
+  function isWorkspacePathSafe(relPath) {
+    const normalized = String(relPath || '').trim().replace(/\\/g, '/');
+    if (!normalized) return false;
+    if (normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized) || normalized.startsWith('file://')) {
+      return false;
+    }
+    const parts = normalized.split('/');
+    let depth = 0;
+    for (const part of parts) {
+      if (part === '..') {
+        depth--;
+        if (depth < 0) return false;
+      } else if (part !== '.' && part !== '') {
+        depth++;
+      }
+    }
+    return true;
+  }
+
+  function matchGlob(filePath, pattern) {
+    const normFile = String(filePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    const normPattern = String(pattern || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    if (normFile === normPattern) return true;
+
+    let regexStr = '^';
+    let i = 0;
+    while (i < normPattern.length) {
+      const c = normPattern[i];
+      if (c === '*') {
+        if (normPattern[i + 1] === '*') {
+          if (normPattern[i + 2] === '/') {
+            regexStr += '(?:.*/)?';
+            i += 3;
+            continue;
+          } else {
+            regexStr += '.*';
+            i += 2;
+            continue;
+          }
+        } else {
+          regexStr += '[^/]*';
+          i++;
+          continue;
+        }
+      } else if (c === '?') {
+        regexStr += '[^/]';
+        i++;
+      } else if ('+?.()^$|{}[]\\'.includes(c)) {
+        regexStr += '\\' + c;
+        i++;
+      } else {
+        regexStr += c;
+        i++;
+      }
+    }
+    regexStr += '$';
+    try {
+      return new RegExp(regexStr).test(normFile);
+    } catch (_) {
+      return normFile === normPattern;
+    }
+  }
+
+  async function scanDirectory(fsOperation, rootUrl, currentUrl, depth = 0, maxDepth = 5, results = [], maxFiles = 200) {
+    if (depth > maxDepth || results.length >= maxFiles) return results;
+    try {
+      const folder = fsOperation(currentUrl);
+      if (!(await folder.exists())) return results;
+      const items = await folder.lsDir();
+      for (const item of items) {
+        if (results.length >= maxFiles) break;
+        const itemUrl = item.url || (currentUrl.endsWith('/') ? currentUrl + item.name : currentUrl + '/' + item.name);
+        const isDir = item.isDirectory || item.type === 'directory' || item.isDir;
+        if (isDir) {
+          if (item.name.startsWith('.') || item.name === 'node_modules') continue;
+          await scanDirectory(fsOperation, rootUrl, itemUrl, depth + 1, maxDepth, results, maxFiles);
+        } else {
+          let relPath = itemUrl;
+          if (rootUrl && itemUrl.startsWith(rootUrl)) {
+            relPath = itemUrl.substring(rootUrl.length).replace(/^\/+/, '');
+          }
+          let mtime = 0;
+          let size = 0;
+          try {
+            const stat = await fsOperation(itemUrl).stat();
+            mtime = stat.mtime || stat.lastModified || 0;
+            size = stat.size || 0;
+          } catch (_) {
+            if (item.stat) {
+              mtime = item.stat.mtime || item.stat.lastModified || 0;
+              size = item.stat.size || 0;
+            }
+          }
+          results.push({ relPath, fullUrl: itemUrl, mtime, size });
+        }
+      }
+    } catch (_) {}
+    return results;
+  }
+
   class PipelineRunner {
     constructor(router) {
       this.router = router;
     }
 
-    async runPipelineFromFile(fileUrl, onProgress) {
+    async runPipelineFromFile(fileUrl, onProgress, options = {}) {
       try {
         const fsOperation = this.router.requireFs();
         if (!fsOperation) throw new Error('File system API unavailable');
         const fileContent = await fsOperation(fileUrl).readFile('utf-8');
         const pipelineData = JSON.parse(fileContent);
-        return await this.runPipelineFromData(pipelineData, onProgress);
+        return await this.runPipelineFromData(pipelineData, onProgress, options);
       } catch (err) {
         this.router.log(`Pipeline run error: ${err.message}`);
         throw err;
       }
     }
 
-    async runPipelineFromData(pipelineData, onProgress) {
+    async runPipelineFromData(pipelineData, onProgress, options = {}) {
       if (!pipelineData || !Array.isArray(pipelineData.steps)) {
         throw new Error('Invalid pipeline format: steps array is missing');
       }
@@ -42,10 +176,14 @@
         }
 
         // Roots compatibility: file.read -> action: file:read, data: payload
-        const action = intentName.replace(/./g, ':');
+        const action = intentName.replace(/\./g, ':');
 
         try {
-          const result = await this.router.route({ action, data: payload });
+          const result = await this.router.route(
+            { action, data: payload, runtimeVariables: options.runtimeVariables },
+            null,
+            options.runtimeVariables
+          );
           logs.push({ step: stepIndex, intent: intentName, success: result.success, data: result.data, error: result.error });
 
           if (!result.success) {
@@ -66,7 +204,318 @@
         onProgress({ step: stepIndex, total: totalSteps, status: 'success' });
       }
 
-      return { success: true, logs };
+      return {
+        success: true,
+        logs,
+        source: options.source || 'manual',
+        triggerStepId: options.triggerStepId,
+        event: options.event
+      };
+    }
+  }
+
+  class AcodeTriggerManager {
+    constructor(router) {
+      this.router = router;
+      this.registrations = new Map();
+      this.snapshots = new Map();
+      this.pollIntervals = new Map();
+      this.debounceTimers = new Map();
+      this.cooldowns = new Map();
+      this.isRefreshing = false;
+      this.refreshPending = false;
+    }
+
+    async start() {
+      await this.refresh();
+    }
+
+    async refresh() {
+      if (this.isRefreshing) {
+        this.refreshPending = true;
+        return;
+      }
+      this.isRefreshing = true;
+      try {
+        this.clearRegistrations();
+        await this.loadRegistrations();
+      } finally {
+        this.isRefreshing = false;
+        if (this.refreshPending) {
+          this.refreshPending = false;
+          await this.refresh();
+        }
+      }
+    }
+
+    clearRegistrations() {
+      for (const interval of this.pollIntervals.values()) {
+        clearInterval(interval);
+      }
+      this.pollIntervals.clear();
+
+      for (const timer of this.debounceTimers.values()) {
+        clearTimeout(timer);
+      }
+      this.debounceTimers.clear();
+
+      this.registrations.clear();
+      this.snapshots.clear();
+      this.cooldowns.clear();
+    }
+
+    destroy() {
+      this.clearRegistrations();
+    }
+
+    async loadRegistrations() {
+      const projectRoot = await this.router.getProjectRoot();
+      if (!projectRoot) return;
+
+      const fsOperation = this.router.requireFsSilently();
+      if (!fsOperation) return;
+
+      const pipelineFolderUrl = projectRoot.endsWith('/') ? projectRoot + 'pipeline' : projectRoot + '/pipeline';
+      const folder = fsOperation(pipelineFolderUrl);
+      if (!(await folder.exists())) return;
+
+      const files = await folder.lsDir();
+      const pipelineFiles = files.filter(f => f.name && f.name.endsWith('.intent.json'));
+
+      for (const file of pipelineFiles) {
+        try {
+          const fileContent = await fsOperation(file.url).readFile('utf-8');
+          const pipelineData = JSON.parse(fileContent);
+          if (!pipelineData || !Array.isArray(pipelineData.steps)) continue;
+
+          for (let stepIndex = 0; stepIndex < pipelineData.steps.length; stepIndex++) {
+            const step = pipelineData.steps[stepIndex];
+            const intent = String(step?.intent || '').trim();
+            if (intent !== 'system.trigger.watch' && intent !== 'system:trigger:watch') continue;
+
+            const payload = step?.payload || {};
+            if (!asBoolean(payload.enabled, true)) continue;
+
+            const stepId = String(step?.id || '').trim() || `trigger_${stepIndex}`;
+            await this.registerWatchTrigger(file.url, stepId, payload, projectRoot);
+          }
+        } catch (err) {
+          this.router.log(`Error parsing trigger from ${file.name}: ${err.message}`);
+        }
+      }
+    }
+
+    async registerWatchTrigger(pipelineUrl, stepId, payload, projectRoot) {
+      const pattern = String(payload.glob || payload.path || '').trim();
+      if (!pattern) return;
+
+      if (!isWorkspacePathSafe(pattern)) {
+        this.router.log(`Watch trigger rejected unsafe/external path: ${pattern}`);
+        return;
+      }
+
+      const id = `watch:${pipelineUrl}:${stepId}`;
+      const events = parseWatchEvents(payload.events);
+      const debounceMs = asPositiveInt(payload.debounceMs, 800);
+      const cooldownMs = asPositiveInt(payload.cooldownMs, 2500);
+      const pollIntervalMs = payload.pollIntervalMs === 0 ? 0 : Math.min(60000, Math.max(1000, asPositiveInt(payload.pollIntervalMs, 3000)));
+
+      const registration = {
+        id,
+        kind: 'watch',
+        pipelineUrl,
+        stepId,
+        payload,
+        pattern,
+        events,
+        debounceMs,
+        cooldownMs,
+        pollIntervalMs,
+        lastTriggered: 0,
+        enabled: true
+      };
+
+      this.registrations.set(id, registration);
+
+      const snapshot = new Map();
+      const fsOperation = this.router.requireFsSilently();
+      if (fsOperation) {
+        const matches = await this.getMatchingFiles(fsOperation, projectRoot, pattern);
+        for (const f of matches) {
+          snapshot.set(f.relPath, { mtime: f.mtime, size: f.size, exists: true });
+        }
+      }
+      this.snapshots.set(id, snapshot);
+
+      if (pollIntervalMs > 0) {
+        const timer = setInterval(() => {
+          void this.pollTick(id, projectRoot);
+        }, pollIntervalMs);
+        this.pollIntervals.set(id, timer);
+      }
+      this.router.log(`Registered watch trigger: ${id} on '${pattern}' (poll: ${pollIntervalMs}ms)`);
+    }
+
+    async getMatchingFiles(fsOperation, projectRoot, pattern) {
+      if (!pattern.includes('*') && !pattern.includes('?')) {
+        const relPath = pattern.replace(/^\/+/, '');
+        if (!isWorkspacePathSafe(relPath)) return [];
+        const fullUrl = projectRoot.endsWith('/') ? projectRoot + relPath : projectRoot + '/' + relPath;
+        try {
+          const handle = fsOperation(fullUrl);
+          if (await handle.exists()) {
+            const stat = await handle.stat();
+            return [{
+              relPath,
+              fullUrl,
+              mtime: stat.mtime || stat.lastModified || 0,
+              size: stat.size || 0
+            }];
+          }
+        } catch (_) {}
+        return [];
+      } else {
+        const allFiles = await scanDirectory(fsOperation, projectRoot, projectRoot, 0, 5, [], 200);
+        return allFiles.filter(f => matchGlob(f.relPath, pattern) && isWorkspacePathSafe(f.relPath));
+      }
+    }
+
+    async pollTick(registrationId, projectRoot) {
+      const reg = this.registrations.get(registrationId);
+      if (!reg) return;
+
+      const fsOperation = this.router.requireFsSilently();
+      if (!fsOperation) return;
+
+      const currentMatches = await this.getMatchingFiles(fsOperation, projectRoot, reg.pattern);
+      const snapshot = this.snapshots.get(registrationId) || new Map();
+      const currentMap = new Map();
+
+      for (const file of currentMatches) {
+        currentMap.set(file.relPath, file);
+        const prev = snapshot.get(file.relPath);
+
+        if (!prev) {
+          if (reg.events.has('create')) {
+            this.emitWatchEvent(reg, file.relPath, file.fullUrl, 'create');
+          }
+        } else if (prev.mtime !== file.mtime || prev.size !== file.size) {
+          if (reg.events.has('change')) {
+            this.emitWatchEvent(reg, file.relPath, file.fullUrl, 'change');
+          }
+        }
+      }
+
+      for (const [relPath, prevStat] of snapshot.entries()) {
+        if (!currentMap.has(relPath) && prevStat.exists) {
+          if (reg.events.has('delete')) {
+            const fullUrl = projectRoot.endsWith('/') ? projectRoot + relPath : projectRoot + '/' + relPath;
+            this.emitWatchEvent(reg, relPath, fullUrl, 'delete');
+          }
+        }
+      }
+
+      const newSnapshot = new Map();
+      for (const [relPath, file] of currentMap.entries()) {
+        newSnapshot.set(relPath, { mtime: file.mtime, size: file.size, exists: true });
+      }
+      this.snapshots.set(registrationId, newSnapshot);
+    }
+
+    shouldCooldown(registrationId, cooldownMs) {
+      const now = Date.now();
+      const last = this.cooldowns.get(registrationId) || 0;
+      if (now - last < cooldownMs) {
+        return true;
+      }
+      this.cooldowns.set(registrationId, now);
+      return false;
+    }
+
+    emitWatchEvent(reg, relPath, fullUrl, changeType) {
+      if (this.shouldCooldown(reg.id, reg.cooldownMs)) {
+        return;
+      }
+
+      const timerKey = `${reg.id}:${relPath}:${changeType}`;
+      if (this.debounceTimers.has(timerKey)) {
+        clearTimeout(this.debounceTimers.get(timerKey));
+      }
+
+      reg.lastRunPromise = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.debounceTimers.delete(timerKey);
+          reg.lastTriggered = Date.now();
+
+          const options = {
+            source: 'watch',
+            triggerStepId: reg.stepId,
+            event: {
+              changeType,
+              path: relPath,
+              uri: fullUrl,
+              timestamp: Date.now()
+            },
+            runtimeVariables: {
+              trigger_source: 'watch',
+              trigger_step_id: reg.stepId,
+              trigger_changeType: changeType,
+              trigger_path: relPath,
+              trigger_uri: fullUrl,
+              trigger_timestamp: String(Date.now()),
+              trigger_event_json: JSON.stringify({
+                changeType,
+                path: relPath,
+                uri: fullUrl,
+                timestamp: Date.now()
+              })
+            }
+          };
+
+          this.router.log(`[Watch Trigger] ${changeType} on ${relPath} -> executing ${reg.pipelineUrl}`);
+
+          this.router.pipelineRunner.runPipelineFromFile(reg.pipelineUrl, null, options)
+            .then(async (result) => {
+              if (result && result.success && reg.payload.onSuccessPipeline) {
+                const onSuccessRef = String(reg.payload.onSuccessPipeline).trim();
+                if (onSuccessRef) {
+                  const projectRoot = await this.router.getProjectRoot();
+                  if (projectRoot) {
+                    const targetUrl = projectRoot.endsWith('/') ? projectRoot + onSuccessRef : projectRoot + '/' + onSuccessRef;
+                    await this.router.pipelineRunner.runPipelineFromFile(targetUrl, null, {
+                      source: 'watch_chain',
+                      triggerStepId: reg.stepId,
+                      runtimeVariables: options.runtimeVariables
+                    });
+                  }
+                }
+              }
+              resolve(result);
+            })
+            .catch((err) => {
+              this.router.log(`[Watch Trigger Error] ${err.message}`);
+              reject(err);
+            });
+        }, reg.debounceMs);
+
+        this.debounceTimers.set(timerKey, timer);
+      });
+    }
+
+    getRegistrations() {
+      return Array.from(this.registrations.values()).map(r => ({
+        id: r.id,
+        kind: r.kind,
+        pipelineUrl: r.pipelineUrl,
+        stepId: r.stepId,
+        pattern: r.pattern,
+        events: Array.from(r.events),
+        debounceMs: r.debounceMs,
+        cooldownMs: r.cooldownMs,
+        pollIntervalMs: r.pollIntervalMs,
+        lastTriggered: r.lastTriggered,
+        enabled: r.enabled
+      }));
     }
   }
 
@@ -105,9 +554,7 @@
     }
 
     async getProjectRoot() {
-      // Trying to get current project root
-      // window.addedFolder is the array of open folders in Acode sidebar
-      if (window.addedFolder && window.addedFolder.length > 0) {
+      if (typeof window !== 'undefined' && window.addedFolder && window.addedFolder.length > 0) {
         return window.addedFolder[0].url;
       }
       return null;
@@ -296,12 +743,26 @@
       this.context = null;
       this.modules = {};
       this.registeredAcodeCommands = [];
+      this.workspaceRoot = null;
       this.pipelineRunner = new PipelineRunner(this);
       this.pipelineUI = new PipelineUI(this);
+      this.triggerManager = new AcodeTriggerManager(this);
     }
 
     safeRequire(name) {
-      try { return acode.require(name); } catch (_) { return null; }
+      try { return typeof acode !== 'undefined' ? acode.require(name) : null; } catch (_) { return null; }
+    }
+
+    async getProjectRoot() {
+      if (this.workspaceRoot) return this.workspaceRoot;
+      if (typeof window !== 'undefined' && window.addedFolder && window.addedFolder.length > 0) {
+        return window.addedFolder[0].url;
+      }
+      return null;
+    }
+
+    requireFsSilently() {
+      return this.modules.fs || null;
     }
 
     async init(baseUrl, $page, context) {
@@ -318,8 +779,11 @@
 
       this.setupCommands();
       this.registerAcodeCommands();
-      window.intentRouter = this;
+      if (typeof window !== 'undefined') {
+        window.intentRouter = this;
+      }
       this.isInitialized = true;
+      await this.triggerManager.start();
       this.log('Intent Router initialized');
       this.toast('Intent Router Active');
     }
@@ -327,7 +791,7 @@
     toast(message, timeout = 3000) {
       try {
         if (typeof this.modules.toast === 'function') return this.modules.toast(String(message), timeout);
-        if (typeof window.toast === 'function') return window.toast(String(message), timeout);
+        if (typeof window !== 'undefined' && typeof window.toast === 'function') return window.toast(String(message), timeout);
       } catch (_) {}
     }
 
@@ -335,7 +799,9 @@
       try {
         if (typeof this.modules.alert === 'function') return this.modules.alert(String(title), String(message));
       } catch (_) {}
-      window.alert(`${title}\n\n${message}`);
+      if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+        window.alert(`${title}\n\n${message}`);
+      }
     }
 
     log(message) {
@@ -368,12 +834,21 @@
       this.log(`Registered command: ${name}`);
     }
 
-    async resolveVariables(input, cache) {
+    async resolveVariables(input, cache, runtimeVars) {
       if (!cache) cache = new Map();
       if (typeof input === 'string') {
+        let result = input;
+        if (runtimeVars && typeof runtimeVars === 'object') {
+          for (const [k, v] of Object.entries(runtimeVars)) {
+            if (v !== undefined && v !== null) {
+              const valStr = String(v);
+              result = result.replace(new RegExp(`\\$\\{var:${k}\\}`, 'g'), valStr);
+              result = result.replace(new RegExp(`\\$\\{${k}\\}`, 'g'), valStr);
+            }
+          }
+        }
         const regex = /\$\{input:([^}]+)\}/g;
         let match;
-        let result = input;
         while ((match = regex.exec(input)) !== null) {
           const fullMatch = match[0];
           const promptText = match[1];
@@ -381,7 +856,7 @@
           if (value === undefined) {
             const prompt = this.safeRequire('prompt');
             if (!prompt) {
-              value = window.prompt(`Value for ${promptText}`);
+              value = typeof window !== 'undefined' && typeof window.prompt === 'function' ? window.prompt(`Value for ${promptText}`) : '';
             } else {
               value = await prompt(promptText, '', 'text', { required: true });
             }
@@ -392,19 +867,20 @@
         }
         return result;
       } else if (Array.isArray(input)) {
-        return Promise.all(input.map(item => this.resolveVariables(item, cache)));
+        return Promise.all(input.map(item => this.resolveVariables(item, cache, runtimeVars)));
       } else if (typeof input === 'object' && input !== null) {
         const resolved = {};
         for (const key of Object.keys(input)) {
-          resolved[key] = await this.resolveVariables(input[key], cache);
+          resolved[key] = await this.resolveVariables(input[key], cache, runtimeVars);
         }
         return resolved;
       }
       return input;
     }
 
-    async route(intent = {}, variableCache) {
+    async route(intent = {}, variableCache, runtimeVars) {
       if (!variableCache) variableCache = new Map();
+      const rVars = runtimeVars || intent.runtimeVariables;
 
       if (intent.steps && Array.isArray(intent.steps) && intent.steps.length > 0) {
         this.log(`Routing composite intent with ${intent.steps.length} steps`);
@@ -413,7 +889,7 @@
           const childIntent = Object.assign({}, childStep, {
             meta: Object.assign({}, intent.meta || {}, childStep.meta || {})
           });
-          lastResult = await this.route(childIntent, variableCache);
+          lastResult = await this.route(childIntent, variableCache, rVars);
           if (!lastResult || (lastResult && lastResult.success === false)) {
             this.log('Composite step failed');
             return lastResult;
@@ -430,7 +906,7 @@
       if (!handler) return this.fail(`Command ${action} not found`, { action });
 
       try {
-        data = await this.resolveVariables(data, variableCache);
+        data = await this.resolveVariables(data, variableCache, rVars);
       } catch (error) {
         return this.fail(error.message, { action });
       }
@@ -452,8 +928,10 @@
     }
 
     getEditor() {
-      if (!window.editorManager || !editorManager.editor) throw new Error('Editor unavailable');
-      return editorManager.editor;
+      if (typeof window === 'undefined' || !window.editorManager || !window.editorManager.editor) {
+        throw new Error('Editor unavailable');
+      }
+      return window.editorManager.editor;
     }
 
     setupCommands() {
@@ -462,15 +940,24 @@
       this.register('router:list', () => Array.from(this.commands.keys()).sort());
       this.register('router:logs', () => this.logs.slice());
       this.register('router:clear_logs', () => { this.logs = []; return { cleared: true }; });
+      this.register('router:triggers', () => this.triggerManager.getRegistrations());
+      this.register('router:refresh_triggers', async () => {
+        await this.triggerManager.refresh();
+        return { refreshed: true, activeCount: this.triggerManager.registrations.size };
+      });
       this.register('router:capabilities', () => ({
         pluginId: PLUGIN_ID,
         version: PLUGIN_VERSION,
         fs: !!this.modules.fs,
         commands: !!this.modules.commands,
         terminal: !!this.modules.terminal,
-        editor: !!(window.editorManager && editorManager.editor),
+        editor: !!(typeof window !== 'undefined' && window.editorManager && window.editorManager.editor),
         network: typeof fetch === 'function'
       }));
+
+      this.register('system:trigger:watch', (data) => ({ trigger: 'watch', active: true, payload: data }));
+      this.register('system:trigger:cron', (data) => ({ trigger: 'cron', active: true, payload: data }));
+      this.register('system:trigger:webhook', (data) => ({ trigger: 'webhook', active: true, payload: data }));
 
       this.register('system:toast', (data) => {
         this.toast(data.message || 'No message', Number(data.timeout) || 3000);
@@ -499,11 +986,11 @@
       this.register('system:copy_to_clipboard', async (data) => {
         if (data.text === undefined) throw new Error('text is required');
         const value = String(data.text);
-        if (navigator.clipboard && navigator.clipboard.writeText) {
+        if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(value);
           return { copied: true, method: 'navigator.clipboard' };
         }
-        const clipboard = window.cordova?.plugins?.clipboard;
+        const clipboard = typeof window !== 'undefined' ? window.cordova?.plugins?.clipboard : null;
         if (!clipboard || typeof clipboard.copy !== 'function') throw new Error('Clipboard API unavailable');
         await new Promise((resolve, reject) => clipboard.copy(value, resolve, reject));
         return { copied: true, method: 'cordova' };
@@ -511,7 +998,9 @@
 
       this.register('system:open_url', (data) => {
         if (!data.url) throw new Error('url is required');
-        window.open(String(data.url), '_system');
+        if (typeof window !== 'undefined' && typeof window.open === 'function') {
+          window.open(String(data.url), '_system');
+        }
         return { opened: true };
       });
 
@@ -621,7 +1110,7 @@
         return { line: lineNumber, column };
       });
 
-      this.register('editor:list_files', () => (editorManager.files || []).map((file) => ({
+      this.register('editor:list_files', () => ((typeof window !== 'undefined' && window.editorManager && window.editorManager.files) || []).map((file) => ({
         id: file.id,
         name: file.filename,
         uri: file.uri,
@@ -630,14 +1119,16 @@
       })));
 
       this.register('editor:save_file', async (data) => {
-        const file = data.uri ? editorManager.getFile(data.uri, 'uri') : editorManager.activeFile;
+        const mgr = typeof window !== 'undefined' ? window.editorManager : null;
+        const file = data.uri ? mgr?.getFile(data.uri, 'uri') : mgr?.activeFile;
         if (!file || typeof file.save !== 'function') throw new Error('File not found or cannot be saved');
         await file.save();
         return { saved: true, uri: file.uri };
       });
 
       this.register('editor:close_file', async (data) => {
-        const file = data.uri ? editorManager.getFile(data.uri, 'uri') : editorManager.activeFile;
+        const mgr = typeof window !== 'undefined' ? window.editorManager : null;
+        const file = data.uri ? mgr?.getFile(data.uri, 'uri') : mgr?.activeFile;
         if (!file || typeof file.remove !== 'function') throw new Error('File not found');
         await file.remove(!!data.force);
         return { closed: true };
@@ -647,7 +1138,9 @@
         if (!data.path) throw new Error('path is required');
         const text = await this.requireFs()(data.path).readFile(data.encoding || 'utf-8');
         const filename = data.name || String(data.path).split('/').filter(Boolean).pop() || 'file';
-        const file = await editorManager.addNewFile(filename, {
+        const mgr = typeof window !== 'undefined' ? window.editorManager : null;
+        if (!mgr || typeof mgr.addNewFile !== 'function') throw new Error('Editor manager unavailable');
+        const file = await mgr.addNewFile(filename, {
           text: String(text), uri: data.path, render: true, isUnsaved: false, readOnly: !!data.readOnly
         });
         return { opened: true, id: file?.id || null, uri: data.path };
@@ -711,6 +1204,7 @@
       }
       const defs = [
         { name: 'leion.intentRouter.pipelines', description: 'Intent Router: Show Pipelines', exec: () => this.pipelineUI.render() },
+        { name: 'leion.intentRouter.triggers', description: 'Intent Router: Show Active Triggers', exec: () => this.showActiveTriggers() },
         { name: 'leion.intentRouter.test', description: 'Intent Router: Run smoke test', exec: () => this.runTest() },
         { name: 'leion.intentRouter.logs', description: 'Intent Router: View logs', exec: () => this.showLogs() },
         { name: 'leion.intentRouter.capabilities', description: 'Intent Router: Show capabilities', exec: () => this.showCapabilities() }
@@ -734,6 +1228,11 @@
     async showCapabilities() {
       const result = await this.route({ action: 'router:capabilities' });
       this.showObject('Intent Router Capabilities', result.data || result);
+    }
+
+    showActiveTriggers() {
+      const list = this.triggerManager.getRegistrations();
+      this.showObject('Active Triggers', list);
     }
 
     showObject(title, value) {
@@ -770,6 +1269,9 @@
     }
 
     async destroy() {
+      if (this.triggerManager) {
+        this.triggerManager.destroy();
+      }
       const commands = this.modules.commands;
       if (commands && typeof commands.removeCommand === 'function') {
         for (const name of this.registeredAcodeCommands) {
@@ -777,7 +1279,7 @@
         }
       }
       this.registeredAcodeCommands = [];
-      if (window.intentRouter === this) delete window.intentRouter;
+      if (typeof window !== 'undefined' && window.intentRouter === this) delete window.intentRouter;
       this.commands.clear();
       this.isInitialized = false;
       this.$page = null;
@@ -787,11 +1289,27 @@
     }
   }
 
-  if (typeof window.acode !== 'undefined') {
+  if (typeof window !== 'undefined' && typeof window.acode !== 'undefined') {
     const router = new IntentRouter();
     acode.setPluginInit(PLUGIN_ID, async (baseUrl, $page, context) => {
       await router.init(baseUrl, $page, context);
     });
     acode.setPluginUnmount(PLUGIN_ID, () => router.destroy());
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      PLUGIN_ID,
+      PLUGIN_VERSION,
+      PipelineRunner,
+      PipelineUI,
+      IntentRouter,
+      AcodeTriggerManager,
+      asBoolean,
+      asPositiveInt,
+      parseWatchEvents,
+      isWorkspacePathSafe,
+      matchGlob
+    };
   }
 })();
