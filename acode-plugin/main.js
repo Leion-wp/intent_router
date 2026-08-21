@@ -3,18 +3,67 @@
 
   const PLUGIN_ID = 'com.leion.intentrouter';
   const PLUGIN_VERSION = '1.2.1';
+  const MAX_PIPELINE_BYTES = 5 * 1024 * 1024; // 5 MB default limit
 
 
   class PipelineRunner {
-    constructor(router) {
+    constructor(router, options = {}) {
       this.router = router;
+      this.maxPipelineBytes = (options && typeof options.maxPipelineBytes === 'number')
+        ? options.maxPipelineBytes
+        : MAX_PIPELINE_BYTES;
     }
 
-    async runPipelineFromFile(fileUrl, onProgress) {
+    async runPipelineFromFile(fileUrl, onProgress, options = {}) {
       try {
         const fsOperation = this.router.requireFs();
         if (!fsOperation) throw new Error('File system API unavailable');
-        const fileContent = await fsOperation(fileUrl).readFile('utf-8');
+
+        const limit = (options && typeof options.maxPipelineBytes === 'number')
+          ? options.maxPipelineBytes
+          : (this.maxPipelineBytes || MAX_PIPELINE_BYTES);
+
+        const fsHandle = fsOperation(fileUrl);
+
+        // Pre-read check via stat() if available
+        if (typeof fsHandle.stat === 'function') {
+          try {
+            const statResult = await fsHandle.stat();
+            if (statResult && typeof statResult === 'object') {
+              const rawSize = statResult.size ?? statResult.length ?? statResult.bytes;
+              if (typeof rawSize === 'number' && !isNaN(rawSize) && rawSize >= 0) {
+                if (rawSize > limit) {
+                  const err = new Error(`Pipeline file size (${rawSize} bytes) exceeds limit (${limit} bytes)`);
+                  err.code = 'pipeline_too_large';
+                  err.limit = limit;
+                  err.size = rawSize;
+                  throw err;
+                }
+              }
+            }
+          } catch (err) {
+            if (err && err.code === 'pipeline_too_large') throw err;
+            // Ignore stat errors/unsupported stat and fallback to post-read check
+          }
+        }
+
+        const fileContent = await fsHandle.readFile('utf-8');
+
+        // Post-read byte length check
+        const contentBytes = typeof Blob !== 'undefined'
+          ? new Blob([fileContent]).size
+          : (typeof TextEncoder !== 'undefined'
+              ? new TextEncoder().encode(fileContent).length
+              : Buffer.byteLength(fileContent, 'utf-8'));
+
+        if (contentBytes > limit) {
+          const err = new Error(`Pipeline content size (${contentBytes} bytes) exceeds limit (${limit} bytes)`);
+          err.code = 'pipeline_too_large';
+          err.limit = limit;
+          err.size = contentBytes;
+          throw err;
+        }
+
         const pipelineData = JSON.parse(fileContent);
         return await this.runPipelineFromData(pipelineData, onProgress);
       } catch (err) {
@@ -787,11 +836,20 @@
     }
   }
 
-  if (typeof window.acode !== 'undefined') {
+  if (typeof window !== 'undefined' && typeof window.acode !== 'undefined') {
     const router = new IntentRouter();
     acode.setPluginInit(PLUGIN_ID, async (baseUrl, $page, context) => {
       await router.init(baseUrl, $page, context);
     });
     acode.setPluginUnmount(PLUGIN_ID, () => router.destroy());
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      MAX_PIPELINE_BYTES,
+      PipelineRunner,
+      PipelineUI,
+      IntentRouter
+    };
   }
 })();
