@@ -4,6 +4,63 @@
   const PLUGIN_ID = 'com.leion.intentrouter';
   const PLUGIN_VERSION = '1.2.1';
 
+  function validateMaxBytes(maxBytes) {
+    if (maxBytes === undefined) {
+      return null;
+    }
+    let num;
+    if (typeof maxBytes === 'number') {
+      num = maxBytes;
+    } else if (typeof maxBytes === 'string' && maxBytes.trim() !== '') {
+      num = Number(maxBytes);
+    } else {
+      const err = new Error('Invalid maxBytes: must be a positive finite number');
+      err.code = 'invalid_max_bytes';
+      throw err;
+    }
+
+    if (isNaN(num) || !Number.isFinite(num) || num <= 0) {
+      const err = new Error('Invalid maxBytes: must be a positive finite number');
+      err.code = 'invalid_max_bytes';
+      throw err;
+    }
+
+    return num;
+  }
+
+  function getByteLength(content) {
+    if (typeof content === 'string') {
+      if (typeof TextEncoder !== 'undefined') {
+        return new TextEncoder().encode(content).length;
+      }
+      if (typeof Buffer !== 'undefined') {
+        return Buffer.byteLength(content, 'utf-8');
+      }
+      let bytes = 0;
+      for (let i = 0; i < content.length; i++) {
+        const code = content.charCodeAt(i);
+        if (code <= 0x7f) {
+          bytes += 1;
+        } else if (code <= 0x7ff) {
+          bytes += 2;
+        } else if (code >= 0xd800 && code <= 0xdbff) {
+          bytes += 4;
+          i++;
+        } else {
+          bytes += 3;
+        }
+      }
+      return bytes;
+    }
+    if (content && typeof content.byteLength === 'number') {
+      return content.byteLength;
+    }
+    if (content && typeof content.length === 'number') {
+      return content.length;
+    }
+    return 0;
+  }
+
 
   class PipelineRunner {
     constructor(router) {
@@ -442,7 +499,13 @@
       } catch (error) {
         const message = error && error.message ? error.message : String(error);
         this.log(`Error executing ${action}: ${message}`);
-        return this.fail(message, { action });
+        const meta = { action };
+        if (error && typeof error === 'object') {
+          if (error.code) meta.code = error.code;
+          if (error.limit !== undefined) meta.limit = error.limit;
+          if (error.size !== undefined) meta.size = error.size;
+        }
+        return this.fail(message, meta);
       }
     }
 
@@ -517,7 +580,42 @@
 
       this.register('file:read', async (data) => {
         if (!data.path) throw new Error('path is required');
-        return await this.requireFs()(data.path).readFile(data.encoding || 'utf-8');
+        const limit = validateMaxBytes(data.maxBytes);
+        const fs = this.requireFs()(data.path);
+
+        if (limit !== null) {
+          try {
+            const stats = await fs.stat();
+            if (stats && typeof stats.size === 'number' && Number.isFinite(stats.size) && stats.size >= 0) {
+              if (stats.size > limit) {
+                const err = new Error(`File size (${stats.size} bytes) exceeds maxBytes limit (${limit} bytes) [file_too_large]`);
+                err.code = 'file_too_large';
+                err.limit = limit;
+                err.size = stats.size;
+                throw err;
+              }
+            }
+          } catch (err) {
+            if (err && err.code === 'file_too_large') {
+              throw err;
+            }
+          }
+        }
+
+        const content = await fs.readFile(data.encoding || 'utf-8');
+
+        if (limit !== null) {
+          const byteLength = getByteLength(content);
+          if (byteLength > limit) {
+            const err = new Error(`File content size (${byteLength} bytes) exceeds maxBytes limit (${limit} bytes) [file_too_large]`);
+            err.code = 'file_too_large';
+            err.limit = limit;
+            err.size = byteLength;
+            throw err;
+          }
+        }
+
+        return content;
       });
 
       this.register('file:write', async (data) => {
@@ -787,11 +885,21 @@
     }
   }
 
-  if (typeof window.acode !== 'undefined') {
+  if (typeof window !== 'undefined' && typeof window.acode !== 'undefined') {
     const router = new IntentRouter();
     acode.setPluginInit(PLUGIN_ID, async (baseUrl, $page, context) => {
       await router.init(baseUrl, $page, context);
     });
     acode.setPluginUnmount(PLUGIN_ID, () => router.destroy());
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      PipelineRunner,
+      PipelineUI,
+      IntentRouter,
+      validateMaxBytes,
+      getByteLength
+    };
   }
 })();
