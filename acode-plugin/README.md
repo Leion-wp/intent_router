@@ -28,6 +28,7 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **GitHub API**: Fetch repos and files.
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
 - **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
+- **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 
 ## API Example
 ```javascript
