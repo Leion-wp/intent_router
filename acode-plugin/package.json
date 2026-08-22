@@ -1,0 +1,8 @@
+{
+  "name": "acode-plugin",
+  "version": "1.2.1",
+  "description": "Acode plugin for Leion Roots Intent Router",
+  "scripts": {
+    "test": "mocha test/**/*.test.js"
+  }
+}

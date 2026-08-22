@@ -4,69 +4,149 @@
   const PLUGIN_ID = 'com.leion.intentrouter';
   const PLUGIN_VERSION = '1.2.1';
 
+  function redactSensitiveData(data) {
+    if (data === null || data === undefined) return data;
+    if (typeof data !== 'object') return data;
+
+    if (Array.isArray(data)) {
+      return data.map(item => redactSensitiveData(item));
+    }
+
+    const SENSITIVE_KEY_PATTERNS = [
+      'token',
+      'authorization',
+      'apikey',
+      'api_key',
+      'secret',
+      'password',
+      'bearer',
+      'privatekey',
+      'private_key',
+      'auth',
+      'access_token'
+    ];
+
+    const redacted = {};
+    for (const key of Object.keys(data)) {
+      const keyLower = key.toLowerCase();
+      const isSensitive = SENSITIVE_KEY_PATTERNS.some(pattern => keyLower.includes(pattern));
+      if (isSensitive && typeof data[key] === 'string') {
+        redacted[key] = '[REDACTED]';
+      } else {
+        redacted[key] = redactSensitiveData(data[key]);
+      }
+    }
+    return redacted;
+  }
 
   class PipelineRunner {
     constructor(router) {
       this.router = router;
     }
 
-    async runPipelineFromFile(fileUrl, onProgress) {
+    async runPipelineFromFile(fileUrl, onProgress, options = {}) {
       try {
         const fsOperation = this.router.requireFs();
         if (!fsOperation) throw new Error('File system API unavailable');
         const fileContent = await fsOperation(fileUrl).readFile('utf-8');
         const pipelineData = JSON.parse(fileContent);
-        return await this.runPipelineFromData(pipelineData, onProgress);
+        return await this.runPipelineFromData(pipelineData, onProgress, options);
       } catch (err) {
         this.router.log(`Pipeline run error: ${err.message}`);
         throw err;
       }
     }
 
-    async runPipelineFromData(pipelineData, onProgress) {
+    async runPipelineFromData(pipelineData, onProgress, options = {}) {
       if (!pipelineData || !Array.isArray(pipelineData.steps)) {
         throw new Error('Invalid pipeline format: steps array is missing');
       }
 
+      const isDryRun = !!(pipelineData.meta?.dryRun || options.dryRun);
       let stepIndex = 0;
       const totalSteps = pipelineData.steps.length;
       const logs = [];
+      const plan = [];
+      const variableCache = options.variableCache || new Map();
+
+      if (isDryRun) {
+        this.router.log(`[DRY RUN] Starting dry-run plan generation for pipeline (${totalSteps} steps)`);
+      }
 
       for (const step of pipelineData.steps) {
         stepIndex++;
-        const intentName = step.intent;
-        const payload = step.payload || {};
+        const intentName = step.intent || step.action;
+        const payload = step.payload !== undefined ? step.payload : (step.data || {});
 
         if (onProgress) {
-          onProgress({ step: stepIndex, total: totalSteps, status: 'running', intent: intentName });
+          onProgress({
+            step: stepIndex,
+            total: totalSteps,
+            status: isDryRun ? 'planning' : 'running',
+            intent: intentName,
+            dryRun: isDryRun
+          });
         }
 
-        // Roots compatibility: file.read -> action: file:read, data: payload
-        const action = intentName.replace(/./g, ':');
+        const stepIntent = Object.assign({}, step, {
+          meta: Object.assign({}, pipelineData.meta || {}, step.meta || {}, isDryRun ? { dryRun: true } : {})
+        });
+
+        const action = this.router.normalizeAction(stepIntent);
 
         try {
-          const result = await this.router.route({ action, data: payload });
-          logs.push({ step: stepIndex, intent: intentName, success: result.success, data: result.data, error: result.error });
+          const result = await this.router.route(stepIntent, variableCache);
 
-          if (!result.success) {
-             throw new Error(result.error || `Step ${stepIndex} failed`);
+          if (isDryRun) {
+            if (!result.success) {
+              throw new Error(result.error || `Command ${action} failed planning`);
+            }
+            const plannedPayload = result.data && result.data.data !== undefined ? result.data.data : redactSensitiveData(payload);
+            const plannedStep = {
+              step: stepIndex,
+              id: step.id || `step_${stepIndex}`,
+              action: action || this.router.normalizeAction(stepIntent),
+              payload: plannedPayload,
+              status: 'planned'
+            };
+            if (step.onFailure || step.on_failure) {
+              plannedStep.onFailure = step.onFailure || step.on_failure;
+            }
+            plan.push(plannedStep);
+            logs.push({ step: stepIndex, intent: intentName, success: true, dryRun: true, plan: plannedStep });
+          } else {
+            logs.push({ step: stepIndex, intent: intentName, success: result.success, data: result.data, error: result.error, dryRun: false });
+            if (!result.success) {
+              throw new Error(result.error || `Step ${stepIndex} failed`);
+            }
           }
         } catch (err) {
-          logs.push({ step: stepIndex, intent: intentName, success: false, error: err.message });
-          if (!step.continueOnError) {
+          logs.push({ step: stepIndex, intent: intentName, success: false, dryRun: isDryRun, error: err.message });
+          if (isDryRun || !step.continueOnError) {
             if (onProgress) {
-              onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: err.message });
+              onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: err.message, dryRun: isDryRun });
             }
-            throw new Error(`Pipeline aborted at step ${stepIndex} (${intentName}): ${err.message}`);
+            const prefix = isDryRun ? 'Pipeline planning failed' : 'Pipeline aborted';
+            throw new Error(`${prefix} at step ${stepIndex} (${intentName}): ${err.message}`);
           }
         }
       }
 
       if (onProgress) {
-        onProgress({ step: stepIndex, total: totalSteps, status: 'success' });
+        onProgress({
+          step: stepIndex,
+          total: totalSteps,
+          status: isDryRun ? 'planned' : 'success',
+          dryRun: isDryRun,
+          plan: isDryRun ? plan : undefined
+        });
       }
 
-      return { success: true, logs };
+      if (isDryRun) {
+        return { success: true, dryRun: true, plan, logs };
+      }
+
+      return { success: true, dryRun: false, logs };
     }
   }
 
@@ -105,8 +185,6 @@
     }
 
     async getProjectRoot() {
-      // Trying to get current project root
-      // window.addedFolder is the array of open folders in Acode sidebar
       if (window.addedFolder && window.addedFolder.length > 0) {
         return window.addedFolder[0].url;
       }
@@ -226,12 +304,19 @@
       openBtn.onclick = async () => {
          try {
             await this.router.route({ action: 'editor:open_file', data: { path: file.url, name: file.name }});
-            // Try to hide the page to show the editor if it has hide method
             if (typeof this.router.$page.hide === 'function') this.router.$page.hide();
          } catch(e) {
             this.router.toast('Error opening file: ' + e.message);
          }
       };
+
+      const dryRunBtn = document.createElement('button');
+      dryRunBtn.textContent = 'Dry Run';
+      dryRunBtn.style.padding = '6px 12px';
+      dryRunBtn.style.background = 'transparent';
+      dryRunBtn.style.border = '1px solid #2196f3';
+      dryRunBtn.style.color = '#2196f3';
+      dryRunBtn.style.borderRadius = '4px';
 
       const runBtn = document.createElement('button');
       runBtn.textContent = 'Execute';
@@ -242,6 +327,7 @@
       runBtn.style.borderRadius = '4px';
 
       controls.appendChild(openBtn);
+      controls.appendChild(dryRunBtn);
       controls.appendChild(runBtn);
 
       header.appendChild(controls);
@@ -253,10 +339,51 @@
       statusArea.style.display = 'none';
       card.appendChild(statusArea);
 
+      dryRunBtn.onclick = () => {
+        runBtn.disabled = true;
+        openBtn.disabled = true;
+        dryRunBtn.disabled = true;
+        runBtn.style.opacity = '0.5';
+        dryRunBtn.style.opacity = '0.5';
+        statusArea.style.display = 'block';
+        statusArea.style.color = '#fff';
+        statusArea.innerHTML = '[DRY RUN] Formulating plan...';
+
+        this.router.pipelineRunner.runPipelineFromFile(file.url, (progress) => {
+           if (progress.status === 'planning') {
+              statusArea.innerHTML = `[DRY RUN] Step ${progress.step}/${progress.total}: ${progress.intent} - Inspecting...`;
+           } else if (progress.status === 'planned') {
+              statusArea.style.color = '#2196f3';
+              statusArea.innerHTML = `<strong>[DRY RUN PLAN]</strong> ${progress.total} steps planned successfully.`;
+           } else if (progress.status === 'error') {
+              statusArea.style.color = '#f44336';
+              statusArea.innerHTML = `[DRY RUN FAILED] at step ${progress.step}: ${this.router.escapeHtml(progress.error)}`;
+           }
+        }, { dryRun: true }).then(result => {
+           runBtn.disabled = false;
+           openBtn.disabled = false;
+           dryRunBtn.disabled = false;
+           runBtn.style.opacity = '1';
+           dryRunBtn.style.opacity = '1';
+           if (result && result.plan) {
+              const summary = result.plan.map(p => `#${p.step} ${p.action} (status: ${p.status})`).join('<br>');
+              statusArea.innerHTML = `<strong style="color:#2196f3">[DRY RUN PLAN]</strong> (${result.plan.length} steps):<br><div style="margin-top:4px;font-family:monospace;font-size:0.85em;">${summary}</div>`;
+           }
+        }).catch(err => {
+           runBtn.disabled = false;
+           openBtn.disabled = false;
+           dryRunBtn.disabled = false;
+           runBtn.style.opacity = '1';
+           dryRunBtn.style.opacity = '1';
+        });
+      };
+
       runBtn.onclick = () => {
         runBtn.disabled = true;
         openBtn.disabled = true;
+        dryRunBtn.disabled = true;
         runBtn.style.opacity = '0.5';
+        dryRunBtn.style.opacity = '0.5';
         statusArea.style.display = 'block';
         statusArea.style.color = '#fff';
         statusArea.innerHTML = 'Starting pipeline...';
@@ -274,11 +401,15 @@
         }).then(result => {
            runBtn.disabled = false;
            openBtn.disabled = false;
+           dryRunBtn.disabled = false;
            runBtn.style.opacity = '1';
+           dryRunBtn.style.opacity = '1';
         }).catch(err => {
            runBtn.disabled = false;
            openBtn.disabled = false;
+           dryRunBtn.disabled = false;
            runBtn.style.opacity = '1';
+           dryRunBtn.style.opacity = '1';
         });
       };
 
@@ -380,10 +511,10 @@
           let value = cache.get(promptText);
           if (value === undefined) {
             const prompt = this.safeRequire('prompt');
-            if (!prompt) {
-              value = window.prompt(`Value for ${promptText}`);
-            } else {
+            if (prompt) {
               value = await prompt(promptText, '', 'text', { required: true });
+            } else if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+              value = window.prompt(`Value for ${promptText}`);
             }
             if (value === undefined || value === null) throw new Error(`Input cancelled for variable: ${promptText}`);
             cache.set(promptText, value);
@@ -406,12 +537,15 @@
     async route(intent = {}, variableCache) {
       if (!variableCache) variableCache = new Map();
 
+      const meta = Object.assign({}, intent.meta || {});
+      const isDryRun = !!meta.dryRun;
+
       if (intent.steps && Array.isArray(intent.steps) && intent.steps.length > 0) {
-        this.log(`Routing composite intent with ${intent.steps.length} steps`);
+        this.log(`Routing composite intent with ${intent.steps.length} steps${isDryRun ? ' [DRY RUN]' : ''}`);
         let lastResult = true;
         for (const childStep of intent.steps) {
           const childIntent = Object.assign({}, childStep, {
-            meta: Object.assign({}, intent.meta || {}, childStep.meta || {})
+            meta: Object.assign({}, intent.meta || {}, childStep.meta || {}, isDryRun ? { dryRun: true } : {})
           });
           lastResult = await this.route(childIntent, variableCache);
           if (!lastResult || (lastResult && lastResult.success === false)) {
@@ -427,12 +561,23 @@
 
       if (!action) return this.fail('intent.action or intent.intent is required');
       const handler = this.commands.get(action);
-      if (!handler) return this.fail(`Command ${action} not found`, { action });
+      if (!handler) return this.fail(`Command ${action} not found`, { action, dryRun: isDryRun });
 
       try {
         data = await this.resolveVariables(data, variableCache);
       } catch (error) {
-        return this.fail(error.message, { action });
+        return this.fail(error.message, { action, dryRun: isDryRun });
+      }
+
+      if (isDryRun) {
+        this.log(`[DRY RUN] Planned action: ${action}`);
+        const redactedData = redactSensitiveData(data);
+        return this.ok({
+          planned: true,
+          action,
+          data: redactedData,
+          dryRun: true
+        }, { action, dryRun: true });
       }
 
       try {
@@ -471,6 +616,16 @@
         editor: !!(window.editorManager && editorManager.editor),
         network: typeof fetch === 'function'
       }));
+
+      this.register('pipeline:dry_run', async (data) => {
+        if (!data || (!data.fileUrl && !data.pipeline)) {
+          throw new Error('fileUrl or pipeline data is required');
+        }
+        if (data.pipeline) {
+          return await this.pipelineRunner.runPipelineFromData(data.pipeline, null, { dryRun: true });
+        }
+        return await this.pipelineRunner.runPipelineFromFile(data.fileUrl, null, { dryRun: true });
+      });
 
       this.register('system:toast', (data) => {
         this.toast(data.message || 'No message', Number(data.timeout) || 3000);
@@ -711,6 +866,7 @@
       }
       const defs = [
         { name: 'leion.intentRouter.pipelines', description: 'Intent Router: Show Pipelines', exec: () => this.pipelineUI.render() },
+        { name: 'leion.intentRouter.dryRunPipeline', description: 'Intent Router: Dry Run Pipeline', exec: () => this.promptAndDryRunPipeline() },
         { name: 'leion.intentRouter.test', description: 'Intent Router: Run smoke test', exec: () => this.runTest() },
         { name: 'leion.intentRouter.logs', description: 'Intent Router: View logs', exec: () => this.showLogs() },
         { name: 'leion.intentRouter.capabilities', description: 'Intent Router: Show capabilities', exec: () => this.showCapabilities() }
@@ -718,6 +874,24 @@
       for (const def of defs) {
         commands.addCommand(def);
         this.registeredAcodeCommands.push(def.name);
+      }
+    }
+
+    async promptAndDryRunPipeline() {
+      const prompt = this.safeRequire('prompt');
+      let fileUrl;
+      if (prompt) {
+        fileUrl = await prompt('Pipeline File URL / Path', '', 'text');
+      } else {
+        fileUrl = window.prompt('Pipeline File URL / Path');
+      }
+      if (!fileUrl) return;
+
+      try {
+        const result = await this.pipelineRunner.runPipelineFromFile(fileUrl, null, { dryRun: true });
+        this.showObject('Pipeline Dry Run Plan', result);
+      } catch (err) {
+        this.alert('Dry Run Error', err.message);
       }
     }
 
@@ -787,11 +961,22 @@
     }
   }
 
-  if (typeof window.acode !== 'undefined') {
+  if (typeof window !== 'undefined' && typeof window.acode !== 'undefined') {
     const router = new IntentRouter();
     acode.setPluginInit(PLUGIN_ID, async (baseUrl, $page, context) => {
       await router.init(baseUrl, $page, context);
     });
     acode.setPluginUnmount(PLUGIN_ID, () => router.destroy());
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      PLUGIN_ID,
+      PLUGIN_VERSION,
+      PipelineRunner,
+      PipelineUI,
+      IntentRouter,
+      redactSensitiveData
+    };
   }
 })();
