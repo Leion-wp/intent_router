@@ -45,4 +45,11 @@ intentRouter.execute({
   action: 'list',
   data: { path: 'file:///sdcard/Documents' }
 });
+
+// Read file with optional maxBytes limit
+intentRouter.execute({
+  scheme: 'file',
+  action: 'read',
+  data: { path: 'file:///sdcard/Documents/log.txt', maxBytes: 1048576 }
+});
 ```
