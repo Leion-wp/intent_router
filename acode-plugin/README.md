@@ -22,6 +22,15 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - You can run tests or view logs.
 - Developers can access the router via the global `intentRouter` object.
 
+## Testing & CI Harness
+Run the isolated Node regression test suite locally from the root repository or inside `acode-plugin`:
+```bash
+npm run test:acode
+# or within acode-plugin/
+npm test
+```
+The regression suite tests action routing, intent normalization, control flow, UI XSS protection, and module isolation.
+
 ## Features
 - **System Routing**: Control Acode UI and files.
 - **Terminal Integration**: Execute commands directly (requires Terminal plugin).

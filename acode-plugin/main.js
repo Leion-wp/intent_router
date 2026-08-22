@@ -42,15 +42,14 @@
         }
 
         // Roots compatibility: file.read -> action: file:read, data: payload
-        const action = intentName.replace(/./g, ':');
+        const action = this.router.normalizeAction({ intent: intentName, payload });
 
         try {
           const result = await this.router.route({ action, data: payload });
-          logs.push({ step: stepIndex, intent: intentName, success: result.success, data: result.data, error: result.error });
-
           if (!result.success) {
              throw new Error(result.error || `Step ${stepIndex} failed`);
           }
+          logs.push({ step: stepIndex, intent: intentName, success: true, data: result.data });
         } catch (err) {
           logs.push({ step: stepIndex, intent: intentName, success: false, error: err.message });
           if (!step.continueOnError) {

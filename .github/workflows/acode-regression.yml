@@ -1,0 +1,32 @@
+name: acode-regression
+
+on:
+  pull_request:
+    branches:
+      - Android
+    paths:
+      - 'acode-plugin/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/acode-regression.yml'
+
+jobs:
+  acode-regression:
+    name: acode-regression
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Acode regression test harness
+        run: npm run test:acode
