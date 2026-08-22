@@ -19,29 +19,38 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 ## Usage
 - Open the Command Palette (`Ctrl+Shift+P`).
 - Search for **Intent Router**.
-- You can run tests or view logs.
+- Open **Intent Router: Show Pipelines** to view project pipelines in `.intent.json`.
+- Tap **Dry Run** on any pipeline card to inspect the step-by-step plan without executing side effects.
+- Search for **Intent Router: Dry Run Pipeline** in the command palette to dry-run a pipeline file.
 - Developers can access the router via the global `intentRouter` object.
 
 ## Features
+- **Dry-Run Planning Mode**: Inspect and validate pipeline execution plans (`meta.dryRun: true`) without side effects on files, terminal, or network.
+- **Sensitive Field Redaction**: Automatically redacts sensitive fields (`token`, `authorization`, `apiKey`, `secret`, `password`, etc.) in plan outputs and logs.
 - **System Routing**: Control Acode UI and files.
 - **Terminal Integration**: Execute commands directly (requires Terminal plugin).
 - **GitHub API**: Fetch repos and files.
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
-- **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
 
 ## API Example
 ```javascript
 // Send a toast notification
-intentRouter.execute({
-  scheme: 'system',
-  action: 'toast',
+intentRouter.route({
+  action: 'system:toast',
   data: { message: 'Hello World' }
 });
 
-// List files in a directory
-intentRouter.execute({
-  scheme: 'fs',
-  action: 'list',
-  data: { path: 'file:///sdcard/Documents' }
+// Dry-run a pipeline without executing side effects
+intentRouter.route({
+  action: 'pipeline:dry_run',
+  data: {
+    pipeline: {
+      meta: { dryRun: true },
+      steps: [
+        { intent: 'file.read', payload: { path: '/tmp/input.txt' } },
+        { intent: 'file.write', payload: { path: '/tmp/output.txt', content: 'test', token: 'secret_123' } }
+      ]
+    }
+  }
 });
 ```
