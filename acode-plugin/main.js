@@ -4,6 +4,7 @@
   const PLUGIN_ID = 'com.leion.intentrouter';
   const PLUGIN_VERSION = '1.2.1';
   const MAX_PIPELINE_BYTES = 5 * 1024 * 1024; // 5 MB default limit
+  const DEFAULT_EDITOR_MAX_BYTES = 5 * 1024 * 1024; // 5 MB default limit for editor open
 
   function validateMaxBytes(maxBytes) {
     if (maxBytes === undefined) {
@@ -60,6 +61,47 @@
       return content.length;
     }
     return 0;
+  }
+
+  async function readBoundedFile(fsHandle, encoding, limit, errorCode = 'file_too_large') {
+    if (limit !== null && limit !== undefined) {
+      if (typeof fsHandle.stat === 'function') {
+        try {
+          const stats = await fsHandle.stat();
+          if (stats && typeof stats === 'object') {
+            const rawSize = stats.size ?? stats.length ?? stats.bytes;
+            if (typeof rawSize === 'number' && Number.isFinite(rawSize) && rawSize >= 0) {
+              if (rawSize > limit) {
+                const err = new Error(`File size (${rawSize} bytes) exceeds limit (${limit} bytes) [${errorCode}]`);
+                err.code = errorCode;
+                err.limit = limit;
+                err.size = rawSize;
+                throw err;
+              }
+            }
+          }
+        } catch (err) {
+          if (err && err.code === errorCode) {
+            throw err;
+          }
+        }
+      }
+    }
+
+    const content = await fsHandle.readFile(encoding || 'utf-8');
+
+    if (limit !== null && limit !== undefined) {
+      const byteLength = getByteLength(content);
+      if (byteLength > limit) {
+        const err = new Error(`File content size (${byteLength} bytes) exceeds limit (${limit} bytes) [${errorCode}]`);
+        err.code = errorCode;
+        err.limit = limit;
+        err.size = byteLength;
+        throw err;
+      }
+    }
+
+    return content;
   }
 
 
@@ -639,41 +681,8 @@
       this.register('file:read', async (data) => {
         if (!data.path) throw new Error('path is required');
         const limit = validateMaxBytes(data.maxBytes);
-        const fs = this.requireFs()(data.path);
-
-        if (limit !== null) {
-          try {
-            const stats = await fs.stat();
-            if (stats && typeof stats.size === 'number' && Number.isFinite(stats.size) && stats.size >= 0) {
-              if (stats.size > limit) {
-                const err = new Error(`File size (${stats.size} bytes) exceeds maxBytes limit (${limit} bytes) [file_too_large]`);
-                err.code = 'file_too_large';
-                err.limit = limit;
-                err.size = stats.size;
-                throw err;
-              }
-            }
-          } catch (err) {
-            if (err && err.code === 'file_too_large') {
-              throw err;
-            }
-          }
-        }
-
-        const content = await fs.readFile(data.encoding || 'utf-8');
-
-        if (limit !== null) {
-          const byteLength = getByteLength(content);
-          if (byteLength > limit) {
-            const err = new Error(`File content size (${byteLength} bytes) exceeds maxBytes limit (${limit} bytes) [file_too_large]`);
-            err.code = 'file_too_large';
-            err.limit = limit;
-            err.size = byteLength;
-            throw err;
-          }
-        }
-
-        return content;
+        const fsHandle = this.requireFs()(data.path);
+        return await readBoundedFile(fsHandle, data.encoding || 'utf-8', limit, 'file_too_large');
       });
 
       this.register('file:write', async (data) => {
@@ -801,7 +810,9 @@
 
       this.register('editor:open_file', async (data) => {
         if (!data.path) throw new Error('path is required');
-        const text = await this.requireFs()(data.path).readFile(data.encoding || 'utf-8');
+        const limit = data.maxBytes !== undefined ? validateMaxBytes(data.maxBytes) : DEFAULT_EDITOR_MAX_BYTES;
+        const fsHandle = this.requireFs()(data.path);
+        const text = await readBoundedFile(fsHandle, data.encoding || 'utf-8', limit, 'editor_file_too_large');
         const filename = data.name || String(data.path).split('/').filter(Boolean).pop() || 'file';
         const file = await editorManager.addNewFile(filename, {
           text: String(text), uri: data.path, render: true, isUnsaved: false, readOnly: !!data.readOnly
@@ -953,11 +964,14 @@
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
+      MAX_PIPELINE_BYTES,
+      DEFAULT_EDITOR_MAX_BYTES,
       PipelineRunner,
       PipelineUI,
       IntentRouter,
       validateMaxBytes,
-      getByteLength
+      getByteLength,
+      readBoundedFile
     };
   }
 })();
