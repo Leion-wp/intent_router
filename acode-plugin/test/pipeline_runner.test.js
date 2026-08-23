@@ -143,4 +143,40 @@ describe('Acode PipelineRunner Size Guard Tests', () => {
       assert(err instanceof SyntaxError || err.message.includes('JSON'), 'Should be a standard JSON parsing error');
     }
   });
+
+  it('7. calculates UTF-8 multi-byte byte length correctly when Blob, TextEncoder, and Buffer are absent', async () => {
+    const originalTextEncoder = globalThis.TextEncoder;
+    const originalBlob = globalThis.Blob;
+    const originalBuffer = globalThis.Buffer;
+
+    try {
+      delete globalThis.TextEncoder;
+      delete globalThis.Blob;
+      delete globalThis.Buffer;
+
+      // "é" is 2 bytes in UTF-8. JSON.stringify({ steps: [], note: 'é' }) is 23 characters, 24 bytes in UTF-8.
+      const multiBytePipeline = JSON.stringify({ steps: [], note: 'é' });
+      // Limit set to 12 bytes, so 24-byte multiBytePipeline exceeds limit
+      const fsMock = {
+        stat: async () => ({}), // no size from stat
+        readFile: async () => multiBytePipeline
+      };
+
+      const router = createMockRouter(fsMock);
+      const runner = new PipelineRunner(router, { maxPipelineBytes: 12 });
+
+      try {
+        await runner.runPipelineFromFile('file:///test.intent.json');
+        assert.fail('Should have thrown pipeline_too_large error');
+      } catch (err) {
+        assert.strictEqual(err.code, 'pipeline_too_large');
+        assert.strictEqual(err.limit, 12);
+        assert.strictEqual(err.size, 24);
+      }
+    } finally {
+      if (originalTextEncoder !== undefined) globalThis.TextEncoder = originalTextEncoder;
+      if (originalBlob !== undefined) globalThis.Blob = originalBlob;
+      if (originalBuffer !== undefined) globalThis.Buffer = originalBuffer;
+    }
+  });
 });
