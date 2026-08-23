@@ -164,6 +164,35 @@ async function runTests() {
     assert.strictEqual(caughtError.message, 'Pipeline aborted at step 1 (step.one): Hard failure');
   }
 
+  // 6. Step retry policy handles transient failure
+  {
+    let callCount = 0;
+    const router = createMockRouter(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return { success: false, error: 'Temporary network glitch' };
+      }
+      return { success: true, data: 'Fetched data on retry' };
+    });
+    const runner = new PipelineRunner(router);
+    const pipelineData = {
+      steps: [
+        {
+          intent: 'network.request',
+          payload: {
+            retry: { mode: 'fixed', maxAttempts: 3, delayMs: 0 }
+          }
+        }
+      ]
+    };
+
+    const res = await runner.runPipelineFromData(pipelineData);
+    assert.strictEqual(res.success, true);
+    assert.strictEqual(callCount, 2, 'Should retry and succeed on attempt 2');
+    assert.strictEqual(res.logs[0].attempt, 2);
+    assert.strictEqual(res.logs[0].maxAttempts, 3);
+  }
+
   console.log('All PipelineRunner tests loaded.');
 }
 

@@ -62,6 +62,44 @@
     return 0;
   }
 
+  function toPositiveInt(val, fallback) {
+    const parsed = parseInt(val, 10);
+    return isNaN(parsed) ? fallback : parsed;
+  }
+
+  function normalizeRetryMode(raw) {
+    const value = String(raw || '').trim().toLowerCase();
+    if (value === 'fixed' || value === 'simple') return 'fixed';
+    if (value === 'exponential') return 'exponential';
+    return 'none';
+  }
+
+  function resolveRetryPolicy(step) {
+    const retry = step?.retry || step?.payload?.retry || {};
+    const mode = normalizeRetryMode(retry?.mode);
+    const maxAttempts = Math.max(1, Math.min(10, toPositiveInt(retry?.maxAttempts, 1)));
+    const delayMs = Math.max(0, toPositiveInt(retry?.delayMs, 1000));
+    const maxDelayMs = Math.max(delayMs, toPositiveInt(retry?.maxDelayMs, 30000));
+    const jitterMs = Math.max(0, toPositiveInt(retry?.jitterMs, 0));
+    return {
+      mode,
+      maxAttempts: mode === 'none' ? 1 : maxAttempts,
+      delayMs,
+      maxDelayMs,
+      jitterMs
+    };
+  }
+
+  function computeRetryDelayMs(policy, attempt, customRandom) {
+    if (!policy || policy.mode === 'none' || attempt < 1) return 0;
+    const base = policy.mode === 'exponential'
+      ? Math.min(policy.maxDelayMs, policy.delayMs * Math.pow(2, Math.max(0, attempt - 1)))
+      : policy.delayMs;
+    const rand = typeof customRandom === 'function' ? customRandom() : Math.random();
+    const jitter = policy.jitterMs > 0 ? Math.floor(rand * (policy.jitterMs + 1)) : 0;
+    return base + jitter;
+  }
+
 
   class PipelineRunner {
     constructor(router, options = {}) {
@@ -69,6 +107,35 @@
       this.maxPipelineBytes = (options && typeof options.maxPipelineBytes === 'number')
         ? options.maxPipelineBytes
         : MAX_PIPELINE_BYTES;
+      this.activeTimers = new Set();
+    }
+
+    sleep(ms) {
+      const waitMs = Math.max(0, Math.floor(Number(ms) || 0));
+      if (waitMs <= 0) return Promise.resolve();
+      return new Promise((resolve) => {
+        let timerObj;
+        const timerHandle = setTimeout(() => {
+          if (timerObj) this.activeTimers.delete(timerObj);
+          resolve();
+        }, waitMs);
+        timerObj = { handle: timerHandle, resolve };
+        this.activeTimers.add(timerObj);
+      });
+    }
+
+    clearActiveTimers() {
+      for (const item of this.activeTimers) {
+        clearTimeout(item.handle);
+        if (typeof item.resolve === 'function') {
+          item.resolve();
+        }
+      }
+      this.activeTimers.clear();
+    }
+
+    destroy() {
+      this.clearActiveTimers();
     }
 
     async runPipelineFromFile(fileUrl, onProgress, options = {}) {
@@ -129,7 +196,7 @@
       }
     }
 
-    async runPipelineFromData(pipelineData, onProgress) {
+    async runPipelineFromData(pipelineData, onProgress, options = {}) {
       if (!pipelineData || !Array.isArray(pipelineData.steps)) {
         throw new Error('Invalid pipeline format: steps array is missing');
       }
@@ -143,35 +210,98 @@
         const intentName = step.intent;
         const payload = step.payload || {};
 
-        if (onProgress) {
-          onProgress({ step: stepIndex, total: totalSteps, status: 'running', intent: intentName });
-        }
-
         // Roots compatibility: file.read -> action: file:read, data: payload
         const action = intentName.replace(/\./g, ':');
+        const retryPolicy = resolveRetryPolicy(step);
 
         let stepSuccess = false;
         let stepError = null;
+        let result = null;
+        let finalAttempt = 1;
 
-        try {
-          const result = await this.router.route({ action, data: payload });
-          if (result && result.success) {
-            stepSuccess = true;
-            logs.push({ step: stepIndex, intent: intentName, success: true, data: result.data, error: result.error || null });
-          } else {
-            stepSuccess = false;
-            stepError = (result && result.error) ? result.error : `Step ${stepIndex} failed`;
-            logs.push({ step: stepIndex, intent: intentName, success: false, data: result ? result.data : null, error: stepError });
+        for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt++) {
+          finalAttempt = attempt;
+          if (onProgress) {
+            onProgress({
+              step: stepIndex,
+              total: totalSteps,
+              status: 'running',
+              intent: intentName,
+              attempt,
+              maxAttempts: retryPolicy.maxAttempts
+            });
           }
-        } catch (err) {
-          stepSuccess = false;
-          stepError = err && err.message ? err.message : String(err);
-          logs.push({ step: stepIndex, intent: intentName, success: false, data: null, error: stepError });
+
+          try {
+            result = await this.router.route({ action, data: payload });
+            if (result && result.success) {
+              stepSuccess = true;
+              stepError = null;
+            } else {
+              stepSuccess = false;
+              stepError = (result && result.error) ? result.error : `Step ${stepIndex} failed`;
+            }
+          } catch (err) {
+            stepSuccess = false;
+            stepError = err && err.message ? err.message : String(err);
+          }
+
+          if (stepSuccess) {
+            logs.push({
+              step: stepIndex,
+              intent: intentName,
+              success: true,
+              data: result ? result.data : null,
+              error: null,
+              attempt,
+              maxAttempts: retryPolicy.maxAttempts
+            });
+            break;
+          }
+
+          if (attempt < retryPolicy.maxAttempts) {
+            const delayMs = computeRetryDelayMs(retryPolicy, attempt, options && options.customRandom);
+            this.router.log(
+              `[retry] step ${stepIndex} (${intentName}) attempt ${attempt}/${retryPolicy.maxAttempts} failed: ${stepError}; retrying in ${delayMs}ms`
+            );
+            if (onProgress) {
+              onProgress({
+                step: stepIndex,
+                total: totalSteps,
+                status: 'retrying',
+                intent: intentName,
+                attempt,
+                maxAttempts: retryPolicy.maxAttempts,
+                delayMs,
+                error: stepError
+              });
+            }
+            if (delayMs > 0) {
+              await this.sleep(delayMs);
+            }
+          } else {
+            logs.push({
+              step: stepIndex,
+              intent: intentName,
+              success: false,
+              data: result ? result.data : null,
+              error: stepError,
+              attempt,
+              maxAttempts: retryPolicy.maxAttempts
+            });
+          }
         }
 
         if (!stepSuccess && !step.continueOnError) {
           if (onProgress) {
-            onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: stepError });
+            onProgress({
+              step: stepIndex,
+              total: totalSteps,
+              status: 'error',
+              error: stepError,
+              attempt: finalAttempt,
+              maxAttempts: retryPolicy.maxAttempts
+            });
           }
           throw new Error(`Pipeline aborted at step ${stepIndex} (${intentName}): ${stepError}`);
         }
@@ -926,6 +1056,9 @@
     }
 
     async destroy() {
+      if (this.pipelineRunner && typeof this.pipelineRunner.destroy === 'function') {
+        this.pipelineRunner.destroy();
+      }
       const commands = this.modules.commands;
       if (commands && typeof commands.removeCommand === 'function') {
         for (const name of this.registeredAcodeCommands) {
@@ -953,11 +1086,16 @@
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
+      MAX_PIPELINE_BYTES,
       PipelineRunner,
       PipelineUI,
       IntentRouter,
       validateMaxBytes,
-      getByteLength
+      getByteLength,
+      toPositiveInt,
+      normalizeRetryMode,
+      resolveRetryPolicy,
+      computeRetryDelayMs
     };
   }
 })();
