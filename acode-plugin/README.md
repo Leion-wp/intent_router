@@ -29,6 +29,7 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
 - **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
+- **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
 
 ## API Example
 ```javascript
@@ -51,5 +52,11 @@ intentRouter.execute({
   scheme: 'file',
   action: 'read',
   data: { path: 'file:///sdcard/Documents/log.txt', maxBytes: 1048576 }
+});
+
+// Open file in editor with optional maxBytes limit (defaults to 5 MB)
+intentRouter.execute({
+  action: 'editor:open_file',
+  data: { path: 'file:///sdcard/Documents/large_log.txt', maxBytes: 2097152 }
 });
 ```
