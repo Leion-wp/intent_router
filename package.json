@@ -778,6 +778,7 @@
         "compile": "npm run build:webview && tsc -p ./",
         "watch": "tsc -watch -p ./",
         "test": "npm run compile && node ./out/test/runTest.js",
+        "test:acode": "mocha acode-plugin/runner.test.js \"acode-plugin/test/**/*.test.js\"",
         "test:webview-state": "node ./scripts/run-webview-ui-state-tests.js",
         "test:stability": "node ./scripts/pr15-stability-gate.js",
         "build:webview": "node ./scripts/build-webview-with-retry.js",

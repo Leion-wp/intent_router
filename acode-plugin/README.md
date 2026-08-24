@@ -60,3 +60,10 @@ intentRouter.execute({
   data: { path: 'file:///sdcard/Documents/large_log.txt', maxBytes: 2097152 }
 });
 ```
+
+## Testing & CI
+Run the canonical Acode regression test suite locally from the root directory:
+```bash
+npm run test:acode
+```
+This regression harness runs automatically in GitHub Actions (`acode-regression`) on pull requests to `Android` modifying `acode-plugin/` or test infrastructure.
