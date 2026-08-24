@@ -30,6 +30,7 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 - **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
+- **Network Response Bounding**: `network:request` (and `github:request` / `github:fetch_repo`) accepts an optional `maxResponseBytes` parameter. Oversized responses are rejected via `Content-Length` headers or interrupted during streaming with a `response_too_large` error to prevent mobile WebView memory pressure.
 
 ## API Example
 ```javascript
@@ -58,5 +59,15 @@ intentRouter.execute({
 intentRouter.execute({
   action: 'editor:open_file',
   data: { path: 'file:///sdcard/Documents/large_log.txt', maxBytes: 2097152 }
+});
+
+// Network request bounded by response size and timeout
+intentRouter.route({
+  action: 'network:request',
+  data: {
+    url: 'https://api.github.com/repos/owner/repo/releases',
+    maxResponseBytes: 1048576, // 1 MB limit
+    timeoutMs: 5000
+  }
 });
 ```
