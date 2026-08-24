@@ -5,6 +5,7 @@
   const PLUGIN_VERSION = '1.2.1';
   const MAX_PIPELINE_BYTES = 5 * 1024 * 1024; // 5 MB default limit
   const DEFAULT_EDITOR_MAX_BYTES = 5 * 1024 * 1024; // 5 MB default limit for editor open
+  const DEFAULT_PIPELINE_BATCH_SIZE = 25; // 25 cards per batch
 
   function validateMaxBytes(maxBytes) {
     if (maxBytes === undefined) {
@@ -198,9 +199,17 @@
 
 
   class PipelineUI {
-    constructor(router) {
+    constructor(router, options = {}) {
       this.router = router;
+      this.batchSize = (options && typeof options.batchSize === 'number' && options.batchSize > 0)
+        ? options.batchSize
+        : DEFAULT_PIPELINE_BATCH_SIZE;
       this.$container = null;
+      this.$cardsContainer = null;
+      this.$counter = null;
+      this.$loadMoreBtn = null;
+      this.pipelineFiles = [];
+      this.renderedCount = 0;
     }
 
     async render() {
@@ -240,6 +249,9 @@
     }
 
     async loadPipelines() {
+      this.pipelineFiles = [];
+      this.renderedCount = 0;
+
       this.$container.innerHTML = '<div style="text-align: center; padding: 20px;">Loading pipelines...</div>';
 
       const projectRoot = await this.getProjectRoot();
@@ -271,21 +283,45 @@
       header.style.justifyContent = 'space-between';
       header.style.alignItems = 'center';
 
+      const headerLeft = document.createElement('div');
+      headerLeft.style.display = 'flex';
+      headerLeft.style.flexDirection = 'column';
+      headerLeft.style.gap = '4px';
+
       const title = document.createElement('h3');
       title.textContent = 'Project Pipelines';
       title.style.margin = '0';
 
-      header.appendChild(title);
+      this.$counter = document.createElement('span');
+      this.$counter.style.fontSize = '0.85em';
+      this.$counter.style.color = 'var(--text-color, #ccc)';
+
+      headerLeft.appendChild(title);
+      headerLeft.appendChild(this.$counter);
+
+      header.appendChild(headerLeft);
       header.appendChild(refreshBtn);
 
-      const content = document.createElement('div');
-      content.style.display = 'flex';
-      content.style.flexDirection = 'column';
-      content.style.gap = '12px';
+      this.$cardsContainer = document.createElement('div');
+      this.$cardsContainer.style.display = 'flex';
+      this.$cardsContainer.style.flexDirection = 'column';
+      this.$cardsContainer.style.gap = '12px';
+
+      this.$loadMoreBtn = document.createElement('button');
+      this.$loadMoreBtn.textContent = 'Load More';
+      this.$loadMoreBtn.style.padding = '8px 16px';
+      this.$loadMoreBtn.style.background = 'transparent';
+      this.$loadMoreBtn.style.border = '1px solid var(--primary-color)';
+      this.$loadMoreBtn.style.color = 'var(--primary-color)';
+      this.$loadMoreBtn.style.borderRadius = '4px';
+      this.$loadMoreBtn.style.alignSelf = 'center';
+      this.$loadMoreBtn.style.display = 'none';
+      this.$loadMoreBtn.onclick = () => this.renderNextBatch();
 
       this.$container.innerHTML = '';
       this.$container.appendChild(header);
-      this.$container.appendChild(content);
+      this.$container.appendChild(this.$cardsContainer);
+      this.$container.appendChild(this.$loadMoreBtn);
 
       try {
         const fsOperation = this.router.requireFs();
@@ -295,28 +331,65 @@
         const exists = await folder.exists();
 
         if (!exists) {
-          content.innerHTML = `<div style="padding: 16px; background: rgba(0,0,0,0.1); border-radius: 4px;">
+          this.$cardsContainer.innerHTML = `<div style="padding: 16px; background: rgba(0,0,0,0.1); border-radius: 4px;">
             No pipeline directory found (${pipelineFolderUrl}).
           </div>`;
           return;
         }
 
         const files = await folder.lsDir();
-        const pipelineFiles = files.filter(f => f.name && f.name.endsWith('.intent.json'));
+        const pipelineFiles = files.filter(f => f.name && f.name.endsWith('.intent.json'))
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+        this.pipelineFiles = pipelineFiles;
 
         if (pipelineFiles.length === 0) {
-          content.innerHTML = '<div style="padding: 16px; background: rgba(0,0,0,0.1); border-radius: 4px;">No *.intent.json files found in pipeline directory.</div>';
+          this.$cardsContainer.innerHTML = '<div style="padding: 16px; background: rgba(0,0,0,0.1); border-radius: 4px;">No *.intent.json files found in pipeline directory.</div>';
           return;
         }
 
-        for (const file of pipelineFiles) {
-          content.appendChild(this.createPipelineCard(file));
-        }
+        this.renderNextBatch();
 
       } catch (err) {
-        content.innerHTML = `<div style="padding: 16px; color: #f44336; background: rgba(244,67,54,0.1); border-radius: 4px;">
+        this.$cardsContainer.innerHTML = `<div style="padding: 16px; color: #f44336; background: rgba(244,67,54,0.1); border-radius: 4px;">
           Error loading pipelines: ${this.router.escapeHtml(err.message)}
         </div>`;
+      }
+    }
+
+    renderNextBatch() {
+      if (!this.$cardsContainer || this.renderedCount >= this.pipelineFiles.length) {
+        if (this.$loadMoreBtn) this.$loadMoreBtn.style.display = 'none';
+        return;
+      }
+
+      const start = this.renderedCount;
+      const end = Math.min(start + this.batchSize, this.pipelineFiles.length);
+      const batch = this.pipelineFiles.slice(start, end);
+
+      const fragment = document.createDocumentFragment();
+      for (const file of batch) {
+        fragment.appendChild(this.createPipelineCard(file));
+      }
+
+      this.$cardsContainer.appendChild(fragment);
+      this.renderedCount = end;
+
+      this.updatePaginationUI();
+    }
+
+    updatePaginationUI() {
+      const total = this.pipelineFiles.length;
+      if (this.$counter) {
+        this.$counter.textContent = total > 0 ? `Showing ${this.renderedCount} of ${total} pipelines` : '';
+      }
+      if (this.$loadMoreBtn) {
+        if (this.renderedCount < total) {
+          this.$loadMoreBtn.style.display = 'block';
+          this.$loadMoreBtn.textContent = `Load More (${total - this.renderedCount} remaining)`;
+        } else {
+          this.$loadMoreBtn.style.display = 'none';
+        }
       }
     }
 
@@ -935,6 +1008,7 @@
     module.exports = {
       MAX_PIPELINE_BYTES,
       DEFAULT_EDITOR_MAX_BYTES,
+      DEFAULT_PIPELINE_BATCH_SIZE,
       PipelineRunner,
       PipelineUI,
       IntentRouter,
