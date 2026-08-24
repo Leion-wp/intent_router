@@ -46,8 +46,15 @@
         } else if (code <= 0x7ff) {
           bytes += 2;
         } else if (code >= 0xd800 && code <= 0xdbff) {
-          bytes += 4;
-          i++;
+          if (i + 1 < content.length) {
+            const next = content.charCodeAt(i + 1);
+            if (next >= 0xdc00 && next <= 0xdfff) {
+              bytes += 4;
+              i++;
+              continue;
+            }
+          }
+          bytes += 3;
         } else {
           bytes += 3;
         }
