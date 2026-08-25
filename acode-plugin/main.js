@@ -112,6 +112,119 @@
     return content;
   }
 
+  function computePipelineSignature(pipelineData) {
+    if (!pipelineData) return '';
+    let parsed = pipelineData;
+    if (typeof pipelineData === 'string') {
+      try {
+        parsed = JSON.parse(pipelineData);
+      } catch (_) {
+        return '';
+      }
+    }
+    const rawSteps = Array.isArray(parsed?.steps) ? parsed.steps : [];
+    const normalized = {
+      name: parsed?.name || '',
+      steps: rawSteps.map(s => ({
+        id: s?.id || null,
+        intent: s?.intent || s?.action || '',
+        payload: s?.payload || s?.data || {},
+        continueOnError: !!s?.continueOnError
+      }))
+    };
+    const jsonStr = JSON.stringify(normalized);
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < jsonStr.length; i++) {
+      hash ^= jsonStr.charCodeAt(i);
+      hash = (hash * 0x01000193) >>> 0;
+    }
+    return 'sig_' + hash.toString(16).padStart(8, '0');
+  }
+
+  class RunHistoryStore {
+    constructor(router, options = {}) {
+      this.router = router;
+      this.maxRuns = (options && typeof options.maxRuns === 'number' && options.maxRuns > 0) ? options.maxRuns : 50;
+      this.runs = [];
+      this.persistenceUri = options.persistenceUri || null;
+      this.writePromise = Promise.resolve();
+    }
+
+    addRun(run) {
+      if (!run || !run.id) return null;
+      const normalizedRun = {
+        id: String(run.id),
+        parentRunId: run.parentRunId ? String(run.parentRunId) : null,
+        source: run.source || (run.parentRunId ? 'resume' : 'direct'),
+        pipelineUrl: run.pipelineUrl || null,
+        pipelineName: run.pipelineName || null,
+        pipelineSignature: run.pipelineSignature || null,
+        status: run.status || 'running',
+        startTime: run.startTime || Date.now(),
+        endTime: run.endTime || null,
+        logs: Array.isArray(run.logs) ? run.logs : [],
+        checkpoint: run.checkpoint || null,
+        error: run.error || null
+      };
+
+      const existingIndex = this.runs.findIndex(r => r.id === normalizedRun.id);
+      if (existingIndex >= 0) {
+        this.runs[existingIndex] = normalizedRun;
+      } else {
+        this.runs.unshift(normalizedRun);
+        if (this.runs.length > this.maxRuns) {
+          this.runs = this.runs.slice(0, this.maxRuns);
+        }
+      }
+      this.scheduleSave();
+      return normalizedRun;
+    }
+
+    updateRun(runId, updates = {}) {
+      const run = this.getRun(runId);
+      if (!run) return null;
+      Object.assign(run, updates);
+      this.scheduleSave();
+      return run;
+    }
+
+    updateCheckpoint(runId, checkpoint) {
+      const run = this.getRun(runId);
+      if (!run) return null;
+      run.checkpoint = checkpoint ? Object.assign({}, checkpoint, { timestamp: Date.now() }) : null;
+      this.scheduleSave();
+      return run;
+    }
+
+    getRun(runId) {
+      if (!runId) return null;
+      return this.runs.find(r => r.id === String(runId)) || null;
+    }
+
+    getHistory() {
+      return this.runs.slice();
+    }
+
+    clearHistory() {
+      this.runs = [];
+      this.scheduleSave();
+    }
+
+    scheduleSave() {
+      if (!this.persistenceUri || !this.router) return;
+      this.writePromise = this.writePromise.then(async () => {
+        try {
+          const fsOperation = this.router.requireFs();
+          if (!fsOperation) return;
+          const jsonContent = JSON.stringify(this.runs, null, 2);
+          await fsOperation(this.persistenceUri).writeFile(jsonContent);
+        } catch (_) {
+          // Ignore persistence errors
+        }
+      });
+    }
+  }
+
 
   class PipelineRunner {
     constructor(router, options = {}) {
@@ -134,66 +247,154 @@
         const fileContent = await readBoundedFile(fsHandle, 'utf-8', limit, 'pipeline_too_large');
 
         const pipelineData = JSON.parse(fileContent);
-        return await this.runPipelineFromData(pipelineData, onProgress);
+        const runOptions = Object.assign({ pipelineUrl: fileUrl }, options);
+        return await this.runPipelineFromData(pipelineData, onProgress, runOptions);
       } catch (err) {
         this.router.log(`Pipeline run error: ${err.message}`);
         throw err;
       }
     }
 
-    async runPipelineFromData(pipelineData, onProgress) {
+    async runPipelineFromData(pipelineData, onProgress, options = {}) {
       if (!pipelineData || !Array.isArray(pipelineData.steps)) {
         throw new Error('Invalid pipeline format: steps array is missing');
       }
 
-      let stepIndex = 0;
+      const historyStore = options.historyStore || (this.router && this.router.historyStore);
+      const pipelineSignature = computePipelineSignature(pipelineData);
+      const runId = options.runId || ('run_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
+      const parentRunId = options.parentRunId ? String(options.parentRunId) : null;
+      const source = options.source || (parentRunId ? 'resume' : 'direct');
+      const pipelineUrl = options.pipelineUrl || null;
+      const pipelineName = options.pipelineName || (pipelineUrl ? String(pipelineUrl).split('/').pop() : (pipelineData.name || 'pipeline.intent.json'));
+      const startStepIndex = (typeof options.startStepIndex === 'number' && options.startStepIndex >= 0)
+        ? options.startStepIndex
+        : 0;
+
+      if (historyStore) {
+        historyStore.addRun({
+          id: runId,
+          parentRunId,
+          source,
+          pipelineUrl,
+          pipelineName,
+          pipelineSignature,
+          status: 'running',
+          startTime: Date.now(),
+          logs: []
+        });
+      }
+
       const totalSteps = pipelineData.steps.length;
       const logs = [];
+      const completedSteps = [];
+      let lastCompletedStepIndex = null;
+      let lastCompletedStepId = null;
 
-      for (const step of pipelineData.steps) {
-        stepIndex++;
-        const intentName = step.intent;
-        const payload = step.payload || {};
+      for (let stepIndex = startStepIndex; stepIndex < totalSteps; stepIndex++) {
+        const step = pipelineData.steps[stepIndex];
+        const intentName = step.intent || step.action;
+        const payload = step.payload || step.data || {};
+        const stepDisplayNumber = stepIndex + 1;
 
         if (onProgress) {
-          onProgress({ step: stepIndex, total: totalSteps, status: 'running', intent: intentName });
+          onProgress({ step: stepDisplayNumber, total: totalSteps, status: 'running', intent: intentName, runId });
         }
 
-        // Roots compatibility: file.read -> action: file:read, data: payload
-        const action = intentName.replace(/\./g, ':');
+        const action = intentName ? intentName.replace(/\./g, ':') : '';
 
         let stepSuccess = false;
         let stepError = null;
+        let stepResultData = null;
 
         try {
           const result = await this.router.route({ action, data: payload });
           if (result && result.success) {
             stepSuccess = true;
-            logs.push({ step: stepIndex, intent: intentName, success: true, data: result.data, error: result.error || null });
+            stepResultData = result.data;
           } else {
             stepSuccess = false;
-            stepError = (result && result.error) ? result.error : `Step ${stepIndex} failed`;
-            logs.push({ step: stepIndex, intent: intentName, success: false, data: result ? result.data : null, error: stepError });
+            stepError = (result && result.error) ? result.error : `Step ${stepDisplayNumber} failed`;
+            stepResultData = result ? result.data : null;
           }
         } catch (err) {
           stepSuccess = false;
           stepError = err && err.message ? err.message : String(err);
-          logs.push({ step: stepIndex, intent: intentName, success: false, data: null, error: stepError });
         }
 
-        if (!stepSuccess && !step.continueOnError) {
-          if (onProgress) {
-            onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: stepError });
+        const stepLog = {
+          step: stepDisplayNumber,
+          stepIndex,
+          stepId: step.id || null,
+          intent: intentName,
+          success: stepSuccess,
+          data: stepResultData,
+          error: stepError
+        };
+        logs.push(stepLog);
+
+        if (stepSuccess) {
+          lastCompletedStepIndex = stepIndex;
+          lastCompletedStepId = step.id || null;
+          completedSteps.push(stepLog);
+
+          const checkpoint = {
+            runId,
+            parentRunId,
+            source,
+            pipelineSignature,
+            pipelineUrl,
+            lastCompletedStepIndex,
+            lastCompletedStepId,
+            completedStepsCount: completedSteps.length,
+            timestamp: Date.now(),
+            completedSteps: completedSteps.slice()
+          };
+
+          if (historyStore) {
+            historyStore.updateCheckpoint(runId, checkpoint);
+            historyStore.updateRun(runId, { logs: logs.slice() });
           }
-          throw new Error(`Pipeline aborted at step ${stepIndex} (${intentName}): ${stepError}`);
+        } else {
+          if (historyStore) {
+            historyStore.updateRun(runId, {
+              status: 'failure',
+              endTime: Date.now(),
+              logs: logs.slice(),
+              error: stepError
+            });
+          }
+
+          if (!step.continueOnError) {
+            if (onProgress) {
+              onProgress({ step: stepDisplayNumber, total: totalSteps, status: 'error', error: stepError, runId });
+            }
+            throw new Error(`Pipeline aborted at step ${stepDisplayNumber} (${intentName}): ${stepError}`);
+          }
         }
+      }
+
+      if (historyStore) {
+        historyStore.updateRun(runId, {
+          status: 'success',
+          endTime: Date.now(),
+          logs: logs.slice()
+        });
       }
 
       if (onProgress) {
-        onProgress({ step: stepIndex, total: totalSteps, status: 'success' });
+        onProgress({ step: totalSteps, total: totalSteps, status: 'success', runId });
       }
 
-      return { success: true, logs };
+      const finalRun = historyStore ? historyStore.getRun(runId) : null;
+      return {
+        runId,
+        parentRunId,
+        source,
+        success: true,
+        logs,
+        checkpoint: finalRun ? finalRun.checkpoint : null
+      };
     }
   }
 
@@ -407,9 +608,38 @@
       header.style.justifyContent = 'space-between';
       header.style.alignItems = 'center';
 
+      const nameContainer = document.createElement('div');
+      nameContainer.style.display = 'flex';
+      nameContainer.style.alignItems = 'center';
+
       const name = document.createElement('strong');
       name.textContent = file.name;
-      header.appendChild(name);
+      nameContainer.appendChild(name);
+
+      const historyStore = this.router && this.router.historyStore;
+      const historyRuns = historyStore ? historyStore.getHistory() : [];
+      const resumableRun = historyRuns.find(r =>
+        (r.pipelineUrl === file.url || r.pipelineName === file.name) &&
+        r.status !== 'success' &&
+        r.checkpoint &&
+        typeof r.checkpoint.lastCompletedStepIndex === 'number' &&
+        r.checkpoint.lastCompletedStepIndex >= 0
+      );
+
+      if (resumableRun) {
+        const badge = document.createElement('span');
+        badge.textContent = 'Resumable';
+        badge.style.background = 'var(--warning-color, #ff9800)';
+        badge.style.color = '#000';
+        badge.style.fontSize = '0.75em';
+        badge.style.padding = '2px 6px';
+        badge.style.borderRadius = '3px';
+        badge.style.marginLeft = '8px';
+        badge.style.fontWeight = 'bold';
+        nameContainer.appendChild(badge);
+      }
+
+      header.appendChild(nameContainer);
 
       const controls = document.createElement('div');
       controls.style.display = 'flex';
@@ -425,7 +655,6 @@
       openBtn.onclick = async () => {
          try {
             await this.router.route({ action: 'editor:open_file', data: { path: file.url, name: file.name }});
-            // Try to hide the page to show the editor if it has hide method
             if (typeof this.router.$page.hide === 'function') this.router.$page.hide();
          } catch(e) {
             this.router.toast('Error opening file: ' + e.message);
@@ -441,15 +670,75 @@
       runBtn.style.borderRadius = '4px';
 
       controls.appendChild(openBtn);
-      controls.appendChild(runBtn);
-
-      header.appendChild(controls);
-      card.appendChild(header);
 
       const statusArea = document.createElement('div');
       statusArea.style.fontSize = '0.9em';
       statusArea.style.color = 'var(--text-color, #ccc)';
       statusArea.style.display = 'none';
+
+      if (resumableRun) {
+        const resumeBtn = document.createElement('button');
+        resumeBtn.textContent = 'Resume';
+        resumeBtn.style.padding = '6px 12px';
+        resumeBtn.style.background = 'var(--warning-color, #ff9800)';
+        resumeBtn.style.border = 'none';
+        resumeBtn.style.color = '#000';
+        resumeBtn.style.borderRadius = '4px';
+        resumeBtn.style.fontWeight = 'bold';
+
+        resumeBtn.onclick = () => {
+          runBtn.disabled = true;
+          openBtn.disabled = true;
+          resumeBtn.disabled = true;
+          runBtn.style.opacity = '0.5';
+          resumeBtn.style.opacity = '0.5';
+          statusArea.style.display = 'block';
+          statusArea.style.color = '#fff';
+          statusArea.innerHTML = `Resuming from step ${resumableRun.checkpoint.lastCompletedStepIndex + 2} (Parent: ${resumableRun.id})...`;
+
+          this.router.route({
+            action: 'router:resume_run',
+            data: {
+              runId: resumableRun.id,
+              onProgress: (progress) => {
+                if (progress.status === 'running') {
+                  statusArea.innerHTML = `Resumed Step ${progress.step}/${progress.total}: ${progress.intent} - Running...`;
+                } else if (progress.status === 'success') {
+                  statusArea.style.color = '#4caf50';
+                  statusArea.innerHTML = `Success! (${progress.total}/${progress.total} steps completed)`;
+                } else if (progress.status === 'error') {
+                  statusArea.style.color = '#f44336';
+                  statusArea.innerHTML = `Failed at step ${progress.step}: ${this.router.escapeHtml(progress.error)}`;
+                }
+              }
+            }
+          }).then(res => {
+            runBtn.disabled = false;
+            openBtn.disabled = false;
+            resumeBtn.disabled = false;
+            runBtn.style.opacity = '1';
+            resumeBtn.style.opacity = '1';
+            if (!res || !res.success) {
+              statusArea.style.color = '#f44336';
+              statusArea.innerHTML = `Resume error: ${this.router.escapeHtml(res ? res.error : 'Unknown error')}`;
+            }
+          }).catch(err => {
+            runBtn.disabled = false;
+            openBtn.disabled = false;
+            resumeBtn.disabled = false;
+            runBtn.style.opacity = '1';
+            resumeBtn.style.opacity = '1';
+            statusArea.style.color = '#f44336';
+            statusArea.innerHTML = `Resume error: ${this.router.escapeHtml(err.message)}`;
+          });
+        };
+        controls.appendChild(resumeBtn);
+      }
+
+      controls.appendChild(runBtn);
+
+      header.appendChild(controls);
+      card.appendChild(header);
       card.appendChild(statusArea);
 
       runBtn.onclick = () => {
@@ -495,6 +784,7 @@
       this.context = null;
       this.modules = {};
       this.registeredAcodeCommands = [];
+      this.historyStore = new RunHistoryStore(this);
       this.pipelineRunner = new PipelineRunner(this);
       this.pipelineUI = new PipelineUI(this);
     }
@@ -676,6 +966,129 @@
         editor: !!(window.editorManager && editorManager.editor),
         network: typeof fetch === 'function'
       }));
+
+      this.register('router:run_history', (data = {}) => {
+        if (data.runId) {
+          const run = this.historyStore.getRun(data.runId);
+          if (!run) {
+            const err = new Error(`Run not found: ${data.runId}`);
+            err.code = 'run_not_found';
+            throw err;
+          }
+          return run;
+        }
+        return this.historyStore.getHistory();
+      });
+
+      const resumeHandler = async (data = {}) => {
+        const runId = data.runId || data.parentRunId;
+        if (!runId) {
+          const err = new Error('runId is required to resume a pipeline run');
+          err.code = 'resume_missing_run_id';
+          throw err;
+        }
+
+        const parentRun = this.historyStore.getRun(runId);
+        if (!parentRun) {
+          const err = new Error(`Run not found in history: ${runId}`);
+          err.code = 'resume_run_not_found';
+          throw err;
+        }
+
+        if (parentRun.status === 'success') {
+          const err = new Error(`Run ${runId} already completed successfully and cannot be resumed`);
+          err.code = 'resume_not_eligible';
+          throw err;
+        }
+
+        const checkpoint = parentRun.checkpoint;
+        if (!checkpoint || typeof checkpoint.lastCompletedStepIndex !== 'number' || checkpoint.lastCompletedStepIndex < 0) {
+          const err = new Error(`Run ${runId} has no valid checkpoint to resume from`);
+          err.code = 'resume_invalid_checkpoint';
+          throw err;
+        }
+
+        const pipelineUrl = checkpoint.pipelineUrl || parentRun.pipelineUrl || data.pipelineUrl;
+        if (!pipelineUrl) {
+          const err = new Error(`Pipeline URL missing in run checkpoint for ${runId}`);
+          err.code = 'resume_pipeline_url_missing';
+          throw err;
+        }
+
+        let currentContent;
+        try {
+          const fsOperation = this.requireFs();
+          if (!fsOperation) throw new Error('File system API unavailable');
+          const fsHandle = fsOperation(pipelineUrl);
+          const limit = data.maxPipelineBytes || this.pipelineRunner.maxPipelineBytes || MAX_PIPELINE_BYTES;
+          currentContent = await readBoundedFile(fsHandle, 'utf-8', limit, 'pipeline_too_large');
+        } catch (err) {
+          const error = new Error(`Failed to read pipeline file for resume (${pipelineUrl}): ${err.message}`);
+          error.code = 'resume_pipeline_not_found';
+          throw error;
+        }
+
+        let currentPipelineData;
+        try {
+          currentPipelineData = JSON.parse(currentContent);
+        } catch (err) {
+          const error = new Error(`Failed to parse pipeline file for resume: ${err.message}`);
+          error.code = 'resume_invalid_pipeline_json';
+          throw error;
+        }
+
+        const currentSignature = computePipelineSignature(currentPipelineData);
+        if (currentSignature !== checkpoint.pipelineSignature) {
+          const err = new Error(`Pipeline content changed since checkpoint (expected ${checkpoint.pipelineSignature}, got ${currentSignature})`);
+          err.code = 'resume_pipeline_changed';
+          err.expectedSignature = checkpoint.pipelineSignature;
+          err.actualSignature = currentSignature;
+          throw err;
+        }
+
+        const lastIndex = checkpoint.lastCompletedStepIndex;
+        const steps = currentPipelineData.steps;
+        if (!Array.isArray(steps) || lastIndex >= steps.length) {
+          const err = new Error(`Checkpoint last completed step index (${lastIndex}) is out of bounds for pipeline steps (${steps ? steps.length : 0})`);
+          err.code = 'resume_step_not_found';
+          throw err;
+        }
+
+        if (checkpoint.lastCompletedStepId) {
+          const stepAtLastIndex = steps[lastIndex];
+          if (!stepAtLastIndex || stepAtLastIndex.id !== checkpoint.lastCompletedStepId) {
+            const err = new Error(`Checkpoint step ID mismatch at index ${lastIndex} (expected ${checkpoint.lastCompletedStepId}, got ${stepAtLastIndex ? stepAtLastIndex.id : 'null'})`);
+            err.code = 'resume_step_not_found';
+            throw err;
+          }
+        }
+
+        const nextStepIndex = lastIndex + 1;
+        if (nextStepIndex >= steps.length) {
+          const err = new Error(`No remaining steps to execute in pipeline (completed ${lastIndex + 1}/${steps.length})`);
+          err.code = 'resume_no_remaining_steps';
+          throw err;
+        }
+
+        const runOptions = {
+          parentRunId: parentRun.id,
+          source: 'resume',
+          pipelineUrl,
+          startStepIndex: nextStepIndex,
+          historyStore: this.historyStore
+        };
+
+        if (this.runQueue && typeof this.runQueue.enqueue === 'function') {
+          return await this.runQueue.enqueue(() =>
+            this.pipelineRunner.runPipelineFromData(currentPipelineData, data.onProgress, runOptions)
+          );
+        }
+
+        return await this.pipelineRunner.runPipelineFromData(currentPipelineData, data.onProgress, runOptions);
+      };
+
+      this.register('router:resume_run', resumeHandler);
+      this.register('router:resume', resumeHandler);
 
       this.register('system:toast', (data) => {
         this.toast(data.message || 'No message', Number(data.timeout) || 3000);
@@ -1009,6 +1422,8 @@
       MAX_PIPELINE_BYTES,
       DEFAULT_EDITOR_MAX_BYTES,
       DEFAULT_PIPELINE_BATCH_SIZE,
+      computePipelineSignature,
+      RunHistoryStore,
       PipelineRunner,
       PipelineUI,
       IntentRouter,
