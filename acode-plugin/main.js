@@ -71,6 +71,24 @@
     return 0;
   }
 
+  function decodeBytesToString(uint8Array) {
+    if (typeof TextDecoder !== 'undefined') {
+      return new TextDecoder('utf-8').decode(uint8Array);
+    }
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(uint8Array).toString('utf-8');
+    }
+    let str = '';
+    for (let i = 0; i < uint8Array.length; i++) {
+      str += String.fromCharCode(uint8Array[i]);
+    }
+    try {
+      return decodeURIComponent(escape(str));
+    } catch (_) {
+      return str;
+    }
+  }
+
   async function readBoundedFile(fsHandle, encoding, limit, errorCode = 'file_too_large') {
     if (limit !== null && limit !== undefined) {
       if (typeof fsHandle.stat === 'function') {
@@ -864,15 +882,157 @@
 
       this.register('network:request', async (data) => {
         if (!data.url) throw new Error('url is required');
-        const options = { method: data.method || 'GET', headers: data.headers || {} };
-        if (data.body !== undefined && data.body !== null) {
-          options.body = typeof data.body === 'string' ? data.body : JSON.stringify(data.body);
+        const limit = validateMaxBytes(data.maxResponseBytes);
+        let timeoutMs = null;
+        if (data.timeoutMs !== undefined && data.timeoutMs !== null) {
+          const num = Number(data.timeoutMs);
+          if (isNaN(num) || !Number.isFinite(num) || num <= 0) {
+            const err = new Error('Invalid timeoutMs: must be a positive finite number');
+            err.code = 'invalid_timeout_ms';
+            throw err;
+          }
+          timeoutMs = num;
         }
-        const response = await fetch(data.url, options);
-        const contentType = response.headers.get('content-type') || '';
-        const body = contentType.includes('application/json') ? await response.json() : await response.text();
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
-        return { status: response.status, headers: Object.fromEntries(response.headers.entries()), body };
+
+        const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        let timer = null;
+
+        if (timeoutMs !== null && controller) {
+          timer = setTimeout(() => {
+            controller.abort();
+          }, timeoutMs);
+        }
+
+        try {
+          const options = { method: data.method || 'GET', headers: data.headers || {} };
+          if (controller) {
+            options.signal = controller.signal;
+          }
+          if (data.body !== undefined && data.body !== null) {
+            options.body = typeof data.body === 'string' ? data.body : JSON.stringify(data.body);
+          }
+
+          let response;
+          try {
+            response = await fetch(data.url, options);
+          } catch (fetchErr) {
+            if (controller && controller.signal.aborted) {
+              const err = new Error(`Request timed out after ${timeoutMs} ms [request_timeout]`);
+              err.code = 'request_timeout';
+              err.timeoutMs = timeoutMs;
+              throw err;
+            }
+            throw fetchErr;
+          }
+
+          const contentType = (response.headers && typeof response.headers.get === 'function')
+            ? (response.headers.get('content-type') || '')
+            : '';
+          const contentLengthHeader = (response.headers && typeof response.headers.get === 'function')
+            ? response.headers.get('content-length')
+            : null;
+
+          if (limit !== null && contentLengthHeader) {
+            const parsedLength = parseInt(contentLengthHeader, 10);
+            if (!isNaN(parsedLength) && parsedLength > limit) {
+              if (controller) controller.abort();
+              const err = new Error(`Response size (${parsedLength} bytes) exceeds limit (${limit} bytes) [response_too_large]`);
+              err.code = 'response_too_large';
+              err.limit = limit;
+              err.size = parsedLength;
+              throw err;
+            }
+          }
+
+          let body;
+          if (limit !== null && response.body && typeof response.body.getReader === 'function') {
+            const reader = response.body.getReader();
+            const chunks = [];
+            let accumulatedBytes = 0;
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (value) {
+                  accumulatedBytes += value.length;
+                  if (accumulatedBytes > limit) {
+                    try { await reader.cancel(); } catch (_) {}
+                    if (controller) controller.abort();
+                    const err = new Error(`Response size (${accumulatedBytes} bytes) exceeds limit (${limit} bytes) [response_too_large]`);
+                    err.code = 'response_too_large';
+                    err.limit = limit;
+                    err.size = accumulatedBytes;
+                    throw err;
+                  }
+                  chunks.push(value);
+                }
+              }
+              const merged = new Uint8Array(accumulatedBytes);
+              let offset = 0;
+              for (const chunk of chunks) {
+                merged.set(chunk, offset);
+                offset += chunk.length;
+              }
+              const rawText = decodeBytesToString(merged);
+              body = contentType.includes('application/json') ? JSON.parse(rawText) : rawText;
+            } catch (streamErr) {
+              try { await reader.cancel(); } catch (_) {}
+              if (controller && controller.signal.aborted && streamErr.code !== 'response_too_large') {
+                const err = new Error(`Request timed out after ${timeoutMs} ms [request_timeout]`);
+                err.code = 'request_timeout';
+                err.timeoutMs = timeoutMs;
+                throw err;
+              }
+              throw streamErr;
+            }
+          } else {
+            let rawText;
+            try {
+              rawText = contentType.includes('application/json') && limit === null
+                ? await response.json()
+                : await response.text();
+            } catch (readErr) {
+              if (controller && controller.signal.aborted) {
+                const err = new Error(`Request timed out after ${timeoutMs} ms [request_timeout]`);
+                err.code = 'request_timeout';
+                err.timeoutMs = timeoutMs;
+                throw err;
+              }
+              throw readErr;
+            }
+
+            if (typeof rawText === 'string') {
+              if (limit !== null) {
+                const byteLength = getByteLength(rawText);
+                if (byteLength > limit) {
+                  const err = new Error(`Response size (${byteLength} bytes) exceeds limit (${limit} bytes) [response_too_large]`);
+                  err.code = 'response_too_large';
+                  err.limit = limit;
+                  err.size = byteLength;
+                  throw err;
+                }
+              }
+              body = contentType.includes('application/json') ? JSON.parse(rawText) : rawText;
+            } else {
+              body = rawText;
+            }
+          }
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
+          }
+
+          const headers = (response.headers && typeof response.headers.entries === 'function')
+            ? Object.fromEntries(response.headers.entries())
+            : {};
+
+          return { status: response.status, headers, body };
+        } finally {
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+        }
       });
 
       this.register('github:request', async (data) => {
@@ -881,17 +1041,48 @@
         if (data.token) headers.Authorization = `Bearer ${data.token}`;
         const routed = await this.route({
           action: 'network:request',
-          data: { url: `https://api.github.com${String(data.path).startsWith('/') ? '' : '/'}${data.path}`, method: data.method || 'GET', headers, body: data.body }
+          data: {
+            url: `https://api.github.com${String(data.path).startsWith('/') ? '' : '/'}${data.path}`,
+            method: data.method || 'GET',
+            headers,
+            body: data.body,
+            maxResponseBytes: data.maxResponseBytes,
+            timeoutMs: data.timeoutMs
+          }
         });
-        if (!routed.success) throw new Error(routed.error || 'GitHub request failed');
+        if (!routed.success) {
+          const err = new Error(routed.error || 'GitHub request failed');
+          if (routed.metadata) {
+            if (routed.metadata.code) err.code = routed.metadata.code;
+            if (routed.metadata.limit !== undefined) err.limit = routed.metadata.limit;
+            if (routed.metadata.size !== undefined) err.size = routed.metadata.size;
+          }
+          throw err;
+        }
         return routed.data;
       });
 
       this.register('github:fetch_repo', async (data) => {
         if (!data.repo) throw new Error('repo is required (owner/repo)');
         const suffix = data.path ? `/contents/${String(data.path).replace(/^\/+/, '')}` : '';
-        const routed = await this.route({ action: 'github:request', data: { path: `/repos/${data.repo}${suffix}`, token: data.token } });
-        if (!routed.success) throw new Error(routed.error || 'GitHub request failed');
+        const routed = await this.route({
+          action: 'github:request',
+          data: {
+            path: `/repos/${data.repo}${suffix}`,
+            token: data.token,
+            maxResponseBytes: data.maxResponseBytes,
+            timeoutMs: data.timeoutMs
+          }
+        });
+        if (!routed.success) {
+          const err = new Error(routed.error || 'GitHub request failed');
+          if (routed.metadata) {
+            if (routed.metadata.code) err.code = routed.metadata.code;
+            if (routed.metadata.limit !== undefined) err.limit = routed.metadata.limit;
+            if (routed.metadata.size !== undefined) err.size = routed.metadata.size;
+          }
+          throw err;
+        }
         return routed.data;
       });
 
@@ -1014,6 +1205,7 @@
       IntentRouter,
       validateMaxBytes,
       getByteLength,
+      decodeBytesToString,
       readBoundedFile
     };
   }
