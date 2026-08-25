@@ -35,7 +35,7 @@ export type Determinism = 'deterministic' | 'interactive';
 
 export type CapabilityArgument = {
     name: string;
-    type: 'string' | 'boolean' | 'enum' | 'path';
+    type: 'string' | 'number' | 'boolean' | 'enum' | 'path';
     description?: string;
     options?: string[] | string; // Array for static, String for dynamic command
     required?: boolean;
