@@ -7,6 +7,40 @@
   const DEFAULT_EDITOR_MAX_BYTES = 5 * 1024 * 1024; // 5 MB default limit for editor open
   const DEFAULT_PIPELINE_BATCH_SIZE = 25; // 25 cards per batch
 
+  const ALLOWED_OPEN_URL_SCHEMES = new Set(['https:', 'http:']);
+
+  function validateOpenUrl(rawUrl) {
+    if (rawUrl === undefined || rawUrl === null) {
+      throw new Error('url is required');
+    }
+    const trimmed = String(rawUrl).trim();
+    if (!trimmed) {
+      throw new Error('url is required');
+    }
+
+    let parsedUrl = null;
+    try {
+      parsedUrl = new URL(trimmed);
+    } catch (_) {
+      const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+      const rejectedScheme = schemeMatch ? schemeMatch[1].toLowerCase() : 'none';
+      const err = new Error(`URL scheme '${rejectedScheme}' is not allowed`);
+      err.code = 'url_scheme_not_allowed';
+      err.scheme = rejectedScheme;
+      throw err;
+    }
+
+    const scheme = parsedUrl.protocol ? parsedUrl.protocol.slice(0, -1).toLowerCase() : 'none';
+    if (!ALLOWED_OPEN_URL_SCHEMES.has(parsedUrl.protocol.toLowerCase())) {
+      const err = new Error(`URL scheme '${scheme}' is not allowed`);
+      err.code = 'url_scheme_not_allowed';
+      err.scheme = scheme;
+      throw err;
+    }
+
+    return parsedUrl.href;
+  }
+
   function validateMaxBytes(maxBytes) {
     if (maxBytes === undefined) {
       return null;
@@ -646,6 +680,7 @@
           if (error.code) meta.code = error.code;
           if (error.limit !== undefined) meta.limit = error.limit;
           if (error.size !== undefined) meta.size = error.size;
+          if (error.scheme !== undefined) meta.scheme = error.scheme;
         }
         return this.fail(message, meta);
       }
@@ -715,8 +750,9 @@
       });
 
       this.register('system:open_url', (data) => {
-        if (!data.url) throw new Error('url is required');
-        window.open(String(data.url), '_system');
+        if (!data || !data.url) throw new Error('url is required');
+        const validUrl = validateOpenUrl(data.url);
+        window.open(validUrl, '_system');
         return { opened: true };
       });
 
@@ -1013,6 +1049,7 @@
       PipelineUI,
       IntentRouter,
       validateMaxBytes,
+      validateOpenUrl,
       getByteLength,
       readBoundedFile
     };
