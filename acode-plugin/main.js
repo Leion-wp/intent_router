@@ -146,6 +146,135 @@
     return content;
   }
 
+  function validatePipelineStructure(pipelineData) {
+    const errors = [];
+
+    if (pipelineData === null || typeof pipelineData !== 'object' || Array.isArray(pipelineData)) {
+      const err = new Error('Invalid pipeline format: pipelineData must be an object');
+      err.code = 'invalid_pipeline_structure';
+      err.errors = [{ message: 'Pipeline data must be a non-null object' }];
+      throw err;
+    }
+
+    if (!Array.isArray(pipelineData.steps)) {
+      const err = new Error('Invalid pipeline format: steps array is missing');
+      err.code = 'invalid_pipeline_structure';
+      err.errors = [{ message: 'steps must be an array' }];
+      throw err;
+    }
+
+    const seenIds = new Set();
+    const declaredIds = new Set();
+    const onFailureRefs = [];
+
+    // First pass: validate each step object, basic attributes, collect step IDs
+    pipelineData.steps.forEach((step, index) => {
+      const stepIndex = index + 1;
+
+      if (step === null || typeof step !== 'object' || Array.isArray(step)) {
+        errors.push({
+          stepIndex,
+          code: 'invalid_step_type',
+          message: `Step ${stepIndex} must be a non-null object`
+        });
+        return;
+      }
+
+      // Check intent
+      if (typeof step.intent !== 'string' || step.intent.trim() === '') {
+        errors.push({
+          stepIndex,
+          stepId: typeof step.id === 'string' && step.id.trim() ? step.id.trim() : null,
+          code: 'invalid_step_intent',
+          message: `Step ${stepIndex} must have a non-empty string intent`
+        });
+      }
+
+      // Check payload if present
+      if (step.payload !== undefined && (step.payload === null || typeof step.payload !== 'object' || Array.isArray(step.payload))) {
+        errors.push({
+          stepIndex,
+          stepId: typeof step.id === 'string' && step.id.trim() ? step.id.trim() : null,
+          code: 'invalid_step_payload',
+          message: `Step ${stepIndex} payload must be a non-null object`
+        });
+      }
+
+      // Check id if present
+      if (step.id !== undefined) {
+        if (typeof step.id !== 'string' || step.id.trim() === '') {
+          errors.push({
+            stepIndex,
+            code: 'invalid_step_id',
+            message: `Step ${stepIndex} id must be a non-empty string`
+          });
+        } else {
+          const trimmedId = step.id.trim();
+          if (seenIds.has(trimmedId)) {
+            errors.push({
+              stepIndex,
+              stepId: trimmedId,
+              code: 'duplicate_step_id',
+              message: `Step ${stepIndex} has duplicate id '${trimmedId}'`
+            });
+          } else {
+            seenIds.add(trimmedId);
+            declaredIds.add(trimmedId);
+          }
+        }
+      }
+
+      // Check continueOnError if present
+      if (step.continueOnError !== undefined && typeof step.continueOnError !== 'boolean') {
+        errors.push({
+          stepIndex,
+          stepId: typeof step.id === 'string' && step.id.trim() ? step.id.trim() : null,
+          code: 'invalid_continue_on_error',
+          message: `Step ${stepIndex} continueOnError must be a boolean`
+        });
+      }
+
+      // Check onFailure if present
+      if (step.onFailure !== undefined) {
+        if (typeof step.onFailure !== 'string' || step.onFailure.trim() === '') {
+          errors.push({
+            stepIndex,
+            stepId: typeof step.id === 'string' && step.id.trim() ? step.id.trim() : null,
+            code: 'invalid_on_failure',
+            message: `Step ${stepIndex} onFailure must be a non-empty string`
+          });
+        } else {
+          onFailureRefs.push({
+            stepIndex,
+            stepId: typeof step.id === 'string' && step.id.trim() ? step.id.trim() : null,
+            targetId: step.onFailure.trim()
+          });
+        }
+      }
+    });
+
+    // Check onFailure target resolution
+    for (const ref of onFailureRefs) {
+      if (!declaredIds.has(ref.targetId)) {
+        errors.push({
+          stepIndex: ref.stepIndex,
+          stepId: ref.stepId,
+          code: 'unresolved_on_failure_target',
+          message: `Step ${ref.stepIndex} references unknown onFailure target step id '${ref.targetId}'`
+        });
+      }
+    }
+
+    if (errors.length > 0) {
+      const mainMsg = errors.map(e => e.message).join('; ');
+      const err = new Error(`Invalid pipeline structure: ${mainMsg}`);
+      err.code = 'invalid_pipeline_structure';
+      err.errors = errors;
+      throw err;
+    }
+
+    return true;
+  }
 
   class PipelineRunner {
     constructor(router, options = {}) {
@@ -176,9 +305,7 @@
     }
 
     async runPipelineFromData(pipelineData, onProgress) {
-      if (!pipelineData || !Array.isArray(pipelineData.steps)) {
-        throw new Error('Invalid pipeline format: steps array is missing');
-      }
+      validatePipelineStructure(pipelineData);
 
       let stepIndex = 0;
       const totalSteps = pipelineData.steps.length;
@@ -1050,6 +1177,7 @@
       IntentRouter,
       validateMaxBytes,
       validateOpenUrl,
+      validatePipelineStructure,
       getByteLength,
       readBoundedFile
     };
