@@ -28,6 +28,8 @@ suite('AI Execution Budget & Timeout Guards (Mocked)', () => {
     let mockCliPath: string;
     let hangingCliPath: string;
     let failingCliPath: string;
+    let chattyStdoutCliPath: string;
+    let chattyStderrCliPath: string;
 
     setup(() => {
         if (mockVscode.__mock?.reset) {
@@ -49,6 +51,16 @@ suite('AI Execution Budget & Timeout Guards (Mocked)', () => {
         failingCliPath = path.join(tempDir, 'failing-cli.js');
         const failingScript = "#!/usr/bin/env node\nconsole.error('Provider API Error 500');\nprocess.exit(1);\n";
         fs.writeFileSync(failingCliPath, failingScript, { mode: 511 });
+
+        // Chatty stdout CLI script (spams stdout continuously)
+        chattyStdoutCliPath = path.join(tempDir, 'chatty-stdout-cli.js');
+        const chattyStdoutScript = "#!/usr/bin/env node\nsetInterval(() => {\n  process.stdout.write('A'.repeat(100));\n}, 10);\n";
+        fs.writeFileSync(chattyStdoutCliPath, chattyStdoutScript, { mode: 511 });
+
+        // Chatty stderr CLI script (spams stderr continuously)
+        chattyStderrCliPath = path.join(tempDir, 'chatty-stderr-cli.js');
+        const chattyStderrScript = "#!/usr/bin/env node\nsetInterval(() => {\n  process.stderr.write('E'.repeat(100));\n}, 10);\n";
+        fs.writeFileSync(chattyStderrCliPath, chattyStderrScript, { mode: 511 });
 
         // Configure codex command to point to node + our script
         mockVscode.__mock.configStore.set('intentRouter.ai.codex.command', process.execPath);
@@ -163,6 +175,125 @@ suite('AI Execution Budget & Timeout Guards (Mocked)', () => {
         });
     });
 
+    suite('ai.generate maxOutputBytes guard', () => {
+        test('completes normally when output size is within maxOutputBytes', async () => {
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [mockCliPath]);
+
+            const result = await executeAiCommand({
+                agent: 'codex',
+                instruction: 'test instruction',
+                maxOutputBytes: 1000
+            });
+
+            assert.strictEqual(result.path, 'src/index.ts');
+            assert.ok(result.content.includes('console.log("ok");'));
+        });
+
+        test('terminates verbose stdout stream and rejects with explicit limit error', async () => {
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [chattyStdoutCliPath]);
+
+            let stepLogsCount = 0;
+            const sub = pipelineEventBus.on((evt: any) => {
+                if (evt.type === 'stepLog') {
+                    stepLogsCount += 1;
+                }
+            });
+
+            let thrownError: any = null;
+            try {
+                await executeAiCommand({
+                    agent: 'codex',
+                    instruction: 'chatty instruction',
+                    maxOutputBytes: 250,
+                    __meta: { runId: 'run-out-1', traceId: 'trace-out-1', stepId: 'step-out-1' }
+                });
+            } catch (err: any) {
+                thrownError = err;
+            } finally {
+                sub.dispose();
+            }
+
+            assert.ok(thrownError, 'Expected ai.generate to throw on maxOutputBytes exceeded');
+            assert.ok(
+                thrownError.message.includes('[AI Budget]'),
+                `Error message should include [AI Budget], got: ${thrownError.message}`
+            );
+            assert.ok(
+                thrownError.message.includes('Provider output limit of 250 bytes exceeded'),
+                `Error message should specify 250 bytes limit, got: ${thrownError.message}`
+            );
+
+            // Give extra tick to ensure logs stopped
+            const logsBeforeWait = stepLogsCount;
+            await new Promise((r) => setTimeout(r, 50));
+            assert.strictEqual(stepLogsCount, logsBeforeWait, 'Logs should not continue after output limit exceeded');
+        });
+
+        test('terminates verbose stderr stream and rejects with explicit limit error', async () => {
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [chattyStderrCliPath]);
+
+            let thrownError: any = null;
+            try {
+                await executeAiCommand({
+                    agent: 'codex',
+                    instruction: 'chatty stderr instruction',
+                    maxOutputBytes: 200
+                });
+            } catch (err: any) {
+                thrownError = err;
+            }
+
+            assert.ok(thrownError, 'Expected ai.generate to throw on stderr maxOutputBytes');
+            assert.ok(
+                thrownError.message.includes('Provider output limit of 200 bytes exceeded'),
+                `Error message should specify 200 bytes limit, got: ${thrownError.message}`
+            );
+        });
+
+        test('measures UTF-8 multi-byte characters accurately against byte boundary', async () => {
+            // Write a CLI script that outputs multi-byte UTF-8 emojis (🚀 = 4 bytes)
+            const multibyteCliPath = path.join(tempDir, 'multibyte-cli.js');
+            // 10 emojis * 4 bytes = 40 bytes
+            const script = "#!/usr/bin/env node\nprocess.stdout.write('🚀'.repeat(10));\nsetInterval(() => {}, 1000);\n";
+            fs.writeFileSync(multibyteCliPath, script, { mode: 511 });
+
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [multibyteCliPath]);
+
+            let thrownError: any = null;
+            try {
+                await executeAiCommand({
+                    agent: 'codex',
+                    instruction: 'multibyte instruction',
+                    maxOutputBytes: 30 // 30 bytes < 40 bytes output
+                });
+            } catch (err: any) {
+                thrownError = err;
+            }
+
+            assert.ok(thrownError, 'Expected multi-byte output exceeding 30 bytes to fail');
+            assert.ok(thrownError.message.includes('Provider output limit of 30 bytes exceeded'));
+        });
+
+        test('handles combination of timeoutMs and maxOutputBytes safely', async () => {
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [chattyStdoutCliPath]);
+
+            let thrownError: any = null;
+            try {
+                await executeAiCommand({
+                    agent: 'codex',
+                    instruction: 'combo instruction',
+                    timeoutMs: 500,
+                    maxOutputBytes: 150
+                });
+            } catch (err: any) {
+                thrownError = err;
+            }
+
+            assert.ok(thrownError);
+            assert.ok(thrownError.message.includes('[AI Budget]'));
+        });
+    });
+
     suite('ai.team maxProviderCalls & budget bounds', () => {
         test('sequential strategy stops at maxProviderCalls=2 for a 4-member team', async () => {
             mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [mockCliPath]);
@@ -256,6 +387,35 @@ suite('AI Execution Budget & Timeout Guards (Mocked)', () => {
 
             assert.ok(thrownError, 'Expected failing CLI to throw');
             assert.ok(thrownError.message.includes('Agent exited with code 1'));
+        });
+
+        test('ai.team propagates maxOutputBytes and emits in summary event', async () => {
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [mockCliPath]);
+
+            let summaryEvent: any = null;
+            const sub = pipelineEventBus.on((evt: any) => {
+                if (evt.type === 'teamRunSummary') {
+                    summaryEvent = evt;
+                }
+            });
+
+            try {
+                const members = [
+                    { name: 'm1', agent: 'codex', instruction: 'do 1' }
+                ];
+
+                await executeAiTeamCommand({
+                    strategy: 'sequential',
+                    members,
+                    maxOutputBytes: 5000,
+                    __meta: { runId: 'run-out-team', traceId: 'trace-out-team', stepId: 'step-out-team' }
+                });
+
+                assert.ok(summaryEvent);
+                assert.strictEqual(summaryEvent.maxOutputBytes, 5000);
+            } finally {
+                sub.dispose();
+            }
         });
     });
 });
