@@ -105,6 +105,134 @@
     return 0;
   }
 
+  function validatePipelineStructure(pipelineData) {
+    const errors = [];
+
+    if (!pipelineData || typeof pipelineData !== 'object' || Array.isArray(pipelineData)) {
+      const err = new Error('Invalid pipeline structure: pipelineData must be a non-null object');
+      err.code = 'invalid_pipeline_structure';
+      err.errors = [{ code: 'invalid_pipeline_object', message: 'pipelineData must be a non-null object' }];
+      throw err;
+    }
+
+    if (!Array.isArray(pipelineData.steps)) {
+      const err = new Error('Invalid pipeline structure: steps array is missing');
+      err.code = 'invalid_pipeline_structure';
+      err.errors = [{ code: 'invalid_steps_array', message: 'steps must be an array' }];
+      throw err;
+    }
+
+    const seenIds = new Set();
+    const stepIds = new Set();
+    const onFailureTargets = [];
+
+    for (let i = 0; i < pipelineData.steps.length; i++) {
+      const stepIndex = i + 1;
+      const step = pipelineData.steps[i];
+
+      if (!step || typeof step !== 'object' || Array.isArray(step)) {
+        errors.push({
+          stepIndex,
+          code: 'invalid_step_type',
+          message: `Step at index ${stepIndex} must be a non-null object`
+        });
+        continue;
+      }
+
+      let stepId = null;
+      if (step.id !== undefined) {
+        if (typeof step.id !== 'string' || !step.id.trim()) {
+          errors.push({
+            stepIndex,
+            code: 'invalid_step_id',
+            message: `Step at index ${stepIndex} has an invalid id (must be a non-empty string)`
+          });
+        } else {
+          stepId = step.id.trim();
+          if (seenIds.has(stepId)) {
+            errors.push({
+              stepIndex,
+              stepId,
+              code: 'duplicate_step_id',
+              message: `Step at index ${stepIndex} has duplicate id '${stepId}'`
+            });
+          } else {
+            seenIds.add(stepId);
+            stepIds.add(stepId);
+          }
+        }
+      }
+
+      if (step.intent === undefined || typeof step.intent !== 'string' || !step.intent.trim()) {
+        errors.push({
+          stepIndex,
+          stepId: stepId || undefined,
+          code: 'invalid_step_intent',
+          message: `Step at index ${stepIndex}${stepId ? ` ('${stepId}')` : ''} must have a non-empty string intent`
+        });
+      }
+
+      if (step.payload !== undefined && step.payload !== null) {
+        if (typeof step.payload !== 'object' || Array.isArray(step.payload)) {
+          errors.push({
+            stepIndex,
+            stepId: stepId || undefined,
+            code: 'invalid_step_payload',
+            message: `Step at index ${stepIndex}${stepId ? ` ('${stepId}')` : ''} payload must be a non-null object`
+          });
+        }
+      }
+
+      if (step.continueOnError !== undefined && typeof step.continueOnError !== 'boolean') {
+        errors.push({
+          stepIndex,
+          stepId: stepId || undefined,
+          code: 'invalid_continue_on_error',
+          message: `Step at index ${stepIndex}${stepId ? ` ('${stepId}')` : ''} continueOnError must be a boolean`
+        });
+      }
+
+      if (step.onFailure !== undefined) {
+        if (typeof step.onFailure !== 'string' || !step.onFailure.trim()) {
+          errors.push({
+            stepIndex,
+            stepId: stepId || undefined,
+            code: 'invalid_on_failure',
+            message: `Step at index ${stepIndex}${stepId ? ` ('${stepId}')` : ''} onFailure must be a non-empty string`
+          });
+        } else {
+          onFailureTargets.push({
+            stepIndex,
+            stepId: stepId || undefined,
+            targetId: step.onFailure.trim()
+          });
+        }
+      }
+    }
+
+    for (const item of onFailureTargets) {
+      if (!stepIds.has(item.targetId)) {
+        errors.push({
+          stepIndex: item.stepIndex,
+          stepId: item.stepId,
+          targetId: item.targetId,
+          code: 'unknown_on_failure_target',
+          message: `Step at index ${item.stepIndex}${item.stepId ? ` ('${item.stepId}')` : ''} references non-existent onFailure step id '${item.targetId}'`
+        });
+      }
+    }
+
+    if (errors.length > 0) {
+      const primaryMsg = errors[0].message;
+      const err = new Error(`Invalid pipeline structure (${errors.length} error${errors.length > 1 ? 's' : ''}): ${primaryMsg}`);
+      err.code = 'invalid_pipeline_structure';
+      err.errors = errors;
+      throw err;
+    }
+
+    return true;
+  }
+
   async function readBoundedFile(fsHandle, encoding, limit, errorCode = 'file_too_large') {
     if (limit !== null && limit !== undefined) {
       if (typeof fsHandle.stat === 'function') {
@@ -176,9 +304,7 @@
     }
 
     async runPipelineFromData(pipelineData, onProgress) {
-      if (!pipelineData || !Array.isArray(pipelineData.steps)) {
-        throw new Error('Invalid pipeline format: steps array is missing');
-      }
+      validatePipelineStructure(pipelineData);
 
       let stepIndex = 0;
       const totalSteps = pipelineData.steps.length;
@@ -1048,6 +1174,7 @@
       PipelineRunner,
       PipelineUI,
       IntentRouter,
+      validatePipelineStructure,
       validateMaxBytes,
       validateOpenUrl,
       getByteLength,

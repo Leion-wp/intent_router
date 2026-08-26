@@ -164,6 +164,33 @@ async function runTests() {
     assert.strictEqual(caughtError.message, 'Pipeline aborted at step 1 (step.one): Hard failure');
   }
 
+  // 6. Pre-execution fail-fast validation in runner.test.js
+  {
+    let routeCalls = 0;
+    const router = createMockRouter(async () => {
+      routeCalls++;
+      return { success: true };
+    });
+    const runner = new PipelineRunner(router);
+    const invalidPipeline = {
+      steps: [
+        { intent: 'file.write', payload: { path: '/tmp/test.txt' } },
+        { payload: { path: '/tmp/other.txt' } } // missing intent
+      ]
+    };
+
+    let caughtError = null;
+    try {
+      await runner.runPipelineFromData(invalidPipeline);
+    } catch (err) {
+      caughtError = err;
+    }
+
+    assert.ok(caughtError, 'Should throw structural validation error');
+    assert.strictEqual(caughtError.code, 'invalid_pipeline_structure');
+    assert.strictEqual(routeCalls, 0, 'No step should be executed when pipeline is structurally invalid');
+  }
+
   console.log('All PipelineRunner tests loaded.');
 }
 
