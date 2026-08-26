@@ -41,6 +41,7 @@ type SessionMemoryMode = 'runtime_only' | 'read_only' | 'write_only' | 'read_wri
 export interface AiExecutionBudget {
     timeoutMs?: number;
     maxProviderCalls?: number;
+    maxOutputBytes?: number;
     providerCallsStarted: number;
     budgetExceeded: boolean;
     exceededReason?: string;
@@ -86,7 +87,8 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'sessionMode', type: 'enum', options: ['runtime_only', 'read_only', 'write_only', 'read_write'], description: 'Session memory mode', default: 'read_write' },
                     { name: 'sessionResetBeforeRun', type: 'boolean', description: 'Reset session memory before running agent', default: false },
                     { name: 'sessionRecallLimit', type: 'string', description: 'Max session memory entries injected into prompt', default: '12' },
-                    { name: 'timeoutMs', type: 'number', description: 'Execution timeout in milliseconds for provider CLI call' }
+                    { name: 'timeoutMs', type: 'number', description: 'Execution timeout in milliseconds for provider CLI call' },
+                    { name: 'maxOutputBytes', type: 'number', description: 'Maximum total stdout/stderr bytes allowed per provider CLI call' }
                 ]
             },
             {
@@ -111,7 +113,8 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'sessionRecallLimit', type: 'string', description: 'Max session memory entries injected into prompt', default: '12' },
                     { name: 'reviewerVoteWeight', type: 'string', description: 'Reviewer weight multiplier when strategy=vote', default: '2' },
                     { name: 'timeoutMs', type: 'number', description: 'Execution timeout in milliseconds for each provider CLI call' },
-                    { name: 'maxProviderCalls', type: 'number', description: 'Maximum total provider calls allowed across team members' }
+                    { name: 'maxProviderCalls', type: 'number', description: 'Maximum total provider calls allowed across team members' },
+                    { name: 'maxOutputBytes', type: 'number', description: 'Maximum total stdout/stderr bytes allowed per provider CLI call' }
                 ]
             }
         ]
@@ -128,9 +131,13 @@ export async function executeAiCommand(args: any, externalBudget?: AiExecutionBu
     const budget: AiExecutionBudget = externalBudget || {
         timeoutMs: normalizeBudgetLimit(args?.timeoutMs),
         maxProviderCalls: normalizeBudgetLimit(args?.maxProviderCalls),
+        maxOutputBytes: normalizeBudgetLimit(args?.maxOutputBytes),
         providerCallsStarted: 0,
         budgetExceeded: false
     };
+    if (externalBudget && budget.maxOutputBytes === undefined) {
+        budget.maxOutputBytes = normalizeBudgetLimit(args?.maxOutputBytes);
+    }
 
     if (!instruction) {
         throw new Error('AI Generate: Instruction is required');
@@ -241,6 +248,7 @@ ${instructionResolved}
 
             let fullOutput = '';
             let fullStderr = '';
+            let totalOutputBytes = 0;
             let timeoutTimer: NodeJS.Timeout | undefined;
             let forceKillTimer: NodeJS.Timeout | undefined;
 
@@ -255,6 +263,21 @@ ${instructionResolved}
                 }
             };
 
+            const terminateChild = () => {
+                try {
+                    child.kill('SIGTERM');
+                } catch (_) {}
+
+                forceKillTimer = setTimeout(() => {
+                    try {
+                        if (!child.killed) {
+                            child.kill('SIGKILL');
+                        }
+                    } catch (_) {}
+                }, 200);
+                if (forceKillTimer.unref) forceKillTimer.unref();
+            };
+
             if (budget.timeoutMs !== undefined && budget.timeoutMs > 0) {
                 timeoutTimer = setTimeout(() => {
                     if (settled) return;
@@ -262,20 +285,7 @@ ${instructionResolved}
                     budget.budgetExceeded = true;
                     budget.exceededReason = `Timeout of ${budget.timeoutMs}ms exceeded`;
                     log(`\n[AI Agent] Timeout of ${budget.timeoutMs}ms exceeded. Terminating provider process...\n`, 'stderr');
-
-                    try {
-                        child.kill('SIGTERM');
-                    } catch (_) {}
-
-                    forceKillTimer = setTimeout(() => {
-                        try {
-                            if (!child.killed) {
-                                child.kill('SIGKILL');
-                            }
-                        } catch (_) {}
-                    }, 200);
-                    if (forceKillTimer.unref) forceKillTimer.unref();
-
+                    terminateChild();
                     reject(new Error(`[AI Budget] Provider execution timed out after ${budget.timeoutMs}ms`));
                 }, budget.timeoutMs);
                 if (timeoutTimer.unref) timeoutTimer.unref();
@@ -286,18 +296,43 @@ ${instructionResolved}
                 child.stdin.end();
             }
 
+            const handleChunk = (chunk: Buffer | string, stream: 'stdout' | 'stderr') => {
+                if (settled) return;
+                const chunkBytes = Buffer.isBuffer(chunk)
+                    ? chunk.length
+                    : Buffer.byteLength(String(chunk || ''), 'utf-8');
+
+                totalOutputBytes += chunkBytes;
+
+                if (budget.maxOutputBytes !== undefined && budget.maxOutputBytes > 0 && totalOutputBytes > budget.maxOutputBytes) {
+                    settled = true;
+                    budget.budgetExceeded = true;
+                    budget.exceededReason = `Output limit of ${budget.maxOutputBytes} bytes exceeded`;
+                    cleanupTimers();
+                    log(`\n[AI Agent] Output limit of ${budget.maxOutputBytes} bytes exceeded. Terminating provider process...\n`, 'stderr');
+                    terminateChild();
+                    reject(new Error(`[AI Budget] Provider execution output limit of ${budget.maxOutputBytes} bytes exceeded`));
+                    return;
+                }
+
+                const text = chunk.toString();
+                if (stream === 'stdout') {
+                    fullOutput += text;
+                    log(text);
+                } else {
+                    fullStderr += text;
+                    if (!text.includes('AttachConsole failed') && !text.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
+                        log(text, 'stderr');
+                    }
+                }
+            };
+
             child.stdout.on('data', (d) => {
-                const text = d.toString();
-                fullOutput += text;
-                log(text);
+                handleChunk(d, 'stdout');
             });
 
             child.stderr.on('data', (d) => {
-                const text = d.toString();
-                fullStderr += text;
-                if (!text.includes('AttachConsole failed') && !text.includes('NODE_TLS_REJECT_UNAUTHORIZED')) {
-                    log(text, 'stderr');
-                }
+                handleChunk(d, 'stderr');
             });
 
             child.on('close', (code) => {
@@ -438,12 +473,13 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
     const budget: AiExecutionBudget = {
         timeoutMs: normalizeBudgetLimit(args?.timeoutMs),
         maxProviderCalls: normalizeBudgetLimit(args?.maxProviderCalls),
+        maxOutputBytes: normalizeBudgetLimit(args?.maxOutputBytes),
         providerCallsStarted: 0,
         budgetExceeded: false
     };
 
-    if (budget.maxProviderCalls !== undefined || budget.timeoutMs !== undefined) {
-        log(`[AI Team] Budget configured: maxProviderCalls=${budget.maxProviderCalls ?? 'unlimited'}, timeoutMs=${budget.timeoutMs ?? 'unlimited'}\n`);
+    if (budget.maxProviderCalls !== undefined || budget.timeoutMs !== undefined || budget.maxOutputBytes !== undefined) {
+        log(`[AI Team] Budget configured: maxProviderCalls=${budget.maxProviderCalls ?? 'unlimited'}, timeoutMs=${budget.timeoutMs ?? 'unlimited'}, maxOutputBytes=${budget.maxOutputBytes ?? 'unlimited'}\n`);
     }
     const sessionEnabled = isSessionMemoryEnabled();
     const sessionId = String(args?.sessionId || '').trim();
@@ -547,6 +583,7 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
             totalFiles: sumTeamFiles(runResults),
             providerCallsStarted: budget.providerCallsStarted,
             maxProviderCalls: budget.maxProviderCalls,
+            maxOutputBytes: budget.maxOutputBytes,
             timeoutMs: budget.timeoutMs,
             budgetExceeded: budget.budgetExceeded,
             budgetReason: budget.exceededReason

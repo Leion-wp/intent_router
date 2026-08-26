@@ -163,7 +163,156 @@ suite('AI Execution Budget & Timeout Guards (Mocked)', () => {
         });
     });
 
+    suite('ai.generate maxOutputBytes guard', () => {
+        test('stdout chunk exceeding limit terminates child and rejects with explicit output limit error', async () => {
+            const spammerPath = path.join(tempDir, 'stdout-spammer.js');
+            const script = "#!/usr/bin/env node\nfor(let i=0; i<50; i++) process.stdout.write('A'.repeat(100));\nsetInterval(() => {}, 10000);\n";
+            fs.writeFileSync(spammerPath, script, { mode: 511 });
+
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [spammerPath]);
+
+            let thrownError: any = null;
+            let logCount = 0;
+            const sub = pipelineEventBus.on((evt: any) => {
+                if (evt.type === 'stepLog' && evt.stream === 'stdout') {
+                    logCount++;
+                }
+            });
+
+            try {
+                await executeAiCommand({
+                    agent: 'codex',
+                    instruction: 'test maxOutputBytes stdout',
+                    maxOutputBytes: 300
+                });
+            } catch (err: any) {
+                thrownError = err;
+            } finally {
+                sub.dispose();
+            }
+
+            assert.ok(thrownError, 'Expected ai.generate to throw on maxOutputBytes exceeded');
+            assert.ok(
+                thrownError.message.includes('[AI Budget] Provider execution output limit of 300 bytes exceeded'),
+                `Unexpected error message: ${thrownError.message}`
+            );
+            // Verify logs stopped after limit was exceeded
+            assert.ok(logCount <= 4, `Log count should be limited, got: ${logCount}`);
+        });
+
+        test('stderr chunk exceeding limit terminates child and rejects with explicit output limit error', async () => {
+            const stderrSpammerPath = path.join(tempDir, 'stderr-spammer.js');
+            const script = "#!/usr/bin/env node\nfor(let i=0; i<50; i++) process.stderr.write('E'.repeat(100));\nsetInterval(() => {}, 10000);\n";
+            fs.writeFileSync(stderrSpammerPath, script, { mode: 511 });
+
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [stderrSpammerPath]);
+
+            let thrownError: any = null;
+            try {
+                await executeAiCommand({
+                    agent: 'codex',
+                    instruction: 'test maxOutputBytes stderr',
+                    maxOutputBytes: 250
+                });
+            } catch (err: any) {
+                thrownError = err;
+            }
+
+            assert.ok(thrownError, 'Expected ai.generate to throw on stderr maxOutputBytes exceeded');
+            assert.ok(
+                thrownError.message.includes('[AI Budget] Provider execution output limit of 250 bytes exceeded'),
+                `Unexpected error message: ${thrownError.message}`
+            );
+        });
+
+        test('correct byte counting for multi-byte UTF-8 text', async () => {
+            // 'é' is 2 bytes in UTF-8
+            const utf8CliPath = path.join(tempDir, 'utf8-cli.js');
+            // 'é'.repeat(100) = 200 bytes
+            const script = "#!/usr/bin/env node\nprocess.stdout.write('é'.repeat(100));\nsetInterval(() => {}, 10000);\n";
+            fs.writeFileSync(utf8CliPath, script, { mode: 511 });
+
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [utf8CliPath]);
+
+            let thrownError: any = null;
+            try {
+                await executeAiCommand({
+                    agent: 'codex',
+                    instruction: 'test utf8 bytes',
+                    maxOutputBytes: 150 // 100 chars = 200 bytes > 150 bytes limit
+                });
+            } catch (err: any) {
+                thrownError = err;
+            }
+
+            assert.ok(thrownError, 'Expected UTF-8 byte measurement to exceed limit');
+            assert.ok(thrownError.message.includes('output limit of 150 bytes exceeded'));
+        });
+
+        test('normal response below or equal to maxOutputBytes succeeds', async () => {
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [mockCliPath]);
+
+            const result = await executeAiCommand({
+                agent: 'codex',
+                instruction: 'normal response under budget',
+                maxOutputBytes: 10000
+            });
+
+            assert.strictEqual(result.path, 'src/index.ts');
+            assert.ok(result.content.includes('console.log("ok");'));
+        });
+
+        test('race between timeoutMs and maxOutputBytes picks first triggered guard without double cleanup', async () => {
+            const fastExceedPath = path.join(tempDir, 'fast-exceed.js');
+            const script = "#!/usr/bin/env node\nprocess.stdout.write('X'.repeat(500));\nsetInterval(() => {}, 10000);\n";
+            fs.writeFileSync(fastExceedPath, script, { mode: 511 });
+
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [fastExceedPath]);
+
+            let thrownError: any = null;
+            try {
+                await executeAiCommand({
+                    agent: 'codex',
+                    instruction: 'race condition test',
+                    timeoutMs: 5000,
+                    maxOutputBytes: 100
+                });
+            } catch (err: any) {
+                thrownError = err;
+            }
+
+            assert.ok(thrownError);
+            assert.ok(thrownError.message.includes('output limit of 100 bytes exceeded'));
+        });
+    });
+
     suite('ai.team maxProviderCalls & budget bounds', () => {
+        test('ai.team passes maxOutputBytes to provider CLI calls', async () => {
+            const spammerPath = path.join(tempDir, 'team-spammer.js');
+            const script = "#!/usr/bin/env node\nprocess.stdout.write('Z'.repeat(1000));\nsetInterval(() => {}, 10000);\n";
+            fs.writeFileSync(spammerPath, script, { mode: 511 });
+
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [spammerPath]);
+
+            const members = [
+                { name: 'm1', agent: 'codex', instruction: 'do 1' }
+            ];
+
+            let thrownError: any = null;
+            try {
+                await executeAiTeamCommand({
+                    strategy: 'sequential',
+                    members,
+                    maxOutputBytes: 200
+                });
+            } catch (err: any) {
+                thrownError = err;
+            }
+
+            assert.ok(thrownError);
+            assert.ok(thrownError.message.includes('output limit of 200 bytes exceeded'));
+        });
+
         test('sequential strategy stops at maxProviderCalls=2 for a 4-member team', async () => {
             mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [mockCliPath]);
 
