@@ -105,6 +105,90 @@
     return 0;
   }
 
+  function validatePipelineStructure(pipelineData) {
+    const errors = [];
+
+    if (!pipelineData || typeof pipelineData !== 'object' || Array.isArray(pipelineData)) {
+      return { valid: false, errors: ['Pipeline data must be a non-null object'] };
+    }
+
+    if (!Array.isArray(pipelineData.steps)) {
+      return { valid: false, errors: ['Pipeline steps must be an array'] };
+    }
+
+    const seenIds = new Set();
+
+    for (let i = 0; i < pipelineData.steps.length; i++) {
+      const step = pipelineData.steps[i];
+      if (!step || typeof step !== 'object' || Array.isArray(step)) {
+        errors.push(`Step ${i + 1}: must be a non-null object`);
+        continue;
+      }
+
+      const label = (typeof step.id === 'string' && step.id.trim())
+        ? `Step ${i + 1} (id: ${step.id.trim()})`
+        : `Step ${i + 1}`;
+
+      if (step.intent === undefined || step.intent === null) {
+        errors.push(`${label}: intent is required`);
+      } else if (typeof step.intent !== 'string' || !step.intent.trim()) {
+        errors.push(`${label}: intent must be a non-empty string`);
+      }
+
+      if (step.payload !== undefined) {
+        if (!step.payload || typeof step.payload !== 'object' || Array.isArray(step.payload)) {
+          errors.push(`${label}: payload must be a non-null object`);
+        }
+      }
+
+      if (step.id !== undefined) {
+        if (typeof step.id !== 'string' || !step.id.trim()) {
+          errors.push(`Step ${i + 1}: id must be a non-empty string`);
+        } else {
+          const trimmedId = step.id.trim();
+          if (seenIds.has(trimmedId)) {
+            errors.push(`${label}: duplicate step id '${trimmedId}'`);
+          } else {
+            seenIds.add(trimmedId);
+          }
+        }
+      }
+
+      if (step.continueOnError !== undefined) {
+        if (typeof step.continueOnError !== 'boolean') {
+          errors.push(`${label}: continueOnError must be a boolean`);
+        }
+      }
+
+      if (step.onFailure !== undefined) {
+        if (typeof step.onFailure !== 'string' || !step.onFailure.trim()) {
+          errors.push(`${label}: onFailure must be a non-empty string`);
+        }
+      }
+    }
+
+    for (let i = 0; i < pipelineData.steps.length; i++) {
+      const step = pipelineData.steps[i];
+      if (!step || typeof step !== 'object' || Array.isArray(step)) continue;
+
+      if (typeof step.onFailure === 'string' && step.onFailure.trim()) {
+        const targetId = step.onFailure.trim();
+        const label = (typeof step.id === 'string' && step.id.trim())
+          ? `Step ${i + 1} (id: ${step.id.trim()})`
+          : `Step ${i + 1}`;
+
+        if (!seenIds.has(targetId)) {
+          errors.push(`${label}: onFailure target '${targetId}' not found in pipeline`);
+        }
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
   async function readBoundedFile(fsHandle, encoding, limit, errorCode = 'file_too_large') {
     if (limit !== null && limit !== undefined) {
       if (typeof fsHandle.stat === 'function') {
@@ -176,8 +260,12 @@
     }
 
     async runPipelineFromData(pipelineData, onProgress) {
-      if (!pipelineData || !Array.isArray(pipelineData.steps)) {
-        throw new Error('Invalid pipeline format: steps array is missing');
+      const validation = validatePipelineStructure(pipelineData);
+      if (!validation.valid) {
+        const err = new Error(`Invalid pipeline structure: ${validation.errors.join('; ')}`);
+        err.code = 'invalid_pipeline_structure';
+        err.errors = validation.errors;
+        throw err;
       }
 
       let stepIndex = 0;
@@ -1050,6 +1138,7 @@
       IntentRouter,
       validateMaxBytes,
       validateOpenUrl,
+      validatePipelineStructure,
       getByteLength,
       readBoundedFile
     };
