@@ -27,6 +27,7 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Terminal Integration**: Execute commands directly (requires Terminal plugin).
 - **GitHub API**: Fetch repos and files.
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
+- **AI Provider Bridge**: OpenAI-compatible runtime bridge for portable cloud and local/LAN model invocation via `ai:chat` action (`ai.chat` intent) and profile management (`registerAiProvider`).
 - **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 - **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
@@ -65,6 +66,31 @@ intentRouter.execute({
 intentRouter.execute({
   action: 'system:open_url',
   data: { url: 'https://example.com' }
+});
+
+// Register an OpenAI-compatible AI provider profile at runtime
+intentRouter.registerAiProvider('openrouter', {
+  baseUrl: 'https://openrouter.ai/api/v1',
+  model: 'anthropic/claude-3.5-sonnet',
+  secret: 'sk-or-your-secret-token'
+});
+
+// Invoke AI chat from pipeline or runtime code
+intentRouter.execute({
+  action: 'ai:chat',
+  data: {
+    provider: 'openrouter',
+    messages: [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      { role: 'user', content: 'Explain mobile AI pipelines in one sentence.' }
+    ],
+    temperature: 0.7
+  }
+});
+
+// List registered AI provider profiles (non-sensitive metadata)
+intentRouter.execute({
+  action: 'router:ai_providers'
 });
 ```
 

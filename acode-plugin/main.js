@@ -9,6 +9,129 @@
 
   const ALLOWED_OPEN_URL_SCHEMES = new Set(['https:', 'http:']);
 
+  function buildOpenAiCompatibleUrl(baseUrl) {
+    if (!baseUrl || typeof baseUrl !== 'string') {
+      throw new Error('baseUrl is required');
+    }
+    const trimmed = baseUrl.trim();
+    if (!trimmed) {
+      throw new Error('baseUrl is required');
+    }
+    const cleanUrl = trimmed.replace(/\/+$/, '');
+    if (cleanUrl.toLowerCase().endsWith('/chat/completions')) {
+      return cleanUrl;
+    }
+    return `${cleanUrl}/chat/completions`;
+  }
+
+  function buildOpenAiCompatibleRequest(profile, payload) {
+    if (!profile) {
+      const err = new Error('AI provider profile is required');
+      err.code = 'ai_provider_unavailable';
+      throw err;
+    }
+    if (!payload || typeof payload !== 'object') {
+      const err = new Error('Payload must be an object');
+      err.code = 'invalid_ai_payload';
+      throw err;
+    }
+    if (!Array.isArray(payload.messages)) {
+      const err = new Error('messages array is required');
+      err.code = 'invalid_ai_payload';
+      throw err;
+    }
+
+    const url = buildOpenAiCompatibleUrl(profile.baseUrl);
+    const model = payload.model || profile.model;
+    if (!model) {
+      const err = new Error('model is required in profile or payload');
+      err.code = 'invalid_ai_payload';
+      throw err;
+    }
+
+    const bodyObj = {
+      model,
+      messages: payload.messages
+    };
+
+    if (payload.temperature !== undefined && payload.temperature !== null) {
+      const temp = Number(payload.temperature);
+      if (!isNaN(temp)) bodyObj.temperature = temp;
+    }
+
+    if (payload.maxTokens !== undefined && payload.maxTokens !== null) {
+      const tokens = Number(payload.maxTokens);
+      if (!isNaN(tokens)) bodyObj.max_tokens = tokens;
+    } else if (payload.max_tokens !== undefined && payload.max_tokens !== null) {
+      const tokens = Number(payload.max_tokens);
+      if (!isNaN(tokens)) bodyObj.max_tokens = tokens;
+    }
+
+    const headers = Object.assign({ 'Content-Type': 'application/json' }, profile.headers || {}, payload.headers || {});
+    const secret = typeof profile.getSecret === 'function'
+      ? profile.getSecret()
+      : (profile.secret || profile.token || profile.apiKey || null);
+
+    if (secret && typeof secret === 'string' && secret.trim().length > 0) {
+      headers.Authorization = `Bearer ${secret.trim()}`;
+    }
+
+    return {
+      url,
+      method: 'POST',
+      headers,
+      body: bodyObj,
+      secret
+    };
+  }
+
+  function normalizeOpenAiCompatibleResponse(responseBody, providerId) {
+    let parsed = responseBody;
+    if (typeof responseBody === 'string') {
+      try {
+        parsed = JSON.parse(responseBody);
+      } catch (_) {
+        const err = new Error('Invalid JSON response from AI provider');
+        err.code = 'ai_invalid_response';
+        if (providerId) err.provider = providerId;
+        throw err;
+      }
+    }
+
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.choices) || parsed.choices.length === 0) {
+      const err = new Error('AI response missing choices array');
+      err.code = 'ai_invalid_response';
+      if (providerId) err.provider = providerId;
+      throw err;
+    }
+
+    const firstChoice = parsed.choices[0];
+    if (!firstChoice || typeof firstChoice !== 'object' || !firstChoice.message || typeof firstChoice.message !== 'object' || firstChoice.message.content === undefined || firstChoice.message.content === null) {
+      const err = new Error('AI response choice missing message content');
+      err.code = 'ai_invalid_response';
+      if (providerId) err.provider = providerId;
+      throw err;
+    }
+
+    const normalized = {
+      provider: providerId || 'unknown',
+      model: parsed.model || null,
+      content: String(firstChoice.message.content)
+    };
+
+    if (parsed.usage && typeof parsed.usage === 'object') {
+      normalized.usage = parsed.usage;
+    }
+
+    if (firstChoice.finish_reason !== undefined && firstChoice.finish_reason !== null) {
+      normalized.finishReason = firstChoice.finish_reason;
+    } else if (firstChoice.finishReason !== undefined && firstChoice.finishReason !== null) {
+      normalized.finishReason = firstChoice.finishReason;
+    }
+
+    return normalized;
+  }
+
   function validateOpenUrl(rawUrl) {
     if (rawUrl === undefined || rawUrl === null) {
       throw new Error('url is required');
@@ -522,6 +645,7 @@
   class IntentRouter {
     constructor() {
       this.commands = new Map();
+      this.aiProviders = new Map();
       this.logs = [];
       this.isInitialized = false;
       this.$page = null;
@@ -531,6 +655,90 @@
       this.registeredAcodeCommands = [];
       this.pipelineRunner = new PipelineRunner(this);
       this.pipelineUI = new PipelineUI(this);
+    }
+
+    registerAiProvider(id, config = {}) {
+      if (!id || typeof id !== 'string' || !id.trim()) {
+        const err = new Error('Provider ID is required and must be a non-empty string');
+        err.code = 'invalid_ai_provider_config';
+        throw err;
+      }
+      const providerId = id.trim();
+      const baseUrl = config.baseUrl || config.url || '';
+      if (!baseUrl || typeof baseUrl !== 'string' || !baseUrl.trim()) {
+        const err = new Error(`Provider '${providerId}' requires a valid baseUrl`);
+        err.code = 'invalid_ai_provider_config';
+        throw err;
+      }
+
+      const profile = {
+        id: providerId,
+        baseUrl: baseUrl.trim(),
+        model: config.model ? String(config.model).trim() : 'gpt-4o-mini',
+        enabled: config.enabled !== false,
+        headers: config.headers && typeof config.headers === 'object' ? Object.assign({}, config.headers) : {}
+      };
+
+      if (typeof config.getSecret === 'function') {
+        profile.getSecret = config.getSecret;
+      } else if (config.secret || config.token || config.apiKey) {
+        profile.secret = String(config.secret || config.token || config.apiKey).trim();
+      }
+
+      this.aiProviders.set(providerId, profile);
+      this.log(`Registered AI provider: ${providerId}`);
+      return profile;
+    }
+
+    unregisterAiProvider(id) {
+      if (!id) return false;
+      const key = String(id).trim();
+      const deleted = this.aiProviders.delete(key);
+      if (deleted) {
+        this.log(`Unregistered AI provider: ${key}`);
+      }
+      return deleted;
+    }
+
+    getAiProvider(id) {
+      if (!id) return null;
+      return this.aiProviders.get(String(id).trim()) || null;
+    }
+
+    listAiProviders() {
+      const list = [];
+      for (const [id, profile] of this.aiProviders.entries()) {
+        list.push({
+          id: profile.id,
+          baseUrl: profile.baseUrl,
+          model: profile.model,
+          enabled: profile.enabled !== false
+        });
+      }
+      return list;
+    }
+
+    getAllSecrets() {
+      const secrets = new Set();
+      for (const profile of this.aiProviders.values()) {
+        const s = typeof profile.getSecret === 'function' ? profile.getSecret() : profile.secret;
+        if (s && typeof s === 'string' && s.trim().length > 0) {
+          secrets.add(s.trim());
+        }
+      }
+      return secrets;
+    }
+
+    redactSensitiveData(text) {
+      if (typeof text !== 'string' || !text) return text;
+      let sanitized = text;
+      const secrets = this.getAllSecrets();
+      for (const secret of secrets) {
+        if (secret && secret.length >= 3) {
+          sanitized = sanitized.split(secret).join('[REDACTED]');
+        }
+      }
+      return sanitized;
     }
 
     safeRequire(name) {
@@ -572,10 +780,11 @@
     }
 
     log(message) {
-      const entry = `[${new Date().toISOString()}] ${message}`;
+      const sanitized = this.redactSensitiveData(String(message));
+      const entry = `[${new Date().toISOString()}] ${sanitized}`;
       this.logs.push(entry);
       if (this.logs.length > 200) this.logs.shift();
-      console.log(`[Intent Router] ${message}`);
+      console.log(`[Intent Router] ${sanitized}`);
     }
 
     normalizeAction(intent = {}) {
@@ -673,7 +882,8 @@
         const output = await handler(data, intent);
         return this.ok(output === undefined ? null : output, { action });
       } catch (error) {
-        const message = error && error.message ? error.message : String(error);
+        const rawMessage = error && error.message ? error.message : String(error);
+        const message = this.redactSensitiveData(rawMessage);
         this.log(`Error executing ${action}: ${message}`);
         const meta = { action };
         if (error && typeof error === 'object') {
@@ -681,6 +891,7 @@
           if (error.limit !== undefined) meta.limit = error.limit;
           if (error.size !== undefined) meta.size = error.size;
           if (error.scheme !== undefined) meta.scheme = error.scheme;
+          if (error.provider !== undefined) meta.provider = error.provider;
         }
         return this.fail(message, meta);
       }
@@ -709,8 +920,66 @@
         commands: !!this.modules.commands,
         terminal: !!this.modules.terminal,
         editor: !!(window.editorManager && editorManager.editor),
-        network: typeof fetch === 'function'
+        network: typeof fetch === 'function',
+        aiProvidersCount: this.aiProviders.size
       }));
+
+      this.register('router:ai_providers', () => this.listAiProviders());
+
+      this.register('ai:chat', async (data = {}) => {
+        const providerId = data.provider || data.id || data.providerId;
+        if (!providerId || typeof providerId !== 'string' || !providerId.trim()) {
+          const err = new Error('provider ID is required in payload');
+          err.code = 'invalid_ai_payload';
+          throw err;
+        }
+
+        const profile = this.getAiProvider(providerId);
+        if (!profile || profile.enabled === false) {
+          const err = new Error(`AI provider '${providerId}' is unavailable or disabled`);
+          err.code = 'ai_provider_unavailable';
+          err.provider = providerId;
+          throw err;
+        }
+
+        const request = buildOpenAiCompatibleRequest(profile, data);
+
+        let routed;
+        try {
+          routed = await this.route({
+            action: 'network:request',
+            data: {
+              url: request.url,
+              method: request.method,
+              headers: request.headers,
+              body: request.body
+            }
+          });
+        } catch (err) {
+          const rawMessage = err && err.message ? err.message : String(err);
+          const sanitized = this.redactSensitiveData(rawMessage);
+          const aiErr = new Error(sanitized);
+          aiErr.code = 'ai_provider_unavailable';
+          aiErr.provider = providerId;
+          throw aiErr;
+        }
+
+        if (!routed || !routed.success) {
+          const errMsg = routed && routed.error ? String(routed.error) : 'Network request failed';
+          const sanitizedMsg = this.redactSensitiveData(errMsg);
+          const aiErr = new Error(sanitizedMsg);
+          if (/\b(401|403)\b/.test(sanitizedMsg) || /HTTP (401|403)/.test(sanitizedMsg)) {
+            aiErr.code = 'ai_auth_failed';
+          } else {
+            aiErr.code = 'ai_provider_unavailable';
+          }
+          aiErr.provider = providerId;
+          throw aiErr;
+        }
+
+        const responseBody = routed.data ? routed.data.body : null;
+        return normalizeOpenAiCompatibleResponse(responseBody, providerId);
+      });
 
       this.register('system:toast', (data) => {
         this.toast(data.message || 'No message', Number(data.timeout) || 3000);
@@ -1051,7 +1320,10 @@
       validateMaxBytes,
       validateOpenUrl,
       getByteLength,
-      readBoundedFile
+      readBoundedFile,
+      buildOpenAiCompatibleUrl,
+      buildOpenAiCompatibleRequest,
+      normalizeOpenAiCompatibleResponse
     };
   }
 })();
