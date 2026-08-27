@@ -105,6 +105,124 @@
     return 0;
   }
 
+  function buildOpenAiCompatibleUrl(baseUrl) {
+    if (!baseUrl || typeof baseUrl !== 'string' || !baseUrl.trim()) {
+      const err = new Error('baseUrl is required for AI provider');
+      err.code = 'invalid_ai_provider_config';
+      throw err;
+    }
+    let trimmed = baseUrl.trim().replace(/\/+$/, '');
+    if (trimmed.endsWith('/chat/completions')) {
+      return trimmed;
+    }
+    return `${trimmed}/chat/completions`;
+  }
+
+  function buildOpenAiCompatibleRequest(providerConfig, payload) {
+    if (!providerConfig || typeof providerConfig !== 'object') {
+      const err = new Error('AI provider configuration is missing or invalid');
+      err.code = 'ai_provider_unavailable';
+      throw err;
+    }
+    if (!payload || typeof payload !== 'object') {
+      const err = new Error('Payload must be an object');
+      err.code = 'invalid_ai_payload';
+      throw err;
+    }
+    if (!Array.isArray(payload.messages) || payload.messages.length === 0) {
+      const err = new Error('messages must be a non-empty array');
+      err.code = 'invalid_ai_payload';
+      throw err;
+    }
+
+    const model = payload.model || providerConfig.model;
+    if (!model || typeof model !== 'string' || !model.trim()) {
+      const err = new Error('model is required');
+      err.code = 'invalid_ai_payload';
+      throw err;
+    }
+
+    const url = buildOpenAiCompatibleUrl(providerConfig.baseUrl);
+
+    const body = {
+      model: model.trim(),
+      messages: payload.messages
+    };
+
+    if (typeof payload.temperature === 'number' && !isNaN(payload.temperature)) {
+      body.temperature = payload.temperature;
+    } else if (typeof providerConfig.temperature === 'number' && !isNaN(providerConfig.temperature)) {
+      body.temperature = providerConfig.temperature;
+    }
+
+    const maxTokens = payload.maxTokens ?? payload.max_tokens ?? providerConfig.maxTokens ?? providerConfig.max_tokens;
+    if (typeof maxTokens === 'number' && !isNaN(maxTokens)) {
+      body.max_tokens = maxTokens;
+    }
+
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    const secret = providerConfig.apiKey || providerConfig.token;
+    if (secret && typeof secret === 'string' && secret.trim()) {
+      headers.Authorization = `Bearer ${secret.trim()}`;
+    }
+
+    return {
+      url,
+      method: 'POST',
+      headers,
+      body
+    };
+  }
+
+  function normalizeOpenAiCompatibleResponse(providerId, defaultModel, responseBody) {
+    if (!responseBody || typeof responseBody !== 'object') {
+      const err = new Error('Invalid or empty response body from AI provider');
+      err.code = 'ai_invalid_response';
+      throw err;
+    }
+
+    if (!Array.isArray(responseBody.choices) || responseBody.choices.length === 0) {
+      const err = new Error('AI provider response missing choices array');
+      err.code = 'ai_invalid_response';
+      throw err;
+    }
+
+    const choice0 = responseBody.choices[0];
+    if (!choice0 || typeof choice0 !== 'object' || !choice0.message || typeof choice0.message !== 'object') {
+      const err = new Error('AI provider response missing choices[0].message');
+      err.code = 'ai_invalid_response';
+      throw err;
+    }
+
+    const content = choice0.message.content;
+    if (content === undefined || content === null) {
+      const err = new Error('AI provider response missing message content');
+      err.code = 'ai_invalid_response';
+      throw err;
+    }
+
+    const model = responseBody.model || defaultModel;
+
+    const result = {
+      provider: providerId,
+      model,
+      content: String(content)
+    };
+
+    if (choice0.finish_reason !== undefined && choice0.finish_reason !== null) {
+      result.finishReason = choice0.finish_reason;
+    }
+
+    if (responseBody.usage && typeof responseBody.usage === 'object') {
+      result.usage = responseBody.usage;
+    }
+
+    return result;
+  }
+
   async function readBoundedFile(fsHandle, encoding, limit, errorCode = 'file_too_large') {
     if (limit !== null && limit !== undefined) {
       if (typeof fsHandle.stat === 'function') {
@@ -529,6 +647,7 @@
       this.context = null;
       this.modules = {};
       this.registeredAcodeCommands = [];
+      this.aiProviders = new Map();
       this.pipelineRunner = new PipelineRunner(this);
       this.pipelineUI = new PipelineUI(this);
     }
@@ -572,10 +691,83 @@
     }
 
     log(message) {
-      const entry = `[${new Date().toISOString()}] ${message}`;
+      let str = String(message);
+      str = str.replace(/Bearer\s+[A-Za-z0-9._~+/-]+/gi, 'Bearer ***');
+      if (this.aiProviders) {
+        for (const p of this.aiProviders.values()) {
+          if (p.apiKey && typeof p.apiKey === 'string' && p.apiKey.length > 3) {
+            str = str.split(p.apiKey).join('***');
+          }
+        }
+      }
+      const entry = `[${new Date().toISOString()}] ${str}`;
       this.logs.push(entry);
       if (this.logs.length > 200) this.logs.shift();
-      console.log(`[Intent Router] ${message}`);
+      console.log(`[Intent Router] ${str}`);
+    }
+
+    registerAiProvider(config) {
+      if (!config || typeof config !== 'object') {
+        const err = new Error('AI provider configuration must be an object');
+        err.code = 'invalid_ai_provider_config';
+        throw err;
+      }
+      if (!config.id || typeof config.id !== 'string' || !config.id.trim()) {
+        const err = new Error('AI provider id is required');
+        err.code = 'invalid_ai_provider_config';
+        throw err;
+      }
+      if (!config.baseUrl || typeof config.baseUrl !== 'string' || !config.baseUrl.trim()) {
+        const err = new Error('AI provider baseUrl is required');
+        err.code = 'invalid_ai_provider_config';
+        throw err;
+      }
+      if (!config.model || typeof config.model !== 'string' || !config.model.trim()) {
+        const err = new Error('AI provider model is required');
+        err.code = 'invalid_ai_provider_config';
+        throw err;
+      }
+
+      const id = config.id.trim();
+      const profile = {
+        id,
+        baseUrl: config.baseUrl.trim(),
+        model: config.model.trim(),
+        apiKey: config.apiKey || config.token || null,
+        enabled: config.enabled !== false,
+        temperature: typeof config.temperature === 'number' ? config.temperature : undefined,
+        maxTokens: config.maxTokens ?? config.max_tokens
+      };
+
+      this.aiProviders.set(id, profile);
+      this.log(`Registered AI provider: ${id}`);
+      return profile;
+    }
+
+    unregisterAiProvider(id) {
+      if (!id) return false;
+      const key = String(id).trim();
+      const deleted = this.aiProviders.delete(key);
+      if (deleted) this.log(`Unregistered AI provider: ${key}`);
+      return deleted;
+    }
+
+    getAiProvider(id) {
+      if (!id) return null;
+      return this.aiProviders.get(String(id).trim()) || null;
+    }
+
+    listAiProviders() {
+      const list = [];
+      for (const provider of this.aiProviders.values()) {
+        list.push({
+          id: provider.id,
+          baseUrl: provider.baseUrl,
+          model: provider.model,
+          enabled: provider.enabled !== false
+        });
+      }
+      return list;
     }
 
     normalizeAction(intent = {}) {
@@ -946,6 +1138,83 @@
         terminal.write(instance.id, `${data.command}\r`);
         return { submitted: true, terminalId: instance.id, command: data.command };
       });
+
+      this.register('router:ai_providers', () => this.listAiProviders());
+
+      this.register('ai:chat', async (data) => {
+        if (!data || typeof data !== 'object') {
+          const err = new Error('Payload must be an object');
+          err.code = 'invalid_ai_payload';
+          throw err;
+        }
+        const providerId = data.provider;
+        if (!providerId || typeof providerId !== 'string' || !providerId.trim()) {
+          const err = new Error('provider is required');
+          err.code = 'invalid_ai_payload';
+          throw err;
+        }
+
+        const provider = this.getAiProvider(providerId);
+        if (!provider || provider.enabled === false) {
+          const err = new Error(`AI provider '${providerId}' is unavailable or not registered`);
+          err.code = 'ai_provider_unavailable';
+          throw err;
+        }
+
+        const req = buildOpenAiCompatibleRequest(provider, data);
+
+        let networkResult;
+        try {
+          networkResult = await this.route({
+            action: 'network:request',
+            data: req
+          });
+        } catch (netErr) {
+          const err = new Error(`AI provider request failed: ${netErr.message}`);
+          err.code = 'ai_provider_unavailable';
+          throw err;
+        }
+
+        if (!networkResult || !networkResult.success) {
+          const rawError = networkResult ? networkResult.error : 'Network request failed';
+          let cleanError = String(rawError).replace(/Bearer\s+[A-Za-z0-9._~+/-]+/gi, 'Bearer ***');
+          const secret = provider.apiKey || provider.token;
+          if (secret && typeof secret === 'string' && secret.length > 0) {
+            cleanError = cleanError.split(secret).join('***');
+          }
+
+          let code = 'ai_provider_unavailable';
+          if (/401|403|Unauthorized|Forbidden/i.test(cleanError)) {
+            code = 'ai_auth_failed';
+          }
+
+          const err = new Error(`AI provider error: ${cleanError}`);
+          err.code = code;
+          throw err;
+        }
+
+        const responseData = networkResult.data;
+        const body = responseData ? responseData.body : null;
+
+        if (!body) {
+          const err = new Error('Empty response from AI provider');
+          err.code = 'ai_invalid_response';
+          throw err;
+        }
+
+        let jsonBody = body;
+        if (typeof body === 'string') {
+          try {
+            jsonBody = JSON.parse(body);
+          } catch (_) {
+            const err = new Error('Invalid JSON response from AI provider');
+            err.code = 'ai_invalid_response';
+            throw err;
+          }
+        }
+
+        return normalizeOpenAiCompatibleResponse(provider.id, req.body.model, jsonBody);
+      });
     }
 
     registerAcodeCommands() {
@@ -1051,7 +1320,10 @@
       validateMaxBytes,
       validateOpenUrl,
       getByteLength,
-      readBoundedFile
+      readBoundedFile,
+      buildOpenAiCompatibleUrl,
+      buildOpenAiCompatibleRequest,
+      normalizeOpenAiCompatibleResponse
     };
   }
 })();
