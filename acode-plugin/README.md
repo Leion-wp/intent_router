@@ -27,6 +27,7 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Terminal Integration**: Execute commands directly (requires Terminal plugin).
 - **GitHub API**: Fetch repos and files.
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
+- **AI Bridge (OpenAI-Compatible)**: Register runtime AI profiles (`registerAiProvider`) and invoke portable `ai.chat` / `ai:chat` actions targeting local/LAN or remote endpoints without serializing secrets in pipelines or logs. Inspect registered profiles via `router:ai_providers`.
 - **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 - **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
@@ -65,6 +66,26 @@ intentRouter.execute({
 intentRouter.execute({
   action: 'system:open_url',
   data: { url: 'https://example.com' }
+});
+
+// Register an AI provider profile (runtime session)
+intentRouter.registerAiProvider({
+  id: 'openrouter',
+  baseUrl: 'https://openrouter.ai/api/v1',
+  model: 'meta-llama/llama-3-70b-instruct',
+  token: 'sk-or-v1-secret-key'
+});
+
+// List registered AI provider profiles (non-sensitive metadata)
+intentRouter.execute({ action: 'router:ai_providers' });
+
+// Invoke portable AI chat completion
+intentRouter.route({
+  intent: 'ai.chat',
+  payload: {
+    provider: 'openrouter',
+    messages: [{ role: 'user', content: 'Hello!' }]
+  }
 });
 ```
 
