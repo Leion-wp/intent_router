@@ -27,6 +27,7 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Terminal Integration**: Execute commands directly (requires Terminal plugin).
 - **GitHub API**: Fetch repos and files.
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
+- **AI Capability & OpenAI Bridge**: Invoke remote or local OpenAI-compatible models (e.g. OpenRouter, Groq, Ollama, LAN endpoints) via `ai:chat` (`ai.chat`) using runtime provider profiles (`router.registerAiProvider`). Sensitive tokens are never stored in pipeline JSON or exposed in logs.
 - **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 - **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
@@ -65,6 +66,31 @@ intentRouter.execute({
 intentRouter.execute({
   action: 'system:open_url',
   data: { url: 'https://example.com' }
+});
+
+// Register an AI provider profile dynamically (session/runtime memory)
+intentRouter.registerAiProvider('openrouter', {
+  baseUrl: 'https://openrouter.ai/api/v1',
+  model: 'anthropic/claude-3-5-sonnet',
+  token: 'sk-or-v1-your-token'
+});
+
+// Invoke OpenAI-style chat completions via portable ai.chat intent
+intentRouter.route({
+  intent: 'ai.chat',
+  payload: {
+    provider: 'openrouter',
+    messages: [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      { role: 'user', content: 'Summarize the project structure.' }
+    ],
+    temperature: 0.7
+  }
+});
+
+// Inspect registered AI provider profiles (metadata only, no tokens)
+intentRouter.route({
+  action: 'router:ai_providers'
 });
 ```
 
