@@ -31,6 +31,7 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 - **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
 - **System URL Scheme Validation**: `system:open_url` strictly enforces web capability safety by permitting only explicit `https:` and `http:` URL schemes (case-insensitive). Non-HTTP(S) schemes (such as `javascript:`, `data:`, `file:`, `content:`, `intent:`, `tel:`, `sms:`, or custom deep link schemes) and relative URLs are rejected prior to calling `window.open` with a structured `url_scheme_not_allowed` error.
+- **OpenAI-Compatible AI Bridge**: Mobile pipelines can invoke remote or local/LAN AI models using `ai:chat` (`ai.chat` intent). Provider profiles with base URLs, default models, and runtime secrets can be registered via `intentRouter.registerAiProvider()`. Tokens/secrets are kept in memory and never exposed in pipeline files, logs, or inspection outputs (`router:ai_providers`).
 
 ## API Example
 ```javascript
@@ -66,6 +67,29 @@ intentRouter.execute({
   action: 'system:open_url',
   data: { url: 'https://example.com' }
 });
+
+// Register an OpenAI-compatible AI provider profile (e.g., OpenRouter, Groq, or local Ollama)
+intentRouter.registerAiProvider('openrouter', {
+  baseUrl: 'https://openrouter.ai/api/v1',
+  model: 'openai/gpt-4o-mini',
+  secret: 'sk-or-v1-...' // Kept in memory, never serialized to disk or logs
+});
+
+// Invoke AI chat via ai:chat action
+intentRouter.route({
+  action: 'ai:chat',
+  data: {
+    provider: 'openrouter',
+    messages: [
+      { role: 'system', content: 'You are a helpful coding assistant.' },
+      { role: 'user', content: 'Write a quick JS helper to format dates.' }
+    ],
+    temperature: 0.7
+  }
+});
+
+// Inspect registered AI provider profiles (non-sensitive metadata only)
+intentRouter.route({ action: 'router:ai_providers' });
 ```
 
 ## Testing & CI

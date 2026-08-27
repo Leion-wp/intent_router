@@ -105,6 +105,138 @@
     return 0;
   }
 
+  function buildOpenAiCompatibleUrl(rawBaseUrl) {
+    if (!rawBaseUrl || typeof rawBaseUrl !== 'string') {
+      throw new Error('baseUrl is required');
+    }
+    let trimmed = rawBaseUrl.trim();
+    if (!trimmed) {
+      throw new Error('baseUrl is required');
+    }
+    trimmed = trimmed.replace(/\/+$/, '');
+    if (trimmed.endsWith('/chat/completions')) {
+      return trimmed;
+    }
+    return `${trimmed}/chat/completions`;
+  }
+
+  function buildOpenAiCompatibleRequest(providerConfig, payload) {
+    if (!providerConfig || typeof providerConfig !== 'object') {
+      throw new Error('Provider profile is invalid');
+    }
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('Payload is required');
+    }
+    if (!Array.isArray(payload.messages) || payload.messages.length === 0) {
+      const err = new Error('messages array is required and must not be empty');
+      err.code = 'invalid_ai_payload';
+      throw err;
+    }
+
+    const model = payload.model || providerConfig.model;
+    if (!model) {
+      const err = new Error('model is required');
+      err.code = 'invalid_ai_payload';
+      throw err;
+    }
+
+    const url = buildOpenAiCompatibleUrl(providerConfig.baseUrl);
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    const secret = providerConfig.secret || providerConfig.apiKey || providerConfig.token;
+    if (secret && typeof secret === 'string' && secret.trim() !== '') {
+      headers['Authorization'] = `Bearer ${secret.trim()}`;
+    }
+
+    const bodyObj = {
+      model: model,
+      messages: payload.messages
+    };
+
+    if (typeof payload.temperature === 'number' && Number.isFinite(payload.temperature)) {
+      bodyObj.temperature = payload.temperature;
+    }
+
+    const maxTokens = (typeof payload.maxTokens === 'number' && Number.isFinite(payload.maxTokens))
+      ? payload.maxTokens
+      : ((typeof payload.max_tokens === 'number' && Number.isFinite(payload.max_tokens)) ? payload.max_tokens : undefined);
+
+    if (maxTokens !== undefined) {
+      bodyObj.max_tokens = maxTokens;
+    }
+
+    return {
+      url,
+      method: 'POST',
+      headers,
+      body: JSON.stringify(bodyObj)
+    };
+  }
+
+  function normalizeOpenAiCompatibleResponse(providerId, defaultModel, rawResponseBody) {
+    let parsed = rawResponseBody;
+    if (typeof rawResponseBody === 'string') {
+      try {
+        parsed = JSON.parse(rawResponseBody);
+      } catch (_) {
+        const err = new Error('AI provider returned invalid JSON response');
+        err.code = 'ai_invalid_response';
+        err.provider = providerId;
+        throw err;
+      }
+    }
+
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.choices) || parsed.choices.length === 0) {
+      const err = new Error('AI provider response missing choices');
+      err.code = 'ai_invalid_response';
+      err.provider = providerId;
+      throw err;
+    }
+
+    const firstChoice = parsed.choices[0];
+    if (!firstChoice || typeof firstChoice !== 'object') {
+      const err = new Error('AI provider response choice is invalid');
+      err.code = 'ai_invalid_response';
+      err.provider = providerId;
+      throw err;
+    }
+
+    let content = null;
+    if (firstChoice.message && typeof firstChoice.message === 'object' && typeof firstChoice.message.content === 'string') {
+      content = firstChoice.message.content;
+    } else if (typeof firstChoice.text === 'string') {
+      content = firstChoice.text;
+    }
+
+    if (content === null || content === undefined) {
+      const err = new Error('AI provider response choice missing message content');
+      err.code = 'ai_invalid_response';
+      err.provider = providerId;
+      throw err;
+    }
+
+    const responseModel = parsed.model || defaultModel;
+
+    const result = {
+      provider: providerId,
+      model: responseModel,
+      content: content
+    };
+
+    if (parsed.usage && typeof parsed.usage === 'object') {
+      result.usage = parsed.usage;
+    }
+
+    const finishReason = firstChoice.finish_reason || firstChoice.finishReason;
+    if (finishReason && typeof finishReason === 'string') {
+      result.finishReason = finishReason;
+    }
+
+    return result;
+  }
+
   async function readBoundedFile(fsHandle, encoding, limit, errorCode = 'file_too_large') {
     if (limit !== null && limit !== undefined) {
       if (typeof fsHandle.stat === 'function') {
@@ -529,8 +661,54 @@
       this.context = null;
       this.modules = {};
       this.registeredAcodeCommands = [];
+      this.aiProviders = new Map();
       this.pipelineRunner = new PipelineRunner(this);
       this.pipelineUI = new PipelineUI(this);
+    }
+
+    registerAiProvider(id, config = {}) {
+      if (!id || typeof id !== 'string') {
+        throw new Error('AI provider id is required');
+      }
+      if (!config.baseUrl || typeof config.baseUrl !== 'string') {
+        throw new Error('AI provider baseUrl is required');
+      }
+      if (!config.model || typeof config.model !== 'string') {
+        throw new Error('AI provider model is required');
+      }
+      const profile = {
+        id: id.trim(),
+        baseUrl: config.baseUrl.trim(),
+        model: config.model.trim(),
+        secret: (config.secret || config.apiKey || config.token || '').trim(),
+        enabled: config.enabled !== false
+      };
+      this.aiProviders.set(profile.id, profile);
+      this.log(`Registered AI provider: ${profile.id}`);
+      return { registered: true, id: profile.id };
+    }
+
+    unregisterAiProvider(id) {
+      if (!id) return false;
+      const deleted = this.aiProviders.delete(String(id).trim());
+      if (deleted) {
+        this.log(`Unregistered AI provider: ${id}`);
+      }
+      return deleted;
+    }
+
+    getAiProvider(id) {
+      if (!id) return null;
+      return this.aiProviders.get(String(id).trim()) || null;
+    }
+
+    listAiProviders() {
+      return Array.from(this.aiProviders.values()).map(p => ({
+        id: p.id,
+        baseUrl: p.baseUrl,
+        model: p.model,
+        enabled: p.enabled !== false
+      }));
     }
 
     safeRequire(name) {
@@ -681,6 +859,7 @@
           if (error.limit !== undefined) meta.limit = error.limit;
           if (error.size !== undefined) meta.size = error.size;
           if (error.scheme !== undefined) meta.scheme = error.scheme;
+          if (error.provider !== undefined) meta.provider = error.provider;
         }
         return this.fail(message, meta);
       }
@@ -946,6 +1125,55 @@
         terminal.write(instance.id, `${data.command}\r`);
         return { submitted: true, terminalId: instance.id, command: data.command };
       });
+
+      this.register('router:ai_providers', () => this.listAiProviders());
+
+      this.register('ai:chat', async (data) => {
+        if (!data || !data.provider) {
+          const err = new Error('provider is required in payload');
+          err.code = 'ai_provider_unavailable';
+          throw err;
+        }
+
+        const providerProfile = this.getAiProvider(data.provider);
+        if (!providerProfile || providerProfile.enabled === false) {
+          const err = new Error(`AI provider '${data.provider}' is unavailable or not registered`);
+          err.code = 'ai_provider_unavailable';
+          err.provider = data.provider;
+          throw err;
+        }
+
+        let requestOpts;
+        try {
+          requestOpts = buildOpenAiCompatibleRequest(providerProfile, data);
+        } catch (err) {
+          if (err && typeof err === 'object') {
+            err.provider = data.provider;
+          }
+          throw err;
+        }
+
+        const routed = await this.route({
+          action: 'network:request',
+          data: requestOpts
+        });
+
+        if (!routed.success) {
+          const rawErr = routed.error || '';
+          if (rawErr.includes('HTTP 401') || rawErr.includes('HTTP 403')) {
+            const err = new Error(`Authentication failed for AI provider '${data.provider}'`);
+            err.code = 'ai_auth_failed';
+            err.provider = data.provider;
+            throw err;
+          }
+          const err = new Error(`AI provider '${data.provider}' request failed: ${rawErr}`);
+          err.code = 'ai_provider_unavailable';
+          err.provider = data.provider;
+          throw err;
+        }
+
+        return normalizeOpenAiCompatibleResponse(data.provider, providerProfile.model, routed.data.body);
+      });
     }
 
     registerAcodeCommands() {
@@ -1051,7 +1279,10 @@
       validateMaxBytes,
       validateOpenUrl,
       getByteLength,
-      readBoundedFile
+      readBoundedFile,
+      buildOpenAiCompatibleUrl,
+      buildOpenAiCompatibleRequest,
+      normalizeOpenAiCompatibleResponse
     };
   }
 })();
