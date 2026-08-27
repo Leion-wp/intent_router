@@ -31,6 +31,7 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 - **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
 - **System URL Scheme Validation**: `system:open_url` strictly enforces web capability safety by permitting only explicit `https:` and `http:` URL schemes (case-insensitive). Non-HTTP(S) schemes (such as `javascript:`, `data:`, `file:`, `content:`, `intent:`, `tel:`, `sms:`, or custom deep link schemes) and relative URLs are rejected prior to calling `window.open` with a structured `url_scheme_not_allowed` error.
+- **OpenAI-Compatible AI Provider Bridge**: Connect to remote or local AI models using the `ai.chat` intent (`ai:chat` action) and register profiles via `intentRouter.registerAiProvider(id, config)`. Secrets are never serialized or logged.
 
 ## API Example
 ```javascript
@@ -66,6 +67,25 @@ intentRouter.execute({
   action: 'system:open_url',
   data: { url: 'https://example.com' }
 });
+
+// Register an OpenAI-compatible AI provider profile (remote or local/LAN)
+intentRouter.registerAiProvider('openrouter', {
+  baseUrl: 'https://openrouter.ai/api/v1',
+  model: 'anthropic/claude-3.5-sonnet',
+  apiKey: 'sk-or-v1-secret-key'
+});
+
+// Invoke AI chat via intent or action
+intentRouter.route({
+  intent: 'ai.chat',
+  payload: {
+    provider: 'openrouter',
+    messages: [{ role: 'user', content: 'Hello!' }]
+  }
+});
+
+// Inspect registered AI providers (secrets redacted)
+intentRouter.route({ action: 'router:ai_providers' });
 ```
 
 ## Testing & CI
