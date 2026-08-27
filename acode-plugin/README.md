@@ -27,7 +27,8 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Terminal Integration**: Execute commands directly (requires Terminal plugin).
 - **GitHub API**: Fetch repos and files.
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
-- **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
+- **AI Capabilities**: Portable OpenAI-compatible AI provider bridge supporting remote services (Groq, OpenRouter) and local LAN/localhost servers via `ai:chat` (routable from `ai.chat`).
+- **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()` or register AI profiles via `intentRouter.registerAiProvider()`.
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 - **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
 - **System URL Scheme Validation**: `system:open_url` strictly enforces web capability safety by permitting only explicit `https:` and `http:` URL schemes (case-insensitive). Non-HTTP(S) schemes (such as `javascript:`, `data:`, `file:`, `content:`, `intent:`, `tel:`, `sms:`, or custom deep link schemes) and relative URLs are rejected prior to calling `window.open` with a structured `url_scheme_not_allowed` error.
@@ -65,6 +66,28 @@ intentRouter.execute({
 intentRouter.execute({
   action: 'system:open_url',
   data: { url: 'https://example.com' }
+});
+
+// Register an AI provider profile (tokens are kept in-memory & redacted from logs/inspection)
+intentRouter.registerAiProvider('groq', {
+  baseUrl: 'https://api.groq.com/openai/v1',
+  model: 'llama-3.1-70b-versatile',
+  token: 'gsk_secret_key'
+});
+
+// Execute AI chat request via intent router
+intentRouter.execute({
+  intent: 'ai.chat',
+  payload: {
+    provider: 'groq',
+    messages: [{ role: 'user', content: 'Summarize current workspace status' }],
+    temperature: 0.7
+  }
+});
+
+// Inspect registered AI provider profiles (safe non-sensitive metadata only)
+intentRouter.execute({
+  action: 'router:ai_providers'
 });
 ```
 
