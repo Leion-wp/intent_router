@@ -70,7 +70,14 @@ class EventBus {
     }
 
     emit(event: PipelineEvent): void {
-        this.listeners.forEach(l => l(event));
+        const snapshot = [...this.listeners];
+        for (const listener of snapshot) {
+            try {
+                listener(event);
+            } catch (err) {
+                console.error('[EventBus] Exception caught in subscriber listener:', err);
+            }
+        }
     }
 }
 
