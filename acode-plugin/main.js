@@ -9,6 +9,107 @@
 
   const ALLOWED_OPEN_URL_SCHEMES = new Set(['https:', 'http:']);
 
+  function actionToIntent(action) {
+    if (typeof action !== 'string') return '';
+    return action.replace(/:/g, '.');
+  }
+
+  function intentToAction(intent) {
+    if (typeof intent !== 'string') return '';
+    return intent.replace(/\./g, ':');
+  }
+
+  function filterRoutableActions(commandKeys) {
+    if (!Array.isArray(commandKeys)) return [];
+    return commandKeys
+      .filter(cmd => typeof cmd === 'string' && !cmd.startsWith('router:'))
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  function sanitizePipelineFilename(rawName) {
+    if (rawName === undefined || rawName === null) {
+      const err = new Error('Pipeline name is required');
+      err.code = 'invalid_pipeline_name';
+      throw err;
+    }
+
+    let trimmed = String(rawName).trim();
+    if (!trimmed) {
+      const err = new Error('Pipeline name cannot be empty');
+      err.code = 'invalid_pipeline_name';
+      throw err;
+    }
+
+    if (trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes('..')) {
+      const err = new Error('Pipeline name contains invalid path characters or path traversal');
+      err.code = 'invalid_pipeline_name';
+      throw err;
+    }
+
+    if (trimmed.toLowerCase().endsWith('.intent.json')) {
+      trimmed = trimmed.slice(0, -'.intent.json'.length).trim();
+    }
+
+    // Replace invalid filename characters (anything not alphanumeric, dash, or underscore)
+    const sanitizedBase = trimmed.replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (!sanitizedBase || /^_+$/.test(sanitizedBase)) {
+      const err = new Error('Pipeline name contains no valid filename characters');
+      err.code = 'invalid_pipeline_name';
+      throw err;
+    }
+
+    return `${sanitizedBase}.intent.json`;
+  }
+
+  function validatePipelineStructure(pipelineData) {
+    const errors = [];
+
+    if (!pipelineData || typeof pipelineData !== 'object' || Array.isArray(pipelineData)) {
+      const err = new Error('Pipeline must be a non-null object');
+      err.code = 'invalid_pipeline_structure';
+      err.errors = ['Pipeline data must be an object'];
+      throw err;
+    }
+
+    if (!Array.isArray(pipelineData.steps)) {
+      errors.push('Pipeline must contain a steps array');
+    } else {
+      const ids = new Set();
+      pipelineData.steps.forEach((step, idx) => {
+        const stepNum = idx + 1;
+        if (!step || typeof step !== 'object' || Array.isArray(step)) {
+          errors.push(`Step ${stepNum} must be a non-null object`);
+          return;
+        }
+
+        if (typeof step.id !== 'string' || !step.id.trim()) {
+          errors.push(`Step ${stepNum} must have a non-empty string id`);
+        } else if (ids.has(step.id)) {
+          errors.push(`Duplicate step id '${step.id}' at step ${stepNum}`);
+        } else {
+          ids.add(step.id);
+        }
+
+        if (typeof step.intent !== 'string' || !step.intent.trim()) {
+          errors.push(`Step ${stepNum} must have a non-empty string intent`);
+        }
+
+        if (step.payload === null || step.payload === undefined || typeof step.payload !== 'object' || Array.isArray(step.payload)) {
+          errors.push(`Step ${stepNum} payload must be a non-null JSON object`);
+        }
+      });
+    }
+
+    if (errors.length > 0) {
+      const err = new Error(`Invalid pipeline structure: ${errors.join('; ')}`);
+      err.code = 'invalid_pipeline_structure';
+      err.errors = errors;
+      throw err;
+    }
+
+    return true;
+  }
+
   function validateOpenUrl(rawUrl) {
     if (rawUrl === undefined || rawUrl === null) {
       throw new Error('url is required');
@@ -302,15 +403,30 @@
 
       const pipelineFolderUrl = projectRoot.endsWith('/') ? projectRoot + 'pipeline' : projectRoot + '/pipeline';
 
+      const newPipelineBtn = document.createElement('button');
+      newPipelineBtn.textContent = '+ New Pipeline';
+      newPipelineBtn.style.padding = '8px 16px';
+      newPipelineBtn.style.background = '#4caf50';
+      newPipelineBtn.style.color = '#fff';
+      newPipelineBtn.style.border = 'none';
+      newPipelineBtn.style.borderRadius = '4px';
+      newPipelineBtn.onclick = () => this.router.pipelineBuilderUI.render();
+
       const refreshBtn = document.createElement('button');
-      refreshBtn.textContent = 'Refresh Pipelines';
+      refreshBtn.textContent = 'Refresh';
       refreshBtn.style.padding = '8px 16px';
       refreshBtn.style.background = 'var(--primary-color)';
       refreshBtn.style.color = '#fff';
       refreshBtn.style.border = 'none';
       refreshBtn.style.borderRadius = '4px';
-      refreshBtn.style.alignSelf = 'flex-end';
       refreshBtn.onclick = () => this.loadPipelines();
+
+      const headerActions = document.createElement('div');
+      headerActions.style.display = 'flex';
+      headerActions.style.gap = '8px';
+      headerActions.style.alignItems = 'center';
+      headerActions.appendChild(newPipelineBtn);
+      headerActions.appendChild(refreshBtn);
 
       const header = document.createElement('div');
       header.style.display = 'flex';
@@ -334,7 +450,7 @@
       headerLeft.appendChild(this.$counter);
 
       header.appendChild(headerLeft);
-      header.appendChild(refreshBtn);
+      header.appendChild(headerActions);
 
       this.$cardsContainer = document.createElement('div');
       this.$cardsContainer.style.display = 'flex';
@@ -519,6 +635,494 @@
     }
   }
 
+  class PipelineBuilderUI {
+    constructor(router) {
+      this.router = router;
+      this.pipelineName = 'my_pipeline';
+      this.steps = [];
+      this.$container = null;
+      this.$stepsContainer = null;
+      this.$previewContainer = null;
+      this.$errorMsg = null;
+    }
+
+    async getProjectRoot() {
+      if (window.addedFolder && window.addedFolder.length > 0) {
+        return window.addedFolder[0].url;
+      }
+      return null;
+    }
+
+    getAvailableActions() {
+      const keys = Array.from(this.router.commands.keys());
+      return filterRoutableActions(keys);
+    }
+
+    createDefaultStep(index = 1) {
+      const available = this.getAvailableActions();
+      const defaultAction = available.includes('file:read') ? 'file:read' : (available[0] || 'system:toast');
+      return {
+        id: `step_${index}`,
+        action: defaultAction,
+        payloadText: '{\n}'
+      };
+    }
+
+    generatePipelineData() {
+      return {
+        name: this.pipelineName.trim(),
+        steps: this.steps.map((step, idx) => {
+          let parsedPayload = {};
+          try {
+            parsedPayload = JSON.parse(step.payloadText || '{}');
+          } catch (_) {
+            parsedPayload = {};
+          }
+          return {
+            id: (step.id && step.id.trim()) ? step.id.trim() : `step_${idx + 1}`,
+            intent: actionToIntent(step.action),
+            payload: parsedPayload
+          };
+        })
+      };
+    }
+
+    async render() {
+      if (!this.router.$page) {
+        this.router.alert('Error', 'UI page is not initialized.');
+        return;
+      }
+
+      const projectRoot = await this.getProjectRoot();
+      if (!projectRoot) {
+        this.router.alert('No Folder Open', 'Please open a project folder in Acode sidebar before creating a pipeline.');
+        return;
+      }
+
+      if (this.steps.length === 0) {
+        this.steps = [this.createDefaultStep(1)];
+      }
+
+      this.router.$page.settitle('New Pipeline');
+      this.router.$page.innerHTML = '';
+
+      this.$container = document.createElement('div');
+      this.$container.style.padding = '16px';
+      this.$container.style.color = 'var(--primary-text-color)';
+      this.$container.style.display = 'flex';
+      this.$container.style.flexDirection = 'column';
+      this.$container.style.gap = '16px';
+      this.$container.style.height = '100%';
+      this.$container.style.overflow = 'auto';
+
+      this.router.$page.append(this.$container);
+
+      this.renderForm();
+      if (typeof this.router.$page.show === 'function') {
+        this.router.$page.show();
+      }
+    }
+
+    renderForm() {
+      this.$container.innerHTML = '';
+
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'center';
+
+      const title = document.createElement('h3');
+      title.textContent = 'Create Pipeline';
+      title.style.margin = '0';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Back to Pipelines';
+      cancelBtn.style.padding = '6px 12px';
+      cancelBtn.style.background = 'transparent';
+      cancelBtn.style.border = '1px solid var(--primary-color)';
+      cancelBtn.style.color = 'var(--primary-color)';
+      cancelBtn.style.borderRadius = '4px';
+      cancelBtn.onclick = () => this.router.pipelineUI.render();
+
+      header.appendChild(title);
+      header.appendChild(cancelBtn);
+
+      const nameGroup = document.createElement('div');
+      nameGroup.style.display = 'flex';
+      nameGroup.style.flexDirection = 'column';
+      nameGroup.style.gap = '6px';
+
+      const nameLabel = document.createElement('label');
+      nameLabel.textContent = 'Pipeline Name:';
+      nameLabel.style.fontWeight = 'bold';
+      nameLabel.style.fontSize = '0.9em';
+
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.value = this.pipelineName;
+      nameInput.placeholder = 'e.g. build_and_sync';
+      nameInput.style.padding = '8px';
+      nameInput.style.borderRadius = '4px';
+      nameInput.style.border = '1px solid var(--secondary-color, #444)';
+      nameInput.style.background = 'var(--secondary-color, rgba(0,0,0,0.2))';
+      nameInput.style.color = 'inherit';
+
+      nameInput.oninput = (e) => {
+        this.pipelineName = e.target.value;
+        this.updatePreview();
+      };
+
+      nameGroup.appendChild(nameLabel);
+      nameGroup.appendChild(nameInput);
+
+      this.$errorMsg = document.createElement('div');
+      this.$errorMsg.style.color = '#f44336';
+      this.$errorMsg.style.background = 'rgba(244,67,54,0.1)';
+      this.$errorMsg.style.padding = '8px 12px';
+      this.$errorMsg.style.borderRadius = '4px';
+      this.$errorMsg.style.display = 'none';
+      this.$errorMsg.style.fontSize = '0.9em';
+
+      const stepsHeader = document.createElement('div');
+      stepsHeader.style.display = 'flex';
+      stepsHeader.style.justifyContent = 'space-between';
+      stepsHeader.style.alignItems = 'center';
+
+      const stepsTitle = document.createElement('strong');
+      stepsTitle.textContent = 'Pipeline Steps';
+
+      const addStepBtn = document.createElement('button');
+      addStepBtn.textContent = '+ Add Step';
+      addStepBtn.style.padding = '6px 12px';
+      addStepBtn.style.background = 'var(--primary-color)';
+      addStepBtn.style.color = '#fff';
+      addStepBtn.style.border = 'none';
+      addStepBtn.style.borderRadius = '4px';
+      addStepBtn.onclick = () => {
+        this.steps.push(this.createDefaultStep(this.steps.length + 1));
+        this.renderForm();
+      };
+
+      stepsHeader.appendChild(stepsTitle);
+      stepsHeader.appendChild(addStepBtn);
+
+      this.$stepsContainer = document.createElement('div');
+      this.$stepsContainer.style.display = 'flex';
+      this.$stepsContainer.style.flexDirection = 'column';
+      this.$stepsContainer.style.gap = '12px';
+
+      this.steps.forEach((step, index) => {
+        this.$stepsContainer.appendChild(this.createStepCard(step, index));
+      });
+
+      const previewHeader = document.createElement('strong');
+      previewHeader.textContent = 'JSON Preview (Read-only)';
+
+      this.$previewContainer = document.createElement('pre');
+      this.$previewContainer.style.background = 'rgba(0,0,0,0.3)';
+      this.$previewContainer.style.padding = '12px';
+      this.$previewContainer.style.borderRadius = '4px';
+      this.$previewContainer.style.overflow = 'auto';
+      this.$previewContainer.style.maxHeight = '200px';
+      this.$previewContainer.style.fontSize = '0.85em';
+      this.$previewContainer.style.margin = '0';
+
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = 'Save Pipeline';
+      saveBtn.style.padding = '12px';
+      saveBtn.style.background = '#4caf50';
+      saveBtn.style.color = '#fff';
+      saveBtn.style.border = 'none';
+      saveBtn.style.borderRadius = '6px';
+      saveBtn.style.fontWeight = 'bold';
+      saveBtn.style.fontSize = '1em';
+      saveBtn.onclick = () => this.handleSave();
+
+      this.$container.appendChild(header);
+      this.$container.appendChild(nameGroup);
+      this.$container.appendChild(this.$errorMsg);
+      this.$container.appendChild(stepsHeader);
+      this.$container.appendChild(this.$stepsContainer);
+      this.$container.appendChild(previewHeader);
+      this.$container.appendChild(this.$previewContainer);
+      this.$container.appendChild(saveBtn);
+
+      this.updatePreview();
+    }
+
+    createStepCard(step, index) {
+      const card = document.createElement('div');
+      card.style.background = 'var(--secondary-color, rgba(0,0,0,0.2))';
+      card.style.padding = '12px';
+      card.style.borderRadius = '6px';
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.gap = '8px';
+      card.style.border = '1px solid rgba(255,255,255,0.1)';
+
+      const cardHeader = document.createElement('div');
+      cardHeader.style.display = 'flex';
+      cardHeader.style.justifyContent = 'space-between';
+      cardHeader.style.alignItems = 'center';
+
+      const title = document.createElement('span');
+      title.style.fontWeight = 'bold';
+      title.textContent = `Step ${index + 1}`;
+
+      const controls = document.createElement('div');
+      controls.style.display = 'flex';
+      controls.style.gap = '4px';
+
+      const moveUpBtn = document.createElement('button');
+      moveUpBtn.textContent = '↑';
+      moveUpBtn.style.padding = '4px 8px';
+      moveUpBtn.disabled = index === 0;
+      moveUpBtn.onclick = () => {
+        if (index > 0) {
+          const temp = this.steps[index];
+          this.steps[index] = this.steps[index - 1];
+          this.steps[index - 1] = temp;
+          this.renderForm();
+        }
+      };
+
+      const moveDownBtn = document.createElement('button');
+      moveDownBtn.textContent = '↓';
+      moveDownBtn.style.padding = '4px 8px';
+      moveDownBtn.disabled = index === this.steps.length - 1;
+      moveDownBtn.onclick = () => {
+        if (index < this.steps.length - 1) {
+          const temp = this.steps[index];
+          this.steps[index] = this.steps[index + 1];
+          this.steps[index + 1] = temp;
+          this.renderForm();
+        }
+      };
+
+      const removeBtn = document.createElement('button');
+      removeBtn.textContent = '✕';
+      removeBtn.style.padding = '4px 8px';
+      removeBtn.style.background = '#f44336';
+      removeBtn.style.color = '#fff';
+      removeBtn.style.border = 'none';
+      removeBtn.style.borderRadius = '4px';
+      removeBtn.disabled = this.steps.length <= 1;
+      removeBtn.onclick = () => {
+        if (this.steps.length > 1) {
+          this.steps.splice(index, 1);
+          this.renderForm();
+        }
+      };
+
+      controls.appendChild(moveUpBtn);
+      controls.appendChild(moveDownBtn);
+      controls.appendChild(removeBtn);
+
+      cardHeader.appendChild(title);
+      cardHeader.appendChild(controls);
+
+      const actionRow = document.createElement('div');
+      actionRow.style.display = 'flex';
+      actionRow.style.flexDirection = 'column';
+      actionRow.style.gap = '4px';
+
+      const actionLabel = document.createElement('label');
+      actionLabel.textContent = 'Action / Capability:';
+      actionLabel.style.fontSize = '0.85em';
+      actionLabel.style.color = 'var(--text-color, #ccc)';
+
+      const actionSelect = document.createElement('select');
+      actionSelect.style.padding = '6px';
+      actionSelect.style.borderRadius = '4px';
+      actionSelect.style.border = '1px solid var(--secondary-color, #444)';
+      actionSelect.style.background = 'var(--secondary-color, rgba(0,0,0,0.3))';
+      actionSelect.style.color = 'inherit';
+
+      const availableActions = this.getAvailableActions();
+      availableActions.forEach(act => {
+        const option = document.createElement('option');
+        option.value = act;
+        option.textContent = act;
+        if (act === step.action) {
+          option.selected = true;
+        }
+        actionSelect.appendChild(option);
+      });
+
+      actionSelect.onchange = (e) => {
+        step.action = e.target.value;
+        this.updatePreview();
+      };
+
+      actionRow.appendChild(actionLabel);
+      actionRow.appendChild(actionSelect);
+
+      const payloadRow = document.createElement('div');
+      payloadRow.style.display = 'flex';
+      payloadRow.style.flexDirection = 'column';
+      payloadRow.style.gap = '4px';
+
+      const payloadLabel = document.createElement('label');
+      payloadLabel.textContent = 'Payload (JSON):';
+      payloadLabel.style.fontSize = '0.85em';
+      payloadLabel.style.color = 'var(--text-color, #ccc)';
+
+      const payloadTextarea = document.createElement('textarea');
+      payloadTextarea.value = step.payloadText;
+      payloadTextarea.rows = 3;
+      payloadTextarea.style.padding = '6px';
+      payloadTextarea.style.fontFamily = 'monospace';
+      payloadTextarea.style.fontSize = '0.9em';
+      payloadTextarea.style.borderRadius = '4px';
+      payloadTextarea.style.border = '1px solid var(--secondary-color, #444)';
+      payloadTextarea.style.background = 'var(--secondary-color, rgba(0,0,0,0.3))';
+      payloadTextarea.style.color = 'inherit';
+
+      payloadTextarea.oninput = (e) => {
+        step.payloadText = e.target.value;
+        this.updatePreview();
+      };
+
+      payloadRow.appendChild(payloadLabel);
+      payloadRow.appendChild(payloadTextarea);
+
+      card.appendChild(cardHeader);
+      card.appendChild(actionRow);
+      card.appendChild(payloadRow);
+
+      return card;
+    }
+
+    updatePreview() {
+      if (!this.$previewContainer) return;
+      this.clearError();
+
+      // Check step JSON payload validity for live error message
+      for (let i = 0; i < this.steps.length; i++) {
+        const txt = this.steps[i].payloadText || '';
+        try {
+          const parsed = JSON.parse(txt);
+          if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            this.showError(`Step ${i + 1} payload must be a JSON object (e.g. {})`);
+          }
+        } catch (e) {
+          this.showError(`Step ${i + 1} payload invalid JSON: ${e.message}`);
+        }
+      }
+
+      const pipelineData = this.generatePipelineData();
+      this.$previewContainer.textContent = JSON.stringify(pipelineData, null, 2);
+    }
+
+    showError(msg) {
+      if (this.$errorMsg) {
+        this.$errorMsg.textContent = msg;
+        this.$errorMsg.style.display = 'block';
+      }
+    }
+
+    clearError() {
+      if (this.$errorMsg) {
+        this.$errorMsg.textContent = '';
+        this.$errorMsg.style.display = 'none';
+      }
+    }
+
+    async handleSave() {
+      this.clearError();
+
+      let filename = '';
+      try {
+        filename = sanitizePipelineFilename(this.pipelineName);
+      } catch (err) {
+        this.showError(`Filename error: ${err.message}`);
+        return;
+      }
+
+      // Check JSON step payloads
+      for (let i = 0; i < this.steps.length; i++) {
+        const txt = this.steps[i].payloadText || '';
+        let parsed;
+        try {
+          parsed = JSON.parse(txt);
+        } catch (e) {
+          this.showError(`Step ${i + 1} payload has JSON syntax error: ${e.message}`);
+          return;
+        }
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          this.showError(`Step ${i + 1} payload must be a JSON object`);
+          return;
+        }
+      }
+
+      const pipelineData = this.generatePipelineData();
+
+      try {
+        validatePipelineStructure(pipelineData);
+      } catch (err) {
+        this.showError(err.message);
+        return;
+      }
+
+      const projectRoot = await this.getProjectRoot();
+      if (!projectRoot) {
+        this.showError('No workspace folder is open');
+        return;
+      }
+
+      const fsOperation = this.router.requireFs();
+      if (!fsOperation) {
+        this.showError('File system API unavailable');
+        return;
+      }
+
+      const pipelineFolderPath = projectRoot.endsWith('/') ? `${projectRoot}pipeline` : `${projectRoot}/pipeline`;
+      const pipelineFolder = fsOperation(pipelineFolderPath);
+
+      try {
+        const folderExists = await pipelineFolder.exists();
+        if (!folderExists) {
+          if (typeof pipelineFolder.createDirectory === 'function') {
+            await pipelineFolder.createDirectory('');
+          } else {
+            const parentUrl = projectRoot;
+            await fsOperation(parentUrl).createDirectory('pipeline');
+          }
+        }
+      } catch (_) {
+        try {
+          const parentUrl = projectRoot;
+          await fsOperation(parentUrl).createDirectory('pipeline');
+        } catch (e) {
+          // Folder creation might already exist or handled by createFile
+        }
+      }
+
+      const targetFileUrl = `${pipelineFolderPath}/${filename}`;
+      const targetFileHandle = fsOperation(targetFileUrl);
+
+      try {
+        const fileExists = await targetFileHandle.exists();
+        if (fileExists) {
+          const confirmOverwrite = confirm ? confirm(`File '${filename}' already exists in pipeline/ directory. Overwrite?`) : true;
+          if (!confirmOverwrite) {
+            return;
+          }
+        }
+      } catch (_) {}
+
+      const fileContent = JSON.stringify(pipelineData, null, 2);
+
+      try {
+        await targetFileHandle.writeFile(fileContent);
+        this.router.toast(`Pipeline '${filename}' saved successfully`);
+        await this.router.pipelineUI.render();
+      } catch (err) {
+        this.showError(`Error writing pipeline file: ${err.message}`);
+      }
+    }
+  }
+
   class IntentRouter {
     constructor() {
       this.commands = new Map();
@@ -531,6 +1135,7 @@
       this.registeredAcodeCommands = [];
       this.pipelineRunner = new PipelineRunner(this);
       this.pipelineUI = new PipelineUI(this);
+      this.pipelineBuilderUI = new PipelineBuilderUI(this);
     }
 
     safeRequire(name) {
@@ -956,6 +1561,7 @@
       }
       const defs = [
         { name: 'leion.intentRouter.pipelines', description: 'Intent Router: Show Pipelines', exec: () => this.pipelineUI.render() },
+        { name: 'leion.intentRouter.newPipeline', description: 'Intent Router: New Pipeline', exec: () => this.pipelineBuilderUI.render() },
         { name: 'leion.intentRouter.test', description: 'Intent Router: Run smoke test', exec: () => this.runTest() },
         { name: 'leion.intentRouter.logs', description: 'Intent Router: View logs', exec: () => this.showLogs() },
         { name: 'leion.intentRouter.capabilities', description: 'Intent Router: Show capabilities', exec: () => this.showCapabilities() }
@@ -1045,8 +1651,14 @@
       MAX_PIPELINE_BYTES,
       DEFAULT_EDITOR_MAX_BYTES,
       DEFAULT_PIPELINE_BATCH_SIZE,
+      actionToIntent,
+      intentToAction,
+      filterRoutableActions,
+      sanitizePipelineFilename,
+      validatePipelineStructure,
       PipelineRunner,
       PipelineUI,
+      PipelineBuilderUI,
       IntentRouter,
       validateMaxBytes,
       validateOpenUrl,
