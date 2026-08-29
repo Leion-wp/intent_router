@@ -105,6 +105,121 @@
     return 0;
   }
 
+  const VALID_CAPABILITY_ARG_TYPES = new Set(['string', 'number', 'boolean', 'enum', 'object']);
+
+  function normalizeCapabilityMetadata(rawMetadata) {
+    if (!rawMetadata || typeof rawMetadata !== 'object') {
+      return { description: undefined, args: [] };
+    }
+
+    const description = typeof rawMetadata.description === 'string' && rawMetadata.description.trim() !== ''
+      ? rawMetadata.description
+      : undefined;
+
+    const rawArgs = Array.isArray(rawMetadata.args) ? rawMetadata.args : [];
+    const normalizedArgs = [];
+
+    for (const arg of rawArgs) {
+      if (!arg || typeof arg !== 'object' || Array.isArray(arg)) {
+        continue;
+      }
+      if (typeof arg.name !== 'string' || arg.name.trim() === '') {
+        continue;
+      }
+
+      const name = arg.name.trim();
+      const rawType = typeof arg.type === 'string' ? arg.type.toLowerCase().trim() : 'string';
+      const type = VALID_CAPABILITY_ARG_TYPES.has(rawType) ? rawType : 'string';
+      const required = !!arg.required;
+      const argDesc = typeof arg.description === 'string' ? arg.description : undefined;
+
+      const normalizedArg = {
+        name,
+        type,
+        required
+      };
+
+      if (argDesc !== undefined) {
+        normalizedArg.description = argDesc;
+      }
+
+      if (arg.default !== undefined) {
+        normalizedArg.default = arg.default;
+      }
+
+      if (Array.isArray(arg.options)) {
+        normalizedArg.options = [...arg.options];
+      }
+
+      normalizedArgs.push(normalizedArg);
+    }
+
+    return {
+      description,
+      args: normalizedArgs
+    };
+  }
+
+  function validatePayloadAgainstArgs(payload, args) {
+    const normalizedMeta = normalizeCapabilityMetadata({ args });
+    const normalizedArgs = normalizedMeta.args;
+    const errors = [];
+
+    const data = (payload && typeof payload === 'object' && !Array.isArray(payload)) ? payload : {};
+
+    for (const arg of normalizedArgs) {
+      const val = data[arg.name];
+      const isPresent = val !== undefined && val !== null;
+
+      if (!isPresent) {
+        if (arg.required) {
+          errors.push(`Missing required argument '${arg.name}'`);
+        }
+        continue;
+      }
+
+      let valid = true;
+      let actualType = Array.isArray(val) ? 'array' : typeof val;
+
+      switch (arg.type) {
+        case 'string':
+          valid = typeof val === 'string';
+          break;
+        case 'number':
+          valid = typeof val === 'number' && Number.isFinite(val);
+          break;
+        case 'boolean':
+          valid = typeof val === 'boolean';
+          break;
+        case 'object':
+          valid = typeof val === 'object' && !Array.isArray(val);
+          break;
+        case 'enum':
+          if (Array.isArray(arg.options) && arg.options.length > 0) {
+            valid = arg.options.includes(val);
+            if (!valid) {
+              errors.push(`Invalid value '${val}' for enum argument '${arg.name}'. Expected one of: ${arg.options.join(', ')}`);
+              continue;
+            }
+          } else {
+            valid = typeof val === 'string' || typeof val === 'number';
+          }
+          break;
+        default:
+          valid = true;
+      }
+
+      if (!valid) {
+        errors.push(`Invalid type for argument '${arg.name}': expected ${arg.type}, got ${actualType}`);
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
   async function readBoundedFile(fsHandle, encoding, limit, errorCode = 'file_too_large') {
     if (limit !== null && limit !== undefined) {
       if (typeof fsHandle.stat === 'function') {
@@ -596,8 +711,29 @@
       return { success: false, status: 'error', data: null, result: null, error: String(message), message: String(message), metadata };
     }
 
-    register(name, handler) {
-      this.commands.set(name, handler);
+    register(name, handlerOrObj, maybeMetadata) {
+      let handler;
+      let rawMetadata;
+
+      if (typeof handlerOrObj === 'function') {
+        handler = handlerOrObj;
+        rawMetadata = maybeMetadata;
+      } else if (handlerOrObj && typeof handlerOrObj === 'object') {
+        handler = handlerOrObj.handler;
+        rawMetadata = handlerOrObj;
+      } else {
+        handler = handlerOrObj;
+        rawMetadata = maybeMetadata;
+      }
+
+      const normalizedMeta = normalizeCapabilityMetadata(rawMetadata);
+
+      this.commands.set(name, {
+        handler,
+        description: normalizedMeta.description,
+        args: normalizedMeta.args
+      });
+
       this.log(`Registered command: ${name}`);
     }
 
@@ -659,8 +795,10 @@
       let data = intent.payload !== undefined ? intent.payload : (intent.data || {});
 
       if (!action) return this.fail('intent.action or intent.intent is required');
-      const handler = this.commands.get(action);
-      if (!handler) return this.fail(`Command ${action} not found`, { action });
+      const entry = this.commands.get(action);
+      if (!entry) return this.fail(`Command ${action} not found`, { action });
+      const handler = typeof entry === 'function' ? entry : entry?.handler;
+      if (!handler || typeof handler !== 'function') return this.fail(`Command ${action} not found`, { action });
 
       try {
         data = await this.resolveVariables(data, variableCache);
@@ -702,15 +840,28 @@
       this.register('router:list', () => Array.from(this.commands.keys()).sort());
       this.register('router:logs', () => this.logs.slice());
       this.register('router:clear_logs', () => { this.logs = []; return { cleared: true }; });
-      this.register('router:capabilities', () => ({
-        pluginId: PLUGIN_ID,
-        version: PLUGIN_VERSION,
-        fs: !!this.modules.fs,
-        commands: !!this.modules.commands,
-        terminal: !!this.modules.terminal,
-        editor: !!(window.editorManager && editorManager.editor),
-        network: typeof fetch === 'function'
-      }));
+      this.register('router:capabilities', () => {
+        const actionsList = [];
+        for (const [actionName, entry] of this.commands.entries()) {
+          const isObj = entry && typeof entry === 'object' && typeof entry.handler === 'function';
+          actionsList.push({
+            action: actionName,
+            description: isObj ? entry.description : undefined,
+            args: isObj && Array.isArray(entry.args) ? entry.args : []
+          });
+        }
+        return {
+          pluginId: PLUGIN_ID,
+          version: PLUGIN_VERSION,
+          fs: !!this.modules.fs,
+          commands: !!this.modules.commands,
+          terminal: !!this.modules.terminal,
+          editor: !!(typeof window !== 'undefined' && window.editorManager && window.editorManager.editor),
+          network: typeof fetch === 'function',
+          actions: actionsList,
+          capabilities: actionsList
+        };
+      });
 
       this.register('system:toast', (data) => {
         this.toast(data.message || 'No message', Number(data.timeout) || 3000);
@@ -754,6 +905,11 @@
         const validUrl = validateOpenUrl(data.url);
         window.open(validUrl, '_system');
         return { opened: true };
+      }, {
+        description: 'Open a web URL in external system browser',
+        args: [
+          { name: 'url', type: 'string', required: true, description: 'HTTP/HTTPS URL to open' }
+        ]
       });
 
       this.register('file:read', async (data) => {
@@ -761,6 +917,13 @@
         const limit = validateMaxBytes(data.maxBytes);
         const fsHandle = this.requireFs()(data.path);
         return await readBoundedFile(fsHandle, data.encoding || 'utf-8', limit, 'file_too_large');
+      }, {
+        description: 'Read file contents with optional size bounding',
+        args: [
+          { name: 'path', type: 'string', required: true, description: 'File path or URL' },
+          { name: 'maxBytes', type: 'number', required: false, description: 'Maximum allowed bytes to read' },
+          { name: 'encoding', type: 'string', required: false, default: 'utf-8', description: 'File encoding' }
+        ]
       });
 
       this.register('file:write', async (data) => {
@@ -768,57 +931,114 @@
         if (data.content === undefined) throw new Error('content is required');
         await this.requireFs()(data.path).writeFile(data.content);
         return { written: true, path: data.path };
+      }, {
+        description: 'Write content to a file',
+        args: [
+          { name: 'path', type: 'string', required: true, description: 'File path or URL' },
+          { name: 'content', type: 'string', required: true, description: 'Content to write' }
+        ]
       });
 
       this.register('file:list', async (data) => {
         if (!data.path) throw new Error('path is required');
         return await this.requireFs()(data.path).lsDir();
+      }, {
+        description: 'List files in a directory',
+        args: [
+          { name: 'path', type: 'string', required: true, description: 'Directory path or URL' }
+        ]
       });
 
       this.register('file:exists', async (data) => {
         if (!data.path) throw new Error('path is required');
         return { exists: await this.requireFs()(data.path).exists() };
+      }, {
+        description: 'Check if a file or directory exists',
+        args: [
+          { name: 'path', type: 'string', required: true, description: 'File path or URL' }
+        ]
       });
 
       this.register('file:stat', async (data) => {
         if (!data.path) throw new Error('path is required');
         return await this.requireFs()(data.path).stat();
+      }, {
+        description: 'Get file statistics',
+        args: [
+          { name: 'path', type: 'string', required: true, description: 'File path or URL' }
+        ]
       });
 
       this.register('file:delete', async (data) => {
         if (!data.path) throw new Error('path is required');
         await this.requireFs()(data.path).delete();
         return { deleted: true, path: data.path };
+      }, {
+        description: 'Delete a file or directory',
+        args: [
+          { name: 'path', type: 'string', required: true, description: 'File path or URL' }
+        ]
       });
 
       this.register('file:create', async (data) => {
         if (!data.directory || !data.name) throw new Error('directory and name are required');
         const url = await this.requireFs()(data.directory).createFile(data.name, data.content || '');
         return { created: true, url };
+      }, {
+        description: 'Create a new file in a directory',
+        args: [
+          { name: 'directory', type: 'string', required: true, description: 'Parent directory path' },
+          { name: 'name', type: 'string', required: true, description: 'File name' },
+          { name: 'content', type: 'string', required: false, description: 'Initial file content' }
+        ]
       });
 
       this.register('file:mkdir', async (data) => {
         if (!data.directory || !data.name) throw new Error('directory and name are required');
         const url = await this.requireFs()(data.directory).createDirectory(data.name);
         return { created: true, url };
+      }, {
+        description: 'Create a new directory',
+        args: [
+          { name: 'directory', type: 'string', required: true, description: 'Parent directory path' },
+          { name: 'name', type: 'string', required: true, description: 'Directory name' }
+        ]
       });
 
       this.register('file:rename', async (data) => {
         if (!data.path || !data.newName) throw new Error('path and newName are required');
         const url = await this.requireFs()(data.path).renameTo(data.newName);
         return { renamed: true, url };
+      }, {
+        description: 'Rename a file or directory',
+        args: [
+          { name: 'path', type: 'string', required: true, description: 'Current path' },
+          { name: 'newName', type: 'string', required: true, description: 'New name' }
+        ]
       });
 
       this.register('file:move', async (data) => {
         if (!data.path || !data.destination) throw new Error('path and destination are required');
         const url = await this.requireFs()(data.path).moveTo(data.destination);
         return { moved: true, url };
+      }, {
+        description: 'Move a file or directory',
+        args: [
+          { name: 'path', type: 'string', required: true, description: 'Source path' },
+          { name: 'destination', type: 'string', required: true, description: 'Destination path' }
+        ]
       });
 
       this.register('file:copy', async (data) => {
         if (!data.path || !data.destination) throw new Error('path and destination are required');
         const url = await this.requireFs()(data.path).copyTo(data.destination);
         return { copied: true, url };
+      }, {
+        description: 'Copy a file or directory',
+        args: [
+          { name: 'path', type: 'string', required: true, description: 'Source path' },
+          { name: 'destination', type: 'string', required: true, description: 'Destination path' }
+        ]
       });
 
       this.register('editor:get_content', () => this.getEditor().state.doc.toString());
@@ -909,6 +1129,14 @@
         const body = contentType.includes('application/json') ? await response.json() : await response.text();
         if (!response.ok) throw new Error(`HTTP ${response.status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
         return { status: response.status, headers: Object.fromEntries(response.headers.entries()), body };
+      }, {
+        description: 'Send an HTTP request',
+        args: [
+          { name: 'url', type: 'string', required: true, description: 'Target URL' },
+          { name: 'method', type: 'enum', required: false, default: 'GET', options: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'], description: 'HTTP method' },
+          { name: 'headers', type: 'object', required: false, description: 'HTTP request headers' },
+          { name: 'body', type: 'string', required: false, description: 'Request payload body' }
+        ]
       });
 
       this.register('github:request', async (data) => {
@@ -921,6 +1149,14 @@
         });
         if (!routed.success) throw new Error(routed.error || 'GitHub request failed');
         return routed.data;
+      }, {
+        description: 'Send an authenticated or unauthenticated GitHub API request',
+        args: [
+          { name: 'path', type: 'string', required: true, description: 'GitHub API endpoint path' },
+          { name: 'method', type: 'enum', required: false, default: 'GET', options: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], description: 'HTTP method' },
+          { name: 'headers', type: 'object', required: false, description: 'Additional headers' },
+          { name: 'token', type: 'string', required: false, description: 'GitHub personal access token' }
+        ]
       });
 
       this.register('github:fetch_repo', async (data) => {
@@ -929,12 +1165,22 @@
         const routed = await this.route({ action: 'github:request', data: { path: `/repos/${data.repo}${suffix}`, token: data.token } });
         if (!routed.success) throw new Error(routed.error || 'GitHub request failed');
         return routed.data;
+      }, {
+        description: 'Fetch repository contents or metadata from GitHub',
+        args: [
+          { name: 'repo', type: 'string', required: true, description: 'Repository identifier (owner/repo)' },
+          { name: 'path', type: 'string', required: false, description: 'Path within repository' },
+          { name: 'token', type: 'string', required: false, description: 'GitHub token' }
+        ]
       });
 
       this.register('terminal:list', () => {
         const terminal = this.modules.terminal;
         if (!terminal) throw new Error('Acode terminal API unavailable');
         return Array.from(terminal.getAll()).map(([id, inst]) => ({ id, name: inst.name }));
+      }, {
+        description: 'List active terminal sessions',
+        args: []
       });
 
       this.register('terminal:exec', async (data) => {
@@ -945,6 +1191,28 @@
         if (!instance) instance = await terminal.createServer({ name: data.name || 'Intent Router' });
         terminal.write(instance.id, `${data.command}\r`);
         return { submitted: true, terminalId: instance.id, command: data.command };
+      }, {
+        description: 'Execute a command in terminal session',
+        args: [
+          { name: 'command', type: 'string', required: true, description: 'Command to execute' },
+          { name: 'id', type: 'string', required: false, description: 'Terminal session ID' },
+          { name: 'name', type: 'string', required: false, description: 'Terminal session name' }
+        ]
+      });
+
+      this.register('terminal:run', async (data) => {
+        if (!data || !data.command) throw new Error('command is required');
+        if (typeof globalThis.Executor === 'object' && typeof globalThis.Executor.execute === 'function') {
+          return await globalThis.Executor.execute(data.command);
+        }
+        return await this.route({ action: 'terminal:exec', data });
+      }, {
+        description: 'Run terminal command and return execution output',
+        args: [
+          { name: 'command', type: 'string', required: true, description: 'Command string to run' },
+          { name: 'id', type: 'string', required: false, description: 'Terminal session ID' },
+          { name: 'name', type: 'string', required: false, description: 'Terminal session name' }
+        ]
       });
     }
 
@@ -1051,7 +1319,9 @@
       validateMaxBytes,
       validateOpenUrl,
       getByteLength,
-      readBoundedFile
+      readBoundedFile,
+      normalizeCapabilityMetadata,
+      validatePayloadAgainstArgs
     };
   }
 })();
