@@ -105,6 +105,83 @@
     return 0;
   }
 
+  function deterministicStringify(val) {
+    if (val === undefined || val === null) return JSON.stringify(val);
+    if (typeof val !== 'object') return JSON.stringify(val);
+    if (Array.isArray(val)) {
+      return '[' + val.map(item => deterministicStringify(item)).join(',') + ']';
+    }
+    const keys = Object.keys(val).sort();
+    const pairs = keys.map(k => JSON.stringify(k) + ':' + deterministicStringify(val[k]));
+    return '{' + pairs.join(',') + '}';
+  }
+
+  function resolveRunVariables(input, variableCache) {
+    if (!variableCache) {
+      variableCache = new Map();
+    }
+
+    if (typeof input === 'string') {
+      return input.replace(/\$\{var:([^}]+)\}/g, (match, rawName) => {
+        const varName = rawName.trim();
+        if (!variableCache.has(varName)) {
+          const err = new Error(`Pipeline variable missing: ${varName}`);
+          err.code = 'pipeline_variable_missing';
+          err.variableName = varName;
+          throw err;
+        }
+        return variableCache.get(varName);
+      });
+    }
+
+    if (Array.isArray(input)) {
+      return input.map(item => resolveRunVariables(item, variableCache));
+    }
+
+    if (typeof input === 'object' && input !== null) {
+      let hasVarPlaceholder = false;
+      const checkVars = (val) => {
+        if (typeof val === 'string' && /\$\{var:([^}]+)\}/.test(val)) return true;
+        if (Array.isArray(val)) return val.some(checkVars);
+        if (typeof val === 'object' && val !== null) return Object.values(val).some(checkVars);
+        return false;
+      };
+      if (!checkVars(input)) return input;
+
+      const resolved = {};
+      for (const key of Object.keys(input)) {
+        resolved[key] = resolveRunVariables(input[key], variableCache);
+      }
+      return resolved;
+    }
+
+    return input;
+  }
+
+  function captureStepOutputs(step, resultData, variableCache) {
+    if (!step || !variableCache) return;
+    const payload = step.payload || {};
+    const outContent = payload.outputVar || step.outputVar;
+    const outPath = payload.outputVarPath || step.outputVarPath;
+    const outChanges = payload.outputVarChanges || step.outputVarChanges;
+
+    if (resultData !== null && typeof resultData === 'object') {
+      if (outContent && resultData.content !== undefined) {
+        variableCache.set(outContent, typeof resultData.content === 'object' ? deterministicStringify(resultData.content) : String(resultData.content));
+      }
+      if (outPath && resultData.path !== undefined) {
+        variableCache.set(outPath, String(resultData.path));
+      }
+      if (outChanges && resultData.changes !== undefined) {
+        variableCache.set(outChanges, deterministicStringify(resultData.changes));
+      }
+    } else if (resultData !== undefined && resultData !== null) {
+      if (outContent) {
+        variableCache.set(outContent, String(resultData));
+      }
+    }
+  }
+
   async function readBoundedFile(fsHandle, encoding, limit, errorCode = 'file_too_large') {
     if (limit !== null && limit !== undefined) {
       if (typeof fsHandle.stat === 'function') {
@@ -183,6 +260,7 @@
       let stepIndex = 0;
       const totalSteps = pipelineData.steps.length;
       const logs = [];
+      const variableCache = new Map();
 
       for (const step of pipelineData.steps) {
         stepIndex++;
@@ -200,9 +278,11 @@
         let stepError = null;
 
         try {
-          const result = await this.router.route({ action, data: payload });
+          const resolvedPayload = resolveRunVariables(payload, variableCache);
+          const result = await this.router.route({ action, data: resolvedPayload }, variableCache);
           if (result && result.success) {
             stepSuccess = true;
+            captureStepOutputs(step, result.data, variableCache);
             logs.push({ step: stepIndex, intent: intentName, success: true, data: result.data, error: result.error || null });
           } else {
             stepSuccess = false;
@@ -1051,7 +1131,9 @@
       validateMaxBytes,
       validateOpenUrl,
       getByteLength,
-      readBoundedFile
+      readBoundedFile,
+      resolveRunVariables,
+      captureStepOutputs
     };
   }
 })();
