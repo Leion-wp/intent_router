@@ -1,0 +1,127 @@
+name: factory-dispatch-v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Open GitHub issue to compile into a FactoryTask'
+        required: true
+        type: number
+      worker:
+        description: 'Requested worker adapter (v1 records only; it does not dispatch)'
+        required: true
+        default: manual
+        type: choice
+        options:
+          - manual
+          - jules
+          - codex
+          - claude
+          - gemini
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: factory-${{ github.repository }}-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  compile-task:
+    name: Compile FactoryTask
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+      REQUESTED_WORKER: ${{ inputs.worker }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Enforce control-plane target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "control-plane/factory-dispatch-v1" || test "${GITHUB_REF_NAME}" = "Android"
+          test -d acode-plugin
+
+      - name: Read source issue
+        id: issue
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" > issue.json
+          test "$(jq -r '.state' issue.json)" = "open"
+          test "$(jq -r '.pull_request // empty' issue.json)" = ""
+
+      - name: Compile FactoryTask
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jq -n \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --argjson issue_number "${ISSUE_NUMBER}" \
+            --arg issue_url "$(jq -r '.html_url' issue.json)" \
+            --arg objective "$(jq -r '.title' issue.json)" \
+            --arg worker "${REQUESTED_WORKER}" \
+            '{
+              version: 1,
+              task_id: ($repository + "#" + ($issue_number | tostring)),
+              source: {
+                issue_number: $issue_number,
+                issue_url: $issue_url
+              },
+              objective: $objective,
+              target: {
+                repository: $repository,
+                branch: "Android",
+                cwd: "/acode-plugin"
+              },
+              worker: {
+                requested: $worker
+              },
+              constraints: [
+                "Do not modify main",
+                "Work only against Android",
+                "Product code scope is /acode-plugin",
+                "Tests are required for product changes",
+                "Do not create a second active PR for this issue"
+              ],
+              state: "DISPATCH_READY"
+            }' > factory-task.json
+
+      - name: Validate FactoryTask contract
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jq -e '
+            .version == 1 and
+            (.task_id | type == "string" and length > 2) and
+            (.source.issue_number | type == "number" and . >= 1) and
+            (.source.issue_url | type == "string" and length > 0) and
+            (.objective | type == "string" and length > 0) and
+            .target.repository == env.GITHUB_REPOSITORY and
+            .target.branch == "Android" and
+            .target.cwd == "/acode-plugin" and
+            (.worker.requested | IN("manual", "jules", "codex", "claude", "gemini")) and
+            (.constraints | type == "array" and length > 0) and
+            .state == "DISPATCH_READY"
+          ' factory-task.json >/dev/null
+
+      - name: Show compiled task
+        shell: bash
+        run: jq . factory-task.json
+
+      - name: Upload FactoryTask artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-task-${{ inputs.issue_number }}
+          path: factory-task.json
+          if-no-files-found: error
+          retention-days: 7
