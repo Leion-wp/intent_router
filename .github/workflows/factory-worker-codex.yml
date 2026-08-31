@@ -1,0 +1,70 @@
+name: factory-worker-codex-v1
+
+on:
+  workflow_call:
+    inputs:
+      task_json:
+        required: true
+        type: string
+      execute:
+        required: true
+        type: boolean
+    secrets:
+      OPENAI_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  codex:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate adapter activation
+        env:
+          TASK_JSON: ${{ inputs.task_json }}
+          EXECUTE: ${{ inputs.execute }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$TASK_JSON" | jq -e . > factory-task.json
+          test "$(jq -r '.target.branch' factory-task.json)" = "Android"
+          test "$(jq -r '.target.cwd' factory-task.json)" = "/acode-plugin"
+          test "$(jq -r '.workers[] | select(.worker_id=="codex") | .status' .github/roots/worker-registry.json)" = "ENABLED"
+          test "$EXECUTE" = "true"
+          test -n "$OPENAI_API_KEY"
+
+      - name: Build provider prompt
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -r '[.spec.objective, (.spec.context.issue_body // ""), "Target: Android /acode-plugin", "Forbidden actions:", (.policy.forbidden_actions[]? // empty)] | join("\n")' factory-task.json > prompt.txt
+
+      - name: Run Codex
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ':workspace'
+          prompt-file: prompt.txt
+
+      - name: Emit worker result
+        env:
+          FINAL_MESSAGE: ${{ steps.codex.outputs.final-message }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg task_id "$(jq -r '.task_id' factory-task.json)" \
+            --arg summary "${FINAL_MESSAGE:-Codex execution completed.}" \
+            '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"codex",summary:$summary,outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:null,worker_url:null},evidence:{tests:[],checks:["Codex action completed"]},risks:["Adapter does not yet infer commit or PR identity from provider output."],next_action:"REVIEW"}' > factory-result.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: factory-result-codex
+          path: factory-result.json
+          retention-days: 7
