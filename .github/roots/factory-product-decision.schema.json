@@ -4,7 +4,7 @@
   "title": "FactoryProductDecision",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "decision_id", "repository", "action", "objective", "hypothesis", "success_metric", "confidence", "risk", "evidence", "milestone", "human_gate"],
+  "required": ["version", "decision_id", "repository", "action", "objective", "hypothesis", "success_metric", "product_context", "confidence", "risk", "evidence", "milestone", "human_gate"],
   "properties": {
     "version": {"type": "integer", "const": 1},
     "decision_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,80}$"},
@@ -13,6 +13,16 @@
     "objective": {"type": "string", "minLength": 10, "maxLength": 1500},
     "hypothesis": {"type": "string", "minLength": 10, "maxLength": 1500},
     "success_metric": {"type": "string", "minLength": 5, "maxLength": 700},
+    "product_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value_proposition", "target_user", "next_question"],
+      "properties": {
+        "value_proposition": {"type": "string", "minLength": 5, "maxLength": 1200},
+        "target_user": {"type": "string", "minLength": 3, "maxLength": 700},
+        "next_question": {"type": "string", "minLength": 5, "maxLength": 900}
+      }
+    },
     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     "risk": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
     "evidence": {"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": {"type": "string", "minLength": 3, "maxLength": 500}},
@@ -44,13 +54,7 @@
     "extensions": {"type": "object"}
   },
   "allOf": [
-    {
-      "if": {"properties": {"action": {"const": "PAUSE"}}},
-      "then": {"properties": {"milestone": {"type": "null"}}}
-    },
-    {
-      "if": {"properties": {"action": {"enum": ["BUILD", "HARDEN", "MEASURE", "PIVOT", "LAUNCH_READY"]}}},
-      "then": {"properties": {"milestone": {"type": "object"}}}
-    }
+    {"if": {"properties": {"action": {"const": "PAUSE"}}}, "then": {"properties": {"milestone": {"type": "null"}}}},
+    {"if": {"properties": {"action": {"enum": ["BUILD", "HARDEN", "MEASURE", "PIVOT", "LAUNCH_READY"]}}}, "then": {"properties": {"milestone": {"type": "object"}}}}
   ]
 }
