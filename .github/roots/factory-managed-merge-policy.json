@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "enabled": true,
+  "scope": {
+    "managed_only": true,
+    "exclude_control_plane_repository": true,
+    "allowed_blueprints": ["roots-micro-saas-v1"]
+  },
+  "source_issue": {
+    "required_label": "factory:dispatched",
+    "blocking_labels": ["factory:blocked", "factory:human-required"],
+    "require_persisted_worker_session": true
+  },
+  "pull_request": {
+    "require_default_base_branch": true,
+    "require_non_draft": true,
+    "require_single_correlated_pr": true,
+    "merge_method": "squash",
+    "forbidden_path_prefixes": [
+      ".github/workflows/",
+      ".github/actions/",
+      ".github/CODEOWNERS",
+      ".factory/profile.json",
+      ".factory/credential-requirements.json"
+    ]
+  },
+  "ci": {
+    "require_profile_jobs": true,
+    "require_all_pull_request_runs_completed": true,
+    "allowed_run_conclusions": ["success", "neutral", "skipped"]
+  },
+  "governance": {
+    "production_deploy": "HUMAN_REQUIRED",
+    "workflow_changes": "HUMAN_REQUIRED",
+    "credential_changes": "HUMAN_REQUIRED",
+    "permission_changes": "HUMAN_REQUIRED",
+    "control_plane_merge": "HUMAN_REQUIRED"
+  }
+}
