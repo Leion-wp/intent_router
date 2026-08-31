@@ -26,7 +26,7 @@ jobs:
     env:
       FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
       CONTROL_TOKEN: ${{ github.token }}
-      ORG: ${{ github.repository_owner }}
+      OWNER: ${{ github.repository_owner }}
       EXECUTE: ${{ github.event_name == 'schedule' || inputs.execute }}
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +39,9 @@ jobs:
           test -n "$FLEET_TOKEN"
           echo "::add-mask::$FLEET_TOKEN"
           export GH_TOKEN="$FLEET_TOKEN"
-          gh api --paginate "orgs/${ORG}/repos?per_page=100&type=all" --jq '.[].full_name' > repos.txt
+          authenticated_login="$(gh api user --jq '.login')"
+          test "$authenticated_login" = "$OWNER"
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' --jq --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
           : > candidates.tsv
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
@@ -107,6 +109,7 @@ jobs:
         run: |
           {
             echo '### Fleet scheduler'
+            echo "- Owner: ${OWNER}"
             echo "- Candidate repository: ${TARGET_REPO:-none}"
             echo "- Candidate issue: ${ISSUE_NUMBER:-none}"
             echo "- Execute: ${EXECUTE}"
