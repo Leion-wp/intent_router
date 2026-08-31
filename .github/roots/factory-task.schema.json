@@ -4,20 +4,31 @@
   "title": "Roots FactoryTask v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "task_id", "source", "objective", "target", "worker", "constraints", "state"],
+  "required": ["version", "task_id", "source", "spec", "target", "requirements", "policy", "budget", "state"],
   "properties": {
     "version": { "const": 1 },
-    "task_id": { "type": "string", "minLength": 3 },
+    "task_id": { "type": "string", "pattern": "^[^#]+/[^#]+#[1-9][0-9]*$" },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["issue_number", "issue_url"],
+      "required": ["type", "issue_number", "issue_url"],
       "properties": {
+        "type": { "const": "github_issue" },
         "issue_number": { "type": "integer", "minimum": 1 },
-        "issue_url": { "type": "string", "minLength": 1 }
+        "issue_url": { "type": "string", "format": "uri" }
       }
     },
-    "objective": { "type": "string", "minLength": 1 },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective", "acceptance_criteria", "test_strategy"],
+      "properties": {
+        "objective": { "type": "string", "minLength": 1 },
+        "acceptance_criteria": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "test_strategy": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "context": { "type": "object" }
+      }
+    },
     "target": {
       "type": "object",
       "additionalProperties": false,
@@ -28,19 +39,39 @@
         "cwd": { "const": "/acode-plugin" }
       }
     },
-    "worker": {
+    "requirements": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["requested"],
+      "required": ["capabilities"],
       "properties": {
-        "requested": { "type": "string", "enum": ["jules", "codex", "claude", "gemini", "manual"] }
+        "capabilities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$" } },
+        "preferred_worker": { "type": ["string", "null"] }
       }
     },
-    "constraints": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_actions", "forbidden_actions", "human_gates"],
+      "properties": {
+        "allowed_actions": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "forbidden_actions": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "human_gates": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      }
     },
-    "state": { "const": "DISPATCH_READY" }
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_attempts", "timeout_minutes", "cost_policy"],
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "timeout_minutes": { "type": "integer", "minimum": 1, "maximum": 360 },
+        "cost_policy": { "type": "string", "enum": ["subscription_preferred", "free_preferred", "paid_allowed", "no_paid"] }
+      }
+    },
+    "state": { "const": "DISPATCH_READY" },
+    "extensions": {
+      "type": "object",
+      "description": "Namespaced producer-specific metadata. Core control-plane policy must not depend on unknown extension keys."
+    }
   }
 }
