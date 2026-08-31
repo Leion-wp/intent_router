@@ -61,13 +61,17 @@ jobs:
 
           jq --argjson issue "$ISSUE_NUMBER" '
             [.[]
-              | select((.body // "") | test("(?i)(fixes|closes|resolves)\\s+#" + ($issue|tostring) + "\\b"))
+              | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))
               | select(.baseRefName == "Android")]
           ' open-prs.json > linked-prs.json
 
           count="$(jq 'length' linked-prs.json)"
           if [ "$count" -ne 1 ]; then
             echo "Resume requires exactly one active Android PR linked to issue #${ISSUE_NUMBER}; found ${count}." >&2
+            if [ -s open-prs.json ]; then
+              echo 'Open PR candidates returned by GitHub search:' >&2
+              jq -r '.[] | "- PR #\(.number): \(.url) | base=\(.baseRefName) | body=\((.body // "") | gsub("\\n"; " ") | .[0:160])"' open-prs.json >&2
+            fi
             exit 1
           fi
 
