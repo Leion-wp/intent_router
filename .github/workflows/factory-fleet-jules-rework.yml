@@ -53,13 +53,20 @@ jobs:
               [ -z "$marker" ] && continue
               session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$marker" | head -n 1)"
               [ -z "$session" ] && continue
+              session_id="${session##*/}"
 
-              gh pr list --repo "$repo" --state open --search "#${issue}" --json number,body,headRefOid,baseRefName,url > /tmp/prs.json
+              gh pr list --repo "$repo" --state open --limit 100 --json number,body,headRefOid,headRefName,baseRefName,url > /tmp/prs.json
               jq --argjson issue "$issue" --arg branch "$branch" '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]' /tmp/prs.json > /tmp/linked.json
               count="$(jq 'length' /tmp/linked.json)"
+
+              if [ "$count" -eq 0 ]; then
+                jq --arg branch "$branch" --arg session_id "$session_id" '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' /tmp/prs.json > /tmp/linked.json
+                count="$(jq 'length' /tmp/linked.json)"
+              fi
+
               [ "$count" -eq 0 ] && continue
               if [ "$count" -gt 1 ]; then
-                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${count} active linked PRs." >&2
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${count} active PR candidates for session ${session}." >&2
                 continue
               fi
               pr="$(jq -r '.[0].number' /tmp/linked.json)"
