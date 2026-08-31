@@ -52,12 +52,10 @@ jobs:
 
             phase=''
             planner_mode=''
-            dynamic=false
             if gh api -H 'Accept: application/vnd.github.raw+json' \
               "repos/${repo}/contents/.factory/product-state.json" > /tmp/state.json 2>/dev/null; then
               phase="$(jq -r '.phase // ""' /tmp/state.json)"
               planner_mode="$(jq -r '.planner_mode // ""' /tmp/state.json)"
-              dynamic=true
             fi
 
             gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
