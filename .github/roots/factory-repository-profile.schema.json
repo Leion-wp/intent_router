@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-repository-profile.schema.json",
+  "title": "FactoryRepositoryProfile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "managed", "repository", "default_branch", "workspace", "blueprint", "worker_policy", "ci"],
+  "properties": {
+    "version": {"const": 1},
+    "managed": {"const": true},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "default_branch": {"type": "string", "minLength": 1},
+    "workspace": {"type": "string", "pattern": "^/"},
+    "blueprint": {"type": "string", "const": "roots-micro-saas-v1"},
+    "worker_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "preferred"],
+      "properties": {
+        "enabled": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["jules", "codex", "claude", "gemini"]}},
+        "preferred": {"enum": ["jules", "codex", "claude", "gemini"]}
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflow", "required_jobs"],
+      "properties": {
+        "workflow": {"type": "string", "const": "factory-ci.yml"},
+        "required_jobs": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "production_gate": {"const": "HUMAN_REQUIRED"},
+        "workflow_changes": {"const": "HUMAN_REQUIRED"},
+        "credential_changes": {"const": "HUMAN_REQUIRED"}
+      }
+    }
+  }
+}
