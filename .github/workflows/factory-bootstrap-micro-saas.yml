@@ -181,7 +181,7 @@ jobs:
             local number
             number="$(gh issue list --repo "$full_repo" --state all --search "${title} in:title" --json number,title --jq '.[] | select(.title == '"$(jq -Rn --arg v "$title" '$v')"') | .number' | head -n 1)"
             if [ -z "$number" ]; then
-              number="$(gh api --method POST "repos/${full_repo}/issues" -f title="$title" -f body="$body" -F milestone="$MILESTONE" -f labels='factory:queued' --jq '.number')"
+              number="$(gh api --method POST "repos/${full_repo}/issues" -f title="$title" -f body="$body" -F milestone="$MILESTONE" -f 'labels[]=factory:queued' --jq '.number')"
             fi
             printf '%s' "$number"
           }
