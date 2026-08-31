@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-result-v1.json",
+  "title": "Roots FactoryResult v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "task_id", "status", "worker", "summary", "artifacts", "tests", "risks", "next_action"],
+  "properties": {
+    "version": { "const": 1 },
+    "task_id": { "type": "string", "minLength": 3 },
+    "status": { "type": "string", "enum": ["SUCCEEDED", "REWORK", "BLOCKED", "FAILED"] },
+    "worker": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "artifacts": { "type": "object" },
+    "tests": { "type": "object" },
+    "risks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "next_action": { "type": "string", "enum": ["REVIEW", "REWORK", "WAIT", "CLOSE", "NONE"] }
+  }
+}
