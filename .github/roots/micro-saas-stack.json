@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "blueprint_id": "roots-micro-saas-v1",
+  "purpose": "Fixed default stack for every Roots-generated micro-SaaS so products never start from zero.",
+  "application": {
+    "framework": "Next.js App Router",
+    "language": "TypeScript",
+    "runtime": "Node.js",
+    "package_manager": "pnpm",
+    "ui": ["Tailwind CSS", "shadcn/ui"],
+    "validation": "Zod"
+  },
+  "backend": {
+    "platform": "Supabase",
+    "database": "PostgreSQL",
+    "authentication": "Supabase Auth",
+    "storage": "Supabase Storage",
+    "authorization": "PostgreSQL Row Level Security"
+  },
+  "billing": {
+    "provider": "Stripe",
+    "capabilities": ["Checkout", "Subscriptions", "Customer Portal", "Webhooks"]
+  },
+  "email": {
+    "provider": "Resend",
+    "templates": "React Email"
+  },
+  "observability": {
+    "errors": "Sentry",
+    "product_analytics": "PostHog"
+  },
+  "testing": {
+    "unit": "Vitest",
+    "e2e": "Playwright",
+    "required_ci": ["lint", "typecheck", "unit", "build"]
+  },
+  "deployment": {
+    "provider": "Vercel",
+    "environments": ["preview", "production"],
+    "production_gate": "HUMAN_REQUIRED"
+  },
+  "baseline_capabilities": [
+    "email/password login",
+    "OAuth-ready auth boundary",
+    "protected dashboard",
+    "user profile",
+    "PostgreSQL persistence",
+    "RLS baseline",
+    "Stripe subscription checkout",
+    "Stripe customer portal",
+    "Stripe webhook reconciliation",
+    "transactional email",
+    "environment validation",
+    "health endpoint",
+    "CI",
+    "error monitoring",
+    "analytics boundary",
+    "README setup/run/deploy documentation"
+  ],
+  "policy": {
+    "stack_changes_require_human_approval": true,
+    "secrets_are_human_provisioned": true,
+    "workers_must_not_create_or_rotate_credentials": true,
+    "production_deploy_requires_human_gate": true
+  }
+}
