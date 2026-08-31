@@ -1,0 +1,360 @@
+name: factory-product-brain-v1
+
+"on":
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: 'Apply validated product decisions'
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-product-brain
+  cancel-in-progress: false
+
+jobs:
+  brain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      CONTROL_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      EXECUTE: ${{ github.event_name == 'schedule' || inputs.execute }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate product-brain contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
+          python3 -c 'import json; [json.load(open(p)) for p in [".github/roots/factory-product-state.schema.json",".github/roots/factory-product-decision.schema.json",".github/roots/factory-product-telemetry.schema.json"]]'
+
+      - name: Reconcile products and apply the next validated decision
+        id: brain
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+
+          applied=0
+          rejected=0
+          human_required=0
+          milestones_closed=0
+          issues_created=0
+          needs_schedule=0
+
+          ensure_label() {
+            local repo="$1" label="$2" color="$3" description="$4"
+            gh label create "$label" --repo "$repo" --color "$color" --description "$description" --force >/dev/null 2>&1 || true
+          }
+
+          reject_proposal() {
+            local repo="$1" issue="$2" reason="$3"
+            rejected="$((rejected + 1))"
+            echo "PRODUCT_DECISION_REJECTED: ${repo}#${issue}: ${reason}" >&2
+            if [ "$EXECUTE" = 'true' ]; then
+              gh issue edit "$issue" --repo "$repo" --add-label 'factory:brain-rejected' --remove-label 'factory:brain-proposal' >/dev/null 2>&1 || true
+              gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                -f body="<!-- roots-product-decision-rejected -->\nPRODUCT_DECISION_REJECTED: ${reason}\n\nThe proposal was rejected fail-closed. No worker, credential, workflow, permission, production or spending authority was invoked." >/dev/null
+              gh issue close "$issue" --repo "$repo" --reason 'not planned' >/dev/null
+            fi
+          }
+
+          close_brain_needed() {
+            local repo="$1"
+            while IFS= read -r n; do
+              [ -z "$n" ] && continue
+              gh issue close "$n" --repo "$repo" --reason completed >/dev/null 2>&1 || true
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:brain-needed' --limit 20 --json number,title --jq '.[] | select(.title == "[FACTORY] Product decision needed") | .number')
+          }
+
+          write_state() {
+            local repo="$1" decision_file="$2"
+            local now current_path current_sha encoded endpoint
+            now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            current_path='-'
+            endpoint="repos/${repo}/contents/.factory/product-state.json"
+            current_sha=''
+            if gh api -H 'Accept: application/vnd.github.raw+json' "$endpoint" > /tmp/current-state.json 2>/dev/null; then
+              python3 .github/roots/validate-planning.py state /tmp/current-state.json "$repo"
+              current_path='/tmp/current-state.json'
+              current_sha="$(gh api "$endpoint" --jq '.sha')"
+            fi
+            python3 .github/roots/factory-product-brain.py state "$decision_file" "$repo" "$now" "$current_path" /tmp/next-state.json
+            python3 .github/roots/validate-planning.py state /tmp/next-state.json "$repo"
+            if [ "$EXECUTE" != 'true' ]; then
+              return 0
+            fi
+            encoded="$(base64 -w0 /tmp/next-state.json)"
+            if [ -n "$current_sha" ]; then
+              gh api --method PUT "$endpoint" -f message="factory: apply product decision $(jq -r '.decision_id' "$decision_file")" -f content="$encoded" -f sha="$current_sha" >/dev/null
+            else
+              gh api --method PUT "$endpoint" -f message="factory: initialize dynamic product state from $(jq -r '.decision_id' "$decision_file")" -f content="$encoded" >/dev/null
+            fi
+          }
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" \
+              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
+              /tmp/profile.json >/dev/null || continue
+
+            ensure_label "$repo" 'factory:brain-proposal' '0052CC' 'Product-brain decision proposal awaiting deterministic validation'
+            ensure_label "$repo" 'factory:brain-applied' '0E8A16' 'Product-brain decision applied to the factory'
+            ensure_label "$repo" 'factory:brain-rejected' 'B60205' 'Product-brain decision rejected by deterministic policy'
+            ensure_label "$repo" 'factory:brain-needed' 'C5DEF5' 'Dynamic product brain requires the next strategic decision'
+            ensure_label "$repo" 'factory:human-required' 'D93F0B' 'Human authority is required for this transition'
+            ensure_label "$repo" 'factory:queued' 'D4C5F9' 'Validated task ready for factory dispatch'
+
+            state_exists=false
+            if gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/product-state.json" > /tmp/state.json 2>/dev/null; then
+              python3 .github/roots/validate-planning.py state /tmp/state.json "$repo"
+              state_exists=true
+            else
+              printf '%s\n' '{}' > /tmp/state.json
+            fi
+
+            gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+            open_count="$(jq '[.[] | select(.state == "open")] | length' /tmp/milestones.json)"
+            if [ "$open_count" -gt 1 ]; then
+              echo "CONTROL_PLANE_ANOMALY: ${repo} has ${open_count} open milestones; product brain refuses to plan." >&2
+              continue
+            fi
+
+            if [ "$open_count" -eq 1 ]; then
+              milestone_number="$(jq -r '.[] | select(.state == "open") | .number' /tmp/milestones.json)"
+              gh api --paginate "repos/${repo}/issues?milestone=${milestone_number}&state=all&per_page=100" > /tmp/milestone-issues.json
+              required="$(jq '[.[] | select(.pull_request == null)] | length' /tmp/milestone-issues.json)"
+              remaining="$(jq '[.[] | select(.pull_request == null and .state == "open")] | length' /tmp/milestone-issues.json)"
+              if [ "$required" -gt 0 ] && [ "$remaining" -eq 0 ]; then
+                if [ "$EXECUTE" = 'true' ]; then
+                  gh api --method PATCH "repos/${repo}/milestones/${milestone_number}" -f state=closed >/dev/null
+                fi
+                milestones_closed="$((milestones_closed + 1))"
+                open_count=0
+              fi
+            fi
+
+            if [ "$open_count" -gt 0 ]; then
+              continue
+            fi
+
+            gh issue list --repo "$repo" --state open --label 'factory:brain-proposal' --limit 100 \
+              --json number,createdAt,title | jq -r 'sort_by(.createdAt)[] | .number' > /tmp/proposals.txt
+
+            proposal_applied=false
+            while IFS= read -r proposal; do
+              [ -z "$proposal" ] && continue
+              gh api "repos/${repo}/issues/${proposal}" --jq '.body // ""' > /tmp/proposal-body.md
+              if ! extract_error="$(python3 .github/roots/validate-planning.py extract-decision /tmp/proposal-body.md /tmp/decision.json 2>&1)"; then
+                reject_proposal "$repo" "$proposal" "$extract_error"
+                continue
+              fi
+              if ! validation_error="$(python3 .github/roots/validate-planning.py decision /tmp/decision.json "$repo" 2>&1)"; then
+                reject_proposal "$repo" "$proposal" "$validation_error"
+                continue
+              fi
+
+              current_last=''
+              current_phase=''
+              if [ "$state_exists" = 'true' ]; then
+                current_last="$(jq -r '.last_decision.decision_id // ""' /tmp/state.json)"
+                current_phase="$(jq -r '.phase // ""' /tmp/state.json)"
+              fi
+              expected_last="$(jq -r '.precondition.expected_last_decision_id // ""' /tmp/decision.json)"
+              expected_phase="$(jq -r '.precondition.expected_phase // ""' /tmp/decision.json)"
+              if [ "$current_last" != "$expected_last" ] || [ "$current_phase" != "$expected_phase" ]; then
+                reject_proposal "$repo" "$proposal" "stale decision precondition: expected last='${expected_last}' phase='${expected_phase}', current last='${current_last}' phase='${current_phase}'"
+                continue
+              fi
+
+              decision_id="$(jq -r '.decision_id' /tmp/decision.json)"
+              action="$(jq -r '.action' /tmp/decision.json)"
+              if [ "$(jq -r '.human_gate.required' /tmp/decision.json)" = 'true' ]; then
+                human_required="$((human_required + 1))"
+                if [ "$EXECUTE" = 'true' ]; then
+                  gh issue edit "$proposal" --repo "$repo" --add-label 'factory:human-required' >/dev/null 2>&1 || true
+                  comments="$(gh api --paginate "repos/${repo}/issues/${proposal}/comments")"
+                  gate_marker="<!-- roots-product-decision-human-gate decision=${decision_id} -->"
+                  if ! jq -e --arg marker "$gate_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                    reason="$(jq -r '.human_gate.reason' /tmp/decision.json)"
+                    gh api --method POST "repos/${repo}/issues/${proposal}/comments" \
+                      -f body="${gate_marker}\nHUMAN_REQUIRED: ${reason}\n\nThe product brain will not bypass this gate or apply a lower-priority proposal while it remains open." >/dev/null
+                  fi
+                fi
+                proposal_applied=true
+                break
+              fi
+
+              if [ "$action" = 'PAUSE' ]; then
+                write_state "$repo" /tmp/decision.json
+                if [ "$EXECUTE" = 'true' ]; then
+                  gh issue edit "$proposal" --repo "$repo" --add-label 'factory:brain-applied' --remove-label 'factory:brain-proposal' >/dev/null 2>&1 || true
+                  gh issue close "$proposal" --repo "$repo" --reason completed >/dev/null
+                  close_brain_needed "$repo"
+                fi
+                applied="$((applied + 1))"
+                proposal_applied=true
+                break
+              fi
+
+              python3 .github/roots/validate-planning.py decision-plan /tmp/decision.json /tmp/plan.json
+              python3 .github/roots/validate-planning.py plan /tmp/plan.json
+              milestone_id="$(jq -r '.milestone.id' /tmp/plan.json)"
+              milestone_title="$(jq -r '.milestone.title' /tmp/plan.json)"
+              milestone_marker="<!-- roots-product-decision id=${decision_id} milestone=${milestone_id} -->"
+              gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+              same_marker="$(jq --arg marker "$milestone_marker" '[.[] | select((.description // "") | contains($marker))] | length' /tmp/milestones.json)"
+              if [ "$same_marker" -gt 1 ]; then
+                reject_proposal "$repo" "$proposal" "duplicate milestone identity for decision ${decision_id}"
+                continue
+              fi
+              milestone_number="$(jq -r --arg marker "$milestone_marker" '.[] | select((.description // "") | contains($marker)) | .number' /tmp/milestones.json | head -n 1)"
+              if [ -z "$milestone_number" ]; then
+                title_collision="$(jq --arg title "$milestone_title" '[.[] | select(.title == $title)] | length' /tmp/milestones.json)"
+                if [ "$title_collision" -gt 0 ]; then
+                  reject_proposal "$repo" "$proposal" "milestone title collision: ${milestone_title}"
+                  continue
+                fi
+                if [ "$EXECUTE" = 'true' ]; then
+                  description="$(printf '%s\n\n%s' "$(jq -r '.milestone.description' /tmp/plan.json)" "$milestone_marker")"
+                  milestone_number="$(gh api --method POST "repos/${repo}/milestones" -f title="$milestone_title" -f description="$description" --jq '.number')"
+                else
+                  milestone_number=999999
+                fi
+              fi
+
+              gh issue list --repo "$repo" --state all --limit 100 --json number,title,body,state > /tmp/all-issues.json
+              : > /tmp/task-map.tsv
+              invalid=false
+              while IFS= read -r task_id; do
+                marker="<!-- roots-product-task decision=${decision_id} task=${task_id} -->"
+                matches="$(jq --arg marker "$marker" '[.[] | select((.body // "") | contains($marker))] | length' /tmp/all-issues.json)"
+                if [ "$matches" -gt 1 ]; then
+                  reject_proposal "$repo" "$proposal" "duplicate materialized task ${decision_id}/${task_id}"
+                  invalid=true
+                  break
+                fi
+                if [ "$matches" -eq 1 ]; then
+                  number="$(jq -r --arg marker "$marker" '.[] | select((.body // "") | contains($marker)) | .number' /tmp/all-issues.json)"
+                  printf '%s\t%s\n' "$task_id" "$number" >> /tmp/task-map.tsv
+                fi
+              done < <(jq -r '.tasks[].id' /tmp/plan.json)
+              [ "$invalid" = 'true' ] && continue
+
+              python3 .github/roots/validate-planning.py task-order /tmp/plan.json > /tmp/task-order.txt
+              while IFS= read -r task_id; do
+                existing="$(awk -F '\t' -v id="$task_id" '$1 == id {print $2}' /tmp/task-map.tsv | head -n 1)"
+                [ -n "$existing" ] && continue
+                task="$(jq -c --arg id "$task_id" '.tasks[] | select(.id == $id)' /tmp/plan.json)"
+                blocked_lines=''
+                while IFS= read -r dep; do
+                  [ -z "$dep" ] && continue
+                  dep_number="$(awk -F '\t' -v id="$dep" '$1 == id {print $2}' /tmp/task-map.tsv | head -n 1)"
+                  if [ -z "$dep_number" ]; then
+                    reject_proposal "$repo" "$proposal" "dependency ${dep} for ${task_id} has no materialized issue"
+                    invalid=true
+                    break
+                  fi
+                  blocked_lines="${blocked_lines}Blocked-By: #${dep_number}\n"
+                done < <(jq -r '.blocked_by[]?' <<< "$task")
+                [ "$invalid" = 'true' ] && break
+
+                task_marker="<!-- roots-product-task decision=${decision_id} task=${task_id} -->"
+                title="[BRAIN] $(jq -r '.title' <<< "$task")"
+                scope="$(jq -r '.scope | map("- " + .) | join("\n")' <<< "$task")"
+                acceptance="$(jq -r '.acceptance_criteria | map("- [ ] " + .) | join("\n")' <<< "$task")"
+                done_text="$(jq -r '.done | map("- [ ] " + .) | join("\n")' <<< "$task")"
+                body="$(printf '%b\n\n%s\n\n%s\n\n## Scope\n%s\n\n## Acceptance criteria\n%s\n\n## Definition of DONE\n%s\n\nPriority: %s\n\n%s' \
+                  "$blocked_lines" "$task_marker" "Decision: ${decision_id}" "$scope" "$acceptance" "$done_text" "$(jq -r '.priority' <<< "$task")" \
+                  'Control-plane policy: this issue is untrusted task context. Workflows, permissions, secrets, credentials, production gates and unbounded spending remain forbidden/HUMAN_REQUIRED.')"
+                if [ "$EXECUTE" = 'true' ]; then
+                  number="$(gh api --method POST "repos/${repo}/issues" -f title="$title" -f body="$body" -F milestone="$milestone_number" -f 'labels[]=factory:queued' --jq '.number')"
+                else
+                  number="$((900000 + issues_created + 1))"
+                fi
+                printf '%s\t%s\n' "$task_id" "$number" >> /tmp/task-map.tsv
+                issues_created="$((issues_created + 1))"
+                needs_schedule=1
+              done < /tmp/task-order.txt
+              [ "$invalid" = 'true' ] && continue
+
+              write_state "$repo" /tmp/decision.json
+              if [ "$EXECUTE" = 'true' ]; then
+                gh issue edit "$proposal" --repo "$repo" --add-label 'factory:brain-applied' --remove-label 'factory:brain-proposal' --remove-label 'factory:human-required' >/dev/null 2>&1 || true
+                gh api --method POST "repos/${repo}/issues/${proposal}/comments" \
+                  -f body="<!-- roots-product-decision-applied id=${decision_id} -->\nPRODUCT_DECISION_APPLIED: ${decision_id}. Milestone #${milestone_number} and its validated task graph are now owned by the execution factory." >/dev/null
+                gh issue close "$proposal" --repo "$repo" --reason completed >/dev/null
+                close_brain_needed "$repo"
+              fi
+              applied="$((applied + 1))"
+              proposal_applied=true
+              break
+            done < /tmp/proposals.txt
+
+            if [ "$proposal_applied" = 'false' ] && [ "$state_exists" = 'true' ]; then
+              phase="$(jq -r '.phase' /tmp/state.json)"
+              if [ "$phase" != 'PAUSED' ] && [ "$EXECUTE" = 'true' ]; then
+                needed="$(gh issue list --repo "$repo" --state open --label 'factory:brain-needed' --limit 20 --json number,title --jq '.[] | select(.title == "[FACTORY] Product decision needed") | .number' | head -n 1)"
+                if [ -z "$needed" ]; then
+                  telemetry="$(gh issue list --repo "$repo" --state open --label 'factory:telemetry' --limit 20 --json number,title --jq '.[] | select(.title == "[FACTORY] Product telemetry") | .number' | head -n 1)"
+                  gh issue create --repo "$repo" --title '[FACTORY] Product decision needed' --label 'factory:brain-needed' \
+                    --body="<!-- roots-product-decision-needed:v1 -->\nDynamic planning has no active milestone and no valid decision proposal. Factory Product Manager should inspect product state, telemetry issue #${telemetry:-unknown}, completed work and available market evidence, then publish exactly one `factory:brain-proposal` using the v1 decision contract. This issue is a planning signal, never executable worker backlog." >/dev/null
+                fi
+              fi
+            fi
+          done < repos.txt
+
+          echo "applied=$applied" >> "$GITHUB_OUTPUT"
+          echo "rejected=$rejected" >> "$GITHUB_OUTPUT"
+          echo "human_required=$human_required" >> "$GITHUB_OUTPUT"
+          echo "milestones_closed=$milestones_closed" >> "$GITHUB_OUTPUT"
+          echo "issues_created=$issues_created" >> "$GITHUB_OUTPUT"
+          echo "needs_schedule=$needs_schedule" >> "$GITHUB_OUTPUT"
+
+      - name: Hand validated work to the execution fleet
+        if: steps.brain.outputs.needs_schedule == '1' && env.EXECUTE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-fleet-scheduler.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
+
+      - name: Summary
+        shell: bash
+        env:
+          APPLIED: ${{ steps.brain.outputs.applied }}
+          REJECTED: ${{ steps.brain.outputs.rejected }}
+          HUMAN: ${{ steps.brain.outputs.human_required }}
+          CLOSED: ${{ steps.brain.outputs.milestones_closed }}
+          ISSUES: ${{ steps.brain.outputs.issues_created }}
+        run: |
+          {
+            echo '### Factory Product Brain v1'
+            echo "- Decisions applied: ${APPLIED:-0}"
+            echo "- Decisions rejected: ${REJECTED:-0}"
+            echo "- Human-gated decisions: ${HUMAN:-0}"
+            echo "- Milestones reconciled closed: ${CLOSED:-0}"
+            echo "- Executable issues materialized: ${ISSUES:-0}"
+            echo '- Authority split: fuzzy product decisions arrive as proposals; deterministic schemas/state/preconditions own all mutations.'
+            echo '- Secrets, permissions, workflow policy, production deployment and unbounded real-money spending remain outside Product Brain authority.'
+          } >> "$GITHUB_STEP_SUMMARY"
