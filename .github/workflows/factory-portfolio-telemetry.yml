@@ -1,0 +1,168 @@
+name: factory-portfolio-telemetry-v1
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '4,19,34,49 * * * *'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: factory-portfolio-telemetry
+  cancel-in-progress: false
+
+jobs:
+  portfolio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      CONTROL_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      ROADMAP: .github/roots/micro-saas-roadmap-v1.json
+      SCHEMA: .github/roots/factory-portfolio-telemetry.schema.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build portfolio telemetry from canonical GitHub state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+          jq -r '.milestones[].title' "$ROADMAP" | sort -u > /tmp/expected-roadmap.txt
+          : > /tmp/repositories.ndjson
+          : > /tmp/active.tsv
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" \
+              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
+              /tmp/profile.json >/dev/null || continue
+
+            phase=''
+            planner_mode=''
+            dynamic=false
+            if gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/product-state.json" > /tmp/state.json 2>/dev/null; then
+              phase="$(jq -r '.phase // ""' /tmp/state.json)"
+              planner_mode="$(jq -r '.planner_mode // ""' /tmp/state.json)"
+              dynamic=true
+            fi
+
+            gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+            jq -r '.[] | select(.state == "closed") | .title' /tmp/milestones.json | sort -u > /tmp/closed-roadmap.txt
+            comm -23 /tmp/expected-roadmap.txt /tmp/closed-roadmap.txt > /tmp/missing-roadmap.txt
+            roadmap_complete=false
+            [ ! -s /tmp/missing-roadmap.txt ] && roadmap_complete=true
+
+            open_milestones="$(jq '[.[] | select(.state == "open")] | length' /tmp/milestones.json)"
+            queued="$(gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number --jq 'length')"
+            dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
+            dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
+            blocked="$(gh issue list --repo "$repo" --state open --label 'factory:blocked' --limit 100 --json number --jq 'length')"
+            brain_needed="$(gh issue list --repo "$repo" --state open --label 'factory:brain-needed' --limit 100 --json number --jq 'length')"
+            brain_proposals="$(gh issue list --repo "$repo" --state open --label 'factory:brain-proposal' --limit 100 --json number --jq 'length')"
+            human_required="$(gh issue list --repo "$repo" --state open --label 'factory:human-required' --limit 100 --json number --jq 'length')"
+            open_prs="$(gh pr list --repo "$repo" --state open --limit 100 --json number --jq 'length')"
+
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              printf '%s\t%s\n' "$repo" "$issue" >> /tmp/active.tsv
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq '.[].number')
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              printf '%s\t%s\n' "$repo" "$issue" >> /tmp/active.tsv
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
+
+            jq -n \
+              --arg repository "$repo" \
+              --arg phase "$phase" \
+              --arg planner_mode "$planner_mode" \
+              --argjson open_milestones "$open_milestones" \
+              --argjson queued "$queued" \
+              --argjson dispatching "$dispatching" \
+              --argjson dispatched "$dispatched" \
+              --argjson blocked "$blocked" \
+              --argjson brain_needed "$brain_needed" \
+              --argjson brain_proposals "$brain_proposals" \
+              --argjson human_required "$human_required" \
+              --argjson open_prs "$open_prs" \
+              --argjson roadmap_complete "$roadmap_complete" \
+              '{repository:$repository,phase:(if $phase == "" then null else $phase end),planner_mode:(if $planner_mode == "" then null else $planner_mode end),open_milestones:$open_milestones,queued:$queued,dispatching:$dispatching,dispatched:$dispatched,blocked:$blocked,brain_needed:$brain_needed,brain_proposals:$brain_proposals,human_required:$human_required,open_prs:$open_prs,roadmap_complete:$roadmap_complete}' \
+              >> /tmp/repositories.ndjson
+          done < /tmp/repos.txt
+
+          if [ -s /tmp/repositories.ndjson ]; then
+            jq -s '.' /tmp/repositories.ndjson > /tmp/repositories.json
+          else
+            printf '%s\n' '[]' > /tmp/repositories.json
+          fi
+
+          active_count="$(sort -u /tmp/active.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          lock_repo=''
+          lock_issue=''
+          if [ "$active_count" -gt 0 ]; then
+            sort -u /tmp/active.tsv | head -n 1 > /tmp/first-active.tsv
+            lock_repo="$(cut -f1 /tmp/first-active.tsv)"
+            lock_issue="$(cut -f2 /tmp/first-active.tsv)"
+          fi
+          if [ "$active_count" -gt 1 ]; then
+            echo "CONTROL_PLANE_ANOMALY: global sequential worker lock has ${active_count} active task identities." >&2
+          fi
+
+          managed="$(jq 'length' /tmp/repositories.json)"
+          active_products="$(jq '[.[] | select(.phase != null)] | length' /tmp/repositories.json)"
+          queued_total="$(jq '[.[].queued] | add // 0' /tmp/repositories.json)"
+          blocked_total="$(jq '[.[].blocked] | add // 0' /tmp/repositories.json)"
+          brain_needed_total="$(jq '[.[].brain_needed] | add // 0' /tmp/repositories.json)"
+          human_total="$(jq '[.[].human_required] | add // 0' /tmp/repositories.json)"
+          idle_without_next="$(jq '[.[] | select((.planner_mode != null or .roadmap_complete == true) and .open_milestones == 0 and .queued == 0 and .dispatching == 0 and .dispatched == 0 and .brain_needed == 0 and .brain_proposals == 0 and .human_required == 0)] | length' /tmp/repositories.json)"
+          now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          jq -n \
+            --arg generated_at "$now" \
+            --arg owner "$OWNER" \
+            --arg lock_repo "$lock_repo" \
+            --arg lock_issue "$lock_issue" \
+            --argjson active_count "$active_count" \
+            --slurpfile repositories /tmp/repositories.json \
+            --argjson managed "$managed" \
+            --argjson active_products "$active_products" \
+            --argjson queued "$queued_total" \
+            --argjson blocked "$blocked_total" \
+            --argjson brain_needed "$brain_needed_total" \
+            --argjson human_required "$human_total" \
+            --argjson idle_without_next "$idle_without_next" \
+            '{version:1,generated_at:$generated_at,owner:$owner,worker_lock:{active:($active_count > 0),repository:(if $lock_repo == "" then null else $lock_repo end),issue:(if $lock_issue == "" then null else ($lock_issue|tonumber) end)},repositories:$repositories[0],summary:{managed_repositories:$managed,active_products:$active_products,queued:$queued,blocked:$blocked,brain_needed:$brain_needed,human_required:$human_required,idle_without_next_transition:$idle_without_next}}' \
+            > /tmp/portfolio.json
+
+          python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
+          python3 -c 'import json,jsonschema; d=json.load(open("/tmp/portfolio.json")); s=json.load(open(".github/roots/factory-portfolio-telemetry.schema.json")); jsonschema.Draft202012Validator(s,format_checker=jsonschema.FormatChecker()).validate(d)'
+
+          export GH_TOKEN="$CONTROL_TOKEN"
+          gh label create 'factory:telemetry' --repo "$GITHUB_REPOSITORY" --color 5319E7 \
+            --description 'Factory-generated product and portfolio telemetry' --force >/dev/null 2>&1 || true
+          title='[FACTORY] Portfolio telemetry'
+          issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label 'factory:telemetry' --limit 50 --json number,title --jq '.[] | select(.title == "[FACTORY] Portfolio telemetry") | .number' | head -n 1)"
+          fence="$(printf '\140\140\140')"
+          body="$(printf '%s\n%sjson\n%s\n%s\n\n%s' '<!-- roots-portfolio-telemetry:v1 -->' "$fence" "$(cat /tmp/portfolio.json)" "$fence" 'Operational telemetry only. Market, revenue and spend evidence must come from separately authorized sources; absent evidence is not inferred.')"
+          if [ -z "$issue" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label 'factory:telemetry' --body "$body" >/dev/null
+          else
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --body "$body" >/dev/null
+          fi
+
+          if [ "$idle_without_next" -gt 0 ]; then
+            echo "AUTONOMY_SLO_DEGRADED: ${idle_without_next} managed repo(s) have no active work and no explicit next transition." >&2
+          fi
