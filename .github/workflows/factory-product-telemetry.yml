@@ -1,0 +1,117 @@
+name: factory-product-telemetry-v1
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-product-telemetry
+  cancel-in-progress: false
+
+jobs:
+  telemetry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build persistent fleet telemetry snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+
+          updated=0
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" \
+              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
+              /tmp/profile.json >/dev/null || continue
+
+            gh label create 'factory:telemetry' --repo "$repo" --color 5319E7 \
+              --description 'Factory-generated product and flow telemetry' --force >/dev/null 2>&1 || true
+
+            gh api --paginate "repos/${repo}/issues?state=all&per_page=100" > /tmp/issues.json
+            gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+            gh pr list --repo "$repo" --state open --limit 100 --json number > /tmp/open-prs.json
+            gh pr list --repo "$repo" --state merged --limit 100 --json number > /tmp/merged-prs.json
+
+            open_issues="$(jq '[.[] | select(.pull_request == null and .state == "open")] | length' /tmp/issues.json)"
+            queued="$(jq '[.[] | select(.pull_request == null and .state == "open") | select(any(.labels[]?; .name == "factory:queued"))] | length' /tmp/issues.json)"
+            dispatching="$(jq '[.[] | select(.pull_request == null and .state == "open") | select(any(.labels[]?; .name == "factory:dispatching"))] | length' /tmp/issues.json)"
+            dispatched="$(jq '[.[] | select(.pull_request == null and .state == "open") | select(any(.labels[]?; .name == "factory:dispatched"))] | length' /tmp/issues.json)"
+            blocked="$(jq '[.[] | select(.pull_request == null and .state == "open") | select(any(.labels[]?; .name == "factory:blocked"))] | length' /tmp/issues.json)"
+            done_count="$(jq '[.[] | select(.pull_request == null) | select(any(.labels[]?; .name == "factory:done"))] | length' /tmp/issues.json)"
+            open_milestones="$(jq '[.[] | select(.state == "open")] | length' /tmp/milestones.json)"
+            closed_milestones="$(jq '[.[] | select(.state == "closed")] | length' /tmp/milestones.json)"
+            open_prs="$(jq 'length' /tmp/open-prs.json)"
+            merged_prs="$(jq 'length' /tmp/merged-prs.json)"
+            jq '[.[] | select(.pull_request == null and .state == "closed" and .created_at != null and .closed_at != null) | (((.closed_at | fromdateiso8601) - (.created_at | fromdateiso8601)) / 3600)]' /tmp/issues.json > /tmp/cycles.json
+
+            rework_events=0
+            rework_issue_count=0
+            blocked_events=0
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              count="$(jq '[.[] | select((.body // "") | contains("<!-- roots-fleet-ci-rework fingerprint="))] | length' <<< "$comments")"
+              blocked_count="$(jq '[.[] | select((.body // "") | contains("CONTROL_PLANE_BLOCKED"))] | length' <<< "$comments")"
+              rework_events="$((rework_events + count))"
+              blocked_events="$((blocked_events + blocked_count))"
+              if [ "$count" -gt 0 ]; then
+                rework_issue_count="$((rework_issue_count + 1))"
+              fi
+            done < <(jq -r '.[] | select(.pull_request == null) | select(any(.labels[]?; .name == "factory:done")) | .number' /tmp/issues.json)
+
+            jq -n \
+              --argjson open_issues "$open_issues" \
+              --argjson queued "$queued" \
+              --argjson dispatching "$dispatching" \
+              --argjson dispatched "$dispatched" \
+              --argjson blocked "$blocked" \
+              --argjson done "$done_count" \
+              --argjson open_milestones "$open_milestones" \
+              --argjson closed_milestones "$closed_milestones" \
+              --argjson open_prs "$open_prs" \
+              --argjson merged_prs "$merged_prs" \
+              --argjson rework_events "$rework_events" \
+              --argjson rework_issue_count "$rework_issue_count" \
+              --argjson blocked_events "$blocked_events" \
+              --slurpfile cycle_hours /tmp/cycles.json \
+              '{open_issues:$open_issues,queued:$queued,dispatching:$dispatching,dispatched:$dispatched,blocked:$blocked,done:$done,open_milestones:$open_milestones,closed_milestones:$closed_milestones,open_prs:$open_prs,merged_prs:$merged_prs,rework_events:$rework_events,rework_issue_count:$rework_issue_count,blocked_events:$blocked_events,cycle_hours:$cycle_hours[0],external_signal:null,revenue_signal:null,cost_signal:null}' \
+              > /tmp/snapshot.json
+
+            now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            python3 .github/roots/factory-product-brain.py telemetry "$repo" "$now" /tmp/snapshot.json /tmp/telemetry.json
+            python3 .github/roots/validate-planning.py telemetry /tmp/telemetry.json "$repo"
+
+            title='[FACTORY] Product telemetry'
+            telemetry_issue="$(gh issue list --repo "$repo" --state open --label 'factory:telemetry' --limit 20 --json number,title --jq '.[] | select(.title == "[FACTORY] Product telemetry") | .number' | head -n 1)"
+            body="$(printf '%s\n```json\n%s\n```\n\n%s' '<!-- roots-product-telemetry:v1 -->' "$(cat /tmp/telemetry.json)" 'Generated by Roots from GitHub operational evidence. Market/revenue/cost fields remain null until an authorized data source supplies them.')"
+            if [ -z "$telemetry_issue" ]; then
+              gh issue create --repo "$repo" --title "$title" --label 'factory:telemetry' --body "$body" >/dev/null
+            else
+              gh issue edit "$telemetry_issue" --repo "$repo" --body "$body" >/dev/null
+            fi
+            updated="$((updated + 1))"
+          done < repos.txt
+
+          echo "Telemetry snapshots updated: ${updated}."
