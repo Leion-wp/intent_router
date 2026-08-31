@@ -4,11 +4,20 @@
   "title": "FactoryProductDecision",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "decision_id", "repository", "action", "objective", "hypothesis", "success_metric", "product_context", "confidence", "risk", "evidence", "milestone", "human_gate"],
+  "required": ["version", "decision_id", "repository", "precondition", "action", "objective", "hypothesis", "success_metric", "product_context", "confidence", "risk", "evidence", "milestone", "human_gate"],
   "properties": {
     "version": {"type": "integer", "const": 1},
     "decision_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,80}$"},
     "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "precondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_last_decision_id", "expected_phase"],
+      "properties": {
+        "expected_last_decision_id": {"type": ["string", "null"], "pattern": "^[a-z0-9][a-z0-9._-]{1,80}$"},
+        "expected_phase": {"type": ["string", "null"], "enum": ["FOUNDATION", "VALUE", "HARDENING", "LAUNCH_READY", "MEASURING", "ITERATING", "PAUSED", null]}
+      }
+    },
     "action": {"type": "string", "enum": ["BUILD", "HARDEN", "MEASURE", "PIVOT", "PAUSE", "LAUNCH_READY"]},
     "objective": {"type": "string", "minLength": 10, "maxLength": 1500},
     "hypothesis": {"type": "string", "minLength": 10, "maxLength": 1500},
