@@ -1,0 +1,146 @@
+name: factory-fleet-watchdog-v1
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '1,11,21,31,41,51 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-fleet-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect stalled or inconsistent worker state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          test -n "$JULES_API_KEY"
+          echo "::add-mask::$FLEET_TOKEN"
+          echo "::add-mask::$JULES_API_KEY"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+
+          active_total=0
+          nudged=0
+          blocked=0
+          anomalies=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
+            branch="$(jq -r '.default_branch' /tmp/profile.json)"
+            gh label create 'factory:stalled' --repo "$repo" --color D93F0B \
+              --description 'Factory worker/control state requires attention' --force >/dev/null 2>&1 || true
+            gh label create 'factory:blocked' --repo "$repo" --color B60205 \
+              --description 'Factory stopped fail-closed' --force >/dev/null 2>&1 || true
+
+            dispatching_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
+            dispatched_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
+            active_total="$((active_total + dispatching_count + dispatched_count))"
+
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              session_body="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-jules-session task_id='"${repo}#${issue}"' "))] | last | .body // empty' <<< "$comments")"
+              if [ -z "$session_body" ]; then
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} is dispatched without persisted Jules session." >&2
+                continue
+              fi
+              session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_body" | head -n 1)"
+              [ -z "$session" ] && continue
+              session_id="${session##*/}"
+
+              gh pr list --repo "$repo" --state open --limit 100 \
+                --json number,body,headRefName,baseRefName,url > /tmp/prs.json
+              jq --argjson issue "$issue" --arg branch "$branch" \
+                '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]' \
+                /tmp/prs.json > /tmp/linked.json
+              count="$(jq 'length' /tmp/linked.json)"
+              if [ "$count" -eq 0 ]; then
+                jq --arg branch "$branch" --arg session_id "$session_id" \
+                  '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' \
+                  /tmp/prs.json > /tmp/linked.json
+                count="$(jq 'length' /tmp/linked.json)"
+              fi
+
+              if [ "$count" -gt 1 ]; then
+                anomalies="$((anomalies + 1))"
+                gh issue edit "$issue" --repo "$repo" --add-label 'factory:blocked' --add-label 'factory:stalled' >/dev/null 2>&1 || true
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${count} active PR candidates for session ${session}." >&2
+                continue
+              fi
+              [ "$count" -eq 1 ] && continue
+
+              session_time="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-jules-session task_id='"${repo}#${issue}"' "))] | last | .created_at // empty' <<< "$comments")"
+              [ -z "$session_time" ] && continue
+              age_seconds="$(date -u -d "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" +%s)"
+              session_seconds="$(date -u -d "$session_time" +%s)"
+              age_seconds="$((age_seconds - session_seconds))"
+
+              nudge_marker="<!-- roots-worker-watchdog-nudge session=${session} -->"
+              block_marker="<!-- roots-worker-watchdog-block session=${session} -->"
+              nudged_before=false
+              blocked_before=false
+              if jq -e --arg marker "$nudge_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                nudged_before=true
+              fi
+              if jq -e --arg marker "$block_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                blocked_before=true
+              fi
+
+              if [ "$age_seconds" -ge 7200 ] && [ "$nudged_before" = 'false' ]; then
+                prompt="CONTROL-PLANE WATCHDOG: continue the SAME task ${repo}#${issue} in this SAME Jules session. No PR is visible yet after two hours. Inspect your current work, resolve blockers that do not require new credentials/permissions, run relevant checks, then commit/push and create or update the single PR for this task. Never create another session. Workflows, secrets, permissions and production deployment remain forbidden."
+                curl --fail-with-body --silent --show-error -X POST \
+                  -H 'Content-Type: application/json' \
+                  -H "X-Goog-Api-Key: $JULES_API_KEY" \
+                  --data "$(jq -nc --arg prompt "$prompt" '{prompt:$prompt}')" \
+                  "https://jules.googleapis.com/v1alpha/${session}:sendMessage" >/dev/null
+                gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                  -f body="${nudge_marker}\nWorker watchdog sent one same-session recovery nudge after two hours without an active PR. No replacement session was created." >/dev/null
+                gh issue edit "$issue" --repo "$repo" --add-label 'factory:stalled' >/dev/null 2>&1 || true
+                nudged="$((nudged + 1))"
+              fi
+
+              if [ "$age_seconds" -ge 21600 ] && [ "$blocked_before" = 'false' ]; then
+                gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                  -f body="${block_marker}\nCONTROL_PLANE_BLOCKED: no active PR is visible six hours after the persisted Jules session was created. The same-session nudge path has been exhausted. The issue remains active to preserve the one-session invariant; HUMAN_REQUIRED before abandoning or replacing this worker identity." >/dev/null
+                gh issue edit "$issue" --repo "$repo" --add-label 'factory:blocked' --add-label 'factory:stalled' >/dev/null 2>&1 || true
+                blocked="$((blocked + 1))"
+              fi
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
+          done < repos.txt
+
+          if [ "$active_total" -gt 1 ]; then
+            anomalies="$((anomalies + 1))"
+            echo "CONTROL_PLANE_ANOMALY: fleet has ${active_total} dispatching/dispatched tasks; sequential invariant is violated." >&2
+          fi
+
+          {
+            echo '### Fleet watchdog'
+            echo "- Active worker identities: ${active_total}"
+            echo "- Same-session recovery nudges: ${nudged}"
+            echo "- Six-hour fail-closed blocks: ${blocked}"
+            echo "- Control-plane anomalies: ${anomalies}"
+            echo '- Recovery never creates a replacement Jules session, branch or PR.'
+          } >> "$GITHUB_STEP_SUMMARY"
