@@ -38,7 +38,7 @@ jobs:
           echo "::add-mask::$FLEET_TOKEN"
           export GH_TOKEN="$FLEET_TOKEN"
           test "$(gh api user --jq '.login')" = "$OWNER"
-          jq -e '.version == 1 and .enabled == true and .scope.managed_only == true and .scope.exclude_control_plane_repository == true and .pull_request.require_single_correlated_pr == true' "$POLICY" >/dev/null
+          jq -e '.version == 1 and .enabled == true and .scope.managed_only == true and .scope.exclude_control_plane_repository == true and .pull_request.require_single_correlated_pr == true and .quality.require_head_specific_verdict == true' "$POLICY" >/dev/null
 
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
@@ -180,6 +180,36 @@ jobs:
                 continue
               fi
 
+              negative_quality=false
+              for verdict in REWORK BLOCK; do
+                marker="<!-- roots-quality-verdict head=${sha} verdict=${verdict} -->"
+                if jq -e --arg marker "$marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                  negative_quality=true
+                  break
+                fi
+              done
+              if [ "$negative_quality" = 'true' ]; then
+                blocked="$((blocked + 1))"
+                continue
+              fi
+
+              quality_ok=false
+              accepted_verdict=''
+              while IFS= read -r verdict; do
+                [ -z "$verdict" ] && continue
+                marker="<!-- roots-quality-verdict head=${sha} verdict=${verdict} -->"
+                if jq -e --arg marker "$marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                  quality_ok=true
+                  accepted_verdict="$verdict"
+                  break
+                fi
+              done < <(jq -r '.quality.accepted_verdicts[]' "$POLICY")
+              if [ "$quality_ok" != 'true' ]; then
+                echo "AUTO_MERGE_WAITING_QUALITY: ${repo}#${issue} PR #${pr} head ${sha}." >&2
+                deferred="$((deferred + 1))"
+                continue
+              fi
+
               mergeable="$(jq -r '.mergeable' /tmp/pr.json)"
               mergeable_state="$(jq -r '.mergeable_state // "unknown"' /tmp/pr.json)"
               if [ "$mergeable" != 'true' ] || [ "$mergeable_state" = 'dirty' ] || [ "$mergeable_state" = 'blocked' ]; then
@@ -190,7 +220,7 @@ jobs:
               ready_marker="<!-- roots-managed-automerge-ready head=${sha} -->"
               if ! jq -e --arg marker "$ready_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
                 gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                  -f body="${ready_marker}\nAUTO_MERGE_READY: PR #${pr} passed the managed-product merge policy at head ${sha}. CI required jobs are green; no protected control-plane path is touched." >/dev/null
+                  -f body="${ready_marker}\nAUTO_MERGE_READY: PR #${pr} passed managed-product CI and protected-path gates plus head-specific Quality Manager verdict ${accepted_verdict} at ${sha}." >/dev/null
               fi
 
               if [ "$EXECUTE" != 'true' ]; then
@@ -201,7 +231,7 @@ jobs:
                 -f sha="$sha" -f merge_method="$merge_method" > /tmp/merge.json 2>/tmp/merge.err; then
                 if [ "$(jq -r '.merged // false' /tmp/merge.json)" = 'true' ]; then
                   gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                    -f body="<!-- roots-managed-automerge-done head=${sha} -->\nAUTO_MERGE_DONE: managed PR #${pr} merged automatically after deterministic policy and CI gates. Completion reconciliation owns the next transition." >/dev/null
+                    -f body="<!-- roots-managed-automerge-done head=${sha} -->\nAUTO_MERGE_DONE: managed PR #${pr} merged automatically after CI, policy and head-specific quality gates. Completion reconciliation owns the next transition." >/dev/null
                   merged="$((merged + 1))"
                 else
                   deferred="$((deferred + 1))"
