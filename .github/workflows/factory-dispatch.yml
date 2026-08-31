@@ -135,8 +135,8 @@ jobs:
           set -euo pipefail
           preferred="$(jq -r '.requirements.preferred_worker // empty' factory-task.json)"
           required="$(jq -c '.requirements.capabilities' factory-task.json)"
-
           compatible='[.workers[] | select(.status == "ENABLED") | select((.capabilities as $caps | $required | all(. as $r | $caps | index($r) != null)))]'
+
           if [ -n "$preferred" ]; then
             worker="$(jq -r --arg p "$preferred" --argjson required "$required" "$compatible | map(select(.worker_id == \$p)) | .[0].worker_id // empty" .github/roots/worker-registry.json)"
           else
@@ -169,3 +169,43 @@ jobs:
           path: factory-task.json
           if-no-files-found: error
           retention-days: 7
+
+  dispatch-jules:
+    needs: compile-task
+    if: needs.compile-task.outputs.execute == 'true' && needs.compile-task.outputs.selected_worker == 'jules'
+    uses: ./.github/workflows/factory-worker-jules.yml
+    with:
+      task_json: ${{ needs.compile-task.outputs.task_json }}
+      execute: true
+    secrets:
+      JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+
+  dispatch-codex:
+    needs: compile-task
+    if: needs.compile-task.outputs.execute == 'true' && needs.compile-task.outputs.selected_worker == 'codex'
+    uses: ./.github/workflows/factory-worker-codex.yml
+    with:
+      task_json: ${{ needs.compile-task.outputs.task_json }}
+      execute: true
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+  dispatch-claude:
+    needs: compile-task
+    if: needs.compile-task.outputs.execute == 'true' && needs.compile-task.outputs.selected_worker == 'claude'
+    uses: ./.github/workflows/factory-worker-claude.yml
+    with:
+      task_json: ${{ needs.compile-task.outputs.task_json }}
+      execute: true
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  dispatch-gemini:
+    needs: compile-task
+    if: needs.compile-task.outputs.execute == 'true' && needs.compile-task.outputs.selected_worker == 'gemini'
+    uses: ./.github/workflows/factory-worker-gemini.yml
+    with:
+      task_json: ${{ needs.compile-task.outputs.task_json }}
+      execute: true
+    secrets:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
