@@ -65,7 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           project_query="query(\$login:String!){user(login:\$login){projectsV2(first:100){nodes{number title closed}}}}"
-          gh api --paginate 'user/repos?per_page=100&affiliation=owner' --jq --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | [.name,.visibility,.default_branch,.archived] | @tsv' > repositories.tsv
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | [.name,.visibility,.default_branch,.archived] | @tsv' > repositories.tsv
           gh api graphql -f query="$project_query" -F login="$OWNER" --jq '.data.user.projectsV2.nodes[] | [.number,.title,.closed] | @tsv' > projects.tsv
           {
             echo '### Fleet inventory'
