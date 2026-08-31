@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-fleet.schema.json",
+  "title": "FactoryFleet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["organization", "control_repository", "policy"],
+  "properties": {
+    "organization": {"type": "string", "minLength": 1},
+    "control_repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "project_title": {"type": "string", "minLength": 1},
+    "managed_repositories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "enabled"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "enabled": {"type": "boolean"},
+          "default_branch": {"type": "string"},
+          "product_id": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo_creation_requires_human", "project_creation_requires_human", "workflow_mutation_requires_human", "production_requires_human"],
+      "properties": {
+        "repo_creation_requires_human": {"type": "boolean", "const": true},
+        "project_creation_requires_human": {"type": "boolean", "const": true},
+        "workflow_mutation_requires_human": {"type": "boolean", "const": true},
+        "production_requires_human": {"type": "boolean", "const": true}
+      }
+    },
+    "extensions": {"type": "object"}
+  }
+}
