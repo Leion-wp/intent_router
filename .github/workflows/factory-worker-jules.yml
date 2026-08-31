@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   jules:
@@ -88,6 +89,41 @@ jobs:
             --data @request.json \
             'https://jules.googleapis.com/v1alpha/sessions' > jules-session.json
 
+      - name: Persist Jules session mapping
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue="$(jq -r '.source.issue_number' factory-task.json)"
+          task_id="$(jq -r '.task_id' factory-task.json)"
+          session_name="$(jq -r '.name // empty' jules-session.json)"
+          session_id="$(jq -r '.id // empty' jules-session.json)"
+          session_url="$(jq -r '.url // empty' jules-session.json)"
+          test -n "$session_name"
+
+          marker="<!-- roots-jules-session task_id=${task_id} session=${session_name} -->"
+          existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" --jq '.[] | select(.body | contains("<!-- roots-jules-session task_id='"${task_id}"' ")) | .id' | head -n1)"
+          if [ -n "$existing" ]; then
+            echo "Existing Jules session mapping found on issue #${issue}; refusing to create a second mapping." >&2
+            exit 1
+          fi
+
+          body="${marker}
+Roots control-plane worker session
+
+- Worker: Jules
+- Task: ${task_id}
+- Session: ${session_name}
+- Session id: ${session_id}
+- URL: ${session_url}
+- Rework policy: CI feedback must use this same session; never create a replacement session."
+
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
+            -f body="$body" >/dev/null
+
       - name: Emit dispatch result
         shell: bash
         run: |
@@ -96,7 +132,7 @@ jobs:
             --arg task_id "$(jq -r '.task_id' factory-task.json)" \
             --arg execution_id "$(jq -r '.id // .name // empty' jules-session.json)" \
             --arg worker_url "$(jq -r '.url // empty' jules-session.json)" \
-            '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"jules",summary:"Jules session created.",outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:$execution_id,worker_url:$worker_url},evidence:{tests:[],checks:["dispatch accepted by Jules API"]},risks:[],next_action:"WAIT"}' > factory-result.json
+            '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"jules",summary:"Jules session created and durably mapped to the source issue.",outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:$execution_id,worker_url:$worker_url},evidence:{tests:[],checks:["dispatch accepted by Jules API","session mapping persisted on source issue"]},risks:[],next_action:"WAIT"}' > factory-result.json
 
       - uses: actions/upload-artifact@v4
         with:
