@@ -87,7 +87,7 @@ jobs:
               --argjson dispatching "$dispatching" \
               --argjson dispatched "$dispatched" \
               --argjson blocked "$blocked" \
-              --argjson 'done' "$done_count" \
+              --argjson completed "$done_count" \
               --argjson open_milestones "$open_milestones" \
               --argjson closed_milestones "$closed_milestones" \
               --argjson open_prs "$open_prs" \
@@ -96,7 +96,7 @@ jobs:
               --argjson rework_issue_count "$rework_issue_count" \
               --argjson blocked_events "$blocked_events" \
               --slurpfile cycle_hours /tmp/cycles.json \
-              "{open_issues:\$open_issues,queued:\$queued,dispatching:\$dispatching,dispatched:\$dispatched,blocked:\$blocked,done:\$done,open_milestones:\$open_milestones,closed_milestones:\$closed_milestones,open_prs:\$open_prs,merged_prs:\$merged_prs,rework_events:\$rework_events,rework_issue_count:\$rework_issue_count,blocked_events:\$blocked_events,cycle_hours:\$cycle_hours[0],external_signal:null,revenue_signal:null,cost_signal:null}" \
+              '{open_issues:$open_issues,queued:$queued,dispatching:$dispatching,dispatched:$dispatched,blocked:$blocked,done:$completed,open_milestones:$open_milestones,closed_milestones:$closed_milestones,open_prs:$open_prs,merged_prs:$merged_prs,rework_events:$rework_events,rework_issue_count:$rework_issue_count,blocked_events:$blocked_events,cycle_hours:$cycle_hours[0],external_signal:null,revenue_signal:null,cost_signal:null}' \
               > /tmp/snapshot.json
 
             now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
