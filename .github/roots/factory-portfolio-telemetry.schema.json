@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-portfolio-telemetry.schema.json",
+  "title": "FactoryPortfolioTelemetry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "generated_at", "owner", "worker_lock", "repositories", "summary"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "owner": {"type": "string", "minLength": 1},
+    "worker_lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active", "repository", "issue"],
+      "properties": {
+        "active": {"type": "boolean"},
+        "repository": {"type": ["string", "null"]},
+        "issue": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "repositories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "phase", "planner_mode", "open_milestones", "queued", "dispatching", "dispatched", "blocked", "brain_needed", "brain_proposals", "human_required", "open_prs", "roadmap_complete"],
+        "properties": {
+          "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+          "phase": {"type": ["string", "null"]},
+          "planner_mode": {"type": ["string", "null"]},
+          "open_milestones": {"type": "integer", "minimum": 0},
+          "queued": {"type": "integer", "minimum": 0},
+          "dispatching": {"type": "integer", "minimum": 0},
+          "dispatched": {"type": "integer", "minimum": 0},
+          "blocked": {"type": "integer", "minimum": 0},
+          "brain_needed": {"type": "integer", "minimum": 0},
+          "brain_proposals": {"type": "integer", "minimum": 0},
+          "human_required": {"type": "integer", "minimum": 0},
+          "open_prs": {"type": "integer", "minimum": 0},
+          "roadmap_complete": {"type": "boolean"}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["managed_repositories", "active_products", "queued", "blocked", "brain_needed", "human_required", "idle_without_next_transition"],
+      "properties": {
+        "managed_repositories": {"type": "integer", "minimum": 0},
+        "active_products": {"type": "integer", "minimum": 0},
+        "queued": {"type": "integer", "minimum": 0},
+        "blocked": {"type": "integer", "minimum": 0},
+        "brain_needed": {"type": "integer", "minimum": 0},
+        "human_required": {"type": "integer", "minimum": 0},
+        "idle_without_next_transition": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
