@@ -72,8 +72,11 @@ jobs:
               pr="$(jq -r '.[0].number' /tmp/linked.json)"
               sha="$(jq -r '.[0].headRefOid' /tmp/linked.json)"
               pr_url="$(jq -r '.[0].url' /tmp/linked.json)"
-              gh api "repos/${repo}/commits/${sha}/check-runs?per_page=100" > /tmp/checks.json
-              failures="$(jq -c '[.check_runs[] | select(.status == "completed") | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required") | {name,conclusion,html_url}]' /tmp/checks.json)"
+
+              # Fine-grained PATs on this account do not expose the Checks permission in the token UI.
+              # Use the Actions runs API instead; FLEET_GITHUB_TOKEN already has Actions read access.
+              gh api "repos/${repo}/actions/runs?head_sha=${sha}&event=pull_request&per_page=100" > /tmp/runs.json
+              failures="$(jq -c '[.workflow_runs[] | select(.status == "completed") | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "action_required") | {name,conclusion,html_url}]' /tmp/runs.json)"
               [ "$(jq 'length' <<< "$failures")" -eq 0 ] && continue
 
               dedupe="<!-- roots-fleet-ci-rework head=${sha} -->"
