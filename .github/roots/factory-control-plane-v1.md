@@ -22,22 +22,33 @@ Discovery may be automatic; activation is not.
 
 A provider found by discovery enters `DISCOVERED`. It cannot become `ENABLED` merely because credentials, a GitHub App or an integration happen to exist.
 
+Existing credentials may be **consumed** by an enabled worker when explicitly wired by the workflow, but the factory may not inspect, export, create, modify, rotate, or use credentials to expand its own permissions. Missing credentials produce a human-required boundary rather than self-provisioning.
+
 ## Core invariant
 
 One issue = one active FactoryTask = one active worker execution = one active PR.
 
 A worker must never create a second active execution for an issue while another execution or linked PR is active.
 
+The dispatcher now treats this as a hard execution invariant: more than one active linked PR is a control-plane anomaly, and even one active linked PR prevents a new worker execution. Dry routing remains allowed for inspection.
+
+## Source trust boundary
+
+GitHub issue content is compiled as `UNTRUSTED_CONTEXT` by default. Issue title/body can describe the task, but they can never override control-plane policy, target, permissions, credential rules, human gates, or forbidden actions.
+
+Every provider prompt explicitly separates authoritative control-plane policy from the untrusted issue body. This prevents issue-level prompt instructions from silently expanding worker authority.
+
 ## FactoryTask v1
 
 The strict envelope contains:
 
 - stable `task_id` (`owner/repository#issue`)
-- source identity
+- source identity and explicit trust level
 - structured `spec`
 - immutable product target
 - required capabilities and optional worker preference
 - allowed/forbidden actions and human gates
+- credential consumption policy
 - bounded execution budget
 - initial state
 - optional namespaced extensions
@@ -82,7 +93,7 @@ The first registry contains:
 
 No AI worker is enabled by this PR. Enabling one is a separate explicit human policy decision.
 
-Important authentication fact: an existing provider/GitHub integration is not assumed to be reusable by a workflow. Each adapter uses only an officially documented activation/authentication method. The current official Codex GitHub Action uses a provider API key, so a connected Codex Cloud/ChatGPT GitHub integration is not silently treated as equivalent workflow authentication.
+Important authentication fact: an existing provider/GitHub integration is not assumed to be reusable by a workflow. Each adapter uses only an officially documented activation/authentication method.
 
 ## FactoryResult v1
 
@@ -99,6 +110,10 @@ Every adapter returns the same strict envelope:
 - optional namespaced extensions
 
 Provider prose cannot directly mutate GitHub state. It must first be normalized into FactoryResult and validated.
+
+The validator also enforces status/next-action coherence and rejects secret-shaped values in FactoryResult so provider output cannot become an accidental credential exfiltration channel.
+
+`HUMAN_REQUIRED` is a valid next action for blocked/failed execution that requires a human-only capability such as credential provisioning or permission expansion.
 
 ## State machine
 
@@ -118,19 +133,19 @@ Every AI result returns to deterministic validation before the control plane can
 
 Durable task identity is `repository#issue`.
 
-The dispatcher uses an issue-scoped GitHub Actions concurrency group. Provider adapters must reconcile existing executions/PRs before creating replacement work.
+The dispatcher uses an issue-scoped GitHub Actions concurrency group plus active-PR reconciliation before execution. Provider adapters must later add durable execution-id reconciliation before replacement work can ever be created.
 
 The `jules` label is an intent signal, not a lifecycle state machine, and must never be removed/reapplied as a retry mechanism.
 
 ## Workflow fleet in this increment
 
-- `factory-dispatch.yml`: compile, validate, route, concurrency lock and explicit execution gate
+- `factory-dispatch.yml`: compile, validate, reconcile, route, concurrency lock and explicit execution gate
 - `factory-worker-discovery.yml`: audit registry and activation metadata
 - `factory-worker-jules.yml`: Jules REST adapter
 - `factory-worker-codex.yml`: Codex Action adapter
 - `factory-worker-claude.yml`: Claude Code Action adapter
 - `factory-worker-gemini.yml`: Gemini CLI Action adapter
-- `factory-result-validate.yml`: strict FactoryResult validator
+- `factory-result-validate.yml`: strict and semantic FactoryResult validator
 - existing `acode-regression.yml`: product regression CI
 
 The provider adapters are wired but unreachable while their registry status remains `DISCOVERED`.
@@ -142,5 +157,7 @@ The provider adapters are wired but unreachable while their registry status rema
 - `main.modify` is forbidden in FactoryTask policy
 - product scope remains Android + `/acode-plugin`
 - execute defaults to false
-- provider credentials are referenced only by secret name and are never placed in FactoryTask
+- existing secrets may be consumed but never inspected/exported/mutated/provisioned by the factory
+- provider credentials are referenced only by workflow secret bindings and are never placed in FactoryTask
+- source issue content is explicitly untrusted context
 - unknown provider-specific data belongs under `extensions`
