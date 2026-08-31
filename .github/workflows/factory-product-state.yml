@@ -1,0 +1,121 @@
+name: factory-product-state-v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_issue:
+        description: 'Issue representing the product lifecycle'
+        required: true
+        type: number
+      next_state:
+        description: 'Requested next product state'
+        required: true
+        type: choice
+        options: [IDEA, PLANNED, BUILDING_MVP, MVP_READY, STAGING, RELEASE_READY, RELEASED, ITERATING, PAUSED, ARCHIVED]
+      apply:
+        description: 'Apply state mutation; false validates only'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: factory-product-${{ github.repository }}-${{ inputs.product_issue }}
+  cancel-in-progress: false
+
+jobs:
+  transition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PRODUCT_ISSUE: ${{ inputs.product_issue }}
+      NEXT_STATE: ${{ inputs.next_state }}
+      APPLY: ${{ inputs.apply }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read current product state
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${PRODUCT_ISSUE}" > product.json
+          test "$(jq -r '.pull_request // empty' product.json)" = ""
+          jq -r '[.labels[].name | select(startswith("product-state:"))] | unique[]' product.json > states.txt
+          count="$(wc -l < states.txt | tr -d ' ')"
+          if [ "$count" -gt 1 ]; then
+            echo 'CONTROL_PLANE_ANOMALY: product issue has multiple state labels.' >&2
+            exit 1
+          fi
+          if [ "$count" -eq 0 ]; then
+            current='IDEA'
+          else
+            current="$(sed 's/^product-state://' states.txt)"
+          fi
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+
+      - name: Validate transition graph
+        shell: bash
+        env:
+          CURRENT_STATE: ${{ steps.state.outputs.current }}
+        run: |
+          set -euo pipefail
+          if [ "$CURRENT_STATE" = "$NEXT_STATE" ]; then
+            exit 0
+          fi
+          edge="${CURRENT_STATE}->${NEXT_STATE}"
+          case "$edge" in
+            'IDEA->PLANNED'|'PLANNED->BUILDING_MVP'|'BUILDING_MVP->MVP_READY'|'MVP_READY->STAGING'|'STAGING->RELEASE_READY'|'RELEASE_READY->RELEASED'|'RELEASED->ITERATING'|'ITERATING->BUILDING_MVP'|'IDEA->PAUSED'|'PLANNED->PAUSED'|'BUILDING_MVP->PAUSED'|'MVP_READY->PAUSED'|'STAGING->PAUSED'|'RELEASE_READY->PAUSED'|'RELEASED->PAUSED'|'ITERATING->PAUSED'|'PAUSED->PLANNED'|'PAUSED->ARCHIVED'|'RELEASED->ARCHIVED') ;;
+            *) echo "Invalid product transition: ${edge}" >&2; exit 1 ;;
+          esac
+
+      - name: Enforce evidence gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$NEXT_STATE" in
+            MVP_READY)
+              open="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --milestone MVP --limit 1 --json number --jq 'length' 2>/dev/null || echo 0)"
+              test "$open" -eq 0 || { echo 'MVP milestone still has open issues.' >&2; exit 1; }
+              ;;
+            RELEASED)
+              echo 'Production transition is allowed only because this workflow is human-dispatched.'
+              ;;
+            ARCHIVED)
+              echo 'Archive transition is human-dispatched and auditable.'
+              ;;
+          esac
+
+      - name: Apply product state label
+        if: inputs.apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${PRODUCT_ISSUE}" > product.json
+          jq -r '.labels[].name | select(startswith("product-state:"))' product.json | while IFS= read -r label; do
+            encoded="$(jq -rn --arg value "$label" '$value|@uri')"
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/${PRODUCT_ISSUE}/labels/${encoded}" >/dev/null || true
+          done
+          next_label="product-state:${NEXT_STATE}"
+          encoded="$(jq -rn --arg value "$next_label" '$value|@uri')"
+          if ! gh api "repos/${GITHUB_REPOSITORY}/labels/${encoded}" >/dev/null 2>&1; then
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/labels" -f name="$next_label" -f color='ededed' >/dev/null
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PRODUCT_ISSUE}/labels" -f "labels[]=$next_label" >/dev/null
+
+      - name: Summary
+        shell: bash
+        env:
+          CURRENT_STATE: ${{ steps.state.outputs.current }}
+        run: |
+          {
+            echo '### Factory product state'
+            echo "- Product issue: #${PRODUCT_ISSUE}"
+            echo "- Current: ${CURRENT_STATE}"
+            echo "- Requested: ${NEXT_STATE}"
+            echo "- Applied: ${APPLY}"
+          } >> "$GITHUB_STEP_SUMMARY"
