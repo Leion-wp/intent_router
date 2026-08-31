@@ -1,0 +1,34 @@
+name: workflow-lint
+
+"on":
+  pull_request:
+    branches:
+      - Android
+    paths:
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSLo /tmp/actionlint.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/actionlint.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          /tmp/actionlint -version
+
+      - name: Lint GitHub Actions workflows
+        shell: bash
+        run: /tmp/actionlint -color -ignore 'SC2129'

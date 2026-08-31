@@ -1,6 +1,6 @@
 name: factory-worker-claude-v1
 
-on:
+"on":
   workflow_call:
     inputs:
       task_json:
@@ -21,7 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Validate adapter activation and credential policy
         env:
@@ -32,13 +33,13 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' "$TASK_JSON" | jq -e . > factory-task.json
-          test "$(jq -r '.target.branch' factory-task.json)" = "Android"
-          test "$(jq -r '.target.cwd' factory-task.json)" = "/acode-plugin"
-          test "$(jq -r '.workers[] | select(.worker_id=="claude") | .status' .github/roots/worker-registry.json)" = "ENABLED"
-          test "$(jq -r '.policy.credentials.use_existing' factory-task.json)" = "true"
-          test "$(jq -r '.policy.credentials.inspect' factory-task.json)" = "false"
-          test "$(jq -r '.policy.credentials.modify' factory-task.json)" = "false"
-          test "$EXECUTE" = "true"
+          test "$(jq -r '.target.branch' factory-task.json)" = 'Android'
+          test "$(jq -r '.target.cwd' factory-task.json)" = '/acode-plugin'
+          test "$(jq -r '.workers[] | select(.worker_id == "claude") | .status' .github/roots/worker-registry.json)" = 'ENABLED'
+          test "$(jq -r '.policy.credentials.use_existing' factory-task.json)" = 'true'
+          test "$(jq -r '.policy.credentials.inspect' factory-task.json)" = 'false'
+          test "$(jq -r '.policy.credentials.modify' factory-task.json)" = 'false'
+          test "$EXECUTE" = 'true'
           test -n "$ANTHROPIC_API_KEY"
           echo "::add-mask::$ANTHROPIC_API_KEY"
 
@@ -73,9 +74,11 @@ jobs:
           set -euo pipefail
           jq -n \
             --arg task_id "$(jq -r '.task_id' factory-task.json)" \
-            '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"claude",summary:"Claude Code action completed.",outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:null,worker_url:null},evidence:{tests:[],checks:["Claude Code action completed"]},risks:["Adapter does not yet infer commit or PR identity from provider output."],next_action:"REVIEW"}' > factory-result.json
+            '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"claude",summary:"Claude Code action completed.",outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:null,worker_url:null},evidence:{tests:[],checks:["Claude Code action completed"]},risks:["Adapter does not yet infer commit or PR identity from provider output."],next_action:"REVIEW"}' \
+            > factory-result.json
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload FactoryResult
+        uses: actions/upload-artifact@v4
         with:
           name: factory-result-claude
           path: factory-result.json
