@@ -62,8 +62,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          inventory_query="query(\$login:String!){organization(login:\$login){projectsV2(first:100){nodes{number title closed}}}}"
           gh api --paginate "orgs/${ORG}/repos?per_page=100&type=all" --jq '.[] | [.name,.visibility,.default_branch,.archived] | @tsv' > repositories.tsv
-          gh api graphql -f query='query($login:String!){organization(login:$login){projectsV2(first:100){nodes{number title closed}}}}' -F login="$ORG" --jq '.data.organization.projectsV2.nodes[] | [.number,.title,.closed] | @tsv' > projects.tsv
+          gh api graphql -f query="$inventory_query" -F login="$ORG" --jq '.data.organization.projectsV2.nodes[] | [.number,.title,.closed] | @tsv' > projects.tsv
           {
             echo '### Fleet inventory'
             echo "- Organization: ${ORG}"
@@ -82,7 +83,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api graphql -f query='query($login:String!){organization(login:$login){id projectsV2(first:100){nodes{id number title}}}}' -F login="$ORG" > owner.json
+          owner_query="query(\$login:String!){organization(login:\$login){id projectsV2(first:100){nodes{id number title}}}}"
+          create_mutation="mutation(\$owner:ID!,\$title:String!){createProjectV2(input:{ownerId:\$owner,title:\$title}){projectV2{id number title}}}"
+          gh api graphql -f query="$owner_query" -F login="$ORG" > owner.json
           owner_id="$(jq -r '.data.organization.id' owner.json)"
           jq --arg title "$TARGET" '[.data.organization.projectsV2.nodes[] | select(.title == $title)]' owner.json > matches.json
           count="$(jq 'length' matches.json)"
@@ -91,9 +94,7 @@ jobs:
             exit 1
           fi
           if [ "$count" -eq 0 ] && [ "$APPLY" = "true" ]; then
-            gh api graphql \
-              -f query='mutation($owner:ID!,$title:String!){createProjectV2(input:{ownerId:$owner,title:$title}){projectV2{id number title}}}' \
-              -F owner="$owner_id" -F title="$TARGET" > created.json
+            gh api graphql -f query="$create_mutation" -F owner="$owner_id" -F title="$TARGET" > created.json
             jq '.data.createProjectV2.projectV2' created.json
           else
             echo "project_count=${count} apply=${APPLY}"
