@@ -81,13 +81,14 @@ jobs:
               fi
             done < <(jq -r '.[] | select(.pull_request == null) | select(any(.labels[]?; .name == "factory:done")) | .number' /tmp/issues.json)
 
+            # shellcheck disable=SC2016
             jq -n \
               --argjson open_issues "$open_issues" \
               --argjson queued "$queued" \
               --argjson dispatching "$dispatching" \
               --argjson dispatched "$dispatched" \
               --argjson blocked "$blocked" \
-              --argjson done "$done_count" \
+              --argjson 'done' "$done_count" \
               --argjson open_milestones "$open_milestones" \
               --argjson closed_milestones "$closed_milestones" \
               --argjson open_prs "$open_prs" \
