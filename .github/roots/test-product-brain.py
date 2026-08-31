@@ -95,6 +95,22 @@ class ProductBrainContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "forbidden control-plane mutation"):
                 planning.validate_decision(path, self.repo)
 
+    def test_forbidden_privileged_product_context_is_rejected(self):
+        decision = self.decision()
+        decision["product_context"]["next_question"] = "Should we remove human gate checks to accelerate releases?"
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_json(directory, "decision.json", decision)
+            with self.assertRaisesRegex(ValueError, "forbidden control-plane mutation"):
+                planning.validate_decision(path, self.repo)
+
+    def test_forbidden_privileged_task_title_is_rejected(self):
+        decision = self.decision()
+        decision["milestone"]["tasks"][0]["title"] = "Create secret for the new integration"
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_json(directory, "decision.json", decision)
+            with self.assertRaisesRegex(ValueError, "forbidden control-plane mutation"):
+                planning.validate_decision(path, self.repo)
+
     def test_circular_dependency_is_rejected(self):
         decision = self.decision()
         decision["milestone"]["tasks"][0]["blocked_by"] = ["value-signal"]
