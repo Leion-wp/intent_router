@@ -68,6 +68,8 @@ Each worker declares:
 
 The `activation.documentation` field is the official source describing how the provider is called. `activation.entrypoint` is the actual adapter target (REST URL, action identifier, CLI, SDK or manual handoff).
 
+This is intentionally split from task construction: FactoryTask says **what capability is required**; WorkerDescriptor says **how this worker is activated**.
+
 ## Initial registry
 
 The first registry contains:
@@ -79,6 +81,8 @@ The first registry contains:
 - `gemini`: DISCOVERED; official Gemini CLI GitHub Action
 
 No AI worker is enabled by this PR. Enabling one is a separate explicit human policy decision.
+
+Important authentication fact: an existing provider/GitHub integration is not assumed to be reusable by a workflow. Each adapter uses only an officially documented activation/authentication method. The current official Codex GitHub Action uses a provider API key, so a connected Codex Cloud/ChatGPT GitHub integration is not silently treated as equivalent workflow authentication.
 
 ## FactoryResult v1
 
