@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import json
 import pathlib
-import re
 import sys
 
 try:
@@ -29,6 +28,11 @@ def load(name: str):
         return json.load(handle)
 
 
+def load_path(path: pathlib.Path):
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def schema_store():
     names = (
         "factory-roadmap.schema.json",
@@ -47,12 +51,32 @@ def validate_schema(document, schema_name: str):
     jsonschema.Draft202012Validator(schema, resolver=resolver).validate(document)
 
 
+def topological_tasks(tasks):
+    by_id = {task["id"]: task for task in tasks}
+    done = set()
+    ordered = []
+    while len(done) < len(by_id):
+        ready = sorted(
+            (
+                task
+                for task in by_id.values()
+                if task["id"] not in done and set(task["blocked_by"]) <= done
+            ),
+            key=lambda task: (task["priority"], task["id"]),
+        )
+        if not ready:
+            raise ValueError(f"circular dependency among: {sorted(set(by_id) - done)}")
+        for task in ready:
+            ordered.append(task["id"])
+            done.add(task["id"])
+    return ordered
+
+
 def semantic_validate_tasks(tasks):
     ids = [task["id"] for task in tasks]
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate task identities")
     known = set(ids)
-    graph = {}
     for task in tasks:
         deps = task["blocked_by"]
         if task["id"] in deps:
@@ -66,22 +90,11 @@ def semantic_validate_tasks(tasks):
                 raise ValueError(f"forbidden control-plane mutation in {task['id']}: {forbidden}")
         if len(task["scope"]) > 12 or len(task["acceptance_criteria"]) > 12:
             raise ValueError(f"unbounded task: {task['id']}")
-        graph[task["id"]] = set(deps)
-
-    remaining = {node: set(deps) for node, deps in graph.items()}
-    while remaining:
-        ready = {node for node, deps in remaining.items() if not deps}
-        if not ready:
-            raise ValueError(f"circular dependency among: {sorted(remaining)}")
-        for node in ready:
-            remaining.pop(node)
-        for deps in remaining.values():
-            deps.difference_update(ready)
+    topological_tasks(tasks)
 
 
 def validate_roadmap(path: pathlib.Path):
-    with path.open(encoding="utf-8") as handle:
-        roadmap = json.load(handle)
+    roadmap = load_path(path)
     validate_schema(roadmap, "factory-roadmap.schema.json")
     milestone_ids = [m["id"] for m in roadmap["milestones"]]
     titles = [m["title"] for m in roadmap["milestones"]]
@@ -94,21 +107,49 @@ def validate_roadmap(path: pathlib.Path):
 
 
 def validate_plan(path: pathlib.Path):
-    with path.open(encoding="utf-8") as handle:
-        plan = json.load(handle)
+    plan = load_path(path)
     validate_schema(plan, "factory-milestone-plan.schema.json")
     semantic_validate_tasks(plan["tasks"])
 
 
+def next_index(roadmap_path: pathlib.Path, milestones_path: pathlib.Path):
+    roadmap = load_path(roadmap_path)
+    milestones = load_path(milestones_path)
+    closed = {m["title"] for m in milestones if m.get("state") == "closed"}
+    index = -1
+    for i, milestone in enumerate(roadmap["milestones"]):
+        if milestone["title"] in closed:
+            index = max(index, i)
+    print(index + 1)
+
+
+def task_order(plan_path: pathlib.Path):
+    plan = load_path(plan_path)
+    for task_id in topological_tasks(plan["tasks"]):
+        print(task_id)
+
+
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in {"roadmap", "plan"}:
-        raise SystemExit("usage: validate-planning.py <roadmap|plan> <file.json>")
-    target = pathlib.Path(sys.argv[2])
-    if sys.argv[1] == "roadmap":
+    if len(sys.argv) < 3:
+        raise SystemExit("usage: validate-planning.py <roadmap|plan|next-index|task-order> ...")
+    command = sys.argv[1]
+    if command == "roadmap" and len(sys.argv) == 3:
+        target = pathlib.Path(sys.argv[2])
         validate_roadmap(target)
-    else:
+        print(f"planning validation passed: {target}")
+        return
+    if command == "plan" and len(sys.argv) == 3:
+        target = pathlib.Path(sys.argv[2])
         validate_plan(target)
-    print(f"planning validation passed: {target}")
+        print(f"planning validation passed: {target}")
+        return
+    if command == "next-index" and len(sys.argv) == 4:
+        next_index(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]))
+        return
+    if command == "task-order" and len(sys.argv) == 3:
+        task_order(pathlib.Path(sys.argv[2]))
+        return
+    raise SystemExit("invalid planning validator command")
 
 
 if __name__ == "__main__":
