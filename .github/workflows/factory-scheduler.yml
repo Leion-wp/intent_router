@@ -101,6 +101,6 @@ jobs:
             echo '### Factory scheduler'
             echo "- Candidate: ${ISSUE_NUMBER:-none}"
             echo "- Execute: ${EXECUTE_REQUESTED}"
-            echo '- Dependency syntax: `Blocked-By: #123` in issue body'
+            echo "- Dependency syntax: \`Blocked-By: #123\` in issue body"
             echo '- Scheduling policy: oldest eligible queued issue first'
           } >> "$GITHUB_STEP_SUMMARY"
