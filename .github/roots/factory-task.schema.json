@@ -11,11 +11,12 @@
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "issue_number", "issue_url"],
+      "required": ["type", "issue_number", "issue_url", "trust"],
       "properties": {
         "type": { "const": "github_issue" },
         "issue_number": { "type": "integer", "minimum": 1 },
-        "issue_url": { "type": "string", "format": "uri" }
+        "issue_url": { "type": "string", "format": "uri" },
+        "trust": { "type": "string", "enum": ["UNTRUSTED_CONTEXT", "TRUSTED_HUMAN", "TRUSTED_CONTROL_PLANE"] }
       }
     },
     "spec": {
@@ -51,11 +52,25 @@
     "policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allowed_actions", "forbidden_actions", "human_gates"],
+      "required": ["allowed_actions", "forbidden_actions", "human_gates", "credentials"],
       "properties": {
         "allowed_actions": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
         "forbidden_actions": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
-        "human_gates": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+        "human_gates": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "credentials": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["use_existing", "inspect", "export", "create", "modify", "rotate", "expand_permissions"],
+          "properties": {
+            "use_existing": { "const": true },
+            "inspect": { "const": false },
+            "export": { "const": false },
+            "create": { "const": false },
+            "modify": { "const": false },
+            "rotate": { "const": false },
+            "expand_permissions": { "const": false }
+          }
+        }
       }
     },
     "budget": {
