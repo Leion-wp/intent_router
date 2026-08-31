@@ -45,9 +45,9 @@ jobs:
           : > candidates.tsv
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
-            profile_b64="$(gh api "repos/${repo}/contents/.factory/profile.json" --jq '.content' 2>/dev/null || true)"
-            [ -z "$profile_b64" ] && continue
-            printf '%s' "$profile_b64" | tr -d '\n' | base64 -d > /tmp/profile.json
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
             jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null || continue
 
             gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number,body,createdAt | jq -c '.[]' | while IFS= read -r row; do
