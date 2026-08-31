@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: 'Organization-level operation'
+        description: 'Account-level operation'
         required: true
         type: choice
         options: [inventory, ensure-project, ensure-repository, ensure-milestone]
@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
-      ORG: ${{ github.repository_owner }}
+      OWNER: ${{ github.repository_owner }}
       OPERATION: ${{ inputs.operation }}
       TARGET: ${{ inputs.target }}
       MILESTONE_TITLE: ${{ inputs.milestone_title }}
@@ -51,23 +51,25 @@ jobs:
           set -euo pipefail
           test -f .github/roots/factory-fleet.schema.json
           if [ -z "$GH_TOKEN" ]; then
-            echo 'FLEET_GITHUB_TOKEN is required for organization-level fleet operations.' >&2
+            echo 'FLEET_GITHUB_TOKEN is required for account-level fleet operations.' >&2
             exit 1
           fi
           echo "::add-mask::$GH_TOKEN"
-          test "$ORG" = "Leion-wp"
+          test "$OWNER" = "Leion-wp"
+          authenticated_login="$(gh api user --jq '.login')"
+          test "$authenticated_login" = "$OWNER"
 
-      - name: Inventory organization
+      - name: Inventory account
         if: inputs.operation == 'inventory'
         shell: bash
         run: |
           set -euo pipefail
-          inventory_query="query(\$login:String!){organization(login:\$login){projectsV2(first:100){nodes{number title closed}}}}"
-          gh api --paginate "orgs/${ORG}/repos?per_page=100&type=all" --jq '.[] | [.name,.visibility,.default_branch,.archived] | @tsv' > repositories.tsv
-          gh api graphql -f query="$inventory_query" -F login="$ORG" --jq '.data.organization.projectsV2.nodes[] | [.number,.title,.closed] | @tsv' > projects.tsv
+          project_query="query(\$login:String!){user(login:\$login){projectsV2(first:100){nodes{number title closed}}}}"
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' --jq --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | [.name,.visibility,.default_branch,.archived] | @tsv' > repositories.tsv
+          gh api graphql -f query="$project_query" -F login="$OWNER" --jq '.data.user.projectsV2.nodes[] | [.number,.title,.closed] | @tsv' > projects.tsv
           {
             echo '### Fleet inventory'
-            echo "- Organization: ${ORG}"
+            echo "- Owner: ${OWNER}"
             echo "- Repositories: $(wc -l < repositories.tsv | tr -d ' ')"
             echo "- Projects v2: $(wc -l < projects.tsv | tr -d ' ')"
             echo ''
@@ -78,19 +80,21 @@ jobs:
             sed 's/^/- /' projects.tsv
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Ensure organization project
+      - name: Ensure account project
         if: inputs.operation == 'ensure-project'
         shell: bash
         run: |
           set -euo pipefail
-          owner_query="query(\$login:String!){organization(login:\$login){id projectsV2(first:100){nodes{id number title}}}}"
+          owner_query="query(\$login:String!){user(login:\$login){id projectsV2(first:100){nodes{id number title}}}}"
           create_mutation="mutation(\$owner:ID!,\$title:String!){createProjectV2(input:{ownerId:\$owner,title:\$title}){projectV2{id number title}}}"
-          gh api graphql -f query="$owner_query" -F login="$ORG" > owner.json
-          owner_id="$(jq -r '.data.organization.id' owner.json)"
-          jq --arg title "$TARGET" '[.data.organization.projectsV2.nodes[] | select(.title == $title)]' owner.json > matches.json
+          gh api graphql -f query="$owner_query" -F login="$OWNER" > owner.json
+          owner_id="$(jq -r '.data.user.id' owner.json)"
+          test -n "$owner_id"
+          test "$owner_id" != 'null'
+          jq --arg title "$TARGET" '[.data.user.projectsV2.nodes[] | select(.title == $title)]' owner.json > matches.json
           count="$(jq 'length' matches.json)"
           if [ "$count" -gt 1 ]; then
-            echo "CONTROL_PLANE_ANOMALY: duplicate organization projects named '${TARGET}'." >&2
+            echo "CONTROL_PLANE_ANOMALY: duplicate account projects named '${TARGET}'." >&2
             exit 1
           fi
           if [ "$count" -eq 0 ] && [ "$APPLY" = "true" ]; then
@@ -107,20 +111,21 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$TARGET" =~ ^[A-Za-z0-9._-]+$ ]]
-          if gh api "repos/${ORG}/${TARGET}" >/dev/null 2>&1; then
-            echo "Repository ${ORG}/${TARGET} already exists."
+          if gh api "repos/${OWNER}/${TARGET}" >/dev/null 2>&1; then
+            echo "Repository ${OWNER}/${TARGET} already exists."
             exit 0
           fi
           if [ "$APPLY" != "true" ]; then
-            echo "DRY-RUN: would create private repository ${ORG}/${TARGET}."
+            echo "DRY-RUN: would create private repository ${OWNER}/${TARGET}."
             exit 0
           fi
-          gh api --method POST "orgs/${ORG}/repos" \
+          gh api --method POST user/repos \
             -f name="$TARGET" \
             -F private=true \
             -f description='Managed by Roots Factory control-plane; governance remains human-owned.' \
             -F has_issues=true \
             -F has_projects=true > repo.json
+          test "$(jq -r '.owner.login' repo.json)" = "$OWNER"
           jq '{full_name,html_url,visibility}' repo.json
 
       - name: Ensure milestone in managed repository
@@ -129,7 +134,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$TARGET" =~ ^[^/]+/[^/]+$ ]]
-          test "${TARGET%%/*}" = "$ORG"
+          test "${TARGET%%/*}" = "$OWNER"
           gh api --paginate "repos/${TARGET}/milestones?state=all&per_page=100" > milestones.json
           jq --arg title "$MILESTONE_TITLE" '[.[] | select(.title == $title)]' milestones.json > matches.json
           count="$(jq 'length' matches.json)"
@@ -150,7 +155,7 @@ jobs:
         run: |
           {
             echo '### Fleet manager'
-            echo "- Organization: ${ORG}"
+            echo "- Owner: ${OWNER}"
             echo "- Operation: ${OPERATION}"
             echo "- Target: ${TARGET}"
             echo "- Apply: ${APPLY}"

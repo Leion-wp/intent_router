@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
-      ORG: ${{ github.repository_owner }}
+      OWNER: ${{ github.repository_owner }}
       REPO_NAME: ${{ inputs.repository_name }}
       APPLY: ${{ inputs.apply }}
     steps:
@@ -37,14 +37,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$ORG" = 'Leion-wp'
+          test "$OWNER" = 'Leion-wp'
           [[ "$REPO_NAME" =~ ^[A-Za-z0-9._-]+$ ]]
           test -f .github/roots/micro-saas-stack.json
           test -f .github/roots/factory-repository-profile.schema.json
           test -n "$GH_TOKEN"
           echo "::add-mask::$GH_TOKEN"
+          authenticated_login="$(gh api user --jq '.login')"
+          test "$authenticated_login" = "$OWNER"
           if [ "$APPLY" != 'true' ]; then
-            echo "DRY-RUN: would bootstrap ${ORG}/${REPO_NAME} from roots-micro-saas-v1."
+            echo "DRY-RUN: would bootstrap ${OWNER}/${REPO_NAME} from roots-micro-saas-v1."
             exit 0
           fi
 
@@ -53,23 +55,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! gh api "repos/${ORG}/${REPO_NAME}" >/dev/null 2>&1; then
-            gh api --method POST "orgs/${ORG}/repos" \
+          if ! gh api "repos/${OWNER}/${REPO_NAME}" >/dev/null 2>&1; then
+            gh api --method POST user/repos \
               -f name="$REPO_NAME" \
               -F private=true \
               -F auto_init=true \
               -F has_issues=true \
               -F has_projects=true \
-              -f description='Roots fixed-stack micro-SaaS boilerplate and factory seed.' >/dev/null
+              -f description='Roots fixed-stack micro-SaaS boilerplate and factory seed.' > /tmp/repo.json
+            test "$(jq -r '.owner.login' /tmp/repo.json)" = "$OWNER"
           fi
-          gh api "repos/${ORG}/${REPO_NAME}" --jq '{full_name,default_branch,visibility}'
+          gh api "repos/${OWNER}/${REPO_NAME}" --jq '{full_name,default_branch,visibility}'
 
       - name: Install managed repository profile
         if: inputs.apply == true
         shell: bash
         run: |
           set -euo pipefail
-          full_repo="${ORG}/${REPO_NAME}"
+          full_repo="${OWNER}/${REPO_NAME}"
           default_branch="$(gh api "repos/${full_repo}" --jq '.default_branch')"
           profile="$(jq -nc \
             --arg repo "$full_repo" \
@@ -89,14 +92,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          full_repo="${ORG}/${REPO_NAME}"
+          full_repo="${OWNER}/${REPO_NAME}"
+          default_branch="$(gh api "repos/${full_repo}" --jq '.default_branch')"
           printf '%s\n' \
             'name: factory-ci' \
             '' \
             '"on":' \
             '  pull_request:' \
             '  push:' \
-            '    branches: [main]' \
+            "    branches: [${default_branch}]" \
             '' \
             'permissions:' \
             '  contents: read' \
@@ -133,7 +137,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          full_repo="${ORG}/${REPO_NAME}"
+          full_repo="${OWNER}/${REPO_NAME}"
           encoded="$(base64 -w0 .github/roots/micro-saas-stack.json)"
           endpoint="repos/${full_repo}/contents/.factory/micro-saas-stack.json"
           current="$(gh api "$endpoint" --jq '.sha' 2>/dev/null || true)"
@@ -149,7 +153,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          full_repo="${ORG}/${REPO_NAME}"
+          full_repo="${OWNER}/${REPO_NAME}"
           for label in 'factory:queued' 'factory:dispatched' 'factory:blocked' 'factory:human-required'; do
             encoded_label="$(jq -rn --arg value "$label" '$value|@uri')"
             if ! gh api "repos/${full_repo}/labels/${encoded_label}" >/dev/null 2>&1; then
@@ -170,7 +174,7 @@ jobs:
           MILESTONE: ${{ steps.planning.outputs.milestone }}
         run: |
           set -euo pipefail
-          full_repo="${ORG}/${REPO_NAME}"
+          full_repo="${OWNER}/${REPO_NAME}"
           ensure_issue() {
             local title="$1"
             local body="$2"
@@ -195,7 +199,7 @@ jobs:
         run: |
           {
             echo '### Micro-SaaS bootstrap'
-            echo "- Repository: ${ORG}/${REPO_NAME}"
+            echo "- Repository: ${OWNER}/${REPO_NAME}"
             echo '- Blueprint: roots-micro-saas-v1'
             echo '- Fixed providers: Next.js + Supabase + Stripe + Resend + Sentry + PostHog + Vercel'
             echo "- Apply: ${APPLY}"

@@ -4,9 +4,10 @@
   "title": "FactoryFleet",
   "type": "object",
   "additionalProperties": false,
-  "required": ["organization", "control_repository", "policy"],
+  "required": ["owner", "owner_type", "control_repository", "policy"],
   "properties": {
-    "organization": {"type": "string", "minLength": 1},
+    "owner": {"type": "string", "minLength": 1},
+    "owner_type": {"type": "string", "enum": ["user", "organization"]},
     "control_repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
     "project_title": {"type": "string", "minLength": 1},
     "managed_repositories": {

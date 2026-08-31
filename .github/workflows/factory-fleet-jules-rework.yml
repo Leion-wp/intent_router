@@ -19,7 +19,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
       JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
-      ORG: ${{ github.repository_owner }}
+      OWNER: ${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,8 +31,11 @@ jobs:
           test -n "$JULES_API_KEY"
           echo "::add-mask::$GH_TOKEN"
           echo "::add-mask::$JULES_API_KEY"
-          gh api --paginate "orgs/${ORG}/repos?per_page=100&type=all" --jq '.[].full_name' > repos.txt
-          sent=0
+          authenticated_login="$(gh api user --jq '.login')"
+          test "$authenticated_login" = "$OWNER"
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' --jq --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+          sent_file="$(mktemp)"
+          printf '0' > "$sent_file"
 
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
@@ -42,7 +45,7 @@ jobs:
             jq -e --arg repo "$repo" '.managed == true and .repository == $repo and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
             branch="$(jq -r '.default_branch' /tmp/profile.json)"
 
-            gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number | jq -r '.[].number' | while IFS= read -r issue; do
+            while IFS= read -r issue; do
               comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
               marker="$(jq -r '[.[] | select(.body | contains("<!-- roots-jules-session task_id='"${repo}#${issue}"' "))] | last | .body // empty' <<< "$comments")"
               [ -z "$marker" ] && continue
@@ -83,8 +86,9 @@ jobs:
                 --data "$(jq -nc --arg prompt "$message" '{prompt:$prompt}')" \
                 "https://jules.googleapis.com/v1alpha/${session}:sendMessage" >/dev/null
               gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="${dedupe}\nRoots Fleet sent failed CI for PR #${pr} back to the existing Jules session. No new session/PR was created." >/dev/null
-              sent=$((sent + 1))
-            done
+              current="$(cat "$sent_file")"
+              printf '%s' "$((current + 1))" > "$sent_file"
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
           done < repos.txt
 
-          echo "Fleet CI rework scan completed. Messages sent in outer shell: ${sent}."
+          echo "Fleet CI rework scan completed. Messages sent: $(cat "$sent_file")."
