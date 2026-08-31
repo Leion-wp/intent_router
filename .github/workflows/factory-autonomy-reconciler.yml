@@ -1,0 +1,178 @@
+name: factory-autonomy-reconciler-v1
+
+"on":
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: 'Repair missing factory transitions and trigger bounded reconcilers'
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-autonomy-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      CONTROL_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      EXECUTE: ${{ github.event_name == 'schedule' || inputs.execute }}
+      ROADMAP: .github/roots/micro-saas-roadmap-v1.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconcile missing transitions
+        id: continuity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          jq -e '.blueprint == "roots-micro-saas-v1" and (.milestones | length) > 0' "$ROADMAP" >/dev/null
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+
+          fixed_planning=0
+          product_brain=0
+          scheduler=0
+          requests_created=0
+          managed=0
+          holes=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" \
+              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
+              /tmp/profile.json >/dev/null || continue
+            managed="$((managed + 1))"
+
+            queued="$(gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number --jq 'length')"
+            if [ "$queued" -gt 0 ]; then
+              scheduler=1
+            fi
+
+            gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+            open_milestones="$(jq '[.[] | select(.state == "open")] | length' /tmp/milestones.json)"
+            if [ "$open_milestones" -gt 1 ]; then
+              echo "CONTROL_PLANE_ANOMALY: ${repo} has ${open_milestones} open milestones." >&2
+              holes="$((holes + 1))"
+              continue
+            fi
+            if [ "$open_milestones" -eq 1 ]; then
+              continue
+            fi
+
+            state_exists=false
+            if gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/product-state.json" >/tmp/product-state.json 2>/dev/null; then
+              state_exists=true
+            fi
+
+            if [ "$state_exists" = 'false' ]; then
+              fixed_complete=true
+              while IFS= read -r title; do
+                [ -z "$title" ] && continue
+                count="$(jq --arg title "$title" '[.[] | select(.title == $title and .state == "closed")] | length' /tmp/milestones.json)"
+                if [ "$count" -eq 0 ]; then
+                  fixed_complete=false
+                  break
+                fi
+              done < <(jq -r '.milestones[].title' "$ROADMAP")
+
+              if [ "$fixed_complete" = 'false' ]; then
+                fixed_planning=1
+                continue
+              fi
+            fi
+
+            proposal_count="$(gh issue list --repo "$repo" --state open --label 'factory:brain-proposal' --limit 100 --json number --jq 'length')"
+            if [ "$proposal_count" -gt 0 ]; then
+              product_brain=1
+              continue
+            fi
+
+            request_count="$(gh issue list --repo "$repo" --state open --label 'factory:brain-needed' --limit 20 --json number,title --jq '[.[] | select(.title == "[FACTORY] Product decision needed")] | length')"
+            if [ "$request_count" -eq 0 ] && [ "$EXECUTE" = 'true' ]; then
+              gh label create 'factory:brain-needed' --repo "$repo" --color C5DEF5 \
+                --description 'Dynamic product brain requires the next strategic decision' --force >/dev/null 2>&1 || true
+              state_note='No dynamic product state exists yet; the fixed roadmap is complete.'
+              if [ "$state_exists" = 'true' ]; then
+                phase="$(jq -r '.phase // "UNKNOWN"' /tmp/product-state.json)"
+                last="$(jq -r '.last_decision.decision_id // "none"' /tmp/product-state.json)"
+                state_note="Dynamic product state is active at phase ${phase}; last decision ${last}."
+              fi
+              gh issue create --repo "$repo" --title '[FACTORY] Product decision needed' --label 'factory:brain-needed' \
+                --body="<!-- roots-product-decision-needed:v1 -->\n${state_note}\n\nNo milestone is active and no Product Brain proposal is waiting. Factory Product Manager must inspect product state, telemetry, completed work and market evidence, then publish exactly one schema-valid product decision proposal. This issue is a planning signal and MUST NOT be dispatched to a code worker." >/dev/null
+              requests_created="$((requests_created + 1))"
+            fi
+          done < repos.txt
+
+          echo "fixed_planning=$fixed_planning" >> "$GITHUB_OUTPUT"
+          echo "product_brain=$product_brain" >> "$GITHUB_OUTPUT"
+          echo "scheduler=$scheduler" >> "$GITHUB_OUTPUT"
+          echo "requests_created=$requests_created" >> "$GITHUB_OUTPUT"
+          echo "managed=$managed" >> "$GITHUB_OUTPUT"
+          echo "holes=$holes" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger fixed-roadmap planner
+        if: steps.continuity.outputs.fixed_planning == '1' && env.EXECUTE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-autonomous-planning.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
+
+      - name: Trigger dynamic Product Brain
+        if: steps.continuity.outputs.product_brain == '1' && env.EXECUTE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-product-brain.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
+
+      - name: Trigger scheduler for queued work
+        if: steps.continuity.outputs.scheduler == '1' && env.EXECUTE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-fleet-scheduler.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
+
+      - name: Summary
+        shell: bash
+        env:
+          MANAGED: ${{ steps.continuity.outputs.managed }}
+          REQUESTS: ${{ steps.continuity.outputs.requests_created }}
+          FIXED: ${{ steps.continuity.outputs.fixed_planning }}
+          BRAIN: ${{ steps.continuity.outputs.product_brain }}
+          SCHEDULER: ${{ steps.continuity.outputs.scheduler }}
+          HOLES: ${{ steps.continuity.outputs.holes }}
+        run: |
+          {
+            echo '### Factory autonomy continuity'
+            echo "- Managed repositories: ${MANAGED:-0}"
+            echo "- Missing product-decision requests repaired: ${REQUESTS:-0}"
+            echo "- Fixed planner requested: ${FIXED:-0}"
+            echo "- Dynamic Product Brain requested: ${BRAIN:-0}"
+            echo "- Scheduler requested: ${SCHEDULER:-0}"
+            echo "- Structural anomalies: ${HOLES:-0}"
+            echo '- Purpose: no healthy managed repository should become idle merely because one controller failed to hand off to the next.'
+          } >> "$GITHUB_STEP_SUMMARY"
