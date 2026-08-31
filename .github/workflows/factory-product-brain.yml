@@ -318,7 +318,7 @@ jobs:
                 if [ -z "$needed" ]; then
                   telemetry="$(gh issue list --repo "$repo" --state open --label 'factory:telemetry' --limit 20 --json number,title --jq '.[] | select(.title == "[FACTORY] Product telemetry") | .number' | head -n 1)"
                   gh issue create --repo "$repo" --title '[FACTORY] Product decision needed' --label 'factory:brain-needed' \
-                    --body="<!-- roots-product-decision-needed:v1 -->\nDynamic planning has no active milestone and no valid decision proposal. Factory Product Manager should inspect product state, telemetry issue #${telemetry:-unknown}, completed work and available market evidence, then publish exactly one `factory:brain-proposal` using the v1 decision contract. This issue is a planning signal, never executable worker backlog." >/dev/null
+                    --body="<!-- roots-product-decision-needed:v1 -->\nDynamic planning has no active milestone and no valid decision proposal. Factory Product Manager should inspect product state, telemetry issue #${telemetry:-unknown}, completed work and available market evidence, then publish exactly one factory:brain-proposal using the v1 decision contract. This issue is a planning signal, never executable worker backlog." >/dev/null
                 fi
               fi
             fi
