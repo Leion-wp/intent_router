@@ -1,0 +1,37 @@
+name: factory-worker-discovery-v1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-registry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate registry envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.version == 1 and (.workers | type == "array" and length > 0)' .github/roots/worker-registry.json >/dev/null
+          test "$(jq -r '[.workers[].worker_id] | length == (unique | length)' .github/roots/worker-registry.json)" = "true"
+
+      - name: Emit discovered workers
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -r '.workers[] | [.worker_id, .status, .activation.protocol, .activation.method, .activation.documentation] | @tsv' .github/roots/worker-registry.json
+
+      - name: Enforce human activation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          unexpected="$(jq -r '[.workers[] | select(.worker_id != "manual" and .status == "ENABLED") | .worker_id] | join(",")' .github/roots/worker-registry.json)"
+          if [ -n "$unexpected" ]; then
+            echo "Workers enabled in registry: $unexpected"
+            echo "This is allowed only after an explicit human-approved workflow/policy change."
+          fi

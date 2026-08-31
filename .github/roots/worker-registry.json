@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "workers": [
+    {
+      "version": 1,
+      "worker_id": "manual",
+      "status": "ENABLED",
+      "capabilities": ["code.read", "code.write", "tests.run", "git.commit", "git.push", "pr.create"],
+      "activation": {"protocol":"manual","documentation":"https://docs.github.com/en/actions","entrypoint":"human","method":"manual_handoff","auth":{"mode":"manual","notes":"Fallback worker requiring explicit human execution."}},
+      "lifecycle": {"start":true,"status":true,"resume":true,"cancel":true}
+    },
+    {
+      "version": 1,
+      "worker_id": "jules",
+      "status": "DISCOVERED",
+      "capabilities": ["code.read", "code.write", "tests.run", "git.commit", "git.push", "pr.create"],
+      "activation": {"protocol":"rest","documentation":"https://jules.google/docs/api/reference/","entrypoint":"https://jules.googleapis.com/v1alpha/sessions","method":"POST create session","auth":{"mode":"api_key","secret_name":"JULES_API_KEY","notes":"Official Jules REST API uses X-Goog-Api-Key. Connected GitHub sources are discoverable through the Jules Sources API after authentication."}},
+      "lifecycle": {"start":true,"status":true,"resume":true,"cancel":true},
+      "extensions": {"source_discovery":"https://jules.googleapis.com/v1alpha/sources","adapter_status":"wired_not_enabled"}
+    },
+    {
+      "version": 1,
+      "worker_id": "codex",
+      "status": "DISCOVERED",
+      "capabilities": ["code.read", "code.write", "tests.run"],
+      "activation": {"protocol":"github_action","documentation":"https://github.com/openai/codex-action","entrypoint":"openai/codex-action@v1","method":"GitHub Action","auth":{"mode":"api_key","secret_name":"OPENAI_API_KEY","notes":"The official codex-action currently requires a provider API key; GitHub connection to Codex Cloud is not treated as equivalent authentication by this adapter."}},
+      "lifecycle": {"start":true,"status":false,"resume":false,"cancel":false},
+      "extensions": {"adapter_status":"wired_not_enabled"}
+    },
+    {
+      "version": 1,
+      "worker_id": "claude",
+      "status": "DISCOVERED",
+      "capabilities": ["code.read", "code.write", "tests.run", "git.commit", "git.push", "pr.create"],
+      "activation": {"protocol":"github_action","documentation":"https://docs.anthropic.com/en/docs/claude-code/github-actions","entrypoint":"anthropics/claude-code-action@v1","method":"GitHub Action","auth":{"mode":"api_key","secret_name":"ANTHROPIC_API_KEY","notes":"Direct Anthropic API mode. Other officially supported modes include Bedrock and Vertex AI."}},
+      "lifecycle": {"start":true,"status":false,"resume":false,"cancel":false},
+      "extensions": {"adapter_status":"wired_not_enabled"}
+    },
+    {
+      "version": 1,
+      "worker_id": "gemini",
+      "status": "DISCOVERED",
+      "capabilities": ["code.read", "code.write", "tests.run"],
+      "activation": {"protocol":"github_action","documentation":"https://github.com/google-github-actions/run-gemini-cli","entrypoint":"google-github-actions/run-gemini-cli@v0","method":"GitHub Action","auth":{"mode":"api_key","secret_name":"GEMINI_API_KEY","notes":"Official action also supports Google Cloud Workload Identity Federation and Gemini Code Assist modes."}},
+      "lifecycle": {"start":true,"status":false,"resume":false,"cancel":false},
+      "extensions": {"adapter_status":"wired_not_enabled"}
+    }
+  ]
+}

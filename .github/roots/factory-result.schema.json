@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-result-v1.json",
+  "title": "Roots FactoryResult v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "task_id", "status", "worker", "summary", "outputs", "evidence", "risks", "next_action"],
+  "properties": {
+    "version": { "const": 1 },
+    "task_id": { "type": "string", "pattern": "^[^#]+/[^#]+#[1-9][0-9]*$" },
+    "status": { "type": "string", "enum": ["SUCCEEDED", "REWORK", "BLOCKED", "FAILED"] },
+    "worker": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+    "summary": { "type": "string", "minLength": 1 },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "branch": { "type": ["string", "null"] },
+        "commit": { "type": ["string", "null"] },
+        "pull_request": { "type": ["integer", "null"], "minimum": 1 },
+        "worker_execution_id": { "type": ["string", "null"] },
+        "worker_url": { "type": ["string", "null"] }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tests"],
+      "properties": {
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "status"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "status": { "type": "string", "enum": ["PASS", "FAIL", "SKIP"] },
+              "details": { "type": "string" }
+            }
+          }
+        },
+        "checks": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "risks": { "type": "array", "items": { "type": "string" } },
+    "next_action": { "type": "string", "enum": ["REVIEW", "REWORK", "WAIT", "HUMAN_REQUIRED", "CLOSE", "NONE"] },
+    "extensions": {
+      "type": "object",
+      "description": "Namespaced provider-specific metadata ignored by core policy unless explicitly versioned later."
+    }
+  }
+}
