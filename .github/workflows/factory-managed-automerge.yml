@@ -1,0 +1,216 @@
+name: factory-managed-automerge-v1
+
+"on":
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: 'Merge eligible managed product PRs'
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-managed-automerge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      EXECUTE: ${{ github.event_name == 'schedule' || inputs.execute }}
+      POLICY: .github/roots/factory-managed-merge-policy.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Merge only deterministic PASS candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          jq -e '.version == 1 and .enabled == true and .scope.managed_only == true and .scope.exclude_control_plane_repository == true and .pull_request.require_single_correlated_pr == true' "$POLICY" >/dev/null
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+
+          merged=0
+          deferred=0
+          blocked=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            blueprint="$(jq -r '.blueprint // ""' /tmp/profile.json)"
+            if ! jq -e --arg blueprint "$blueprint" '.scope.allowed_blueprints | index($blueprint) != null' "$POLICY" >/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo' /tmp/profile.json >/dev/null || continue
+            default_branch="$(jq -r '.default_branch' /tmp/profile.json)"
+
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              labels="$(gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
+              should_block=false
+              while IFS= read -r label; do
+                [ -z "$label" ] && continue
+                if jq -e --arg label "$label" '.source_issue.blocking_labels | index($label) != null' "$POLICY" >/dev/null; then
+                  should_block=true
+                  break
+                fi
+              done < <(jq -r '.[]' <<< "$labels")
+              if [ "$should_block" = 'true' ]; then
+                blocked="$((blocked + 1))"
+                continue
+              fi
+
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              session_marker="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
+              if [ -z "$session_marker" ]; then
+                deferred="$((deferred + 1))"
+                continue
+              fi
+              session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_marker" | head -n 1)"
+              session_id="${session##*/}"
+              if [ -z "$session_id" ]; then
+                deferred="$((deferred + 1))"
+                continue
+              fi
+
+              gh pr list --repo "$repo" --state open --limit 100 \
+                --json number,body,headRefOid,headRefName,baseRefName,isDraft,url > /tmp/prs.json
+              jq --argjson issue "$issue" --arg branch "$default_branch" \
+                '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]' \
+                /tmp/prs.json > /tmp/candidates.json
+              count="$(jq 'length' /tmp/candidates.json)"
+              if [ "$count" -eq 0 ]; then
+                jq --arg branch "$default_branch" --arg session_id "$session_id" \
+                  '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' \
+                  /tmp/prs.json > /tmp/candidates.json
+                count="$(jq 'length' /tmp/candidates.json)"
+              fi
+              if [ "$count" -gt 1 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${count} active PR candidates." >&2
+                blocked="$((blocked + 1))"
+                continue
+              fi
+              if [ "$count" -eq 0 ]; then
+                deferred="$((deferred + 1))"
+                continue
+              fi
+
+              pr="$(jq -r '.[0].number' /tmp/candidates.json)"
+              sha="$(jq -r '.[0].headRefOid' /tmp/candidates.json)"
+              is_draft="$(jq -r '.[0].isDraft' /tmp/candidates.json)"
+              [ "$is_draft" = 'false' ] || { deferred="$((deferred + 1))"; continue; }
+
+              gh api "repos/${repo}/pulls/${pr}" > /tmp/pr.json
+              [ "$(jq -r '.base.ref' /tmp/pr.json)" = "$default_branch" ] || { blocked="$((blocked + 1))"; continue; }
+              [ "$(jq -r '.head.sha' /tmp/pr.json)" = "$sha" ] || { deferred="$((deferred + 1))"; continue; }
+              [ "$(jq -r '.draft' /tmp/pr.json)" = 'false' ] || { deferred="$((deferred + 1))"; continue; }
+
+              : > /tmp/changed-files.txt
+              gh api --paginate "repos/${repo}/pulls/${pr}/files?per_page=100" --jq '.[].filename' > /tmp/changed-files.txt
+              forbidden=false
+              while IFS= read -r prefix; do
+                [ -z "$prefix" ] && continue
+                if grep -Fqx "$prefix" /tmp/changed-files.txt || grep -Fq "${prefix}" /tmp/changed-files.txt; then
+                  forbidden=true
+                  echo "AUTO_MERGE_FORBIDDEN_PATH: ${repo}#${issue} PR #${pr} touches ${prefix}." >&2
+                  break
+                fi
+              done < <(jq -r '.pull_request.forbidden_path_prefixes[]' "$POLICY")
+              if [ "$forbidden" = 'true' ]; then
+                blocked="$((blocked + 1))"
+                continue
+              fi
+
+              gh api "repos/${repo}/actions/runs?head_sha=${sha}&event=pull_request&per_page=100" > /tmp/runs.json
+              run_count="$(jq '.workflow_runs | length' /tmp/runs.json)"
+              if [ "$run_count" -eq 0 ]; then
+                deferred="$((deferred + 1))"
+                continue
+              fi
+              all_runs_completed="$(jq '[.workflow_runs[] | select(.status != "completed")] | length == 0' /tmp/runs.json)"
+              if [ "$all_runs_completed" != 'true' ]; then
+                deferred="$((deferred + 1))"
+                continue
+              fi
+              bad_runs="$(jq --slurpfile policy "$POLICY" '[.workflow_runs[] | select((.conclusion as $c | $policy[0].ci.allowed_run_conclusions | index($c)) == null)] | length' /tmp/runs.json)"
+              if [ "$bad_runs" -gt 0 ]; then
+                deferred="$((deferred + 1))"
+                continue
+              fi
+
+              : > /tmp/jobs.ndjson
+              while IFS= read -r run_id; do
+                [ -z "$run_id" ] && continue
+                gh api "repos/${repo}/actions/runs/${run_id}/jobs?per_page=100" \
+                  --jq '.jobs[] | {name,status,conclusion,started_at,completed_at}' >> /tmp/jobs.ndjson
+              done < <(jq -r '.workflow_runs[].id' /tmp/runs.json)
+              if [ -s /tmp/jobs.ndjson ]; then
+                jq -s '.' /tmp/jobs.ndjson > /tmp/jobs.json
+              else
+                printf '%s\n' '[]' > /tmp/jobs.json
+              fi
+
+              required_ok=true
+              while IFS= read -r required_job; do
+                [ -z "$required_job" ] && continue
+                latest="$(jq -c --arg name "$required_job" '[.[] | select(.name == $name)] | sort_by(.started_at // "") | last // null' /tmp/jobs.json)"
+                if [ "$latest" = 'null' ] || [ "$(jq -r '.status' <<< "$latest")" != 'completed' ] || [ "$(jq -r '.conclusion' <<< "$latest")" != 'success' ]; then
+                  required_ok=false
+                  break
+                fi
+              done < <(jq -r '.ci.required_jobs[]' /tmp/profile.json)
+              if [ "$required_ok" != 'true' ]; then
+                deferred="$((deferred + 1))"
+                continue
+              fi
+
+              mergeable="$(jq -r '.mergeable' /tmp/pr.json)"
+              mergeable_state="$(jq -r '.mergeable_state // "unknown"' /tmp/pr.json)"
+              if [ "$mergeable" != 'true' ] || [ "$mergeable_state" = 'dirty' ] || [ "$mergeable_state" = 'blocked' ]; then
+                deferred="$((deferred + 1))"
+                continue
+              fi
+
+              ready_marker="<!-- roots-managed-automerge-ready head=${sha} -->"
+              if ! jq -e --arg marker "$ready_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                  -f body="${ready_marker}\nAUTO_MERGE_READY: PR #${pr} passed the managed-product merge policy at head ${sha}. CI required jobs are green; no protected control-plane path is touched." >/dev/null
+              fi
+
+              if [ "$EXECUTE" != 'true' ]; then
+                continue
+              fi
+              merge_method="$(jq -r '.pull_request.merge_method' "$POLICY")"
+              if gh api --method PUT "repos/${repo}/pulls/${pr}/merge" \
+                -f sha="$sha" -f merge_method="$merge_method" > /tmp/merge.json 2>/tmp/merge.err; then
+                if [ "$(jq -r '.merged // false' /tmp/merge.json)" = 'true' ]; then
+                  gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                    -f body="<!-- roots-managed-automerge-done head=${sha} -->\nAUTO_MERGE_DONE: managed PR #${pr} merged automatically after deterministic policy and CI gates. Completion reconciliation owns the next transition." >/dev/null
+                  merged="$((merged + 1))"
+                else
+                  deferred="$((deferred + 1))"
+                fi
+              else
+                echo "AUTO_MERGE_DEFERRED: ${repo} PR #${pr}: $(tail -c 1200 /tmp/merge.err)" >&2
+                deferred="$((deferred + 1))"
+              fi
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
+          done < /tmp/repos.txt
+
+          echo "Managed auto-merge scan: merged=${merged}, deferred=${deferred}, blocked=${blocked}, execute=${EXECUTE}."
