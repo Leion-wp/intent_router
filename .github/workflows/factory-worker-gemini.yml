@@ -1,0 +1,70 @@
+name: factory-worker-gemini-v1
+
+on:
+  workflow_call:
+    inputs:
+      task_json:
+        required: true
+        type: string
+      execute:
+        required: true
+        type: boolean
+    secrets:
+      GEMINI_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  gemini:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate adapter activation
+        env:
+          TASK_JSON: ${{ inputs.task_json }}
+          EXECUTE: ${{ inputs.execute }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$TASK_JSON" | jq -e . > factory-task.json
+          test "$(jq -r '.target.branch' factory-task.json)" = "Android"
+          test "$(jq -r '.target.cwd' factory-task.json)" = "/acode-plugin"
+          test "$(jq -r '.workers[] | select(.worker_id=="gemini") | .status' .github/roots/worker-registry.json)" = "ENABLED"
+          test "$EXECUTE" = "true"
+          test -n "$GEMINI_API_KEY"
+
+      - name: Build provider prompt
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -r '[.spec.objective, (.spec.context.issue_body // ""), "Target: Android /acode-plugin", "Forbidden actions:", (.policy.forbidden_actions[]? // empty)] | join("\n")' factory-task.json > prompt.txt
+
+      - name: Run Gemini CLI
+        id: gemini
+        uses: google-github-actions/run-gemini-cli@v0
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          prompt: 'Read prompt.txt and execute the FactoryTask. Do not modify workflows, policies, secrets, production deployment, main, or anything outside /acode-plugin.'
+          upload_artifacts: false
+
+      - name: Emit worker result
+        env:
+          GEMINI_SUMMARY: ${{ steps.gemini.outputs.summary }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg task_id "$(jq -r '.task_id' factory-task.json)" \
+            --arg summary "${GEMINI_SUMMARY:-Gemini CLI action completed.}" \
+            '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"gemini",summary:$summary,outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:null,worker_url:null},evidence:{tests:[],checks:["Gemini CLI action completed"]},risks:["Adapter does not yet infer commit or PR identity from provider output."],next_action:"REVIEW"}' > factory-result.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: factory-result-gemini
+          path: factory-result.json
+          retention-days: 7
