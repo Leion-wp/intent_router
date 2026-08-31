@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-task-v1.json",
+  "title": "Roots FactoryTask v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "task_id", "source", "objective", "target", "worker", "constraints", "state"],
+  "properties": {
+    "version": { "const": 1 },
+    "task_id": { "type": "string", "minLength": 3 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_number", "issue_url"],
+      "properties": {
+        "issue_number": { "type": "integer", "minimum": 1 },
+        "issue_url": { "type": "string", "minLength": 1 }
+      }
+    },
+    "objective": { "type": "string", "minLength": 1 },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "branch", "cwd"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 3 },
+        "branch": { "const": "Android" },
+        "cwd": { "const": "/acode-plugin" }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested"],
+      "properties": {
+        "requested": { "type": "string", "enum": ["jules", "codex", "claude", "gemini", "manual"] }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "state": { "const": "DISPATCH_READY" }
+  }
+}
