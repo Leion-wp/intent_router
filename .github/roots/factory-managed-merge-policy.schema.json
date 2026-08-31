@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-managed-merge-policy.schema.json",
+  "title": "FactoryManagedMergePolicy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "enabled", "scope", "source_issue", "pull_request", "ci", "governance"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "enabled": {"type": "boolean"},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["managed_only", "exclude_control_plane_repository", "allowed_blueprints"],
+      "properties": {
+        "managed_only": {"const": true},
+        "exclude_control_plane_repository": {"const": true},
+        "allowed_blueprints": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "source_issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_label", "blocking_labels", "require_persisted_worker_session"],
+      "properties": {
+        "required_label": {"const": "factory:dispatched"},
+        "blocking_labels": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "require_persisted_worker_session": {"const": true}
+      }
+    },
+    "pull_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["require_default_base_branch", "require_non_draft", "require_single_correlated_pr", "merge_method", "forbidden_path_prefixes"],
+      "properties": {
+        "require_default_base_branch": {"const": true},
+        "require_non_draft": {"const": true},
+        "require_single_correlated_pr": {"const": true},
+        "merge_method": {"enum": ["merge", "squash", "rebase"]},
+        "forbidden_path_prefixes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["require_profile_jobs", "require_all_pull_request_runs_completed", "allowed_run_conclusions"],
+      "properties": {
+        "require_profile_jobs": {"const": true},
+        "require_all_pull_request_runs_completed": {"const": true},
+        "allowed_run_conclusions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["success", "neutral", "skipped"]}}
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["production_deploy", "workflow_changes", "credential_changes", "permission_changes", "control_plane_merge"],
+      "properties": {
+        "production_deploy": {"const": "HUMAN_REQUIRED"},
+        "workflow_changes": {"const": "HUMAN_REQUIRED"},
+        "credential_changes": {"const": "HUMAN_REQUIRED"},
+        "permission_changes": {"const": "HUMAN_REQUIRED"},
+        "control_plane_merge": {"const": "HUMAN_REQUIRED"}
+      }
+    }
+  }
+}
