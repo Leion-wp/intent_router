@@ -7,21 +7,26 @@ on:
         description: 'Open GitHub issue to compile into a FactoryTask'
         required: true
         type: number
-      worker:
-        description: 'Requested worker adapter (v1 records only; it does not dispatch)'
+      preferred_worker:
+        description: 'Preference only; selection remains capability/status based'
         required: true
-        default: manual
+        default: auto
         type: choice
-        options:
-          - manual
-          - jules
-          - codex
-          - claude
-          - gemini
+        options: [auto, manual, jules, codex, claude, gemini]
+      execute:
+        description: 'Human execution gate. false only compiles/routes the task.'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
   issues: read
+  pull-requests: read
+
+env:
+  FACTORY_BRANCH: Android
+  FACTORY_CWD: /acode-plugin
 
 concurrency:
   group: factory-${{ github.repository }}-${{ inputs.issue_number }}
@@ -29,28 +34,31 @@ concurrency:
 
 jobs:
   compile-task:
-    name: Compile FactoryTask
+    name: Compile and route FactoryTask
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      selected_worker: ${{ steps.route.outputs.selected_worker }}
+      task_json: ${{ steps.compile.outputs.task_json }}
+      execute: ${{ steps.gate.outputs.execute }}
 
     env:
       GH_TOKEN: ${{ github.token }}
       ISSUE_NUMBER: ${{ inputs.issue_number }}
-      REQUESTED_WORKER: ${{ inputs.worker }}
+      PREFERRED_WORKER: ${{ inputs.preferred_worker }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Enforce control-plane target
+      - name: Enforce immutable product target
         shell: bash
         run: |
           set -euo pipefail
-          test "${GITHUB_REF_NAME}" = "control-plane/factory-dispatch-v1" || test "${GITHUB_REF_NAME}" = "Android"
           test -d acode-plugin
+          test "$FACTORY_BRANCH" = "Android"
+          test "$FACTORY_CWD" = "/acode-plugin"
 
       - name: Read source issue
-        id: issue
         shell: bash
         run: |
           set -euo pipefail
@@ -58,67 +66,103 @@ jobs:
           test "$(jq -r '.state' issue.json)" = "open"
           test "$(jq -r '.pull_request // empty' issue.json)" = ""
 
-      - name: Compile FactoryTask
+      - name: Reject duplicate active PRs
         shell: bash
         run: |
           set -euo pipefail
+          count="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --search "#${ISSUE_NUMBER}" --json number,body --jq '[.[] | select((.body // "") | test("(?i)(fixes|closes|resolves)\\s+#'"${ISSUE_NUMBER}"'\\b"))] | length')"
+          test "$count" -le 1
 
+      - name: Compile FactoryTask
+        id: compile
+        shell: bash
+        run: |
+          set -euo pipefail
           jq -n \
-            --arg repository "${GITHUB_REPOSITORY}" \
-            --argjson issue_number "${ISSUE_NUMBER}" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --argjson issue_number "$ISSUE_NUMBER" \
             --arg issue_url "$(jq -r '.html_url' issue.json)" \
             --arg objective "$(jq -r '.title' issue.json)" \
-            --arg worker "${REQUESTED_WORKER}" \
+            --arg body "$(jq -r '.body // ""' issue.json)" \
+            --arg preferred "$PREFERRED_WORKER" \
             '{
               version: 1,
               task_id: ($repository + "#" + ($issue_number | tostring)),
-              source: {
-                issue_number: $issue_number,
-                issue_url: $issue_url
+              source: {type:"github_issue", issue_number:$issue_number, issue_url:$issue_url},
+              spec: {
+                objective:$objective,
+                acceptance_criteria: [],
+                test_strategy: [],
+                context:{issue_body:$body}
               },
-              objective: $objective,
-              target: {
-                repository: $repository,
-                branch: "Android",
-                cwd: "/acode-plugin"
+              target:{repository:$repository, branch:"Android", cwd:"/acode-plugin"},
+              requirements:{
+                capabilities:["code.read","code.write","tests.run"],
+                preferred_worker:(if $preferred == "auto" then null else $preferred end)
               },
-              worker: {
-                requested: $worker
+              policy:{
+                allowed_actions:["code.read","code.write","tests.run","git.commit","git.push","pr.create"],
+                forbidden_actions:["workflow.modify","policy.modify","secret.read","production.deploy","main.modify"],
+                human_gates:["workflow.modify","policy.modify","worker.enable","production.deploy","credential.modify"]
               },
-              constraints: [
-                "Do not modify main",
-                "Work only against Android",
-                "Product code scope is /acode-plugin",
-                "Tests are required for product changes",
-                "Do not create a second active PR for this issue"
-              ],
-              state: "DISPATCH_READY"
+              budget:{max_attempts:2, timeout_minutes:30, cost_policy:"subscription_preferred"},
+              state:"DISPATCH_READY"
             }' > factory-task.json
+          echo "task_json=$(jq -c . factory-task.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Validate FactoryTask contract
+      - name: Validate strict FactoryTask core
         shell: bash
         run: |
           set -euo pipefail
-
           jq -e '
             .version == 1 and
-            (.task_id | type == "string" and length > 2) and
-            (.source.issue_number | type == "number" and . >= 1) and
-            (.source.issue_url | type == "string" and length > 0) and
-            (.objective | type == "string" and length > 0) and
+            (.task_id | test("^[^#]+/[^#]+#[1-9][0-9]*$")) and
+            .source.type == "github_issue" and
+            (.spec.objective | length > 0) and
             .target.repository == env.GITHUB_REPOSITORY and
             .target.branch == "Android" and
             .target.cwd == "/acode-plugin" and
-            (.worker.requested | IN("manual", "jules", "codex", "claude", "gemini")) and
-            (.constraints | type == "array" and length > 0) and
+            (.requirements.capabilities | length > 0) and
+            (.policy.forbidden_actions | index("workflow.modify") != null) and
+            (.policy.forbidden_actions | index("main.modify") != null) and
             .state == "DISPATCH_READY"
           ' factory-task.json >/dev/null
 
-      - name: Show compiled task
+      - name: Resolve compatible enabled worker
+        id: route
         shell: bash
-        run: jq . factory-task.json
+        run: |
+          set -euo pipefail
+          preferred="$(jq -r '.requirements.preferred_worker // empty' factory-task.json)"
+          required="$(jq -c '.requirements.capabilities' factory-task.json)"
 
-      - name: Upload FactoryTask artifact
+          compatible='[.workers[] | select(.status == "ENABLED") | select((.capabilities as $caps | $required | all(. as $r | $caps | index($r) != null)))]'
+          if [ -n "$preferred" ]; then
+            worker="$(jq -r --arg p "$preferred" --argjson required "$required" "$compatible | map(select(.worker_id == \$p)) | .[0].worker_id // empty" .github/roots/worker-registry.json)"
+          else
+            worker="$(jq -r --argjson required "$required" "$compatible | .[0].worker_id // empty" .github/roots/worker-registry.json)"
+          fi
+
+          if [ -z "$worker" ]; then
+            echo 'No ENABLED worker satisfies the requested capabilities.' >&2
+            exit 1
+          fi
+          echo "selected_worker=$worker" >> "$GITHUB_OUTPUT"
+          echo "Selected worker: $worker"
+
+      - name: Human execution gate
+        id: gate
+        shell: bash
+        env:
+          EXECUTE: ${{ inputs.execute }}
+        run: |
+          set -euo pipefail
+          echo "execute=$EXECUTE" >> "$GITHUB_OUTPUT"
+          if [ "$EXECUTE" != "true" ]; then
+            echo 'Dry route only: no worker will be invoked.'
+          fi
+
+      - name: Upload FactoryTask
         uses: actions/upload-artifact@v4
         with:
           name: factory-task-${{ inputs.issue_number }}
