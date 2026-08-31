@@ -2,8 +2,10 @@ name: factory-fleet-jules-rework-v1
 
 "on":
   workflow_dispatch:
+  repository_dispatch:
+    types: [factory-ci-failed]
   schedule:
-    - cron: '23,53 * * * *'
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: read
