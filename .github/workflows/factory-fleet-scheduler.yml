@@ -1,4 +1,4 @@
-name: factory-fleet-scheduler-v2
+name: factory-fleet-scheduler-v3
 
 "on":
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Discover oldest eligible issue and reconcile dispatch acknowledgements
+      - name: Discover highest-priority eligible issue and reconcile dispatch acknowledgements
         id: candidate
         shell: bash
         run: |
@@ -91,6 +91,8 @@ jobs:
           if [ "$active" -eq 1 ]; then
             echo 'repository=' >> "$GITHUB_OUTPUT"
             echo 'issue_number=' >> "$GITHUB_OUTPUT"
+            echo 'selected_priority=' >> "$GITHUB_OUTPUT"
+            echo 'portfolio_focus=' >> "$GITHUB_OUTPUT"
             echo 'global_lock=true' >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -98,11 +100,20 @@ jobs:
           while IFS= read -r repo; do
             [ -z "$repo" ] && continue
             gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json
-            gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number,body,createdAt \
+            gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number,body,createdAt,labels \
               | jq -c '.[]' | while IFS= read -r row; do
               issue="$(jq -r '.number' <<< "$row")"
               body="$(jq -r '.body // ""' <<< "$row")"
               created="$(jq -r '.createdAt' <<< "$row")"
+              focus="$(jq -r 'if any(.labels[]?; .name == "factory:portfolio-focus") then 0 else 1 end' <<< "$row")"
+              priority="$(printf '%s\n' "$body" | sed -nE 's/^Priority:[[:space:]]*([0-9]+).*$/\1/ip' | head -n 1)"
+              if [ -z "$priority" ]; then
+                priority=50
+              fi
+              if [ "$priority" -gt 100 ]; then
+                priority=100
+              fi
+
               gh pr list --repo "$repo" --state open --search "#${issue}" --json body,baseRefName > /tmp/prs.json
               branch="$(jq -r '.default_branch' /tmp/profile.json)"
               linked="$(jq --argjson issue "$issue" --arg branch "$branch" '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))] | length' /tmp/prs.json)"
@@ -119,7 +130,7 @@ jobs:
                 fi
               done <<< "$blockers"
               [ "$blocked" = 'true' ] && continue
-              printf '%s\t%s\t%s\n' "$created" "$repo" "$issue" >> candidates.tsv
+              printf '%s\t%03d\t%s\t%s\t%s\n' "$focus" "$priority" "$created" "$repo" "$issue" >> candidates.tsv
             done
           done < managed-repos.txt
 
@@ -127,11 +138,15 @@ jobs:
           if [ ! -s candidates.tsv ]; then
             echo 'repository=' >> "$GITHUB_OUTPUT"
             echo 'issue_number=' >> "$GITHUB_OUTPUT"
+            echo 'selected_priority=' >> "$GITHUB_OUTPUT"
+            echo 'portfolio_focus=' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          sort candidates.tsv | head -n 1 > selected.tsv
-          echo "repository=$(cut -f2 selected.tsv)" >> "$GITHUB_OUTPUT"
-          echo "issue_number=$(cut -f3 selected.tsv)" >> "$GITHUB_OUTPUT"
+          sort -t $'\t' -k1,1n -k2,2n -k3,3 candidates.tsv | head -n 1 > selected.tsv
+          echo "portfolio_focus=$(cut -f1 selected.tsv)" >> "$GITHUB_OUTPUT"
+          echo "selected_priority=$(cut -f2 selected.tsv | sed 's/^0*//; s/^$/0/')" >> "$GITHUB_OUTPUT"
+          echo "repository=$(cut -f4 selected.tsv)" >> "$GITHUB_OUTPUT"
+          echo "issue_number=$(cut -f5 selected.tsv)" >> "$GITHUB_OUTPUT"
 
       - name: Enter acknowledged dispatching state and trigger dispatcher
         if: steps.candidate.outputs.repository != '' && env.EXECUTE == 'true'
@@ -161,13 +176,18 @@ jobs:
           TARGET_REPO: ${{ steps.candidate.outputs.repository }}
           ISSUE_NUMBER: ${{ steps.candidate.outputs.issue_number }}
           GLOBAL_LOCK: ${{ steps.candidate.outputs.global_lock }}
+          PRIORITY: ${{ steps.candidate.outputs.selected_priority }}
+          FOCUS: ${{ steps.candidate.outputs.portfolio_focus }}
         run: |
           {
-            echo '### Fleet scheduler v2'
+            echo '### Fleet scheduler v3'
             echo "- Candidate repository: ${TARGET_REPO:-none}"
             echo "- Candidate issue: ${ISSUE_NUMBER:-none}"
+            echo "- Candidate task priority: ${PRIORITY:-none}"
+            echo "- Portfolio focus rank: ${FOCUS:-none}"
             echo "- Global worker lock: ${GLOBAL_LOCK:-false}"
             echo "- Execute: ${EXECUTE}"
+            echo '- Scheduling order: portfolio-focus first, then lower numeric task Priority, then oldest creation time.'
             echo '- Sequential invariant: at most one open dispatching/dispatched task across the managed fleet.'
             echo '- Dispatch invariant: queued -> dispatching -> persisted Jules session -> dispatched.'
             echo '- Missing acknowledgement after 20 minutes is reconciled back to queued.'
