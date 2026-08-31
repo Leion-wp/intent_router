@@ -37,15 +37,36 @@ jobs:
             .version == 1 and
             (.task_id | type == "string" and test("^[^#]+/[^#]+#[1-9][0-9]*$")) and
             (.status | IN("SUCCEEDED", "REWORK", "BLOCKED", "FAILED")) and
-            (.worker | type == "string" and length > 0) and
+            (.worker | type == "string" and test("^[a-z0-9][a-z0-9_-]*$")) and
             (.summary | type == "string" and length > 0) and
             (.outputs | type == "object") and
             (.evidence | type == "object") and
             (.evidence.tests | type == "array") and
             (.risks | type == "array") and
-            (.next_action | IN("REVIEW", "REWORK", "WAIT", "CLOSE", "NONE")) and
+            (.next_action | IN("REVIEW", "REWORK", "WAIT", "HUMAN_REQUIRED", "CLOSE", "NONE")) and
             ((keys - ["version","task_id","status","worker","summary","outputs","evidence","risks","next_action","extensions"]) | length == 0)
           ' factory-result.json >/dev/null
+
+      - name: Validate status transition semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            if .status == "REWORK" then .next_action == "REWORK"
+            elif .status == "FAILED" then (.next_action | IN("CLOSE", "HUMAN_REQUIRED", "NONE"))
+            elif .status == "BLOCKED" then (.next_action | IN("WAIT", "HUMAN_REQUIRED", "CLOSE"))
+            elif .status == "SUCCEEDED" then (.next_action | IN("REVIEW", "WAIT", "NONE"))
+            else false end
+          ' factory-result.json >/dev/null
+
+      - name: Reject secret-shaped outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if jq -r '.. | strings' factory-result.json | grep -Eiq '(sk-[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)'; then
+            echo 'FactoryResult contains a value that looks like a secret or private key.' >&2
+            exit 1
+          fi
 
       - name: Upload validated result
         uses: actions/upload-artifact@v4
