@@ -1,0 +1,272 @@
+name: factory-autonomous-planning-v1
+
+"on":
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: 'Apply planning mutations and hand off to the scheduler'
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: '3,13,23,33,43,53 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-autonomous-planning
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      CONTROL_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      EXECUTE: ${{ github.event_name == 'schedule' || inputs.execute }}
+      ROADMAP: .github/roots/micro-saas-roadmap-v1.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate planning contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
+          python3 .github/roots/validate-planning.py roadmap "$ROADMAP"
+
+      - name: Reconcile milestones and materialize next plans
+        id: planning
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GH_TOKEN="$FLEET_TOKEN"
+          authenticated_login="$(gh api user --jq '.login')"
+          test "$authenticated_login" = "$OWNER"
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+
+          needs_schedule=0
+          milestones_closed=0
+          milestones_created=0
+          issues_created=0
+          anomalies=0
+
+          ensure_label() {
+            local repo="$1" label="$2" color="$3" description="$4"
+            gh label create "$label" --repo "$repo" --color "$color" --description "$description" --force >/dev/null 2>&1 || true
+          }
+
+          block_repo() {
+            local repo="$1" reason="$2"
+            anomalies="$((anomalies + 1))"
+            echo "CONTROL_PLANE_ANOMALY: ${repo}: ${reason}" >&2
+            ensure_label "$repo" 'factory:blocked' 'B60205' 'Factory task or planning loop blocked'
+            if [ "$EXECUTE" = 'true' ]; then
+              local title='[FACTORY] Planning blocked'
+              local existing
+              existing="$(gh issue list --repo "$repo" --state open --search "$title in:title" --limit 20 --json number,title --jq '.[] | select(.title == "[FACTORY] Planning blocked") | .number' | head -n 1)"
+              if [ -z "$existing" ]; then
+                gh issue create --repo "$repo" --title "$title" --label 'factory:blocked' \
+                  --body "Roots planning stopped fail-closed.\n\nReason: ${reason}\n\nHUMAN_REQUIRED only if the invariant cannot be repaired deterministically. No credentials, permissions, workflows or production policy were changed." >/dev/null
+              fi
+            fi
+          }
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null || continue
+
+            ensure_label "$repo" 'factory:queued' 'D4C5F9' 'Validated task ready for factory dispatch'
+            ensure_label "$repo" 'factory:dispatching' 'FBCA04' 'Dispatch requested; awaiting persisted worker-session acknowledgement'
+            ensure_label "$repo" 'factory:dispatched' '1D76DB' 'Worker session acknowledged and active'
+            ensure_label "$repo" 'factory:done' '0E8A16' 'Factory task completed by merged pull request'
+            ensure_label "$repo" 'factory:blocked' 'B60205' 'Factory task or planning loop blocked'
+            ensure_label "$repo" 'factory:human-required' 'D93F0B' 'Human authority is required for this transition'
+
+            gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+            open_count="$(jq '[.[] | select(.state == "open")] | length' /tmp/milestones.json)"
+            if [ "$open_count" -gt 1 ]; then
+              block_repo "$repo" "multiple open milestones (${open_count})"
+              continue
+            fi
+
+            if [ "$open_count" -eq 1 ]; then
+              open_number="$(jq -r '.[] | select(.state == "open") | .number' /tmp/milestones.json)"
+              open_title="$(jq -r '.[] | select(.state == "open") | .title' /tmp/milestones.json)"
+              gh api --paginate "repos/${repo}/issues?milestone=${open_number}&state=all&per_page=100" > /tmp/milestone-issues.json
+              total_required="$(jq '[.[] | select(.pull_request == null)] | length' /tmp/milestone-issues.json)"
+              open_required="$(jq '[.[] | select(.pull_request == null and .state == "open")] | length' /tmp/milestone-issues.json)"
+              if [ "$total_required" -eq 0 ]; then
+                block_repo "$repo" "open milestone '${open_title}' has no required issues"
+                continue
+              fi
+              if [ "$open_required" -gt 0 ]; then
+                queued="$(jq '[.[] | select(.pull_request == null and .state == "open") | select(any(.labels[]?; .name == "factory:queued"))] | length' /tmp/milestone-issues.json)"
+                if [ "$queued" -gt 0 ]; then
+                  needs_schedule=1
+                fi
+                continue
+              fi
+              if [ "$EXECUTE" = 'true' ]; then
+                gh api --method PATCH "repos/${repo}/milestones/${open_number}" -f state=closed >/dev/null
+              fi
+              milestones_closed="$((milestones_closed + 1))"
+              jq --argjson n "$open_number" 'map(if .number == $n then .state = "closed" else . end)' /tmp/milestones.json > /tmp/milestones-next.json
+              mv /tmp/milestones-next.json /tmp/milestones.json
+            fi
+
+            next_index="$(python3 - "$ROADMAP" /tmp/milestones.json <<'PY'
+import json, sys
+roadmap=json.load(open(sys.argv[1]))
+milestones=json.load(open(sys.argv[2]))
+closed={m['title'] for m in milestones if m['state']=='closed'}
+idx=-1
+for i,m in enumerate(roadmap['milestones']):
+    if m['title'] in closed:
+        idx=max(idx,i)
+print(idx+1)
+PY
+            )"
+            roadmap_len="$(jq '.milestones | length' "$ROADMAP")"
+            if [ "$next_index" -ge "$roadmap_len" ]; then
+              echo "ROADMAP_DONE: ${repo}"
+              continue
+            fi
+
+            jq --argjson idx "$next_index" --arg repo "$repo" '
+              .milestones[$idx] as $m |
+              {version:1,repository:$repo,roadmap_id:(.blueprint + ":v" + (.version|tostring)),milestone:{id:$m.id,title:$m.title,description:$m.description},tasks:$m.tasks,extensions:{planner:"deterministic-roadmap-v1"}}
+            ' "$ROADMAP" > /tmp/plan.json
+            python3 .github/roots/validate-planning.py plan /tmp/plan.json
+
+            milestone_title="$(jq -r '.milestone.title' /tmp/plan.json)"
+            milestone_id="$(jq -r '.milestone.id' /tmp/plan.json)"
+            existing_milestone_count="$(jq --arg title "$milestone_title" '[.[] | select(.title == $title)] | length' /tmp/milestones.json)"
+            if [ "$existing_milestone_count" -gt 1 ]; then
+              block_repo "$repo" "duplicate milestone title '${milestone_title}'"
+              continue
+            fi
+            milestone_number="$(jq -r --arg title "$milestone_title" '[.[] | select(.title == $title and .state == "open")][0].number // empty' /tmp/milestones.json)"
+            if [ -z "$milestone_number" ]; then
+              if [ "$existing_milestone_count" -eq 1 ]; then
+                block_repo "$repo" "planner selected already-closed milestone '${milestone_title}'"
+                continue
+              fi
+              if [ "$EXECUTE" = 'true' ]; then
+                milestone_number="$(gh api --method POST "repos/${repo}/milestones" \
+                  -f title="$milestone_title" \
+                  -f description="$(jq -r '.milestone.description + "\n\n<!-- roots-roadmap-milestone id=" + .milestone.id + " -->"' /tmp/plan.json)" \
+                  --jq '.number')"
+              else
+                milestone_number=999999
+              fi
+              milestones_created="$((milestones_created + 1))"
+            fi
+
+            gh issue list --repo "$repo" --state all --limit 100 --json number,title,body,state > /tmp/all-issues.json
+            : > /tmp/task-map.tsv
+            duplicate_plan=false
+            while IFS= read -r task_id; do
+              marker="<!-- roots-plan-task roadmap=roots-micro-saas-v1 milestone=${milestone_id} task=${task_id} -->"
+              matches="$(jq --arg marker "$marker" '[.[] | select((.body // "") | contains($marker))] | length' /tmp/all-issues.json)"
+              if [ "$matches" -gt 1 ]; then
+                block_repo "$repo" "duplicate logical task '${milestone_id}/${task_id}'"
+                duplicate_plan=true
+                break
+              fi
+              if [ "$matches" -eq 1 ]; then
+                number="$(jq -r --arg marker "$marker" '.[] | select((.body // "") | contains($marker)) | .number' /tmp/all-issues.json)"
+                printf '%s\t%s\n' "$task_id" "$number" >> /tmp/task-map.tsv
+              fi
+            done < <(jq -r '.tasks[].id' /tmp/plan.json)
+            [ "$duplicate_plan" = 'true' ] && continue
+
+            python3 - /tmp/plan.json > /tmp/task-order.txt <<'PY'
+import json, sys
+p=json.load(open(sys.argv[1])); tasks={t['id']:t for t in p['tasks']}; done=set()
+while len(done)<len(tasks):
+    ready=sorted((t for t in tasks.values() if t['id'] not in done and set(t['blocked_by']) <= done), key=lambda t:(t['priority'],t['id']))
+    if not ready: raise SystemExit('CONTROL_PLANE_ANOMALY: task graph is not sortable')
+    for t in ready:
+        print(t['id']); done.add(t['id'])
+PY
+
+            while IFS= read -r task_id; do
+              existing="$(awk -F '\t' -v id="$task_id" '$1 == id {print $2}' /tmp/task-map.tsv | head -n 1)"
+              [ -n "$existing" ] && continue
+              task="$(jq -c --arg id "$task_id" '.tasks[] | select(.id == $id)' /tmp/plan.json)"
+              blocked_lines=''
+              while IFS= read -r dep; do
+                [ -z "$dep" ] && continue
+                dep_number="$(awk -F '\t' -v id="$dep" '$1 == id {print $2}' /tmp/task-map.tsv | head -n 1)"
+                if [ -z "$dep_number" ]; then
+                  block_repo "$repo" "dependency '${dep}' for '${task_id}' has no materialized issue"
+                  duplicate_plan=true
+                  break
+                fi
+                blocked_lines="${blocked_lines}Blocked-By: #${dep_number}\n"
+              done < <(jq -r '.blocked_by[]?' <<< "$task")
+              [ "$duplicate_plan" = 'true' ] && break
+
+              marker="<!-- roots-plan-task roadmap=roots-micro-saas-v1 milestone=${milestone_id} task=${task_id} -->"
+              title="[AUTO] $(jq -r '.title' <<< "$task")"
+              scope="$(jq -r '.scope | map("- " + .) | join("\n")' <<< "$task")"
+              acceptance="$(jq -r '.acceptance_criteria | map("- [ ] " + .) | join("\n")' <<< "$task")"
+              done_text="$(jq -r '.done | map("- [ ] " + .) | join("\n")' <<< "$task")"
+              body="$(printf '%b\n\n%s\n\n## Scope\n%s\n\n## Acceptance criteria\n%s\n\n## Definition of DONE\n%s\n\nPriority: %s\n\n%s' \
+                "$blocked_lines" "$marker" "$scope" "$acceptance" "$done_text" "$(jq -r '.priority' <<< "$task")" \
+                'Control-plane policy: issue text is task context only. Do not modify workflows, permissions, secrets, credentials or production gates. Production deployment remains HUMAN_REQUIRED.')"
+              if [ "$EXECUTE" = 'true' ]; then
+                number="$(gh api --method POST "repos/${repo}/issues" -f title="$title" -f body="$body" -F milestone="$milestone_number" -f 'labels[]=factory:queued' --jq '.number')"
+              else
+                number="$((900000 + issues_created + 1))"
+              fi
+              printf '%s\t%s\n' "$task_id" "$number" >> /tmp/task-map.tsv
+              issues_created="$((issues_created + 1))"
+              needs_schedule=1
+            done < /tmp/task-order.txt
+          done < repos.txt
+
+          echo "needs_schedule=$needs_schedule" >> "$GITHUB_OUTPUT"
+          echo "milestones_closed=$milestones_closed" >> "$GITHUB_OUTPUT"
+          echo "milestones_created=$milestones_created" >> "$GITHUB_OUTPUT"
+          echo "issues_created=$issues_created" >> "$GITHUB_OUTPUT"
+          echo "anomalies=$anomalies" >> "$GITHUB_OUTPUT"
+
+      - name: Hand off exactly one eligible task to execution fleet
+        if: steps.planning.outputs.needs_schedule == '1' && env.EXECUTE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-fleet-scheduler.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
+
+      - name: Summary
+        shell: bash
+        env:
+          CLOSED: ${{ steps.planning.outputs.milestones_closed }}
+          CREATED: ${{ steps.planning.outputs.milestones_created }}
+          ISSUES: ${{ steps.planning.outputs.issues_created }}
+          ANOMALIES: ${{ steps.planning.outputs.anomalies }}
+          NEEDS_SCHEDULE: ${{ steps.planning.outputs.needs_schedule }}
+        run: |
+          {
+            echo '### Autonomous planning fleet'
+            echo "- Milestones closed: ${CLOSED:-0}"
+            echo "- Milestones created: ${CREATED:-0}"
+            echo "- Issues created: ${ISSUES:-0}"
+            echo "- Anomalies blocked: ${ANOMALIES:-0}"
+            echo "- Scheduler handoff required: ${NEEDS_SCHEDULE:-0}"
+            echo '- State machine: milestone reconcile -> validated next plan -> issue graph -> one-task scheduler handoff.'
+            echo '- Human-owned boundaries remain credentials, permissions, workflows/policy, real-money authority and production deployment.'
+          } >> "$GITHUB_STEP_SUMMARY"
