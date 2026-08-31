@@ -125,18 +125,7 @@ jobs:
               mv /tmp/milestones-next.json /tmp/milestones.json
             fi
 
-            next_index="$(python3 - "$ROADMAP" /tmp/milestones.json <<'PY'
-import json, sys
-roadmap=json.load(open(sys.argv[1]))
-milestones=json.load(open(sys.argv[2]))
-closed={m['title'] for m in milestones if m['state']=='closed'}
-idx=-1
-for i,m in enumerate(roadmap['milestones']):
-    if m['title'] in closed:
-        idx=max(idx,i)
-print(idx+1)
-PY
-            )"
+            next_index="$(python3 .github/roots/validate-planning.py next-index "$ROADMAP" /tmp/milestones.json)"
             roadmap_len="$(jq '.milestones | length' "$ROADMAP")"
             if [ "$next_index" -ge "$roadmap_len" ]; then
               echo "ROADMAP_DONE: ${repo}"
@@ -191,15 +180,7 @@ PY
             done < <(jq -r '.tasks[].id' /tmp/plan.json)
             [ "$duplicate_plan" = 'true' ] && continue
 
-            python3 - /tmp/plan.json > /tmp/task-order.txt <<'PY'
-import json, sys
-p=json.load(open(sys.argv[1])); tasks={t['id']:t for t in p['tasks']}; done=set()
-while len(done)<len(tasks):
-    ready=sorted((t for t in tasks.values() if t['id'] not in done and set(t['blocked_by']) <= done), key=lambda t:(t['priority'],t['id']))
-    if not ready: raise SystemExit('CONTROL_PLANE_ANOMALY: task graph is not sortable')
-    for t in ready:
-        print(t['id']); done.add(t['id'])
-PY
+            python3 .github/roots/validate-planning.py task-order /tmp/plan.json > /tmp/task-order.txt
 
             while IFS= read -r task_id; do
               existing="$(awk -F '\t' -v id="$task_id" '$1 == id {print $2}' /tmp/task-map.tsv | head -n 1)"
