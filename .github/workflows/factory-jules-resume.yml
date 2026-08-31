@@ -1,0 +1,180 @@
+name: factory-jules-resume-v1
+
+"on":
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Open issue whose existing Jules session must be resumed'
+        required: true
+        type: number
+      message:
+        description: 'Human-authored follow-up instruction for the existing Jules session'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: jules-resume-${{ github.repository }}-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  resume-jules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+      FOLLOWUP_MESSAGE: ${{ inputs.message }}
+
+    steps:
+      - name: Checkout control-plane
+        uses: actions/checkout@v4
+
+      - name: Validate human resume request
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$JULES_API_KEY"
+          echo "::add-mask::$JULES_API_KEY"
+          test -n "$FOLLOWUP_MESSAGE"
+          test "$(jq -r '.workers[] | select(.worker_id == "jules") | .status' .github/roots/worker-registry.json)" = "ENABLED"
+
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" > issue.json
+          test "$(jq -r '.state' issue.json)" = "open"
+          test "$(jq -r '.pull_request // empty' issue.json)" = ""
+
+      - name: Resolve exactly one active linked PR
+        id: pr
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --search "#${ISSUE_NUMBER}" \
+            --json number,body,url,baseRefName,headRepository > open-prs.json
+
+          jq --argjson issue "$ISSUE_NUMBER" '
+            [.[]
+              | select((.body // "") | test("(?i)(fixes|closes|resolves)\\s+#" + ($issue|tostring) + "\\b"))
+              | select(.baseRefName == "Android")]
+          ' open-prs.json > linked-prs.json
+
+          count="$(jq 'length' linked-prs.json)"
+          if [ "$count" -ne 1 ]; then
+            echo "Resume requires exactly one active Android PR linked to issue #${ISSUE_NUMBER}; found ${count}." >&2
+            exit 1
+          fi
+
+          pr_number="$(jq -r '.[0].number' linked-prs.json)"
+          pr_url="$(jq -r '.[0].url' linked-prs.json)"
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve existing Jules session
+        id: session
+        shell: bash
+        run: |
+          set -euo pipefail
+          task_id="${GITHUB_REPOSITORY}#${ISSUE_NUMBER}"
+
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments?per_page=100" > comments.json
+          jq -r --arg task "$task_id" '
+            [.[].body
+              | try capture("<!-- roots-jules-session task_id=" + $task + " session=(?<session>sessions/[^ ]+) -->").session catch empty]
+            | unique[]
+          ' comments.json > mapped-sessions.txt
+
+          mapped_count="$(wc -l < mapped-sessions.txt | tr -d ' ')"
+          if [ "$mapped_count" -gt 1 ]; then
+            echo "CONTROL_PLANE_ANOMALY: multiple durable Jules mappings found for ${task_id}." >&2
+            exit 1
+          fi
+
+          if [ "$mapped_count" -eq 1 ]; then
+            session="$(cat mapped-sessions.txt)"
+            resolution="durable_mapping"
+          else
+            curl --fail-with-body --silent --show-error \
+              -H "X-Goog-Api-Key: $JULES_API_KEY" \
+              'https://jules.googleapis.com/v1alpha/sessions?pageSize=100' > sessions.json
+
+            jq -r --arg task "$task_id" '
+              [.sessions[]? | select(.title == $task) | .name] | unique[]
+            ' sessions.json > discovered-sessions.txt
+
+            discovered_count="$(wc -l < discovered-sessions.txt | tr -d ' ')"
+            if [ "$discovered_count" -ne 1 ]; then
+              echo "Expected exactly one Jules session titled ${task_id}; found ${discovered_count}." >&2
+              exit 1
+            fi
+
+            session="$(cat discovered-sessions.txt)"
+            resolution="api_discovery"
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            -H "X-Goog-Api-Key: $JULES_API_KEY" \
+            "https://jules.googleapis.com/v1alpha/${session}" > session.json
+
+          test "$(jq -r '.title' session.json)" = "$task_id"
+          echo "session=$session" >> "$GITHUB_OUTPUT"
+          echo "task_id=$task_id" >> "$GITHUB_OUTPUT"
+          echo "resolution=$resolution" >> "$GITHUB_OUTPUT"
+
+      - name: Backfill durable mapping when discovered from Jules API
+        if: steps.session.outputs.resolution == 'api_discovery'
+        shell: bash
+        env:
+          SESSION: ${{ steps.session.outputs.session }}
+          TASK_ID: ${{ steps.session.outputs.task_id }}
+        run: |
+          set -euo pipefail
+          marker="<!-- roots-jules-session task_id=${TASK_ID} session=${SESSION} -->"
+          body="${marker}\nRoots control-plane worker session\n\n- Worker: Jules\n- Task: ${TASK_ID}\n- Session: ${SESSION}\n- Mapping source: authenticated Jules Sessions API discovery\n- Rework policy: all follow-up must reuse this same session."
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="$body" >/dev/null
+
+      - name: Send follow-up to the same Jules session
+        shell: bash
+        env:
+          SESSION: ${{ steps.session.outputs.session }}
+          TASK_ID: ${{ steps.session.outputs.task_id }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+        run: |
+          set -euo pipefail
+          prompt="$(printf '%s\n' \
+            'CONTROL-PLANE FOLLOW-UP (authoritative)' \
+            "Task: ${TASK_ID}" \
+            "Existing PR: #${PR_NUMBER}" \
+            "Existing Jules session: ${SESSION}" \
+            'Continue this same task, same Jules session, same branch and same PR. Do not create another session or PR.' \
+            'Target remains Android /acode-plugin only. Existing control-plane forbidden actions remain authoritative.' \
+            '' \
+            'Human follow-up instruction:' \
+            "$FOLLOWUP_MESSAGE")"
+
+          jq -n --arg prompt "$prompt" '{prompt:$prompt}' > resume-message.json
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            -H "X-Goog-Api-Key: $JULES_API_KEY" \
+            --data @resume-message.json \
+            "https://jules.googleapis.com/v1alpha/${SESSION}:sendMessage"
+
+          {
+            echo '### Jules same-session resume'
+            echo "- Task: ${TASK_ID}"
+            echo "- Issue: #${ISSUE_NUMBER}"
+            echo "- PR: #${PR_NUMBER}"
+            echo "- Session: ${SESSION}"
+            echo "- Resolution: ${{ steps.session.outputs.resolution }}"
+            echo '- Action: follow-up delivered through sendMessage to the existing Jules session'
+          } >> "$GITHUB_STEP_SUMMARY"
