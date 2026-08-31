@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-product-state.schema.json",
+  "title": "FactoryProductState",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "repository", "planner_mode", "product", "phase", "strategy", "last_decision", "governance"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "planner_mode": {"type": "string", "enum": ["DYNAMIC", "FALLBACK"]},
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value_proposition", "target_user"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "value_proposition": {"type": "string", "minLength": 1, "maxLength": 1200},
+        "target_user": {"type": "string", "minLength": 1, "maxLength": 700}
+      }
+    },
+    "phase": {
+      "type": "string",
+      "enum": ["FOUNDATION", "VALUE", "HARDENING", "LAUNCH_READY", "MEASURING", "ITERATING", "PAUSED"]
+    },
+    "strategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current_hypothesis", "success_metric", "next_question"],
+      "properties": {
+        "current_hypothesis": {"type": "string", "minLength": 1, "maxLength": 1500},
+        "success_metric": {"type": "string", "minLength": 1, "maxLength": 700},
+        "next_question": {"type": "string", "minLength": 1, "maxLength": 900}
+      }
+    },
+    "last_decision": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["decision_id", "action", "applied_at"],
+      "properties": {
+        "decision_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,80}$"},
+        "action": {"type": "string", "enum": ["BUILD", "HARDEN", "MEASURE", "PIVOT", "PAUSE", "LAUNCH_READY"]},
+        "applied_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["production_gate", "credential_gate", "spend_gate"],
+      "properties": {
+        "production_gate": {"type": "string", "const": "HUMAN_REQUIRED"},
+        "credential_gate": {"type": "string", "const": "HUMAN_REQUIRED"},
+        "spend_gate": {"type": "string", "const": "HUMAN_REQUIRED"}
+      }
+    },
+    "updated_at": {"type": ["string", "null"], "format": "date-time"},
+    "extensions": {"type": "object"}
+  }
+}

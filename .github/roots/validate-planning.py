@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import pathlib
+import re
 import sys
 
 try:
@@ -17,9 +18,14 @@ FORBIDDEN = (
     "modify secret",
     "rotate secret",
     "export secret",
+    "inspect secret",
+    "read secret",
     "production deploy",
     "deploy production",
     "disable human gate",
+    "remove human gate",
+    "expand permission",
+    "change branch protection",
 )
 
 
@@ -39,6 +45,9 @@ def schema_store():
         "factory-issue-plan.schema.json",
         "factory-milestone-plan.schema.json",
         "factory-planning-result.schema.json",
+        "factory-product-state.schema.json",
+        "factory-product-decision.schema.json",
+        "factory-product-telemetry.schema.json",
     )
     schemas = {name: load(name) for name in names}
     return schemas, {schema["$id"]: schema for schema in schemas.values()}
@@ -49,6 +58,13 @@ def validate_schema(document, schema_name: str):
     schema = schemas[schema_name]
     resolver = jsonschema.RefResolver.from_schema(schema, store=store)
     jsonschema.Draft202012Validator(schema, resolver=resolver).validate(document)
+
+
+def reject_forbidden_text(text: str, context: str):
+    normalized = text.lower()
+    for forbidden in FORBIDDEN:
+        if forbidden in normalized:
+            raise ValueError(f"forbidden control-plane mutation in {context}: {forbidden}")
 
 
 def topological_tasks(tasks):
@@ -84,10 +100,8 @@ def semantic_validate_tasks(tasks):
         missing = [dep for dep in deps if dep not in known]
         if missing:
             raise ValueError(f"missing dependency for {task['id']}: {missing}")
-        text = " ".join(task["scope"] + task["acceptance_criteria"] + task["done"]).lower()
-        for forbidden in FORBIDDEN:
-            if forbidden in text:
-                raise ValueError(f"forbidden control-plane mutation in {task['id']}: {forbidden}")
+        text = " ".join([task["title"]] + task["scope"] + task["acceptance_criteria"] + task["done"])
+        reject_forbidden_text(text, task["id"])
         if len(task["scope"]) > 12 or len(task["acceptance_criteria"]) > 12:
             raise ValueError(f"unbounded task: {task['id']}")
     topological_tasks(tasks)
@@ -112,6 +126,88 @@ def validate_plan(path: pathlib.Path):
     semantic_validate_tasks(plan["tasks"])
 
 
+def validate_state(path: pathlib.Path, expected_repo: str | None = None):
+    state = load_path(path)
+    validate_schema(state, "factory-product-state.schema.json")
+    if expected_repo and state["repository"] != expected_repo:
+        raise ValueError(f"product state repository mismatch: {state['repository']} != {expected_repo}")
+
+
+def validate_telemetry(path: pathlib.Path, expected_repo: str | None = None):
+    telemetry = load_path(path)
+    validate_schema(telemetry, "factory-product-telemetry.schema.json")
+    if expected_repo and telemetry["repository"] != expected_repo:
+        raise ValueError(f"telemetry repository mismatch: {telemetry['repository']} != {expected_repo}")
+
+
+def validate_decision(path: pathlib.Path, expected_repo: str | None = None):
+    decision = load_path(path)
+    validate_schema(decision, "factory-product-decision.schema.json")
+    if expected_repo and decision["repository"] != expected_repo:
+        raise ValueError(f"decision repository mismatch: {decision['repository']} != {expected_repo}")
+    product_context = decision["product_context"]
+    reject_forbidden_text(
+        " ".join(
+            [
+                decision["objective"],
+                decision["hypothesis"],
+                decision["success_metric"],
+                product_context["value_proposition"],
+                product_context["target_user"],
+                product_context["next_question"],
+                decision["human_gate"]["reason"],
+            ]
+            + decision["evidence"]
+        ),
+        f"decision {decision['decision_id']}",
+    )
+    milestone = decision.get("milestone")
+    if milestone:
+        reject_forbidden_text(milestone["title"] + " " + milestone["description"], f"decision {decision['decision_id']} milestone")
+        semantic_validate_tasks(milestone["tasks"])
+    if decision["action"] == "PAUSE" and decision["human_gate"]["required"]:
+        raise ValueError("PAUSE must remain a reversible product-state decision and cannot request privileged side effects")
+
+
+def extract_decision(body_path: pathlib.Path, out_path: pathlib.Path):
+    body = body_path.read_text(encoding="utf-8")
+    if "<!-- roots-product-decision:v1 -->" not in body:
+        raise ValueError("missing roots-product-decision:v1 marker")
+    match = re.search(r"```json\s*(\{.*?\})\s*```", body, flags=re.DOTALL)
+    if not match:
+        raise ValueError("missing fenced JSON decision payload")
+    payload = json.loads(match.group(1))
+    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def decision_to_plan(decision_path: pathlib.Path, out_path: pathlib.Path):
+    decision = load_path(decision_path)
+    if decision.get("milestone") is None:
+        raise ValueError("decision has no milestone")
+    plan = {
+        "version": 1,
+        "repository": decision["repository"],
+        "roadmap_id": f"product-brain:{decision['decision_id']}",
+        "milestone": {
+            "id": decision["milestone"]["id"],
+            "title": decision["milestone"]["title"],
+            "description": decision["milestone"]["description"],
+        },
+        "tasks": decision["milestone"]["tasks"],
+        "extensions": {
+            "planner": "product-brain-v1",
+            "decision_id": decision["decision_id"],
+            "action": decision["action"],
+            "success_metric": decision["success_metric"],
+            "confidence": decision["confidence"],
+            "risk": decision["risk"],
+        },
+    }
+    validate_schema(plan, "factory-milestone-plan.schema.json")
+    semantic_validate_tasks(plan["tasks"])
+    out_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def next_index(roadmap_path: pathlib.Path, milestones_path: pathlib.Path):
     roadmap = load_path(roadmap_path)
     milestones = load_path(milestones_path)
@@ -131,7 +227,9 @@ def task_order(plan_path: pathlib.Path):
 
 def main():
     if len(sys.argv) < 3:
-        raise SystemExit("usage: validate-planning.py <roadmap|plan|next-index|task-order> ...")
+        raise SystemExit(
+            "usage: validate-planning.py <roadmap|plan|state|telemetry|decision|extract-decision|decision-plan|next-index|task-order> ..."
+        )
     command = sys.argv[1]
     if command == "roadmap" and len(sys.argv) == 3:
         target = pathlib.Path(sys.argv[2])
@@ -142,6 +240,18 @@ def main():
         target = pathlib.Path(sys.argv[2])
         validate_plan(target)
         print(f"planning validation passed: {target}")
+        return
+    if command in {"state", "telemetry", "decision"} and len(sys.argv) in {3, 4}:
+        target = pathlib.Path(sys.argv[2])
+        expected = sys.argv[3] if len(sys.argv) == 4 else None
+        {"state": validate_state, "telemetry": validate_telemetry, "decision": validate_decision}[command](target, expected)
+        print(f"{command} validation passed: {target}")
+        return
+    if command == "extract-decision" and len(sys.argv) == 4:
+        extract_decision(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]))
+        return
+    if command == "decision-plan" and len(sys.argv) == 4:
+        decision_to_plan(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]))
         return
     if command == "next-index" and len(sys.argv) == 4:
         next_index(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]))

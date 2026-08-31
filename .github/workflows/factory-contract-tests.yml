@@ -1,0 +1,35 @@
+name: factory-contract-tests
+
+"on":
+  pull_request:
+    branches: [Android]
+    paths:
+      - '.github/roots/**'
+      - '.github/workflows/factory-product-brain.yml'
+      - '.github/workflows/factory-product-telemetry.yml'
+      - '.github/workflows/factory-fleet-watchdog.yml'
+      - '.github/workflows/factory-credential-readiness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install validator dependency
+        run: python -m pip install --disable-pip-version-check 'jsonschema==4.23.0'
+      - name: Validate committed schemas and fixed manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -c 'import json; [json.load(open(p)) for p in [".github/roots/factory-product-state.schema.json",".github/roots/factory-product-decision.schema.json",".github/roots/factory-product-telemetry.schema.json",".github/roots/factory-credential-requirements.schema.json",".github/roots/micro-saas-credentials-v1.json"]]'
+          python -c 'import json,jsonschema; d=json.load(open(".github/roots/micro-saas-credentials-v1.json")); s=json.load(open(".github/roots/factory-credential-requirements.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
+      - name: Run Product Brain contract tests
+        run: python .github/roots/test-product-brain.py
