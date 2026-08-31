@@ -63,6 +63,8 @@ jobs:
               '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
               /tmp/profile.json >/dev/null || continue
             managed="$((managed + 1))"
+            gh label create 'factory:portfolio-focus' --repo "$repo" --color F9D0C4 \
+              --description 'Portfolio manager focus; scheduler prefers eligible work carrying this label' --force >/dev/null 2>&1 || true
 
             queued="$(gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number --jq 'length')"
             if [ "$queued" -gt 0 ]; then
