@@ -41,7 +41,7 @@ jobs:
           export GH_TOKEN="$FLEET_TOKEN"
           authenticated_login="$(gh api user --jq '.login')"
           test "$authenticated_login" = "$OWNER"
-          gh api --paginate 'user/repos?per_page=100&affiliation=owner' --jq --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
           : > candidates.tsv
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
