@@ -31,6 +31,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Ensure scheduler labels
+        shell: bash
+        run: |
+          set -euo pipefail
+          for label in 'factory:queued' 'factory:dispatched'; do
+            encoded="$(jq -rn --arg value "$label" '$value|@uri')"
+            if ! gh api "repos/${GITHUB_REPOSITORY}/labels/${encoded}" >/dev/null 2>&1; then
+              gh api --method POST "repos/${GITHUB_REPOSITORY}/labels" -f name="$label" -f color='ededed' >/dev/null
+            fi
+          done
+
       - name: Find one eligible queued issue
         id: candidate
         shell: bash
