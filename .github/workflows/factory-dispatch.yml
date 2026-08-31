@@ -8,7 +8,7 @@ on:
         required: true
         type: number
       preferred_worker:
-        description: 'Preference only; selection remains capability/status based'
+        description: 'Preference only; auto prefers enabled AI workers over manual fallback'
         required: true
         default: auto
         type: choice
@@ -182,20 +182,45 @@ jobs:
           set -euo pipefail
           preferred="$(jq -r '.requirements.preferred_worker // empty' factory-task.json)"
           required="$(jq -c '.requirements.capabilities' factory-task.json)"
-          compatible='[.workers[] | select(.status == "ENABLED") | select((.capabilities as $caps | $required | all(. as $r | $caps | index($r) != null)))]'
 
           if [ -n "$preferred" ]; then
-            worker="$(jq -r --arg p "$preferred" --argjson required "$required" "$compatible | map(select(.worker_id == \$p)) | .[0].worker_id // empty" .github/roots/worker-registry.json)"
+            worker="$(jq -r \
+              --arg p "$preferred" \
+              --argjson required "$required" '
+                [.workers[]
+                  | select(.status == "ENABLED")
+                  | select(.worker_id == $p)
+                  | select((.capabilities as $caps | $required | all(. as $r | $caps | index($r) != null)))]
+                | .[0].worker_id // empty
+              ' .github/roots/worker-registry.json)"
           else
-            worker="$(jq -r --argjson required "$required" "$compatible | .[0].worker_id // empty" .github/roots/worker-registry.json)"
+            worker="$(jq -r \
+              --argjson required "$required" '
+                ([.workers[]
+                  | select(.status == "ENABLED")
+                  | select(.worker_id != "manual")
+                  | select((.capabilities as $caps | $required | all(. as $r | $caps | index($r) != null)))]
+                 +
+                 [.workers[]
+                  | select(.status == "ENABLED")
+                  | select(.worker_id == "manual")
+                  | select((.capabilities as $caps | $required | all(. as $r | $caps | index($r) != null)))])
+                | .[0].worker_id // empty
+              ' .github/roots/worker-registry.json)"
           fi
 
           if [ -z "$worker" ]; then
             echo 'No ENABLED worker satisfies the requested capabilities.' >&2
             exit 1
           fi
+
           echo "selected_worker=$worker" >> "$GITHUB_OUTPUT"
           echo "Selected worker: $worker"
+          echo "### Factory routing" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Issue: #${ISSUE_NUMBER}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Preferred: ${PREFERRED_WORKER}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Selected: ${worker}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Execute: ${EXECUTE_REQUESTED}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Human execution gate
         id: gate
