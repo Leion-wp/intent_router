@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "blueprint": "roots-micro-saas-v1",
+  "milestones": [
+    {
+      "id": "mvp-boilerplate",
+      "title": "MVP Boilerplate",
+      "description": "Fixed reusable micro-SaaS baseline: application shell, auth, persistence, billing, email, observability, tests and documentation.",
+      "bootstrap_managed": true,
+      "tasks": [
+        {
+          "id": "application-foundation",
+          "title": "Application foundation",
+          "scope": ["Next.js application shell", "TypeScript and pnpm project quality commands", "environment validation", "protected application shell baseline"],
+          "acceptance_criteria": ["Application installs and builds with pnpm", "lint, typecheck and tests are runnable", "required environment variables are validated without committing secrets"],
+          "done": ["CI quality commands pass", "no credentials are committed"],
+          "priority": 10,
+          "blocked_by": []
+        }
+      ]
+    },
+    {
+      "id": "product-value-slice",
+      "title": "Product Value Slice",
+      "description": "Turn the reusable foundation into a coherent product slice derived from the repository product objective and expose one end-to-end user value path.",
+      "tasks": [
+        {
+          "id": "product-objective-contract",
+          "title": "Create product objective and primary-user contract",
+          "scope": ["Document product problem, target user and promised outcome", "define the primary user journey", "define measurable activation event"],
+          "acceptance_criteria": ["A repository-local product objective document exists", "target user, problem and outcome are explicit", "one primary activation event is documented and testable"],
+          "done": ["objective contract is committed", "primary journey is bounded enough to implement in one milestone"],
+          "priority": 10,
+          "blocked_by": []
+        },
+        {
+          "id": "primary-user-journey",
+          "title": "Implement the primary end-to-end user journey",
+          "scope": ["Implement the smallest complete workflow that delivers the documented product outcome", "connect authenticated UI to persistence", "handle empty, loading and error states"],
+          "acceptance_criteria": ["An authenticated user can complete the primary workflow end to end", "created data is persisted under the existing authorization model", "failure and empty states are explicit"],
+          "done": ["primary flow has automated coverage", "quality CI passes"],
+          "priority": 20,
+          "blocked_by": ["product-objective-contract"]
+        },
+        {
+          "id": "activation-onboarding",
+          "title": "Add activation-focused onboarding and dashboard entry",
+          "scope": ["first-run onboarding", "dashboard entry into the primary workflow", "activation completion state"],
+          "acceptance_criteria": ["new users are guided to the primary action", "returning users can resume from the dashboard", "activation state is derived from product data rather than a hard-coded flag"],
+          "done": ["onboarding and dashboard paths are covered", "quality CI passes"],
+          "priority": 30,
+          "blocked_by": ["primary-user-journey"]
+        }
+      ]
+    },
+    {
+      "id": "launch-readiness",
+      "title": "Launch Readiness",
+      "description": "Make the product safe to provision and release while keeping credentials and production deployment under explicit human authority.",
+      "tasks": [
+        {
+          "id": "credential-manifest",
+          "title": "Document runtime credential and environment contract",
+          "scope": ["enumerate required environment variable names", "document provider ownership and required scopes", "add safe startup validation"],
+          "acceptance_criteria": ["all required credential names are documented without values", "missing required configuration fails safely", "no workflow creates, reads back or exports secrets"],
+          "done": ["credential manifest is complete", "secret values are absent from repository history introduced by this task"],
+          "priority": 10,
+          "blocked_by": []
+        },
+        {
+          "id": "release-safety",
+          "title": "Harden release safety, health and failure handling",
+          "scope": ["health/readiness behavior", "user-safe error handling", "billing webhook reconciliation safety", "rollback and recovery documentation"],
+          "acceptance_criteria": ["health behavior distinguishes healthy from misconfigured runtime", "critical webhook handling is idempotent", "production release remains HUMAN_REQUIRED"],
+          "done": ["release-safety tests pass", "recovery steps are documented"],
+          "priority": 20,
+          "blocked_by": ["credential-manifest"]
+        },
+        {
+          "id": "release-checklist",
+          "title": "Produce human-gated production release checklist",
+          "scope": ["deployment prerequisites", "credential provisioning checklist", "billing and email verification checklist", "post-release smoke checks"],
+          "acceptance_criteria": ["checklist clearly marks human-owned credential and production actions", "no production deployment is performed by the task", "post-release checks are executable and bounded"],
+          "done": ["release checklist is committed", "human gates are explicit"],
+          "priority": 30,
+          "blocked_by": ["release-safety"]
+        }
+      ]
+    },
+    {
+      "id": "market-instrumentation",
+      "title": "Market Instrumentation",
+      "description": "Instrument the product so future portfolio decisions can be based on activation, conversion, retention and feedback rather than repository activity.",
+      "tasks": [
+        {
+          "id": "funnel-events",
+          "title": "Instrument the product funnel with privacy-aware events",
+          "scope": ["visit-to-signup funnel", "activation event", "subscription conversion event", "retention-relevant product event"],
+          "acceptance_criteria": ["events have stable documented names", "no secrets or sensitive payloads are sent to analytics", "events cover signup, activation and paid conversion boundaries"],
+          "done": ["analytics instrumentation has tests where practical", "event dictionary is documented"],
+          "priority": 10,
+          "blocked_by": []
+        },
+        {
+          "id": "feedback-loop",
+          "title": "Add an in-product user feedback loop",
+          "scope": ["lightweight feedback capture", "context linking to product area", "safe persistence or provider boundary"],
+          "acceptance_criteria": ["authenticated users can submit feedback", "feedback failures do not break the primary product flow", "personally sensitive data is not required"],
+          "done": ["feedback path is covered", "quality CI passes"],
+          "priority": 20,
+          "blocked_by": ["funnel-events"]
+        },
+        {
+          "id": "experiment-contract",
+          "title": "Define measurable product experiment contract",
+          "scope": ["baseline metrics", "experiment hypothesis format", "success and kill thresholds"],
+          "acceptance_criteria": ["activation, conversion and retention metrics have definitions", "experiments require a hypothesis and bounded evaluation window", "kill criteria are documented"],
+          "done": ["experiment contract is repository-local and machine-readable enough for future portfolio automation"],
+          "priority": 30,
+          "blocked_by": ["funnel-events"]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-issue-plan.schema.json",
+  "title": "FactoryIssuePlan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "scope", "acceptance_criteria", "done", "priority", "blocked_by"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+    "title": {"type": "string", "minLength": 5, "maxLength": 140},
+    "scope": {"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": {"type": "string", "minLength": 2, "maxLength": 200}},
+    "acceptance_criteria": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "string", "minLength": 4, "maxLength": 300}},
+    "done": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string", "minLength": 4, "maxLength": 300}},
+    "priority": {"type": "integer", "minimum": 1, "maximum": 100},
+    "blocked_by": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"}}
+  }
+}

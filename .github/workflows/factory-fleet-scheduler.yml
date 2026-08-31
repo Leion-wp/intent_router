@@ -1,4 +1,4 @@
-name: factory-fleet-scheduler-v1
+name: factory-fleet-scheduler-v2
 
 "on":
   workflow_dispatch:
@@ -9,7 +9,7 @@ name: factory-fleet-scheduler-v1
         default: false
         type: boolean
   schedule:
-    - cron: '11,41 * * * *'
+    - cron: '*/5 * * * *'
 
 permissions:
   actions: write
@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Discover oldest eligible issue across managed repositories
+      - name: Discover oldest eligible issue and reconcile dispatch acknowledgements
         id: candidate
         shell: bash
         run: |
@@ -41,16 +41,65 @@ jobs:
           export GH_TOKEN="$FLEET_TOKEN"
           authenticated_login="$(gh api user --jq '.login')"
           test "$authenticated_login" = "$OWNER"
-          gh api --paginate 'user/repos?per_page=100&affiliation=owner' | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
           : > candidates.tsv
+          : > managed-repos.txt
+
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
             if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
               continue
             fi
             jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null || continue
+            echo "$repo" >> managed-repos.txt
 
-            gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number,body,createdAt | jq -c '.[]' | while IFS= read -r row; do
+            while IFS= read -r issue; do
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              if jq -e --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '.[] | select((.body // "") | contains($prefix))' <<< "$comments" >/dev/null; then
+                if [ "$EXECUTE" = 'true' ]; then
+                  gh issue edit "$issue" --repo "$repo" --remove-label 'factory:dispatching' --add-label 'factory:dispatched' >/dev/null
+                fi
+                echo "DISPATCH_ACK_RECOVERED: ${repo}#${issue}"
+                continue
+              fi
+
+              requested_at="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-dispatch-request issue='"${issue}"' "))] | last | .created_at // empty' <<< "$comments")"
+              [ -z "$requested_at" ] && continue
+              stale="$(python3 -c 'from datetime import datetime, timezone; import sys; stamp=datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")); print("true" if (datetime.now(timezone.utc)-stamp).total_seconds() > 1200 else "false")' "$requested_at")"
+              if [ "$stale" = 'true' ] && [ "$EXECUTE" = 'true' ]; then
+                gh issue edit "$issue" --repo "$repo" --remove-label 'factory:dispatching' --add-label 'factory:queued' >/dev/null
+                gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                  -f body="<!-- roots-dispatch-recovered issue=${issue} -->\nDispatch acknowledgement timed out after 20 minutes with no persisted Jules session; returned safely to factory:queued." >/dev/null
+                echo "DISPATCH_TIMEOUT_RECOVERED: ${repo}#${issue}"
+              fi
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq '.[].number')
+          done < repos.txt
+
+          active=0
+          while IFS= read -r repo; do
+            [ -z "$repo" ] && continue
+            dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 1 --json number --jq 'length')"
+            dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 1 --json number --jq 'length')"
+            if [ "$dispatching" -gt 0 ] || [ "$dispatched" -gt 0 ]; then
+              active=1
+              echo "GLOBAL_WORKER_LOCK: active task exists in ${repo}; no new dispatch this run."
+              break
+            fi
+          done < managed-repos.txt
+
+          if [ "$active" -eq 1 ]; then
+            echo 'repository=' >> "$GITHUB_OUTPUT"
+            echo 'issue_number=' >> "$GITHUB_OUTPUT"
+            echo 'global_lock=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          while IFS= read -r repo; do
+            [ -z "$repo" ] && continue
+            gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json
+            gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number,body,createdAt \
+              | jq -c '.[]' | while IFS= read -r row; do
               issue="$(jq -r '.number' <<< "$row")"
               body="$(jq -r '.body // ""' <<< "$row")"
               created="$(jq -r '.createdAt' <<< "$row")"
@@ -72,20 +121,19 @@ jobs:
               [ "$blocked" = 'true' ] && continue
               printf '%s\t%s\t%s\n' "$created" "$repo" "$issue" >> candidates.tsv
             done
-          done < repos.txt
+          done < managed-repos.txt
 
+          echo 'global_lock=false' >> "$GITHUB_OUTPUT"
           if [ ! -s candidates.tsv ]; then
             echo 'repository=' >> "$GITHUB_OUTPUT"
             echo 'issue_number=' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           sort candidates.tsv | head -n 1 > selected.tsv
-          repo="$(cut -f2 selected.tsv)"
-          issue="$(cut -f3 selected.tsv)"
-          echo "repository=$repo" >> "$GITHUB_OUTPUT"
-          echo "issue_number=$issue" >> "$GITHUB_OUTPUT"
+          echo "repository=$(cut -f2 selected.tsv)" >> "$GITHUB_OUTPUT"
+          echo "issue_number=$(cut -f3 selected.tsv)" >> "$GITHUB_OUTPUT"
 
-      - name: Dispatch through central cross-repo dispatcher
+      - name: Enter acknowledged dispatching state and trigger dispatcher
         if: steps.candidate.outputs.repository != '' && env.EXECUTE == 'true'
         shell: bash
         env:
@@ -93,25 +141,34 @@ jobs:
           ISSUE_NUMBER: ${{ steps.candidate.outputs.issue_number }}
         run: |
           set -euo pipefail
-          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-cross-repo-dispatch.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref Android \
-            -f repository="$TARGET_REPO" \
-            -f issue_number="$ISSUE_NUMBER" \
-            -f execute=true
-          GH_TOKEN="$FLEET_TOKEN" gh issue edit "$ISSUE_NUMBER" --repo "$TARGET_REPO" --remove-label 'factory:queued' --add-label 'factory:dispatched'
+          marker="<!-- roots-dispatch-request issue=${ISSUE_NUMBER} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} -->"
+          GH_TOKEN="$FLEET_TOKEN" gh issue edit "$ISSUE_NUMBER" --repo "$TARGET_REPO" \
+            --remove-label 'factory:queued' --add-label 'factory:dispatching'
+          GH_TOKEN="$FLEET_TOKEN" gh api --method POST "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments" \
+            -f body="${marker}\nDispatch requested by central scheduler. State remains factory:dispatching until a worker-session marker is persisted."
+
+          if ! GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-cross-repo-dispatch.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android \
+            -f repository="$TARGET_REPO" -f issue_number="$ISSUE_NUMBER" -f execute=true; then
+            GH_TOKEN="$FLEET_TOKEN" gh issue edit "$ISSUE_NUMBER" --repo "$TARGET_REPO" \
+              --remove-label 'factory:dispatching' --add-label 'factory:queued' || true
+            exit 1
+          fi
 
       - name: Summary
         shell: bash
         env:
           TARGET_REPO: ${{ steps.candidate.outputs.repository }}
           ISSUE_NUMBER: ${{ steps.candidate.outputs.issue_number }}
+          GLOBAL_LOCK: ${{ steps.candidate.outputs.global_lock }}
         run: |
           {
-            echo '### Fleet scheduler'
-            echo "- Owner: ${OWNER}"
+            echo '### Fleet scheduler v2'
             echo "- Candidate repository: ${TARGET_REPO:-none}"
             echo "- Candidate issue: ${ISSUE_NUMBER:-none}"
+            echo "- Global worker lock: ${GLOBAL_LOCK:-false}"
             echo "- Execute: ${EXECUTE}"
-            echo '- Policy: oldest eligible issue fleet-wide, dependencies closed, no active linked PR.'
+            echo '- Sequential invariant: at most one open dispatching/dispatched task across the managed fleet.'
+            echo '- Dispatch invariant: queued -> dispatching -> persisted Jules session -> dispatched.'
+            echo '- Missing acknowledgement after 20 minutes is reconciled back to queued.'
           } >> "$GITHUB_STEP_SUMMARY"
