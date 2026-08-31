@@ -1,0 +1,95 @@
+name: factory-dynamic-planning-handoff-v1
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-dynamic-planning-handoff
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      ROADMAP: .github/roots/micro-saas-roadmap-v1.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconcile deterministic-to-dynamic planning handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          jq -e '.version == 1 and .blueprint == "roots-micro-saas-v1" and (.milestones | length > 0)' "$ROADMAP" >/dev/null
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+          jq -r '.milestones[].title' "$ROADMAP" | sort -u > /tmp/expected-roadmap-titles.txt
+
+          created=0
+          waiting=0
+          skipped=0
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" \
+              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
+              /tmp/profile.json >/dev/null || continue
+
+            if gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/product-state.json" >/tmp/product-state.json 2>/dev/null; then
+              skipped="$((skipped + 1))"
+              continue
+            fi
+
+            gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+            open_milestones="$(jq '[.[] | select(.state == "open")] | length' /tmp/milestones.json)"
+            if [ "$open_milestones" -gt 0 ]; then
+              waiting="$((waiting + 1))"
+              continue
+            fi
+
+            jq -r '.[] | select(.state == "closed") | .title' /tmp/milestones.json | sort -u > /tmp/closed-roadmap-titles.txt
+            comm -23 /tmp/expected-roadmap-titles.txt /tmp/closed-roadmap-titles.txt > /tmp/missing-roadmap-titles.txt
+            if [ -s /tmp/missing-roadmap-titles.txt ]; then
+              waiting="$((waiting + 1))"
+              continue
+            fi
+
+            gh label create 'factory:brain-needed' --repo "$repo" --color C5DEF5 \
+              --description 'Dynamic product brain requires the next strategic decision' --force >/dev/null 2>&1 || true
+            gh label create 'factory:brain-proposal' --repo "$repo" --color 0052CC \
+              --description 'Product-brain decision proposal awaiting deterministic validation' --force >/dev/null 2>&1 || true
+
+            proposals="$(gh issue list --repo "$repo" --state open --label 'factory:brain-proposal' --limit 10 --json number --jq 'length')"
+            needed="$(gh issue list --repo "$repo" --state open --label 'factory:brain-needed' --limit 20 --json number,title --jq '[.[] | select(.title == "[FACTORY] Product decision needed")] | length')"
+            if [ "$proposals" -gt 0 ] || [ "$needed" -gt 0 ]; then
+              continue
+            fi
+
+            body="$(printf '%s\n\n%s\n\n%s\n%s\n\n%s' \
+              '<!-- roots-product-decision-needed:v1 source=deterministic-roadmap-complete -->' \
+              'The fixed roots-micro-saas-v1 roadmap is complete and no dynamic product-state exists. The factory now requires its first Product Brain decision.' \
+              'Initial optimistic precondition:' \
+              'expected_last_decision_id=null, expected_phase=null' \
+              'Factory Product Manager must inspect the completed product, portfolio/product telemetry and available market evidence, then publish exactly one factory:brain-proposal matching the current decision schema. This issue is planning state, never executable worker backlog.')"
+            gh issue create --repo "$repo" --title '[FACTORY] Product decision needed' \
+              --label 'factory:brain-needed' --body "$body" >/dev/null
+            created="$((created + 1))"
+          done < repos.txt
+
+          echo "Dynamic handoffs created: ${created}; deterministic roadmap still active: ${waiting}; already dynamic: ${skipped}."
