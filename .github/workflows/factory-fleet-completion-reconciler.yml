@@ -1,0 +1,136 @@
+name: factory-fleet-completion-reconciler-v1
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-fleet-completion-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      CONTROL_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Close completed issues and advance the fleet
+        id: reconcile
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+
+          authenticated_login="$(gh api user --jq '.login')"
+          test "$authenticated_login" = "$OWNER"
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' \
+            > repos.txt
+
+          completed=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+
+            jq -e --arg repo "$repo" \
+              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
+              /tmp/profile.json >/dev/null || continue
+
+            branch="$(jq -r '.default_branch' /tmp/profile.json)"
+
+            while IFS= read -r issue; do
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              marker="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-jules-session task_id='"${repo}#${issue}"' "))] | last | .body // empty' <<< "$comments")"
+              [ -z "$marker" ] && continue
+
+              session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$marker" | head -n 1)"
+              [ -z "$session" ] && continue
+              session_id="${session##*/}"
+
+              gh pr list --repo "$repo" --state merged --limit 100 \
+                --json number,body,headRefName,baseRefName,url,mergedAt > /tmp/merged-prs.json
+
+              jq --argjson issue "$issue" --arg branch "$branch" \
+                '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]' \
+                /tmp/merged-prs.json > /tmp/linked-merged.json
+              count="$(jq 'length' /tmp/linked-merged.json)"
+
+              if [ "$count" -eq 0 ]; then
+                jq --arg branch "$branch" --arg session_id "$session_id" \
+                  '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' \
+                  /tmp/merged-prs.json > /tmp/linked-merged.json
+                count="$(jq 'length' /tmp/linked-merged.json)"
+              fi
+
+              [ "$count" -eq 0 ] && continue
+
+              if [ "$count" -gt 1 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${count} merged PR candidates for Jules session ${session}." >&2
+                continue
+              fi
+
+              pr="$(jq -r '.[0].number' /tmp/linked-merged.json)"
+              pr_url="$(jq -r '.[0].url' /tmp/linked-merged.json)"
+              merged_at="$(jq -r '.[0].mergedAt // "unknown"' /tmp/linked-merged.json)"
+              done_marker="<!-- roots-fleet-task-done issue=${issue} pr=${pr} -->"
+
+              if jq -e --arg marker "$done_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                continue
+              fi
+
+              gh label create 'factory:done' --repo "$repo" --color 0E8A16 \
+                --description 'Factory task completed by merged pull request' --force >/dev/null 2>&1 || true
+              gh issue edit "$issue" --repo "$repo" \
+                --add-label 'factory:done' --remove-label 'factory:dispatched' >/dev/null 2>&1 || true
+              gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                -f body="${done_marker}\nRoots Fleet reconciled merged PR #${pr} as task completion. PR: ${pr_url}. Merged: ${merged_at}." >/dev/null
+              gh issue close "$issue" --repo "$repo" --reason completed >/dev/null
+
+              completed="$((completed + 1))"
+              echo "TASK_DONE: ${repo}#${issue} via PR #${pr}."
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' \
+              --limit 100 --json number --jq '.[].number')
+          done < repos.txt
+
+          echo "completed=$completed" >> "$GITHUB_OUTPUT"
+          echo "Reconciled completed tasks: $completed"
+
+      - name: Dispatch next eligible issue
+        if: steps.reconcile.outputs.completed != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-fleet-scheduler.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref Android \
+            -f execute=true
+
+      - name: Summary
+        shell: bash
+        env:
+          COMPLETED: ${{ steps.reconcile.outputs.completed }}
+        run: |
+          {
+            echo '### Fleet completion reconciler'
+            echo "- Completed issues reconciled: ${COMPLETED:-0}"
+            echo '- Rule: merged linked PR -> close issue -> trigger scheduler for exactly one next eligible issue.'
+            echo '- Correlation: explicit issue reference first, persisted Jules session ID in PR branch as fallback.'
+          } >> "$GITHUB_STEP_SUMMARY"
