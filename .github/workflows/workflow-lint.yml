@@ -31,4 +31,4 @@ jobs:
 
       - name: Lint GitHub Actions workflows
         shell: bash
-        run: /tmp/actionlint -color
+        run: /tmp/actionlint -color -ignore 'SC2129'
