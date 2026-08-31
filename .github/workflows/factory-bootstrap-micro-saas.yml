@@ -1,0 +1,203 @@
+name: factory-bootstrap-micro-saas-v1
+
+"on":
+  workflow_dispatch:
+    inputs:
+      repository_name:
+        description: 'New managed repository name'
+        required: true
+        default: micro-saas-boilerplate
+        type: string
+      apply:
+        description: 'Human mutation gate'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-bootstrap-${{ inputs.repository_name }}
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      ORG: ${{ github.repository_owner }}
+      REPO_NAME: ${{ inputs.repository_name }}
+      APPLY: ${{ inputs.apply }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate human-owned fleet authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$ORG" = 'Leion-wp'
+          [[ "$REPO_NAME" =~ ^[A-Za-z0-9._-]+$ ]]
+          test -f .github/roots/micro-saas-stack.json
+          test -f .github/roots/factory-repository-profile.schema.json
+          test -n "$GH_TOKEN"
+          echo "::add-mask::$GH_TOKEN"
+          if [ "$APPLY" != 'true' ]; then
+            echo "DRY-RUN: would bootstrap ${ORG}/${REPO_NAME} from roots-micro-saas-v1."
+            exit 0
+          fi
+
+      - name: Ensure private repository
+        if: inputs.apply == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh api "repos/${ORG}/${REPO_NAME}" >/dev/null 2>&1; then
+            gh api --method POST "orgs/${ORG}/repos" \
+              -f name="$REPO_NAME" \
+              -F private=true \
+              -F auto_init=true \
+              -F has_issues=true \
+              -F has_projects=true \
+              -f description='Roots fixed-stack micro-SaaS boilerplate and factory seed.' >/dev/null
+          fi
+          gh api "repos/${ORG}/${REPO_NAME}" --jq '{full_name,default_branch,visibility}'
+
+      - name: Install managed repository profile
+        if: inputs.apply == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          full_repo="${ORG}/${REPO_NAME}"
+          default_branch="$(gh api "repos/${full_repo}" --jq '.default_branch')"
+          profile="$(jq -nc \
+            --arg repo "$full_repo" \
+            --arg branch "$default_branch" \
+            '{version:1,managed:true,repository:$repo,default_branch:$branch,workspace:"/",blueprint:"roots-micro-saas-v1",worker_policy:{enabled:["jules"],preferred:"jules"},ci:{workflow:"factory-ci.yml",required_jobs:["quality"]},governance:{production_gate:"HUMAN_REQUIRED",workflow_changes:"HUMAN_REQUIRED",credential_changes:"HUMAN_REQUIRED"}}')"
+          encoded="$(printf '%s' "$profile" | base64 -w0)"
+          endpoint="repos/${full_repo}/contents/.factory/profile.json"
+          current="$(gh api "$endpoint" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$current" ]; then
+            gh api --method PUT "$endpoint" -f message='factory: refresh managed repository profile' -f content="$encoded" -f sha="$current" >/dev/null
+          else
+            gh api --method PUT "$endpoint" -f message='factory: install managed repository profile' -f content="$encoded" >/dev/null
+          fi
+
+      - name: Install minimal CI owned by control-plane
+        if: inputs.apply == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          full_repo="${ORG}/${REPO_NAME}"
+          printf '%s\n' \
+            'name: factory-ci' \
+            '' \
+            '"on":' \
+            '  pull_request:' \
+            '  push:' \
+            '    branches: [main]' \
+            '' \
+            'permissions:' \
+            '  contents: read' \
+            '' \
+            'jobs:' \
+            '  quality:' \
+            '    runs-on: ubuntu-latest' \
+            '    timeout-minutes: 15' \
+            '    steps:' \
+            '      - uses: actions/checkout@v4' \
+            '      - uses: pnpm/action-setup@v4' \
+            '        with:' \
+            '          version: 10' \
+            '      - uses: actions/setup-node@v4' \
+            '        with:' \
+            "          node-version: '22'" \
+            "          cache: 'pnpm'" \
+            '      - run: pnpm install --frozen-lockfile' \
+            '      - run: pnpm lint' \
+            '      - run: pnpm typecheck' \
+            '      - run: pnpm test -- --run' \
+            '      - run: pnpm build' > /tmp/factory-ci.yml
+          encoded="$(base64 -w0 /tmp/factory-ci.yml)"
+          endpoint="repos/${full_repo}/contents/.github/workflows/factory-ci.yml"
+          current="$(gh api "$endpoint" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$current" ]; then
+            gh api --method PUT "$endpoint" -f message='factory: refresh minimal CI' -f content="$encoded" -f sha="$current" >/dev/null
+          else
+            gh api --method PUT "$endpoint" -f message='factory: install minimal CI' -f content="$encoded" >/dev/null
+          fi
+
+      - name: Publish fixed stack manifest
+        if: inputs.apply == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          full_repo="${ORG}/${REPO_NAME}"
+          encoded="$(base64 -w0 .github/roots/micro-saas-stack.json)"
+          endpoint="repos/${full_repo}/contents/.factory/micro-saas-stack.json"
+          current="$(gh api "$endpoint" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$current" ]; then
+            gh api --method PUT "$endpoint" -f message='factory: refresh fixed stack manifest' -f content="$encoded" -f sha="$current" >/dev/null
+          else
+            gh api --method PUT "$endpoint" -f message='factory: pin fixed stack manifest' -f content="$encoded" >/dev/null
+          fi
+
+      - name: Ensure labels and MVP milestone
+        if: inputs.apply == true
+        id: planning
+        shell: bash
+        run: |
+          set -euo pipefail
+          full_repo="${ORG}/${REPO_NAME}"
+          for label in 'factory:queued' 'factory:dispatched' 'factory:blocked' 'factory:human-required'; do
+            encoded_label="$(jq -rn --arg value "$label" '$value|@uri')"
+            if ! gh api "repos/${full_repo}/labels/${encoded_label}" >/dev/null 2>&1; then
+              gh api --method POST "repos/${full_repo}/labels" -f name="$label" -f color='ededed' >/dev/null
+            fi
+          done
+          gh api --paginate "repos/${full_repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+          milestone="$(jq -r '[.[] | select(.title == "MVP Boilerplate")] | .[0].number // empty' /tmp/milestones.json)"
+          if [ -z "$milestone" ]; then
+            milestone="$(gh api --method POST "repos/${full_repo}/milestones" -f title='MVP Boilerplate' -f description='Fixed reusable micro-SaaS baseline: app, auth, DB/RLS, billing, email, observability, tests and docs.' --jq '.number')"
+          fi
+          echo "milestone=$milestone" >> "$GITHUB_OUTPUT"
+
+      - name: Seed dependency-ordered boilerplate backlog
+        if: inputs.apply == true
+        shell: bash
+        env:
+          MILESTONE: ${{ steps.planning.outputs.milestone }}
+        run: |
+          set -euo pipefail
+          full_repo="${ORG}/${REPO_NAME}"
+          ensure_issue() {
+            local title="$1"
+            local body="$2"
+            local number
+            number="$(gh issue list --repo "$full_repo" --state all --search "${title} in:title" --json number,title --jq '.[] | select(.title == '"$(jq -Rn --arg v "$title" '$v')"') | .number' | head -n 1)"
+            if [ -z "$number" ]; then
+              number="$(gh api --method POST "repos/${full_repo}/issues" -f title="$title" -f body="$body" -F milestone="$MILESTONE" -f labels='factory:queued' --jq '.number')"
+            fi
+            printf '%s' "$number"
+          }
+
+          i1="$(ensure_issue '[BOOTSTRAP] Application foundation' $'Build the fixed-stack application foundation.\n\nAcceptance:\n- Next.js App Router + TypeScript + pnpm\n- Tailwind CSS + shadcn/ui baseline\n- Zod environment validation\n- lint/typecheck/test/build scripts\n- protected application shell placeholder\n- no secrets committed\n\nStack contract: .factory/micro-saas-stack.json')"
+          i2="$(ensure_issue '[BOOTSTRAP] Supabase auth database and RLS' "Blocked-By: #${i1}\n\nImplement Supabase PostgreSQL, Auth, user profile persistence, protected routes and a secure RLS baseline. Never create or expose credentials; document required environment variables.")"
+          i3="$(ensure_issue '[BOOTSTRAP] Stripe subscription billing' "Blocked-By: #${i2}\n\nImplement Stripe Checkout subscriptions, customer portal, webhook verification and idempotent subscription-state reconciliation in PostgreSQL. Credentials remain human-provisioned.")"
+          i4="$(ensure_issue '[BOOTSTRAP] Transactional email and dashboard' "Blocked-By: #${i2}\n\nImplement Resend + React Email integration boundaries, account/dashboard UX and user profile flows. Credentials remain human-provisioned.")"
+          i5="$(ensure_issue '[BOOTSTRAP] Observability and analytics boundaries' "Blocked-By: #${i1}\n\nAdd Sentry and PostHog integration boundaries with safe environment-driven configuration, privacy-aware defaults and no credential creation.")"
+          ensure_issue '[BOOTSTRAP] Hardening tests docs and release readiness' "Blocked-By: #${i3}\nBlocked-By: #${i4}\nBlocked-By: #${i5}\n\nComplete Vitest/Playwright coverage, CI stability, setup documentation, health endpoint, local-development instructions and a production-readiness checklist. Production deployment itself remains HUMAN_REQUIRED." >/dev/null
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '### Micro-SaaS bootstrap'
+            echo "- Repository: ${ORG}/${REPO_NAME}"
+            echo '- Blueprint: roots-micro-saas-v1'
+            echo '- Fixed providers: Next.js + Supabase + Stripe + Resend + Sentry + PostHog + Vercel'
+            echo "- Apply: ${APPLY}"
+            echo '- Production, secrets and control-plane changes remain human-owned.'
+          } >> "$GITHUB_STEP_SUMMARY"
