@@ -1,0 +1,86 @@
+name: factory-worker-jules-v1
+
+on:
+  workflow_call:
+    inputs:
+      task_json:
+        required: true
+        type: string
+      execute:
+        required: true
+        type: boolean
+    secrets:
+      JULES_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  jules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate adapter activation
+        env:
+          TASK_JSON: ${{ inputs.task_json }}
+          EXECUTE: ${{ inputs.execute }}
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$TASK_JSON" | jq -e . > factory-task.json
+          test "$(jq -r '.target.branch' factory-task.json)" = "Android"
+          test "$(jq -r '.target.cwd' factory-task.json)" = "/acode-plugin"
+          test "$(jq -r '.workers[] | select(.worker_id=="jules") | .status' .github/roots/worker-registry.json)" = "ENABLED"
+          test "$EXECUTE" = "true"
+          test -n "$JULES_API_KEY"
+
+      - name: Resolve Jules GitHub source
+        env:
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$(jq -r '.target.repository' factory-task.json)"
+          curl --fail-with-body --silent --show-error \
+            -H "X-Goog-Api-Key: $JULES_API_KEY" \
+            'https://jules.googleapis.com/v1alpha/sources' > sources.json
+          source="$(jq -r --arg repo "$repo" '.sources[] | select(.githubRepo.owner + "/" + .githubRepo.repo == $repo) | .name' sources.json | head -n1)"
+          test -n "$source"
+          printf '%s' "$source" > jules-source.txt
+
+      - name: Start Jules session
+        env:
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="$(cat jules-source.txt)"
+          prompt="$(jq -r '[.spec.objective, (.spec.context.issue_body // ""), "Acceptance criteria:", (.spec.acceptance_criteria[]? // empty), "Test strategy:", (.spec.test_strategy[]? // empty), "Hard policy:", (.policy.forbidden_actions[]? | "FORBIDDEN: " + .)] | join("\n")' factory-task.json)"
+          title="$(jq -r '.task_id' factory-task.json)"
+          jq -n --arg prompt "$prompt" --arg source "$source" --arg title "$title" '{prompt:$prompt,title:$title,sourceContext:{source:$source,githubRepoContext:{startingBranch:"Android"}},requirePlanApproval:false}' > request.json
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            -H "X-Goog-Api-Key: $JULES_API_KEY" \
+            --data @request.json \
+            'https://jules.googleapis.com/v1alpha/sessions' > jules-session.json
+
+      - name: Emit dispatch result
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg task_id "$(jq -r '.task_id' factory-task.json)" \
+            --arg execution_id "$(jq -r '.id // .name // empty' jules-session.json)" \
+            --arg worker_url "$(jq -r '.url // empty' jules-session.json)" \
+            '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"jules",summary:"Jules session created.",outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:$execution_id,worker_url:$worker_url},evidence:{tests:[],checks:["dispatch accepted by Jules API"]},risks:[],next_action:"WAIT"}' > factory-result.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: factory-result-jules
+          path: factory-result.json
+          retention-days: 7
