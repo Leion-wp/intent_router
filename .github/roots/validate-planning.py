@@ -100,7 +100,7 @@ def semantic_validate_tasks(tasks):
         missing = [dep for dep in deps if dep not in known]
         if missing:
             raise ValueError(f"missing dependency for {task['id']}: {missing}")
-        text = " ".join(task["scope"] + task["acceptance_criteria"] + task["done"])
+        text = " ".join([task["title"]] + task["scope"] + task["acceptance_criteria"] + task["done"])
         reject_forbidden_text(text, task["id"])
         if len(task["scope"]) > 12 or len(task["acceptance_criteria"]) > 12:
             raise ValueError(f"unbounded task: {task['id']}")
@@ -145,8 +145,20 @@ def validate_decision(path: pathlib.Path, expected_repo: str | None = None):
     validate_schema(decision, "factory-product-decision.schema.json")
     if expected_repo and decision["repository"] != expected_repo:
         raise ValueError(f"decision repository mismatch: {decision['repository']} != {expected_repo}")
+    product_context = decision["product_context"]
     reject_forbidden_text(
-        " ".join([decision["objective"], decision["hypothesis"], decision["success_metric"]] + decision["evidence"]),
+        " ".join(
+            [
+                decision["objective"],
+                decision["hypothesis"],
+                decision["success_metric"],
+                product_context["value_proposition"],
+                product_context["target_user"],
+                product_context["next_question"],
+                decision["human_gate"]["reason"],
+            ]
+            + decision["evidence"]
+        ),
         f"decision {decision['decision_id']}",
     )
     milestone = decision.get("milestone")
