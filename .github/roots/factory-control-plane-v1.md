@@ -2,11 +2,25 @@
 
 ## Purpose
 
-Provide a deterministic GitHub control plane around probabilistic workers. GitHub owns lifecycle, validation, locking, permissions and state transitions. AI workers reason and execute only inside an explicit task contract.
+Provide a deterministic GitHub control plane around probabilistic workers.
+
+GitHub owns lifecycle, validation, locking, permissions and state transitions. AI workers reason and execute only inside explicit versioned contracts.
+
+## Architectural rule
+
+**Loose construction -> strict FactoryTask -> free worker execution -> strict FactoryResult.**
+
+Producers may be humans, issues, agents, APIs or future product generators. Workers may use unrelated providers, APIs, CLIs, SDKs or GitHub Actions. The control plane only accepts data crossing its boundaries when it satisfies the versioned contract.
+
+Strict does not mean provider-specific. The strict core is intentionally small and provider-neutral. Optional `extensions` objects provide namespaced evolution without allowing unknown fields to leak into core policy.
 
 ## Human boundary
 
-Creating or modifying workflows, permission policies, deployment gates, production credentials, or worker enablement requires explicit human approval. Discovery may be automatic; activation is not.
+Creating or modifying workflows, permission policies, deployment gates, production credentials, or worker enablement requires explicit human approval.
+
+Discovery may be automatic; activation is not.
+
+A provider found by discovery enters `DISCOVERED`. It cannot become `ENABLED` merely because credentials, a GitHub App or an integration happen to exist.
 
 ## Core invariant
 
@@ -14,79 +28,115 @@ One issue = one active FactoryTask = one active worker execution = one active PR
 
 A worker must never create a second active execution for an issue while another execution or linked PR is active.
 
-## v1 scope
+## FactoryTask v1
 
-The first increment is intentionally non-dispatching. `factory-dispatch.yml` is a manually triggered contract compiler and validator. It reads one GitHub issue, builds a normalized `FactoryTask`, validates the hard Android/Acode target, applies an issue-scoped concurrency lock, and uploads the task as an artifact.
+The strict envelope contains:
 
-No Jules, Codex, Claude, Gemini, merge, deployment, label mutation, secret access or repository write is performed by v1.
+- stable `task_id` (`owner/repository#issue`)
+- source identity
+- structured `spec`
+- immutable product target
+- required capabilities and optional worker preference
+- allowed/forbidden actions and human gates
+- bounded execution budget
+- initial state
+- optional namespaced extensions
 
-## FactoryTask
+The current product target is hard-bound to:
 
-Required fields:
+- repository: current repository
+- branch: `Android`
+- CWD: `/acode-plugin`
 
-- `version`: contract version (`1`)
-- `task_id`: stable identity `<owner>/<repo>#<issue_number>`
-- `source.issue_number`
-- `source.issue_url`
-- `objective`
-- `target.repository`
-- `target.branch`: must be `Android`
-- `target.cwd`: must be `/acode-plugin`
-- `worker.requested`: requested worker capability adapter
-- `constraints`: hard constraints inherited by every worker
-- `state`: initially `DISPATCH_READY`
+The task asks for capabilities. It does not encode provider API details.
 
-The contract describes the task, not provider-specific API details.
+## WorkerDescriptor v1
 
-## FactoryResult
+Provider activation belongs in the Worker Registry, not FactoryTask.
 
-Every future worker adapter must return a `FactoryResult` containing:
+Each worker declares:
 
-- `version`
-- `task_id`
-- `status`: `SUCCEEDED`, `REWORK`, `BLOCKED`, or `FAILED`
-- `worker`
-- `summary`
-- `artifacts`
-- `tests`
-- `risks`
-- `next_action`
+- `worker_id`
+- lifecycle status: `DISCOVERED`, `ENABLED`, `DEGRADED`, `DISABLED`
+- capabilities
+- activation protocol
+- official documentation URL
+- concrete entrypoint
+- activation method
+- authentication mode / expected secret name when applicable
+- lifecycle support (`start`, `status`, `resume`, `cancel`)
 
-GitHub validates the result before any next state transition.
+The `activation.documentation` field is the official source describing how the provider is called. `activation.entrypoint` is the actual adapter target (REST URL, action identifier, CLI, SDK or manual handoff).
+
+## Initial registry
+
+The first registry contains:
+
+- `manual`: ENABLED fallback
+- `jules`: DISCOVERED; official Jules REST API
+- `codex`: DISCOVERED; official OpenAI Codex GitHub Action
+- `claude`: DISCOVERED; official Claude Code GitHub Action
+- `gemini`: DISCOVERED; official Gemini CLI GitHub Action
+
+No AI worker is enabled by this PR. Enabling one is a separate explicit human policy decision.
+
+## FactoryResult v1
+
+Every adapter returns the same strict envelope:
+
+- contract version and task identity
+- `SUCCEEDED`, `REWORK`, `BLOCKED`, or `FAILED`
+- worker identity
+- summary
+- normalized outputs (branch, commit, PR, worker execution id/url)
+- evidence including tests/checks
+- risks
+- deterministic `next_action`
+- optional namespaced extensions
+
+Provider prose cannot directly mutate GitHub state. It must first be normalized into FactoryResult and validated.
 
 ## State machine
 
 `CANDIDATE -> DISPATCH_READY -> DISPATCHING -> WORKER_RUNNING -> PR_OPEN -> REVIEW -> PASS | REWORK | BLOCKED | FAILED -> MERGED | CLOSED`
 
-v1 stops at `DISPATCH_READY`.
+State transitions are control-plane facts, not prompts.
 
 ## Deterministic vs probabilistic boundary
 
-Use scripts/workflows for facts and policy: branch, CWD, WIP, locks, duplicate PR checks, checks status, timeouts, retries, permissions and state transitions.
+Use workflows/scripts for branch, CWD, WIP, locks, duplicate-PR checks, checks status, budgets, timeouts, retries, permissions, provider enablement and state transitions.
 
-Use AI for ambiguous decisions: interpretation, planning, implementation strategy, review reasoning and prioritization.
+Use AI for interpretation, planning, implementation strategy, review reasoning and prioritization.
 
-Every AI decision must return to a deterministic validator before it can change GitHub state.
+Every AI result returns to deterministic validation before the control plane can act on it.
 
 ## Idempotence
 
-The durable task identity is `repository#issue`. Workflows use an issue-scoped concurrency group and future dispatch adapters must additionally reconcile existing executions and linked PRs before starting a worker.
+Durable task identity is `repository#issue`.
 
-The `jules` label is not a lifecycle state machine. It may be treated as an intent signal, but must never be removed/reapplied as a retry mechanism.
+The dispatcher uses an issue-scoped GitHub Actions concurrency group. Provider adapters must reconcile existing executions/PRs before creating replacement work.
 
-## Worker registry direction
+The `jules` label is an intent signal, not a lifecycle state machine, and must never be removed/reapplied as a retry mechanism.
 
-Workers are adapters behind a generic contract. Future examples: `jules`, `codex`, `claude`, `gemini`, `local`.
+## Workflow fleet in this increment
 
-A discovered worker can be `DISCOVERED`, `ENABLED`, `DEGRADED`, or `DISABLED`. Only a human can move a newly discovered worker to `ENABLED`.
+- `factory-dispatch.yml`: compile, validate, route, concurrency lock and explicit execution gate
+- `factory-worker-discovery.yml`: audit registry and activation metadata
+- `factory-worker-jules.yml`: Jules REST adapter
+- `factory-worker-codex.yml`: Codex Action adapter
+- `factory-worker-claude.yml`: Claude Code Action adapter
+- `factory-worker-gemini.yml`: Gemini CLI Action adapter
+- `factory-result-validate.yml`: strict FactoryResult validator
+- existing `acode-regression.yml`: product regression CI
 
-## v1 acceptance criteria
+The provider adapters are wired but unreachable while their registry status remains `DISCOVERED`.
 
-1. Manual dispatch accepts an issue number and requested worker.
-2. The issue must exist and be open.
-3. The generated task is stable and machine-readable.
-4. Branch is always `Android` and CWD is always `/acode-plugin`.
-5. Concurrent runs for the same issue cannot execute simultaneously.
-6. The workflow has read-only repository permissions.
-7. The workflow performs no external AI dispatch and no GitHub mutation.
-8. The generated FactoryTask is uploaded as an artifact for inspection.
+## Safety defaults
+
+- no provider automatically changes from DISCOVERED to ENABLED
+- workflow/policy modification remains human-gated
+- `main.modify` is forbidden in FactoryTask policy
+- product scope remains Android + `/acode-plugin`
+- execute defaults to false
+- provider credentials are referenced only by secret name and are never placed in FactoryTask
+- unknown provider-specific data belongs under `extensions`
