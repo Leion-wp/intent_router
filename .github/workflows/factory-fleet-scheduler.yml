@@ -66,13 +66,7 @@ jobs:
 
               requested_at="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-dispatch-request issue='"${issue}"' "))] | last | .created_at // empty' <<< "$comments")"
               [ -z "$requested_at" ] && continue
-              stale="$(python3 - "$requested_at" <<'PY'
-from datetime import datetime, timezone
-import sys
-stamp=datetime.fromisoformat(sys.argv[1].replace('Z','+00:00'))
-print('true' if (datetime.now(timezone.utc)-stamp).total_seconds() > 1200 else 'false')
-PY
-              )"
+              stale="$(python3 -c 'from datetime import datetime, timezone; import sys; stamp=datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")); print("true" if (datetime.now(timezone.utc)-stamp).total_seconds() > 1200 else "false")' "$requested_at")"
               if [ "$stale" = 'true' ] && [ "$EXECUTE" = 'true' ]; then
                 gh issue edit "$issue" --repo "$repo" --remove-label 'factory:dispatching' --add-label 'factory:queued' >/dev/null
                 gh api --method POST "repos/${repo}/issues/${issue}/comments" \
