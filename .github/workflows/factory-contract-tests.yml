@@ -13,6 +13,7 @@ name: factory-contract-tests
       - '.github/workflows/factory-portfolio-telemetry.yml'
       - '.github/workflows/factory-managed-automerge.yml'
       - '.github/workflows/factory-release-readiness.yml'
+      - '.github/workflows/factory-product-incubator.yml'
   workflow_dispatch:
 
 permissions:
@@ -33,9 +34,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -c 'import json; [json.load(open(p)) for p in [".github/roots/factory-product-state.schema.json",".github/roots/factory-product-decision.schema.json",".github/roots/factory-product-telemetry.schema.json",".github/roots/factory-credential-requirements.schema.json",".github/roots/factory-portfolio-telemetry.schema.json",".github/roots/factory-managed-merge-policy.schema.json",".github/roots/factory-managed-merge-policy.json",".github/roots/factory-release-policy.schema.json",".github/roots/factory-release-policy.json",".github/roots/micro-saas-credentials-v1.json"]]'
+          python -c 'import json; [json.load(open(p)) for p in [".github/roots/factory-product-state.schema.json",".github/roots/factory-product-decision.schema.json",".github/roots/factory-product-telemetry.schema.json",".github/roots/factory-credential-requirements.schema.json",".github/roots/factory-portfolio-telemetry.schema.json",".github/roots/factory-managed-merge-policy.schema.json",".github/roots/factory-managed-merge-policy.json",".github/roots/factory-release-policy.schema.json",".github/roots/factory-release-policy.json",".github/roots/factory-new-product-proposal.schema.json",".github/roots/micro-saas-credentials-v1.json"]]'
           python -c 'import json,jsonschema; d=json.load(open(".github/roots/micro-saas-credentials-v1.json")); s=json.load(open(".github/roots/factory-credential-requirements.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
           python -c 'import json,jsonschema; d=json.load(open(".github/roots/factory-managed-merge-policy.json")); s=json.load(open(".github/roots/factory-managed-merge-policy.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
           python -c 'import json,jsonschema; d=json.load(open(".github/roots/factory-release-policy.json")); s=json.load(open(".github/roots/factory-release-policy.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
       - name: Run Product Brain contract tests
         run: python .github/roots/test-product-brain.py
+      - name: Run new-product proposal contract tests
+        run: python .github/roots/test-new-product-proposal.py
