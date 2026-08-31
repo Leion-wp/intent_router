@@ -12,11 +12,11 @@
     {
       "version": 1,
       "worker_id": "jules",
-      "status": "DISCOVERED",
+      "status": "ENABLED",
       "capabilities": ["code.read", "code.write", "tests.run", "git.commit", "git.push", "pr.create"],
       "activation": {"protocol":"rest","documentation":"https://jules.google/docs/api/reference/","entrypoint":"https://jules.googleapis.com/v1alpha/sessions","method":"POST create session","auth":{"mode":"api_key","secret_name":"JULES_API_KEY","notes":"Official Jules REST API uses X-Goog-Api-Key. Connected GitHub sources are discoverable through the Jules Sources API after authentication."}},
       "lifecycle": {"start":true,"status":true,"resume":true,"cancel":true},
-      "extensions": {"source_discovery":"https://jules.googleapis.com/v1alpha/sources","adapter_status":"wired_not_enabled"}
+      "extensions": {"source_discovery":"https://jules.googleapis.com/v1alpha/sources","adapter_status":"wired_enabled"}
     },
     {
       "version": 1,
