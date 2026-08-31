@@ -1,0 +1,169 @@
+name: factory-product-incubator-v1
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '6,21,36,51 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: factory-product-incubator
+  cancel-in-progress: false
+
+jobs:
+  incubate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      CONTROL_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate and reconcile approved new-product proposals
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
+
+          export GH_TOKEN="$CONTROL_TOKEN"
+          gh label create 'factory:new-product-proposal' --repo "$GITHUB_REPOSITORY" --color 0052CC \
+            --description 'Validated candidate for a new managed product' --force >/dev/null 2>&1 || true
+          gh label create 'factory:repo-create-approved' --repo "$GITHUB_REPOSITORY" --color 0E8A16 \
+            --description 'Human explicitly approved creation of the proposed repository' --force >/dev/null 2>&1 || true
+          gh label create 'factory:bootstrap-requested' --repo "$GITHUB_REPOSITORY" --color FBCA04 \
+            --description 'Approved product proposal was handed to repository bootstrap' --force >/dev/null 2>&1 || true
+          gh label create 'factory:incubated' --repo "$GITHUB_REPOSITORY" --color 0E8A16 \
+            --description 'New managed product repository was successfully bootstrapped' --force >/dev/null 2>&1 || true
+          gh label create 'factory:human-required' --repo "$GITHUB_REPOSITORY" --color D93F0B \
+            --description 'Human authority is required for this transition' --force >/dev/null 2>&1 || true
+          gh label create 'factory:blocked' --repo "$GITHUB_REPOSITORY" --color B60205 \
+            --description 'Factory task or control-plane transition blocked' --force >/dev/null 2>&1 || true
+
+          gh issue list --repo "$GITHUB_REPOSITORY" --state open --label 'factory:new-product-proposal' --limit 100 \
+            --json number,body,labels,createdAt | jq -c 'sort_by(.createdAt)[]' > /tmp/proposals.ndjson
+
+          approved=0
+          waiting=0
+          completed=0
+          rejected=0
+          blocked=0
+
+          while IFS= read -r row; do
+            [ -z "$row" ] && continue
+            issue="$(jq -r '.number' <<< "$row")"
+            body="$(jq -r '.body // ""' <<< "$row")"
+            printf '%s' "$body" > /tmp/proposal.md
+            if ! error="$(python3 .github/roots/validate-new-product-proposal.py extract /tmp/proposal.md /tmp/proposal.json 2>&1)"; then
+              rejected="$((rejected + 1))"
+              marker='<!-- roots-new-product-rejected:v1 -->'
+              comments="$(GH_TOKEN="$CONTROL_TOKEN" gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments")"
+              if ! jq -e --arg marker "$marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                GH_TOKEN="$CONTROL_TOKEN" gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
+                  -f body="${marker}\nNEW_PRODUCT_PROPOSAL_REJECTED: ${error}\n\nNo repository, credential, permission, workflow, production or spending mutation occurred." >/dev/null
+              fi
+              GH_TOKEN="$CONTROL_TOKEN" gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label 'factory:blocked' --remove-label 'factory:repo-create-approved' >/dev/null 2>&1 || true
+              continue
+            fi
+
+            proposal_id="$(jq -r '.proposal_id' /tmp/proposal.json)"
+            repo_name="$(jq -r '.repository_name' /tmp/proposal.json)"
+            target_repo="${OWNER}/${repo_name}"
+            budget="$(jq -r '.budget_request_eur' /tmp/proposal.json)"
+
+            GH_TOKEN="$CONTROL_TOKEN" gh issue list --repo "$GITHUB_REPOSITORY" --state all --label 'factory:new-product-proposal' --limit 100 \
+              --json number,body > /tmp/all-proposals.json
+            proposal_key="\"proposal_id\": \"${proposal_id}\""
+            repo_key="\"repository_name\": \"${repo_name}\""
+            duplicate_count="$(jq --arg proposal_key "$proposal_key" --arg repo_key "$repo_key" '[.[] | select((.body // "") | contains($proposal_key) or contains($repo_key))] | length' /tmp/all-proposals.json)"
+            if [ "$duplicate_count" -gt 1 ]; then
+              blocked="$((blocked + 1))"
+              echo "CONTROL_PLANE_ANOMALY: duplicate new-product identity ${proposal_id}/${target_repo}." >&2
+              GH_TOKEN="$CONTROL_TOKEN" gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label 'factory:blocked' >/dev/null 2>&1 || true
+              continue
+            fi
+
+            export GH_TOKEN="$FLEET_TOKEN"
+            if gh api "repos/${target_repo}" >/tmp/existing-repo.json 2>/dev/null; then
+              if gh api -H 'Accept: application/vnd.github.raw+json' \
+                "repos/${target_repo}/contents/.factory/profile.json" >/tmp/existing-profile.json 2>/dev/null \
+                && jq -e --arg repo "$target_repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/existing-profile.json >/dev/null; then
+                export GH_TOKEN="$CONTROL_TOKEN"
+                done_marker="<!-- roots-new-product-incubated:v1 proposal=${proposal_id} repo=${target_repo} -->"
+                comments="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments")"
+                if ! jq -e --arg marker "$done_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                  gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
+                    -f body="${done_marker}\nPRODUCT_INCUBATED: ${target_repo} exists with a valid managed factory profile. The ordinary planning/execution fleet now owns product delivery." >/dev/null
+                fi
+                gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label 'factory:incubated' --remove-label 'factory:human-required' --remove-label 'factory:bootstrap-requested' >/dev/null 2>&1 || true
+                gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason completed >/dev/null
+                completed="$((completed + 1))"
+                continue
+              fi
+
+              export GH_TOKEN="$CONTROL_TOKEN"
+              blocked="$((blocked + 1))"
+              gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label 'factory:blocked' >/dev/null 2>&1 || true
+              echo "CONTROL_PLANE_ANOMALY: ${target_repo} already exists but is not the validated managed product for proposal ${proposal_id}." >&2
+              continue
+            fi
+
+            export GH_TOKEN="$CONTROL_TOKEN"
+            approved_label="$(jq '[.labels[].name] | index("factory:repo-create-approved") != null' <<< "$row")"
+            requested_label="$(jq '[.labels[].name] | index("factory:bootstrap-requested") != null' <<< "$row")"
+            if [ "$approved_label" != 'true' ]; then
+              gate_marker="<!-- roots-new-product-human-gate:v1 proposal=${proposal_id} -->"
+              comments="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments")"
+              if ! jq -e --arg marker "$gate_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                product_name="$(jq -r '.product_name' /tmp/proposal.json)"
+                one_liner="$(jq -r '.one_liner' /tmp/proposal.json)"
+                gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
+                  -f body="${gate_marker}\nHUMAN_REQUIRED: approve creation of private managed repository ${target_repo} for **${product_name}** only if this experiment should enter the portfolio.\n\n${one_liner}\n\nRequested variable experiment budget: €${budget}. Approval of repository creation does NOT approve spending that amount.\n\nTo authorize repository creation, add label factory:repo-create-approved. No other authority is implied." >/dev/null
+              fi
+              gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label 'factory:human-required' >/dev/null 2>&1 || true
+              waiting="$((waiting + 1))"
+              continue
+            fi
+
+            if [ "$requested_label" != 'true' ]; then
+              if gh workflow run factory-bootstrap-micro-saas.yml --repo "$GITHUB_REPOSITORY" --ref Android \
+                -f repository_name="$repo_name" -f apply=true; then
+                gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label 'factory:bootstrap-requested' >/dev/null
+                gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
+                  -f body="<!-- roots-new-product-bootstrap-requested:v1 proposal=${proposal_id} -->\nBOOTSTRAP_REQUESTED: human repository-creation approval was observed and the existing approved bootstrap workflow was dispatched for ${target_repo}." >/dev/null
+                approved="$((approved + 1))"
+              else
+                blocked="$((blocked + 1))"
+                gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label 'factory:blocked' >/dev/null 2>&1 || true
+              fi
+              continue
+            fi
+
+            comments="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments")"
+            requested_at="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-new-product-bootstrap-requested:v1 proposal='"${proposal_id}"' -->"))] | last | .created_at // empty' <<< "$comments")"
+            if [ -n "$requested_at" ]; then
+              stale="$(python3 -c 'from datetime import datetime,timezone; import sys; t=datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")); print("true" if (datetime.now(timezone.utc)-t).total_seconds()>3600 else "false")' "$requested_at")"
+              if [ "$stale" = 'true' ]; then
+                stalled_marker="<!-- roots-new-product-bootstrap-stalled:v1 proposal=${proposal_id} -->"
+                if ! jq -e --arg marker "$stalled_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                  gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments" \
+                    -f body="${stalled_marker}\nCONTROL_PLANE_BLOCKED: bootstrap was requested more than one hour ago but ${target_repo} is still not a validated managed repository. Automatic redispatch is intentionally suppressed to preserve idempotence; inspect the bootstrap run." >/dev/null
+                fi
+                gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label 'factory:blocked' >/dev/null 2>&1 || true
+                blocked="$((blocked + 1))"
+              else
+                waiting="$((waiting + 1))"
+              fi
+            fi
+          done < /tmp/proposals.ndjson
+
+          echo "Product incubator: bootstrap_requested=${approved}, waiting_human_or_bootstrap=${waiting}, completed=${completed}, rejected=${rejected}, blocked=${blocked}."
