@@ -29,6 +29,10 @@
     "require_all_pull_request_runs_completed": true,
     "allowed_run_conclusions": ["success", "neutral", "skipped"]
   },
+  "quality": {
+    "require_head_specific_verdict": true,
+    "accepted_verdicts": ["PASS", "PASS_WITH_FOLLOW_UP"]
+  },
   "governance": {
     "production_deploy": "HUMAN_REQUIRED",
     "workflow_changes": "HUMAN_REQUIRED",
