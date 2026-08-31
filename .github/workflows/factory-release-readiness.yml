@@ -1,0 +1,147 @@
+name: factory-release-readiness-v1
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '9,24,39,54 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-release-readiness
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      POLICY: .github/roots/factory-release-policy.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconcile launch-ready products into explicit human release gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
+          python3 -c 'import json,jsonschema; d=json.load(open(".github/roots/factory-release-policy.json")); s=json.load(open(".github/roots/factory-release-policy.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
+          jq -e '.enabled == true and .production_deploy == "HUMAN_REQUIRED"' "$POLICY" >/dev/null
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+
+          ready=0
+          waiting=0
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null || continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/product-state.json" > /tmp/state.json 2>/dev/null; then
+              continue
+            fi
+            phase="$(jq -r '.phase // ""' /tmp/state.json)"
+            eligible_phase="$(jq -r '.eligible_phase' "$POLICY")"
+            [ "$phase" = "$eligible_phase" ] || continue
+
+            gh label create 'factory:release-ready' --repo "$repo" --color 0E8A16 \
+              --description 'All deterministic pre-production gates passed; production approval remains human-owned' --force >/dev/null 2>&1 || true
+            gh label create 'factory:release-approved' --repo "$repo" --color 5319E7 \
+              --description 'Human explicitly approved the production release transition' --force >/dev/null 2>&1 || true
+            gh label create 'factory:human-required' --repo "$repo" --color D93F0B \
+              --description 'Human authority is required for this transition' --force >/dev/null 2>&1 || true
+
+            open_milestones="$(gh api --paginate "repos/${repo}/milestones?state=open&per_page=100" --jq 'length' | awk '{s+=$1} END {print s+0}')"
+            queued="$(gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number --jq 'length')"
+            dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
+            dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
+            blocked="$(gh issue list --repo "$repo" --state open --label 'factory:blocked' --limit 100 --json number --jq 'length')"
+            open_prs="$(gh pr list --repo "$repo" --state open --limit 100 --json number --jq 'length')"
+            if [ "$open_milestones" -gt 0 ] || [ "$queued" -gt 0 ] || [ "$dispatching" -gt 0 ] || [ "$dispatched" -gt 0 ] || [ "$blocked" -gt 0 ] || [ "$open_prs" -gt 0 ]; then
+              waiting="$((waiting + 1))"
+              continue
+            fi
+
+            credential_gate="$(gh issue list --repo "$repo" --state open --limit 100 --json number,title,labels \
+              --jq '.[] | select(.title == "[FACTORY] Credential provisioning gate") | .number' | head -n 1)"
+            if [ -z "$credential_gate" ]; then
+              echo "RELEASE_WAITING: ${repo} has no credential readiness gate yet." >&2
+              waiting="$((waiting + 1))"
+              continue
+            fi
+            credentials_ready="$(gh api "repos/${repo}/issues/${credential_gate}" --jq '[.labels[].name] | index("factory:credentials-ready") != null')"
+            if [ "$credentials_ready" != 'true' ]; then
+              echo "HUMAN_REQUIRED: ${repo} credential gate #${credential_gate} is not attested ready." >&2
+              waiting="$((waiting + 1))"
+              continue
+            fi
+
+            default_branch="$(jq -r '.default_branch' /tmp/profile.json)"
+            ci_workflow="$(jq -r '.ci.workflow' /tmp/profile.json)"
+            gh api "repos/${repo}/actions/workflows/${ci_workflow}/runs?branch=${default_branch}&event=push&per_page=20" > /tmp/runs.json
+            latest_run="$(jq -c '.workflow_runs | sort_by(.created_at) | last // null' /tmp/runs.json)"
+            if [ "$latest_run" = 'null' ]; then
+              echo "RELEASE_WAITING: ${repo} has no default-branch push CI run." >&2
+              waiting="$((waiting + 1))"
+              continue
+            fi
+            if [ "$(jq -r '.status' <<< "$latest_run")" != 'completed' ] || [ "$(jq -r '.conclusion' <<< "$latest_run")" != 'success' ]; then
+              echo "RELEASE_WAITING: ${repo} latest default-branch CI is not successful." >&2
+              waiting="$((waiting + 1))"
+              continue
+            fi
+            run_id="$(jq -r '.id' <<< "$latest_run")"
+            run_sha="$(jq -r '.head_sha' <<< "$latest_run")"
+            gh api "repos/${repo}/actions/runs/${run_id}/jobs?per_page=100" > /tmp/jobs.json
+            required_ok=true
+            while IFS= read -r required_job; do
+              [ -z "$required_job" ] && continue
+              job="$(jq -c --arg name "$required_job" '[.jobs[] | select(.name == $name)] | sort_by(.started_at // "") | last // null' /tmp/jobs.json)"
+              if [ "$job" = 'null' ] || [ "$(jq -r '.status' <<< "$job")" != 'completed' ] || [ "$(jq -r '.conclusion' <<< "$job")" != 'success' ]; then
+                required_ok=false
+                break
+              fi
+            done < <(jq -r '.ci.required_jobs[]' /tmp/profile.json)
+            if [ "$required_ok" != 'true' ]; then
+              echo "RELEASE_WAITING: ${repo} required default-branch CI jobs are not all successful." >&2
+              waiting="$((waiting + 1))"
+              continue
+            fi
+
+            release_title='[FACTORY] Production release approval'
+            release_issue="$(gh issue list --repo "$repo" --state open --limit 100 --json number,title \
+              --jq '.[] | select(.title == "[FACTORY] Production release approval") | .number' | head -n 1)"
+            decision_id="$(jq -r '.last_decision.decision_id // "unknown"' /tmp/state.json)"
+            marker="<!-- roots-release-ready:v1 decision=${decision_id} head=${run_sha} -->"
+            body="$(printf '%s\n\n%s\n\n%s\n%s\n%s\n%s\n%s\n\n%s' \
+              "$marker" \
+              'All deterministic pre-production gates passed. Production deployment is still HUMAN_REQUIRED and is not performed by this workflow.' \
+              "- Product phase: ${phase}" \
+              "- Product decision: ${decision_id}" \
+              "- Default branch: ${default_branch}" \
+              "- Verified CI head: ${run_sha}" \
+              "- Credential gate: #${credential_gate} (human-attested ready; secret values were never read)" \
+              'Human release owner: review the release evidence and, only if production release is intended, add the label factory:release-approved. That label records approval only; deployment requires a separately authorized production controller.')"
+            if [ -z "$release_issue" ]; then
+              gh issue create --repo "$repo" --title "$release_title" \
+                --label 'factory:release-ready' --label 'factory:human-required' --body "$body" >/dev/null
+            else
+              gh issue edit "$release_issue" --repo "$repo" --body "$body" --add-label 'factory:release-ready' --add-label 'factory:human-required' >/dev/null
+            fi
+
+            gh issue close "$credential_gate" --repo "$repo" --reason completed >/dev/null 2>&1 || true
+            ready="$((ready + 1))"
+          done < /tmp/repos.txt
+
+          echo "Release readiness scan: ready=${ready}, waiting=${waiting}. Production deployment remains HUMAN_REQUIRED."
