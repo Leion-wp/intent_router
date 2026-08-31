@@ -25,6 +25,18 @@ For the exact PR head SHA:
 
 A missing, queued, failing, ambiguous or stale signal defers merge. It does not get guessed into PASS.
 
+## Semantic quality gate
+
+Green CI is necessary but not sufficient. The Factory Quality Manager must inspect the issue acceptance criteria and the exact PR head SHA, then publish one machine-readable verdict on the source issue:
+
+```text
+<!-- roots-quality-verdict head=<FULL_HEAD_SHA> verdict=PASS -->
+```
+
+`PASS_WITH_FOLLOW_UP` is also accepted when the remaining point is explicitly independent and non-blocking. `REWORK` or `BLOCK` for the same head SHA always prevents auto-merge. A verdict for an older SHA has no authority over a newer commit.
+
+This creates two different gates: deterministic CI proves executable checks, while the independent Quality Manager checks semantic fit to the requested work.
+
 ## Protected paths
 
 The human-owned policy denies automatic merge when a product PR touches protected control-plane/governance paths such as `.github/workflows/`, `.github/actions/`, `.github/CODEOWNERS`, `.factory/profile.json` or `.factory/credential-requirements.json`.
@@ -35,7 +47,7 @@ This is a second enforcement boundary even though worker prompts already forbid 
 
 PR correlation prefers explicit issue references and falls back to the persisted Jules session ID in the worker branch. More than one candidate is a `CONTROL_PLANE_ANOMALY` and fails closed.
 
-The merge request is pinned to the observed head SHA. A moving PR cannot be accidentally merged from stale validation. Once merged, the existing completion reconciler owns issue closure and next-task scheduling.
+The merge request is pinned to the observed head SHA. A moving PR cannot be accidentally merged from stale CI or quality validation. Once merged, the existing completion reconciler owns issue closure and next-task scheduling.
 
 ## Human boundary
 
