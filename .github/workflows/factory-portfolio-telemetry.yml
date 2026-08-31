@@ -1,0 +1,163 @@
+name: factory-portfolio-telemetry-v1
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '4,19,34,49 * * * *'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: factory-portfolio-telemetry
+  cancel-in-progress: false
+
+jobs:
+  portfolio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      CONTROL_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Aggregate portfolio telemetry and autonomy SLO
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+
+          : > /tmp/repos.ndjson
+          managed=0
+          active_products=0
+          queued_total=0
+          dispatching_total=0
+          dispatched_total=0
+          blocked_total=0
+          brain_needed_total=0
+          brain_proposal_total=0
+          human_required_total=0
+          open_milestones_total=0
+          open_prs_total=0
+          idle_total=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" \
+              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
+              /tmp/profile.json >/dev/null || continue
+            managed="$((managed + 1))"
+
+            phase='FIXED_ROADMAP'
+            state_exists=false
+            if gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/product-state.json" > /tmp/state.json 2>/dev/null; then
+              phase="$(jq -r '.phase // "UNKNOWN"' /tmp/state.json)"
+              state_exists=true
+              active_products="$((active_products + 1))"
+            fi
+
+            queued="$(gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number --jq 'length')"
+            dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
+            dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
+            blocked="$(gh issue list --repo "$repo" --state open --label 'factory:blocked' --limit 100 --json number --jq 'length')"
+            brain_needed="$(gh issue list --repo "$repo" --state open --label 'factory:brain-needed' --limit 100 --json number --jq 'length')"
+            brain_proposal="$(gh issue list --repo "$repo" --state open --label 'factory:brain-proposal' --limit 100 --json number --jq 'length')"
+            human_required="$(gh issue list --repo "$repo" --state open --label 'factory:human-required' --limit 100 --json number --jq 'length')"
+            open_milestones="$(gh api --paginate "repos/${repo}/milestones?state=open&per_page=100" --jq 'length' | awk '{s+=$1} END {print s+0}')"
+            open_prs="$(gh pr list --repo "$repo" --state open --limit 100 --json number --jq 'length')"
+
+            queued_total="$((queued_total + queued))"
+            dispatching_total="$((dispatching_total + dispatching))"
+            dispatched_total="$((dispatched_total + dispatched))"
+            blocked_total="$((blocked_total + blocked))"
+            brain_needed_total="$((brain_needed_total + brain_needed))"
+            brain_proposal_total="$((brain_proposal_total + brain_proposal))"
+            human_required_total="$((human_required_total + human_required))"
+            open_milestones_total="$((open_milestones_total + open_milestones))"
+            open_prs_total="$((open_prs_total + open_prs))"
+
+            idle=false
+            if [ "$open_milestones" -eq 0 ] && [ "$queued" -eq 0 ] && [ "$dispatching" -eq 0 ] && \
+               [ "$dispatched" -eq 0 ] && [ "$brain_needed" -eq 0 ] && [ "$brain_proposal" -eq 0 ] && \
+               [ "$human_required" -eq 0 ] && [ "$blocked" -eq 0 ]; then
+              idle=true
+              idle_total="$((idle_total + 1))"
+            fi
+
+            jq -nc \
+              --arg repository "$repo" --arg phase "$phase" --argjson state_exists "$state_exists" \
+              --argjson queued "$queued" --argjson dispatching "$dispatching" --argjson dispatched "$dispatched" \
+              --argjson blocked "$blocked" --argjson brain_needed "$brain_needed" --argjson brain_proposal "$brain_proposal" \
+              --argjson human_required "$human_required" --argjson open_milestones "$open_milestones" \
+              --argjson open_prs "$open_prs" --argjson idle "$idle" \
+              '{repository:$repository,phase:$phase,dynamic_state:$state_exists,queued:$queued,dispatching:$dispatching,dispatched:$dispatched,blocked:$blocked,brain_needed:$brain_needed,brain_proposal:$brain_proposal,human_required:$human_required,open_milestones:$open_milestones,open_prs:$open_prs,idle_without_next_transition:$idle}' \
+              >> /tmp/repos.ndjson
+          done < repos.txt
+
+          jq -s '.' /tmp/repos.ndjson > /tmp/repositories.json
+          worker_lock="$((dispatching_total + dispatched_total))"
+          if [ "$worker_lock" -gt 1 ]; then
+            worker_lock_status='VIOLATED'
+          elif [ "$worker_lock" -eq 1 ]; then
+            worker_lock_status='HELD'
+          else
+            worker_lock_status='FREE'
+          fi
+          if [ "$idle_total" -gt 0 ]; then
+            autonomy_slo='DEGRADED'
+          else
+            autonomy_slo='HEALTHY'
+          fi
+          now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          jq -n \
+            --arg generated_at "$now" --arg worker_lock_status "$worker_lock_status" --arg autonomy_slo "$autonomy_slo" \
+            --argjson managed_repositories "$managed" --argjson active_products "$active_products" \
+            --argjson queued "$queued_total" --argjson dispatching "$dispatching_total" --argjson dispatched "$dispatched_total" \
+            --argjson blocked "$blocked_total" --argjson brain_needed "$brain_needed_total" --argjson brain_proposal "$brain_proposal_total" \
+            --argjson human_required "$human_required_total" --argjson open_milestones "$open_milestones_total" \
+            --argjson open_prs "$open_prs_total" --argjson idle "$idle_total" --argjson worker_lock "$worker_lock" \
+            --slurpfile repositories /tmp/repositories.json \
+            '{version:1,generated_at:$generated_at,managed_repositories:$managed_repositories,active_dynamic_products:$active_products,worker_lock:{active_tasks:$worker_lock,status:$worker_lock_status},autonomy_slo:{status:$autonomy_slo,idle_without_next_transition:$idle},totals:{queued:$queued,dispatching:$dispatching,dispatched:$dispatched,blocked:$blocked,brain_needed:$brain_needed,brain_proposal:$brain_proposal,human_required:$human_required,open_milestones:$open_milestones,open_prs:$open_prs},market_signals:{usage:null,revenue:null,cost:null,note:"No authorized external market data source is connected; null is intentional."},repositories:$repositories[0]}' \
+            > /tmp/portfolio.json
+
+          export GH_TOKEN="$CONTROL_TOKEN"
+          gh label create 'factory:portfolio-telemetry' --repo "$GITHUB_REPOSITORY" --color 5319E7 \
+            --description 'Central portfolio health and autonomy telemetry' --force >/dev/null 2>&1 || true
+          title='[FACTORY] Portfolio telemetry'
+          issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label 'factory:portfolio-telemetry' --limit 20 --json number,title --jq '.[] | select(.title == "[FACTORY] Portfolio telemetry") | .number' | head -n 1)"
+          fence="$(printf '\140\140\140')"
+          body="$(printf '%s\n\n%s\n\n%sjson\n%s\n%s\n\n%s' \
+            '<!-- roots-portfolio-telemetry:v1 -->' \
+            "Autonomy SLO: ${autonomy_slo}. Worker lock: ${worker_lock_status} (${worker_lock} active identity/identities)." \
+            "$fence" "$(cat /tmp/portfolio.json)" "$fence" \
+            'This is operational telemetry only. Usage, revenue and cost remain null until an explicitly authorized source provides them.')"
+          if [ -z "$issue" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label 'factory:portfolio-telemetry' --body "$body" >/dev/null
+          else
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --body "$body" >/dev/null
+          fi
+
+          {
+            echo '### Portfolio telemetry'
+            echo "- Managed repositories: ${managed}"
+            echo "- Dynamic product states: ${active_products}"
+            echo "- Worker lock: ${worker_lock_status} (${worker_lock})"
+            echo "- Autonomy SLO: ${autonomy_slo}"
+            echo "- Idle without next transition: ${idle_total}"
+            echo "- Brain decisions needed: ${brain_needed_total}"
+            echo "- Human-required gates: ${human_required_total}"
+          } >> "$GITHUB_STEP_SUMMARY"
