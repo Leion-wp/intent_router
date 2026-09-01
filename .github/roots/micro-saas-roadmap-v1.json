@@ -80,7 +80,7 @@
           "id": "release-checklist",
           "title": "Produce human-gated production release checklist",
           "scope": ["deployment prerequisites", "credential provisioning checklist", "billing and email verification checklist", "post-release smoke checks"],
-          "acceptance_criteria": ["checklist clearly marks human-owned credential and production actions", "no production deployment is performed by the task", "post-release checks are executable and bounded"],
+          "acceptance_criteria": ["checklist clearly marks human-owned credential and production actions", "all live-release execution remains HUMAN_REQUIRED and outside this task", "post-release checks are executable and bounded"],
           "done": ["release checklist is committed", "human gates are explicit"],
           "priority": 30,
           "blocked_by": ["release-safety"]

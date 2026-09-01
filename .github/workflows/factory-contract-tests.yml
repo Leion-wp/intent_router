@@ -37,5 +37,8 @@ jobs:
           python -c 'import json,jsonschema; d=json.load(open(".github/roots/micro-saas-credentials-v1.json")); s=json.load(open(".github/roots/factory-credential-requirements.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
           python -c 'import json,jsonschema; d=json.load(open(".github/roots/factory-managed-merge-policy.json")); s=json.load(open(".github/roots/factory-managed-merge-policy.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
           python -c 'import json,jsonschema; d=json.load(open(".github/roots/factory-release-policy.json")); s=json.load(open(".github/roots/factory-release-policy.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
+          python .github/roots/validate-planning.py roadmap .github/roots/micro-saas-roadmap-v1.json
+      - name: Run planning safety regression tests
+        run: python .github/roots/test-planning-safety.py
       - name: Run Product Brain contract tests
         run: python .github/roots/test-product-brain.py
