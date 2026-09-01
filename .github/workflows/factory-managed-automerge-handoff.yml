@@ -1,0 +1,43 @@
+name: factory-managed-automerge-handoff-v1
+
+"on":
+  workflow_run:
+    workflows: ["factory-managed-automerge-v1"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-managed-automerge-handoff
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger deterministic completion reconciliation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-fleet-completion-reconciler.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref Android
+          echo 'AUTO_MERGE_HANDOFF: completion reconciler dispatched.'
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo '### Managed auto-merge completion handoff'
+            echo '- Trigger: successful factory-managed-automerge-v1 run.'
+            echo '- Action: dispatch factory-fleet-completion-reconciler.yml immediately.'
+            echo '- Scheduled completion reconciliation remains the fallback.'
+            echo '- No product, secret, permission, production, or spending authority is expanded.'
+          } >> "$GITHUB_STEP_SUMMARY"
