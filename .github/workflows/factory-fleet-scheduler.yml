@@ -81,9 +81,10 @@ jobs:
             [ -z "$repo" ] && continue
             dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 1 --json number --jq 'length')"
             dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 1 --json number --jq 'length')"
-            if [ "$dispatching" -gt 0 ] || [ "$dispatched" -gt 0 ]; then
+            escalated="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 1 --json number --jq 'length')"
+            if [ "$dispatching" -gt 0 ] || [ "$dispatched" -gt 0 ] || [ "$escalated" -gt 0 ]; then
               active=1
-              echo "GLOBAL_WORKER_LOCK: active task exists in ${repo}; no new dispatch this run."
+              echo "GLOBAL_WORKER_LOCK: active or escalated task identity exists in ${repo}; no new dispatch this run."
               break
             fi
           done < managed-repos.txt
@@ -168,7 +169,8 @@ jobs:
             echo "- Candidate issue: ${ISSUE_NUMBER:-none}"
             echo "- Global worker lock: ${GLOBAL_LOCK:-false}"
             echo "- Execute: ${EXECUTE}"
-            echo '- Sequential invariant: at most one open dispatching/dispatched task across the managed fleet.'
+            echo '- Sequential invariant: at most one open dispatching/dispatched/escalated task identity across the managed fleet.'
             echo '- Dispatch invariant: queued -> dispatching -> persisted Jules session -> dispatched.'
+            echo '- Exhausted workers transition to escalated + human-required and continue holding the lock fail-closed.'
             echo '- Missing acknowledgement after 20 minutes is reconciled back to queued.'
           } >> "$GITHUB_STEP_SUMMARY"
