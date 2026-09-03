@@ -38,7 +38,7 @@ jobs:
 
           active_total=0
           nudged=0
-          blocked=0
+          escalated=0
           anomalies=0
 
           while IFS= read -r repo; do
@@ -53,10 +53,15 @@ jobs:
               --description 'Factory worker/control state requires attention' --force >/dev/null 2>&1 || true
             gh label create 'factory:blocked' --repo "$repo" --color B60205 \
               --description 'Factory stopped fail-closed' --force >/dev/null 2>&1 || true
+            gh label create 'factory:escalated' --repo "$repo" --color 8B0000 \
+              --description 'Worker identity exhausted; human resolution required' --force >/dev/null 2>&1 || true
+            gh label create 'factory:human-required' --repo "$repo" --color FBCA04 \
+              --description 'A human decision is required before factory execution can continue' --force >/dev/null 2>&1 || true
 
             dispatching_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
             dispatched_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
-            active_total="$((active_total + dispatching_count + dispatched_count))"
+            escalated_count="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq 'length')"
+            active_total="$((active_total + dispatching_count + dispatched_count + escalated_count))"
 
             while IFS= read -r issue; do
               [ -z "$issue" ] && continue
@@ -99,14 +104,14 @@ jobs:
               age_seconds="$((age_seconds - session_seconds))"
 
               nudge_marker="<!-- roots-worker-watchdog-nudge session=${session} -->"
-              block_marker="<!-- roots-worker-watchdog-block session=${session} -->"
+              escalation_marker="<!-- roots-worker-watchdog-escalation session=${session} -->"
               nudged_before=false
-              blocked_before=false
+              escalated_before=false
               if jq -e --arg marker "$nudge_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
                 nudged_before=true
               fi
-              if jq -e --arg marker "$block_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
-                blocked_before=true
+              if jq -e --arg marker "$escalation_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                escalated_before=true
               fi
 
               if [ "$age_seconds" -ge 7200 ] && [ "$nudged_before" = 'false' ]; then
@@ -120,27 +125,35 @@ jobs:
                   -f body="${nudge_marker}\nWorker watchdog sent one same-session recovery nudge after two hours without an active PR. No replacement session was created." >/dev/null
                 gh issue edit "$issue" --repo "$repo" --add-label 'factory:stalled' >/dev/null 2>&1 || true
                 nudged="$((nudged + 1))"
+                nudged_before=true
               fi
 
-              if [ "$age_seconds" -ge 21600 ] && [ "$blocked_before" = 'false' ]; then
+              decision="$(python3 .github/roots/factory_worker_escalation.py "$age_seconds" "$nudged_before" "$escalated_before" "$count")"
+              if [ "$decision" = 'escalate' ]; then
                 gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                  -f body="${block_marker}\nCONTROL_PLANE_BLOCKED: no active PR is visible six hours after the persisted Jules session was created. The same-session nudge path has been exhausted. The issue remains active to preserve the one-session invariant; HUMAN_REQUIRED before abandoning or replacing this worker identity." >/dev/null
-                gh issue edit "$issue" --repo "$repo" --add-label 'factory:blocked' --add-label 'factory:stalled' >/dev/null 2>&1 || true
-                blocked="$((blocked + 1))"
+                  -f body="${escalation_marker}\nCONTROL_PLANE_ESCALATED: the persisted Jules identity produced no active PR after the bounded same-session recovery path. This issue is now terminally escalated for execution, remains fail-closed, and requires an explicit human decision before abandonment or replacement. No replacement worker session was created." >/dev/null
+                gh issue edit "$issue" --repo "$repo" \
+                  --remove-label 'factory:dispatched' \
+                  --add-label 'factory:blocked' \
+                  --add-label 'factory:stalled' \
+                  --add-label 'factory:escalated' \
+                  --add-label 'factory:human-required' >/dev/null
+                escalated="$((escalated + 1))"
               fi
             done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
           done < repos.txt
 
           if [ "$active_total" -gt 1 ]; then
             anomalies="$((anomalies + 1))"
-            echo "CONTROL_PLANE_ANOMALY: fleet has ${active_total} dispatching/dispatched tasks; sequential invariant is violated." >&2
+            echo "CONTROL_PLANE_ANOMALY: fleet has ${active_total} dispatching/dispatched/escalated task identities; sequential invariant is violated." >&2
           fi
 
           {
             echo '### Fleet watchdog'
             echo "- Active worker identities: ${active_total}"
             echo "- Same-session recovery nudges: ${nudged}"
-            echo "- Six-hour fail-closed blocks: ${blocked}"
+            echo "- Terminal human escalations: ${escalated}"
             echo "- Control-plane anomalies: ${anomalies}"
             echo '- Recovery never creates a replacement Jules session, branch or PR.'
+            echo '- Escalated identities retain the global worker lock until a human resolves them.'
           } >> "$GITHUB_STEP_SUMMARY"
