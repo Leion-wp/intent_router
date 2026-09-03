@@ -1,0 +1,47 @@
+name: factory-portfolio-telemetry-handoff-v1
+
+"on":
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - factory-fleet-watchdog-v1
+      - factory-fleet-scheduler-v2
+      - factory-cross-repo-dispatch-v1
+      - factory-fleet-completion-reconciler-v1
+      - factory-managed-automerge-v1
+      - factory-autonomous-planning-v1
+      - factory-product-brain-v1
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-portfolio-telemetry-handoff
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refresh canonical portfolio telemetry immediately
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_EVENT: ${{ github.event_name }}
+          SOURCE_WORKFLOW: ${{ github.event.workflow_run.name || 'manual' }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run factory-portfolio-telemetry.yml --ref Android
+          {
+            echo '### Portfolio telemetry handoff'
+            echo "- Source event: ${SOURCE_EVENT}"
+            echo "- Source workflow: ${SOURCE_WORKFLOW}"
+            echo "- Source run: ${SOURCE_RUN_ID}"
+            echo '- Requested an immediate canonical telemetry refresh.'
+            echo '- Scheduled telemetry remains the reconciliation fallback.'
+          } >> "$GITHUB_STEP_SUMMARY"
