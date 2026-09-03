@@ -82,6 +82,10 @@ jobs:
               [ -z "$issue" ] && continue
               printf '%s\t%s\n' "$repo" "$issue" >> /tmp/active.tsv
             done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              printf '%s\t%s\n' "$repo" "$issue" >> /tmp/active.tsv
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq '.[].number')
 
             jq -n \
               --arg repository "$repo" \
@@ -116,7 +120,7 @@ jobs:
             lock_issue="$(cut -f2 /tmp/first-active.tsv)"
           fi
           if [ "$active_count" -gt 1 ]; then
-            echo "CONTROL_PLANE_ANOMALY: global sequential worker lock has ${active_count} active task identities." >&2
+            echo "CONTROL_PLANE_ANOMALY: global sequential worker lock has ${active_count} active or escalated task identities." >&2
           fi
 
           managed="$(jq 'length' /tmp/repositories.json)"
