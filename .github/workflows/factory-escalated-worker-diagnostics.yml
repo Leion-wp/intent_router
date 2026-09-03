@@ -91,7 +91,9 @@ jobs:
                 last_activity_kind="$(jq -r '((.activities // []) | last // {}) | (.type // .activityType // .kind // .name // "unknown") | tostring' /tmp/jules-activities.json 2>/dev/null || printf unknown)"
               fi
 
-              open_prs="$(gh pr list --repo "$repo" --state open --limit 100 --json number,body,headRefName | jq --arg session_id "${session##*/}" '[.[] | select(((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#'"${issue}"'\\b")) or ((.headRefName // "") | contains($session_id)))] | length')"
+              open_prs="$(gh pr list --repo "$repo" --state open --limit 100 --json number,body,headRefName \
+                | jq --arg issue "$issue" --arg session_id "${session##*/}" \
+                  '[.[] | select(((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + $issue + "\\b")) or ((.headRefName // "") | contains($session_id)))] | length')"
 
               body="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
                 "$marker" \
