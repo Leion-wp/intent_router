@@ -8,6 +8,7 @@ name: factory-contract-tests
       - '.github/workflows/factory-product-brain.yml'
       - '.github/workflows/factory-product-telemetry.yml'
       - '.github/workflows/factory-fleet-watchdog.yml'
+      - '.github/workflows/factory-fleet-scheduler.yml'
       - '.github/workflows/factory-credential-readiness.yml'
       - '.github/workflows/factory-dynamic-planning-handoff.yml'
       - '.github/workflows/factory-portfolio-telemetry.yml'
@@ -40,5 +41,7 @@ jobs:
           python .github/roots/validate-planning.py roadmap .github/roots/micro-saas-roadmap-v1.json
       - name: Run planning safety regression tests
         run: python .github/roots/test-planning-safety.py
+      - name: Run worker escalation contract tests
+        run: python .github/roots/test-worker-escalation.py
       - name: Run Product Brain contract tests
         run: python .github/roots/test-product-brain.py
