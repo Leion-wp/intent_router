@@ -1,0 +1,117 @@
+name: factory-escalated-worker-diagnostics-v1
+
+"on":
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - factory-fleet-watchdog-v1
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-escalated-worker-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Snapshot escalated Jules identities without exposing task content
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          test -n "$JULES_API_KEY"
+          echo "::add-mask::$FLEET_TOKEN"
+          echo "::add-mask::$JULES_API_KEY"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+
+          diagnosed=0
+          unavailable=0
+          anomalies=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
+
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              session_body="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
+              if [ -z "$session_body" ]; then
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} is escalated without a persisted Jules session." >&2
+                continue
+              fi
+              session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_body" | head -n 1)"
+              [ -n "$session" ] || continue
+              marker="<!-- roots-worker-diagnostic session=${session} -->"
+              if jq -e --arg marker "$marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                continue
+              fi
+
+              api_reachable=false
+              activity_api_reachable=false
+              session_state='unknown'
+              activity_count=0
+              last_activity_kind='unknown'
+
+              if curl --fail-with-body --silent --show-error \
+                -H "X-Goog-Api-Key: $JULES_API_KEY" \
+                "https://jules.googleapis.com/v1alpha/${session}" > /tmp/jules-session.json 2>/tmp/jules-session.err; then
+                api_reachable=true
+                session_state="$(jq -r '(.state // .status // .phase // .result // "unknown") | tostring' /tmp/jules-session.json 2>/dev/null || printf unknown)"
+              else
+                unavailable="$((unavailable + 1))"
+              fi
+
+              if curl --fail-with-body --silent --show-error \
+                -H "X-Goog-Api-Key: $JULES_API_KEY" \
+                "https://jules.googleapis.com/v1alpha/${session}/activities?pageSize=20" > /tmp/jules-activities.json 2>/tmp/jules-activities.err; then
+                activity_api_reachable=true
+                activity_count="$(jq '(.activities // []) | length' /tmp/jules-activities.json 2>/dev/null || printf 0)"
+                last_activity_kind="$(jq -r '((.activities // []) | last // {}) | (.type // .activityType // .kind // .name // "unknown") | tostring' /tmp/jules-activities.json 2>/dev/null || printf unknown)"
+              fi
+
+              open_prs="$(gh pr list --repo "$repo" --state open --limit 100 --json number,body,headRefName | jq --arg session_id "${session##*/}" '[.[] | select(((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#'"${issue}"'\\b")) or ((.headRefName // "") | contains($session_id)))] | length')"
+
+              body="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+                "$marker" \
+                'WORKER_DIAGNOSTIC: bounded metadata snapshot for the terminally escalated Jules identity.' \
+                "- Session API reachable: ${api_reachable}" \
+                "- Normalized session state: ${session_state}" \
+                "- Activities API reachable: ${activity_api_reachable}" \
+                "- Activity records observed: ${activity_count}" \
+                "- Last activity kind: ${last_activity_kind}" \
+                "- Correlated open PR count: ${open_prs}")"
+              body="${body}\n- No activity body, prompt, credential or secret value was persisted.\n- Execution remains HUMAN_REQUIRED; diagnostics do not create a replacement session."
+              gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="$body" >/dev/null
+              diagnosed="$((diagnosed + 1))"
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq '.[].number')
+          done < /tmp/repos.txt
+
+          {
+            echo '### Escalated worker diagnostics'
+            echo "- New diagnostics: ${diagnosed}"
+            echo "- Jules session API unavailable: ${unavailable}"
+            echo "- Control-plane anomalies: ${anomalies}"
+            echo '- Diagnostics are metadata-only and never create a replacement worker identity.'
+          } >> "$GITHUB_STEP_SUMMARY"
