@@ -86,8 +86,9 @@ jobs:
             --arg prompt "$prompt" \
             --arg source "$source" \
             --arg title "$title" \
-            '{prompt:$prompt,title:$title,sourceContext:{source:$source,githubRepoContext:{startingBranch:"Android"}},requirePlanApproval:false}' \
+            '{prompt:$prompt,title:$title,sourceContext:{source:$source,githubRepoContext:{startingBranch:"Android"}},requirePlanApproval:false,automationMode:"AUTO_CREATE_PR"}' \
             > request.json
+          test "$(jq -r '.automationMode' request.json)" = 'AUTO_CREATE_PR'
           curl --fail-with-body --silent --show-error \
             -X POST \
             -H 'Content-Type: application/json' \
@@ -115,7 +116,7 @@ jobs:
             exit 1
           fi
 
-          printf -v body '%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s' \
+          printf -v body '%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
             "$marker" \
             'Roots control-plane worker session' \
             '- Worker: Jules' \
@@ -123,6 +124,7 @@ jobs:
             "- Session: ${session_name}" \
             "- Session id: ${session_id}" \
             "- URL: ${session_url}" \
+            '- Delivery mode: AUTO_CREATE_PR' \
             '- Rework policy: CI feedback must use this same session; never create a replacement session.'
 
           gh api \
@@ -138,7 +140,7 @@ jobs:
             --arg task_id "$(jq -r '.task_id' factory-task.json)" \
             --arg execution_id "$(jq -r '.id // .name // empty' jules-session.json)" \
             --arg worker_url "$(jq -r '.url // empty' jules-session.json)" \
-            '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"jules",summary:"Jules session created and durably mapped to the source issue.",outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:$execution_id,worker_url:$worker_url},evidence:{tests:[],checks:["dispatch accepted by Jules API","session mapping persisted on source issue"]},risks:[],next_action:"WAIT"}' \
+            '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"jules",summary:"Jules session created with AUTO_CREATE_PR and durably mapped to the source issue.",outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:$execution_id,worker_url:$worker_url},evidence:{tests:[],checks:["dispatch accepted by Jules API","AUTO_CREATE_PR requested","session mapping persisted on source issue"]},risks:[],next_action:"WAIT"}' \
             > factory-result.json
 
       - name: Upload FactoryResult
