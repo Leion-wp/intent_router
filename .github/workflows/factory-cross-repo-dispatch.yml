@@ -141,7 +141,8 @@ jobs:
             "Objective:", .spec.objective,
             "--- BEGIN UNTRUSTED ISSUE CONTEXT ---", (.spec.context.issue_body // ""), "--- END UNTRUSTED ISSUE CONTEXT ---"
           ] | join("\n")' factory-task.json)"
-          jq -n --arg prompt "$prompt" --arg source "$source" --arg title "$TARGET_REPO#$ISSUE_NUMBER" --arg branch "$branch" '{prompt:$prompt,title:$title,sourceContext:{source:$source,githubRepoContext:{startingBranch:$branch}},requirePlanApproval:false}' > request.json
+          jq -n --arg prompt "$prompt" --arg source "$source" --arg title "$TARGET_REPO#$ISSUE_NUMBER" --arg branch "$branch" '{prompt:$prompt,title:$title,sourceContext:{source:$source,githubRepoContext:{startingBranch:$branch}},requirePlanApproval:false,automationMode:"AUTO_CREATE_PR"}' > request.json
+          test "$(jq -r '.automationMode' request.json)" = 'AUTO_CREATE_PR'
           curl --fail-with-body --silent --show-error -X POST -H 'Content-Type: application/json' -H "X-Goog-Api-Key: $JULES_API_KEY" --data @request.json 'https://jules.googleapis.com/v1alpha/sessions' > session.json
           test -n "$(jq -r '.name // empty' session.json)"
           printf '%s' "$cwd" >/dev/null
@@ -159,12 +160,13 @@ jobs:
             exit 1
           fi
           marker="<!-- roots-jules-session task_id=${task_id} session=${session} -->"
-          body="$(printf '%s\n%s\n%s\n%s' "$marker" 'Roots Fleet worker session' '- Worker: Jules' '- Rework invariant: same session + same branch + same PR; never create a replacement session for rework.')"
+          body="$(printf '%s\n%s\n%s\n%s\n%s' "$marker" 'Roots Fleet worker session' '- Worker: Jules' '- Delivery mode: AUTO_CREATE_PR' '- Rework invariant: same session + same branch + same PR; never create a replacement session for rework.')"
           gh api --method POST "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments" -f body="$body" >/dev/null
           {
             echo '### Cross-repo dispatch'
             echo "- Target: ${task_id}"
             echo "- Session: ${session}"
+            echo '- Delivery mode: AUTO_CREATE_PR'
             echo '- New session created: yes'
             echo '- Rework identity persisted on target issue.'
           } >> "$GITHUB_STEP_SUMMARY"
