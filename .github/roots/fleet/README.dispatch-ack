@@ -1,0 +1,1 @@
+Immediate dispatch acknowledgement is owned by factory-cross-repo-dispatch after durable Jules session persistence. Scheduler reconciliation is fallback recovery only.
