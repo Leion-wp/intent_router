@@ -45,3 +45,5 @@ jobs:
         run: python .github/roots/test-worker-escalation.py
       - name: Run Product Brain contract tests
         run: python .github/roots/test-product-brain.py
+      - name: Run managed auto-merge LOW_RISK contract tests
+        run: python .github/roots/test-managed-automerge-risk.py

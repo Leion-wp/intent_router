@@ -8,8 +8,13 @@
   },
   "source_issue": {
     "required_label": "factory:dispatched",
-    "blocking_labels": ["factory:blocked", "factory:human-required"],
+    "blocking_labels": ["factory:blocked", "factory:human-required", "factory:escalated"],
     "require_persisted_worker_session": true
+  },
+  "risk": {
+    "required_low_risk_label": "factory:risk-low",
+    "denied_risk_labels": ["factory:risk-medium", "factory:risk-high", "factory:risk-unknown"],
+    "fail_closed_when_unclassified": true
   },
   "pull_request": {
     "require_default_base_branch": true,

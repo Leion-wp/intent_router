@@ -4,7 +4,7 @@
   "title": "FactoryManagedMergePolicy",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "enabled", "scope", "source_issue", "pull_request", "ci", "quality", "governance"],
+  "required": ["version", "enabled", "scope", "source_issue", "risk", "pull_request", "ci", "quality", "governance"],
   "properties": {
     "version": {"type": "integer", "const": 1},
     "enabled": {"type": "boolean"},
@@ -26,6 +26,21 @@
         "required_label": {"const": "factory:dispatched"},
         "blocking_labels": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
         "require_persisted_worker_session": {"const": true}
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_low_risk_label", "denied_risk_labels", "fail_closed_when_unclassified"],
+      "properties": {
+        "required_low_risk_label": {"const": "factory:risk-low"},
+        "denied_risk_labels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["factory:risk-medium", "factory:risk-high", "factory:risk-unknown"]}
+        },
+        "fail_closed_when_unclassified": {"const": true}
       }
     },
     "pull_request": {
