@@ -38,16 +38,7 @@ jobs:
           echo "::add-mask::$FLEET_TOKEN"
           export GH_TOKEN="$FLEET_TOKEN"
           test "$(gh api user --jq '.login')" = "$OWNER"
-          jq -e '
-            .version == 1 and .enabled == true and
-            .scope.managed_only == true and
-            .scope.exclude_control_plane_repository == true and
-            .source_issue.require_persisted_worker_session == true and
-            .risk.required_low_risk_label == "factory:risk-low" and
-            .risk.fail_closed_when_unclassified == true and
-            .pull_request.require_single_correlated_pr == true and
-            .quality.require_head_specific_verdict == true
-          ' "$POLICY" >/dev/null
+          jq -e '.version == 1 and .enabled == true and .scope.managed_only == true and .scope.exclude_control_plane_repository == true and .source_issue.require_persisted_worker_session == true and .risk.required_low_risk_label == "factory:risk-low" and .risk.fail_closed_when_unclassified == true and .pull_request.require_single_correlated_pr == true and .quality.require_head_specific_verdict == true' "$POLICY" >/dev/null
 
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
@@ -58,37 +49,34 @@ jobs:
 
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
-            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
-              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
               continue
             fi
-
             blueprint="$(jq -r '.blueprint // ""' /tmp/profile.json)"
             jq -e --arg blueprint "$blueprint" '.scope.allowed_blueprints | index($blueprint) != null' "$POLICY" >/dev/null || continue
             jq -e --arg repo "$repo" '.managed == true and .repository == $repo' /tmp/profile.json >/dev/null || continue
             default_branch="$(jq -r '.default_branch' /tmp/profile.json)"
             required_label="$(jq -r '.source_issue.required_label' "$POLICY")"
+            low_risk_label="$(jq -r '.risk.required_low_risk_label' "$POLICY")"
 
             while IFS= read -r issue; do
-              [ -z "$issue" ] && continue
-
+              [ -n "$issue" ] || continue
               issue_json="$(gh api "repos/${repo}/issues/${issue}")"
               labels="$(jq '[.labels[].name]' <<< "$issue_json")"
 
-              should_block=false
+              issue_blocked=false
               while IFS= read -r label; do
-                [ -z "$label" ] && continue
+                [ -n "$label" ] || continue
                 if jq -e --arg label "$label" '.source_issue.blocking_labels | index($label) != null' "$POLICY" >/dev/null; then
-                  should_block=true
+                  issue_blocked=true
                   break
                 fi
               done < <(jq -r '.[]' <<< "$labels")
-              if [ "$should_block" = true ]; then
+              if [ "$issue_blocked" = true ]; then
                 blocked=$((blocked + 1))
                 continue
               fi
 
-              low_risk_label="$(jq -r '.risk.required_low_risk_label' "$POLICY")"
               if ! jq -e --arg label "$low_risk_label" 'index($label) != null' <<< "$labels" >/dev/null; then
                 echo "AUTO_MERGE_HUMAN: ${repo}#${issue} has no explicit LOW_RISK classification."
                 deferred=$((deferred + 1))
@@ -96,38 +84,29 @@ jobs:
               fi
               denied_risk=false
               while IFS= read -r label; do
-                [ -z "$label" ] && continue
+                [ -n "$label" ] || continue
                 if jq -e --arg label "$label" 'index($label) != null' <<< "$labels" >/dev/null; then
                   denied_risk=true
                   break
                 fi
               done < <(jq -r '.risk.denied_risk_labels[]' "$POLICY")
               if [ "$denied_risk" = true ]; then
-                echo "AUTO_MERGE_HUMAN: ${repo}#${issue} has contradictory/non-low risk classification."
                 blocked=$((blocked + 1))
                 continue
               fi
 
               comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
               session_marker="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
-              if [ -z "$session_marker" ]; then
-                deferred=$((deferred + 1))
-                continue
-              fi
+              [ -n "$session_marker" ] || { deferred=$((deferred + 1)); continue; }
               session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_marker" | head -n1)"
               session_id="${session##*/}"
               [ -n "$session_id" ] || { deferred=$((deferred + 1)); continue; }
 
-              gh pr list --repo "$repo" --state open --limit 100 \
-                --json number,body,headRefOid,headRefName,baseRefName,isDraft,url > /tmp/prs.json
-              jq --argjson issue "$issue" --arg branch "$default_branch" \
-                '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]' \
-                /tmp/prs.json > /tmp/candidates.json
+              gh pr list --repo "$repo" --state open --limit 100 --json number,body,headRefOid,headRefName,baseRefName,isDraft,url > /tmp/prs.json
+              jq --argjson issue "$issue" --arg branch "$default_branch" '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]' /tmp/prs.json > /tmp/candidates.json
               count="$(jq 'length' /tmp/candidates.json)"
               if [ "$count" -eq 0 ]; then
-                jq --arg branch "$default_branch" --arg session_id "$session_id" \
-                  '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' \
-                  /tmp/prs.json > /tmp/candidates.json
+                jq --arg branch "$default_branch" --arg session_id "$session_id" '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' /tmp/prs.json > /tmp/candidates.json
                 count="$(jq 'length' /tmp/candidates.json)"
               fi
               if [ "$count" -gt 1 ]; then
@@ -146,16 +125,14 @@ jobs:
               [ "$(jq -r '.base.ref' /tmp/pr.json)" = "$default_branch" ] || { blocked=$((blocked + 1)); continue; }
               [ "$(jq -r '.head.sha' /tmp/pr.json)" = "$sha" ] || { deferred=$((deferred + 1)); continue; }
               [ "$(jq -r '.draft' /tmp/pr.json)" = false ] || { deferred=$((deferred + 1)); continue; }
-
               review_decision="$(gh pr view "$pr" --repo "$repo" --json reviewDecision --jq '.reviewDecision // ""')"
               [ "$review_decision" != CHANGES_REQUESTED ] || { blocked=$((blocked + 1)); continue; }
 
               gh api --paginate "repos/${repo}/pulls/${pr}/files?per_page=100" --jq '.[].filename' > /tmp/changed-files.txt
               forbidden=false
               while IFS= read -r prefix; do
-                [ -z "$prefix" ] && continue
+                [ -n "$prefix" ] || continue
                 if grep -Fq "$prefix" /tmp/changed-files.txt; then
-                  echo "AUTO_MERGE_FORBIDDEN_PATH: ${repo}#${issue} PR #${pr} touches ${prefix}." >&2
                   forbidden=true
                   break
                 fi
@@ -170,10 +147,13 @@ jobs:
 
               : > /tmp/jobs.ndjson
               while IFS= read -r run_id; do
-                gh api "repos/${repo}/actions/runs/${run_id}/jobs?per_page=100" \
-                  --jq '.jobs[] | {name,status,conclusion,started_at}' >> /tmp/jobs.ndjson
+                gh api "repos/${repo}/actions/runs/${run_id}/jobs?per_page=100" --jq '.jobs[] | {name,status,conclusion,started_at}' >> /tmp/jobs.ndjson
               done < <(jq -r '.workflow_runs[].id' /tmp/runs.json)
-              if [ -s /tmp/jobs.ndjson ]; then jq -s '.' /tmp/jobs.ndjson > /tmp/jobs.json; else echo '[]' > /tmp/jobs.json; fi
+              if [ -s /tmp/jobs.ndjson ]; then
+                jq -s '.' /tmp/jobs.ndjson > /tmp/jobs.json
+              else
+                echo '[]' > /tmp/jobs.json
+              fi
 
               required_ok=true
               while IFS= read -r required_job; do
@@ -206,13 +186,16 @@ jobs:
                   break
                 fi
               done < <(jq -r '.quality.accepted_verdicts[]' "$POLICY")
-              [ "$quality_ok" = true ] || { echo "AUTO_MERGE_WAITING_QUALITY: ${repo}#${issue} PR #${pr} head ${sha}."; deferred=$((deferred + 1)); continue; }
+              [ "$quality_ok" = true ] || { deferred=$((deferred + 1)); continue; }
 
               [ "$(jq -r '.mergeable' /tmp/pr.json)" = true ] || { deferred=$((deferred + 1)); continue; }
               mergeable_state="$(jq -r '.mergeable_state // "unknown"' /tmp/pr.json)"
-              [ "$mergeable_state" != dirty ] && [ "$mergeable_state" != blocked ] || { deferred=$((deferred + 1)); continue; }
+              if [ "$mergeable_state" = dirty ] || [ "$mergeable_state" = blocked ]; then
+                deferred=$((deferred + 1))
+                continue
+              fi
 
-              # Final race guard. Head, base, state, risk and blocking gates are re-read immediately before merge.
+              # Final race guard: exact head plus all mutable gates are re-read immediately before merge.
               current_pr="$(gh api "repos/${repo}/pulls/${pr}")"
               [ "$(jq -r '.head.sha' <<< "$current_pr")" = "$sha" ] || { echo "AUTO_MERGE_REVALIDATE: ${repo} PR #${pr} head moved."; deferred=$((deferred + 1)); continue; }
               [ "$(jq -r '.base.ref' <<< "$current_pr")" = "$default_branch" ] || continue
@@ -224,7 +207,10 @@ jobs:
               jq -e --arg label "$low_risk_label" 'index($label) != null' <<< "$current_labels" >/dev/null || { deferred=$((deferred + 1)); continue; }
               current_block=false
               while IFS= read -r label; do
-                if jq -e --arg label "$label" 'index($label) != null' <<< "$current_labels" >/dev/null; then current_block=true; break; fi
+                if jq -e --arg label "$label" 'index($label) != null' <<< "$current_labels" >/dev/null; then
+                  current_block=true
+                  break
+                fi
               done < <(jq -r '.source_issue.blocking_labels[], .risk.denied_risk_labels[]' "$POLICY")
               [ "$current_block" = false ] || { blocked=$((blocked + 1)); continue; }
 
@@ -234,17 +220,18 @@ jobs:
 
               ready_marker="<!-- roots-managed-automerge-ready head=${sha} -->"
               if ! jq -e --arg marker "$ready_marker" '.[] | select((.body // "") | contains($marker))' <<< "$current_comments" >/dev/null; then
-                gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                  -f body="${ready_marker}\nAUTO_MERGE_READY: LOW_RISK PR #${pr} passed exact-head CI, protected-path, review and Quality Manager ${accepted_verdict} gates at ${sha}." >/dev/null
+                gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="${ready_marker}\nAUTO_MERGE_READY: LOW_RISK PR #${pr} passed exact-head CI, protected-path, review and Quality Manager ${accepted_verdict} gates at ${sha}." >/dev/null
               fi
 
               [ "$EXECUTE" = true ] || continue
               merge_method="$(jq -r '.pull_request.merge_method' "$POLICY")"
-              if gh api --method PUT "repos/${repo}/pulls/${pr}/merge" -f sha="$sha" -f merge_method="$merge_method" > /tmp/merge.json 2>/tmp/merge.err \
-                && [ "$(jq -r '.merged // false' /tmp/merge.json)" = true ]; then
-                gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                  -f body="<!-- roots-managed-automerge-done head=${sha} -->\nAUTO_MERGE_DONE: LOW_RISK managed PR #${pr} merged automatically after exact-head CI, policy, review and quality gates. Completion reconciliation owns the next transition." >/dev/null
-                merged=$((merged + 1))
+              if gh api --method PUT "repos/${repo}/pulls/${pr}/merge" -f sha="$sha" -f merge_method="$merge_method" > /tmp/merge.json 2>/tmp/merge.err; then
+                if [ "$(jq -r '.merged // false' /tmp/merge.json)" = true ]; then
+                  gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="<!-- roots-managed-automerge-done head=${sha} -->\nAUTO_MERGE_DONE: LOW_RISK managed PR #${pr} merged automatically after exact-head CI, policy, review and quality gates. Completion reconciliation owns the next transition." >/dev/null
+                  merged=$((merged + 1))
+                else
+                  deferred=$((deferred + 1))
+                fi
               else
                 echo "AUTO_MERGE_DEFERRED: ${repo} PR #${pr}: $(tail -c 1200 /tmp/merge.err 2>/dev/null || true)" >&2
                 deferred=$((deferred + 1))
