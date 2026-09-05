@@ -1,0 +1,57 @@
+name: factory-quality-risk-handoff-v1
+
+"on":
+  workflow_run:
+    workflows:
+      - factory-product-telemetry-v1
+      - factory-portfolio-telemetry-v1
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-quality-risk-handoff
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger Quality risk reconciliation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          before="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/factory-quality-risk-reconciler.yml/runs?event=workflow_dispatch&per_page=1" --jq '.workflow_runs[0].id // 0')"
+          dispatched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          gh workflow run factory-quality-risk-reconciler.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref Android
+
+          run_id=''
+          for _ in $(seq 1 12); do
+            runs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/factory-quality-risk-reconciler.yml/runs?event=workflow_dispatch&per_page=10")"
+            run_id="$(jq -r --arg before "$before" --arg dispatched_at "$dispatched_at" '[.workflow_runs[] | select((.id|tostring) != $before and .created_at >= $dispatched_at)] | sort_by(.created_at) | last | .id // empty' <<< "$runs_json")"
+            [ -n "$run_id" ] && break
+            sleep 5
+          done
+
+          if [ -z "$run_id" ]; then
+            echo 'QUALITY_RISK_HANDOFF_FAILED: no reconciler workflow_dispatch run materialized.' >&2
+            exit 1
+          fi
+
+          echo "QUALITY_RISK_RECONCILER_DISPATCHED: run_id=${run_id}"
+          {
+            echo '### Quality risk event handoff'
+            echo "- Trigger event: ${GITHUB_EVENT_NAME}"
+            echo "- Reconciler run: ${run_id}"
+            echo '- Quality risk reconciliation was dispatched immediately; managed auto-merge remains independently fail-closed.'
+          } >> "$GITHUB_STEP_SUMMARY"
