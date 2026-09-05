@@ -1,0 +1,1 @@
+factory-cross-repo-dispatch: roots-jules-session persisted => factory:dispatching removed => factory:dispatched added => labels re-read and verified; scheduler reconciliation is recovery-only.
