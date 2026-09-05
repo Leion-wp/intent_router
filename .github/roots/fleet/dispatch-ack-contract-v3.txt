@@ -1,0 +1,1 @@
+A successful cross-repo dispatch must finish in factory:dispatched after the Jules session identity is durable.
