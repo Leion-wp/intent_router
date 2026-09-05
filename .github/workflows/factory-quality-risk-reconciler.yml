@@ -1,0 +1,170 @@
+name: factory-quality-risk-reconciler-v1
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-quality-risk-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      POLICY: .github/roots/factory-managed-merge-policy.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Materialize exact-head Quality LOW risk
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          jq -e '.version == 1 and .risk.required_low_risk_label == "factory:risk-low" and .risk.fail_closed_when_unclassified == true and .quality.require_head_specific_verdict == true' "$POLICY" >/dev/null
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+
+          reconciled=0
+          deferred=0
+          blocked=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo' /tmp/profile.json >/dev/null || continue
+            blueprint="$(jq -r '.blueprint // ""' /tmp/profile.json)"
+            jq -e --arg blueprint "$blueprint" '.scope.allowed_blueprints | index($blueprint) != null' "$POLICY" >/dev/null || continue
+            default_branch="$(jq -r '.default_branch' /tmp/profile.json)"
+            required_label="$(jq -r '.source_issue.required_label' "$POLICY")"
+            low_label="$(jq -r '.risk.required_low_risk_label' "$POLICY")"
+
+            while IFS= read -r issue; do
+              [ -n "$issue" ] || continue
+              issue_json="$(gh api "repos/${repo}/issues/${issue}")"
+              labels="$(jq '[.labels[].name]' <<< "$issue_json")"
+
+              blocked_state=false
+              while IFS= read -r label; do
+                if jq -e --arg label "$label" 'index($label) != null' <<< "$labels" >/dev/null; then
+                  blocked_state=true
+                  break
+                fi
+              done < <(jq -r '.source_issue.blocking_labels[], .risk.denied_risk_labels[]' "$POLICY")
+              if [ "$blocked_state" = true ]; then
+                blocked=$((blocked + 1))
+                continue
+              fi
+
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              session_marker="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
+              [ -n "$session_marker" ] || { deferred=$((deferred + 1)); continue; }
+              session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_marker" | head -n1)"
+              session_id="${session##*/}"
+              [ -n "$session_id" ] || { deferred=$((deferred + 1)); continue; }
+
+              gh pr list --repo "$repo" --state open --limit 100 --json number,body,headRefOid,headRefName,baseRefName,isDraft > /tmp/prs.json
+              jq --argjson issue "$issue" --arg branch "$default_branch" '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]' /tmp/prs.json > /tmp/candidates.json
+              count="$(jq 'length' /tmp/candidates.json)"
+              if [ "$count" -eq 0 ]; then
+                jq --arg branch "$default_branch" --arg session_id "$session_id" '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' /tmp/prs.json > /tmp/candidates.json
+                count="$(jq 'length' /tmp/candidates.json)"
+              fi
+              if [ "$count" -gt 1 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${count} active PR candidates." >&2
+                blocked=$((blocked + 1))
+                continue
+              fi
+              [ "$count" -eq 1 ] || { deferred=$((deferred + 1)); continue; }
+
+              pr="$(jq -r '.[0].number' /tmp/candidates.json)"
+              sha="$(jq -r '.[0].headRefOid' /tmp/candidates.json)"
+              [ "$(jq -r '.[0].isDraft' /tmp/candidates.json)" = false ] || { deferred=$((deferred + 1)); continue; }
+
+              negative=false
+              for verdict in REWORK BLOCK; do
+                marker="<!-- roots-quality-verdict head=${sha} verdict=${verdict} -->"
+                if jq -e --arg marker "$marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                  negative=true
+                  break
+                fi
+              done
+              [ "$negative" = false ] || { blocked=$((blocked + 1)); continue; }
+
+              accepted=''
+              quality_body=''
+              while IFS= read -r verdict; do
+                marker="<!-- roots-quality-verdict head=${sha} verdict=${verdict} -->"
+                body="$(jq -r --arg marker "$marker" '[.[] | select((.body // "") | contains($marker))] | last | .body // empty' <<< "$comments")"
+                if [ -n "$body" ]; then
+                  accepted="$verdict"
+                  quality_body="$body"
+                  break
+                fi
+              done < <(jq -r '.quality.accepted_verdicts[]' "$POLICY")
+              [ -n "$accepted" ] || { deferred=$((deferred + 1)); continue; }
+
+              # Risk must be explicit in the authoritative exact-head Quality verdict.
+              # Accept the current Quality report form "Risk: low" case-insensitively;
+              # never infer LOW from PASS alone.
+              if ! grep -Eiq '(^|[^[:alnum:]_])risk:[[:space:]]*low([^[:alnum:]_]|$)' <<< "$quality_body"; then
+                echo "QUALITY_RISK_UNCLASSIFIED: ${repo}#${issue} PR #${pr} head ${sha}."
+                deferred=$((deferred + 1))
+                continue
+              fi
+
+              current_pr="$(gh api "repos/${repo}/pulls/${pr}")"
+              [ "$(jq -r '.head.sha' <<< "$current_pr")" = "$sha" ] || { deferred=$((deferred + 1)); continue; }
+              [ "$(jq -r '.base.ref' <<< "$current_pr")" = "$default_branch" ] || { blocked=$((blocked + 1)); continue; }
+              [ "$(jq -r '.state' <<< "$current_pr")" = open ] || continue
+              [ "$(jq -r '.draft' <<< "$current_pr")" = false ] || continue
+
+              if ! jq -e --arg label "$low_label" 'index($label) != null' <<< "$labels" >/dev/null; then
+                gh issue edit "$issue" --repo "$repo" --add-label "$low_label" >/dev/null
+                reconciled=$((reconciled + 1))
+              fi
+
+              current_labels="$(gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
+              jq -e --arg label "$low_label" 'index($label) != null' <<< "$current_labels" >/dev/null || {
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} LOW_RISK label did not persist." >&2
+                exit 1
+              }
+            done < <(gh issue list --repo "$repo" --state open --label "$required_label" --limit 100 --json number --jq '.[].number')
+          done < /tmp/repos.txt
+
+          echo "Quality risk reconciliation: reconciled=${reconciled}, deferred=${deferred}, blocked=${blocked}."
+
+      - name: Trigger managed auto-merge after risk reconciliation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-managed-automerge.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref Android \
+            -f execute=true
+          echo 'QUALITY_RISK_HANDOFF: managed auto-merge dispatched.'
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo '### Quality risk reconciliation'
+            echo '- Exact-head Quality PASS is necessary but does not imply LOW_RISK.'
+            echo '- Explicit `Risk: low` on that exact-head Quality report materializes `factory:risk-low`.'
+            echo '- REWORK, BLOCK, denied risk labels, ambiguity, stale heads and unclassified risk remain fail-closed.'
+            echo '- Managed auto-merge is dispatched immediately after reconciliation; its own gates revalidate everything.'
+          } >> "$GITHUB_STEP_SUMMARY"
