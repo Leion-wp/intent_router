@@ -31,6 +31,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Trigger Quality REWORK reconciliation
+        shell: bash
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-fleet-jules-quality-rework.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref Android
+
       - name: Discover oldest eligible issue and reconcile dispatch acknowledgements
         id: candidate
         shell: bash
