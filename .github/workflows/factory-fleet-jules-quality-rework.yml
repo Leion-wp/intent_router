@@ -1,0 +1,105 @@
+name: factory-fleet-jules-quality-rework-v1
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-fleet-jules-quality-rework
+  cancel-in-progress: false
+
+jobs:
+  rework:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Feed Quality REWORK to the same Jules session
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          test -n "$JULES_API_KEY"
+          echo "::add-mask::$GH_TOKEN"
+          echo "::add-mask::$JULES_API_KEY"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+          sent=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
+            branch="$(jq -r '.default_branch' /tmp/profile.json)"
+
+            while IFS= read -r issue; do
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              session_marker="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-jules-session task_id='"${repo}#${issue}"' "))] | last | .body // empty' <<< "$comments")"
+              [ -z "$session_marker" ] && continue
+              session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_marker" | head -n 1)"
+              [ -z "$session" ] && continue
+              session_id="${session##*/}"
+
+              gh pr list --repo "$repo" --state open --limit 100 --json number,body,headRefOid,headRefName,baseRefName,url > /tmp/prs.json
+              jq --argjson issue "$issue" --arg branch "$branch" '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]' /tmp/prs.json > /tmp/linked.json
+              count="$(jq 'length' /tmp/linked.json)"
+              if [ "$count" -eq 0 ]; then
+                jq --arg branch "$branch" --arg session_id "$session_id" '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' /tmp/prs.json > /tmp/linked.json
+                count="$(jq 'length' /tmp/linked.json)"
+              fi
+              [ "$count" -eq 0 ] && continue
+              if [ "$count" -gt 1 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${count} active PR candidates." >&2
+                continue
+              fi
+
+              pr="$(jq -r '.[0].number' /tmp/linked.json)"
+              sha="$(jq -r '.[0].headRefOid' /tmp/linked.json)"
+              pr_url="$(jq -r '.[0].url' /tmp/linked.json)"
+              verdict_marker="<!-- roots-quality-verdict head=${sha} verdict=REWORK -->"
+              verdict_body="$(jq -r --arg marker "$verdict_marker" '[.[] | select((.body // "") | contains($marker))] | last | .body // empty' <<< "$comments")"
+              [ -z "$verdict_body" ] && continue
+
+              dedupe="<!-- roots-fleet-quality-rework head=${sha} verdict=REWORK -->"
+              if jq -e --arg marker "$dedupe" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                continue
+              fi
+
+              {
+                printf '%s\n\n' 'CONTROL-PLANE QUALITY REWORK (authoritative)'
+                printf '%s\n' "Continue the SAME Jules session, SAME branch and SAME PR #${pr}."
+                printf '%s\n\n' 'Never create another session, branch, or PR.'
+                printf '%s\n' "Repository: ${repo}"
+                printf '%s\n' "Base branch: ${branch}"
+                printf '%s\n' "PR: ${pr_url}"
+                printf '%s\n\n' "Head SHA evaluated by Quality Manager: ${sha}"
+                printf '%s\n\n' 'The Factory Quality Manager rejected this exact head against the source issue acceptance criteria. Treat the feedback below as authoritative rework requirements. Make the smallest correct fix, run relevant tests, then commit and push ONLY to the existing PR branch.'
+                printf '%s\n' 'QUALITY FEEDBACK'
+                printf '%s\n' '----------------'
+                printf '%s\n' "$verdict_body"
+              } > /tmp/quality-rework-message.txt
+              message="$(cat /tmp/quality-rework-message.txt)"
+
+              curl --fail-with-body --silent --show-error -X POST \
+                -H 'Content-Type: application/json' \
+                -H "X-Goog-Api-Key: $JULES_API_KEY" \
+                --data "$(jq -nc --arg prompt "$message" '{prompt:$prompt}')" \
+                "https://jules.googleapis.com/v1alpha/${session}:sendMessage" >/dev/null
+
+              gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                -f body="${dedupe}\nRoots Fleet sent Quality REWORK for PR #${pr} head ${sha} to the existing Jules session. Same session/branch/PR preserved." >/dev/null
+              sent=$((sent + 1))
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
+          done < repos.txt
+
+          echo "Fleet Quality rework scan completed. Messages sent: ${sent}."
