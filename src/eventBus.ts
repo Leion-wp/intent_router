@@ -32,6 +32,7 @@ export type PipelineEvent =
         totalFiles: number;
         providerCallsStarted?: number;
         maxProviderCalls?: number;
+        maxOutputBytes?: number;
         timeoutMs?: number;
         budgetExceeded?: boolean;
         budgetReason?: string;
