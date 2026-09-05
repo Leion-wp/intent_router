@@ -75,24 +75,20 @@ jobs:
                 continue
               fi
 
-              message="$(cat <<EOF
-CONTROL-PLANE QUALITY REWORK (authoritative)
-
-Continue the SAME Jules session, SAME branch and SAME PR #${pr}.
-Never create another session, branch, or PR.
-
-Repository: ${repo}
-Base branch: ${branch}
-PR: ${pr_url}
-Head SHA evaluated by Quality Manager: ${sha}
-
-The Factory Quality Manager rejected this exact head against the source issue acceptance criteria. Treat the feedback below as authoritative rework requirements. Make the smallest correct fix, run relevant tests, then commit and push ONLY to the existing PR branch.
-
-QUALITY FEEDBACK
-----------------
-${verdict_body}
-EOF
-)"
+              {
+                printf '%s\n\n' 'CONTROL-PLANE QUALITY REWORK (authoritative)'
+                printf '%s\n' "Continue the SAME Jules session, SAME branch and SAME PR #${pr}."
+                printf '%s\n\n' 'Never create another session, branch, or PR.'
+                printf '%s\n' "Repository: ${repo}"
+                printf '%s\n' "Base branch: ${branch}"
+                printf '%s\n' "PR: ${pr_url}"
+                printf '%s\n\n' "Head SHA evaluated by Quality Manager: ${sha}"
+                printf '%s\n\n' 'The Factory Quality Manager rejected this exact head against the source issue acceptance criteria. Treat the feedback below as authoritative rework requirements. Make the smallest correct fix, run relevant tests, then commit and push ONLY to the existing PR branch.'
+                printf '%s\n' 'QUALITY FEEDBACK'
+                printf '%s\n' '----------------'
+                printf '%s\n' "$verdict_body"
+              } > /tmp/quality-rework-message.txt
+              message="$(cat /tmp/quality-rework-message.txt)"
 
               curl --fail-with-body --silent --show-error -X POST \
                 -H 'Content-Type: application/json' \
