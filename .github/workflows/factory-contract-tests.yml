@@ -13,6 +13,7 @@ name: factory-contract-tests
       - '.github/workflows/factory-dynamic-planning-handoff.yml'
       - '.github/workflows/factory-portfolio-telemetry.yml'
       - '.github/workflows/factory-managed-automerge.yml'
+      - '.github/workflows/factory-quality-risk-reconciler.yml'
       - '.github/workflows/factory-release-readiness.yml'
   workflow_dispatch:
 
@@ -47,3 +48,5 @@ jobs:
         run: python .github/roots/test-product-brain.py
       - name: Run managed auto-merge LOW_RISK contract tests
         run: python .github/roots/test-managed-automerge-risk.py
+      - name: Run Quality LOW_RISK handoff contract tests
+        run: python .github/roots/test-quality-risk-reconciler.py
