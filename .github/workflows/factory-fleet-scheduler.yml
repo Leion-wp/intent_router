@@ -53,9 +53,8 @@ jobs:
 
           run_id=''
           for _ in $(seq 1 12); do
-            # shellcheck disable=SC2016
-            run_id="$(GH_TOKEN="$CONTROL_TOKEN" gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/factory-managed-automerge.yml/runs?event=workflow_dispatch&per_page=10" \
-              --jq --arg before "$before" --arg dispatched_at "$dispatched_at" '[.workflow_runs[] | select((.id|tostring) != $before and .created_at >= $dispatched_at)] | sort_by(.created_at) | last | .id // empty')"
+            runs_json="$(GH_TOKEN="$CONTROL_TOKEN" gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/factory-managed-automerge.yml/runs?event=workflow_dispatch&per_page=10")"
+            run_id="$(jq -r --arg before "$before" --arg dispatched_at "$dispatched_at" '[.workflow_runs[] | select((.id|tostring) != $before and .created_at >= $dispatched_at)] | sort_by(.created_at) | last | .id // empty' <<< "$runs_json")"
             [ -n "$run_id" ] && break
             sleep 5
           done
