@@ -164,7 +164,7 @@ jobs:
           {
             echo '### Quality risk reconciliation'
             echo '- Exact-head Quality PASS is necessary but does not imply LOW_RISK.'
-            echo '- Explicit `Risk: low` on that exact-head Quality report materializes `factory:risk-low`.'
+            echo '- Explicit Risk: low on that exact-head Quality report materializes factory:risk-low.'
             echo '- REWORK, BLOCK, denied risk labels, ambiguity, stale heads and unclassified risk remain fail-closed.'
             echo '- Managed auto-merge is dispatched immediately after reconciliation; its own gates revalidate everything.'
           } >> "$GITHUB_STEP_SUMMARY"
