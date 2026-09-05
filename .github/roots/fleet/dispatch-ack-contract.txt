@@ -1,0 +1,3 @@
+Dispatch acknowledgement contract
+
+After a Jules session marker is persisted by factory-cross-repo-dispatch, the same workflow must transition the source issue from factory:dispatching to factory:dispatched and verify that the transition persisted. Scheduler reconciliation is recovery-only and must not be required for the happy path.
