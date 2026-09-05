@@ -1,0 +1,1 @@
+Normal path: dispatching -> persist Jules session -> dispatched. Recovery path may reconcile the same postcondition later after a crash.
