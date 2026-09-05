@@ -1,1 +1,0 @@
-{"version":1,"producer":"factory-cross-repo-dispatch","precondition":"factory:dispatching","durable_boundary":"roots-jules-session","postcondition":"factory:dispatched","scheduler_role":"recovery-only"}
