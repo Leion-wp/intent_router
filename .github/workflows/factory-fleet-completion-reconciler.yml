@@ -48,9 +48,6 @@ jobs:
             branch="$(jq -r '.default_branch' /tmp/profile.json)"
 
             gh issue list --repo "$repo" --state open --limit 100 --json number,labels > /tmp/open-issues.json
-            # GitHub may have closed the source issue via "Fixes #N" during merge.
-            # Include completed issues still carrying the worker state, but never
-            # revive a task a human closed as NOT_PLANNED.
             gh issue list --repo "$repo" --state closed --label 'factory:dispatched' \
               --limit 100 --json number,labels,stateReason \
               | jq '[.[] | select(.stateReason == "COMPLETED")]' > /tmp/closed-issues.json
@@ -90,8 +87,6 @@ jobs:
               done_marker="<!-- roots-fleet-task-done issue=${issue} pr=${pr} -->"
               gh label create 'factory:done' --repo "$repo" --color 0E8A16 \
                 --description 'Factory task completed by merged pull request' --force >/dev/null
-              # Close before removing the recoverable worker label. Repeating a
-              # partial transition must finish it even if its marker already exists.
               gh api --method PATCH "repos/${repo}/issues/${issue}" \
                 -f state=closed -f state_reason=completed >/dev/null
               if ! jq -e --arg marker "$done_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
@@ -106,6 +101,13 @@ jobs:
 
           echo "completed=$completed" >> "$GITHUB_OUTPUT"
           echo "Reconciled completed tasks: $completed"
+
+      - name: Reconcile deterministic planning immediately
+        shell: bash
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-autonomous-planning.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
 
       - name: Dispatch next eligible issue
         shell: bash
@@ -123,8 +125,8 @@ jobs:
             echo '### Fleet completion reconciler'
             echo "- Completed issues reconciled: ${COMPLETED:-0}"
             echo '- Candidates: dispatched tasks plus unlabeled recovery tasks; explicit blocked/human/stalled/escalated/done states are excluded.'
-            echo '- Rule: merged linked PR -> close issue -> trigger scheduler dispatch_only for at most one next eligible issue.'
+            echo '- Rule: merged linked PR -> close issue -> deterministic planner -> scheduler.'
+            echo '- Planner owns milestone close, next milestone materialization and its own scheduler handoff; direct scheduler remains an idempotent wake-up for existing queued work.'
             echo '- Already auto-closed tasks and partial transitions are reconciled idempotently.'
-            echo '- Every successful scan hands off, including zero completions; the scheduler rechecks the global lock.'
             echo '- Correlation: explicit issue reference first, persisted Jules session ID in PR branch as fallback.'
           } >> "$GITHUB_STEP_SUMMARY"
