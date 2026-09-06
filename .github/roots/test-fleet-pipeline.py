@@ -437,6 +437,16 @@ class PipelineTests(unittest.TestCase):
             self.assertFalse(self.workflow(name)['concurrency']['cancel-in-progress'])
         self.assertNotIn('workflow_run', self.workflow('factory-managed-automerge-handoff')['on'])
 
+    def test_workflow_dispatch_ci_hint_matches_repository_dispatch(self):
+        self.success('factory-fleet-events', inputs={'repository': REPO, 'event_type': 'factory-ci-completed'})
+        self.assertEqual([row['workflow'] for row in self.get()['dispatches']],
+                         ['factory-fleet-jules-rework.yml', 'factory-fleet-scheduler.yml'])
+        state = fixture()
+        self.put(state)
+        self.assertNotEqual(self.run_workflow('factory-fleet-events', inputs={
+            'repository': REPO, 'event_type': 'run-arbitrary-workflow'}).returncode, 0)
+        self.assertFalse(self.get()['dispatches'])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

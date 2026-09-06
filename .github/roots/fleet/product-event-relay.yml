@@ -1,0 +1,115 @@
+# Install this control-plane-owned template in the product's .github/workflows/.
+name: factory-product-event-relay
+
+"on":
+  workflow_run:
+    workflows: [factory-ci]
+    types: [completed]
+  pull_request_target:
+    types: [closed]
+  issue_comment:
+    types: [created, edited]
+  issues:
+    types: [opened, edited, labeled, unlabeled, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      event_type:
+        description: 'Replay a persisted product transition'
+        required: true
+        default: factory-queue-updated
+        type: choice
+        options:
+          - factory-quality-verdict
+          - factory-ci-completed
+          - factory-pr-merged
+          - factory-queue-updated
+
+# The local GITHUB_TOKEN has no cross-repository authority. This workflow never
+# checks out a PR, downloads artifacts, or executes any product/PR code.
+permissions: {}
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Classify the persisted GitHub transition
+        id: event
+        shell: bash
+        env:
+          MANUAL_EVENT_TYPE: ${{ inputs.event_type }}
+        run: |
+          set -euo pipefail
+          event_type=''
+          case "$GITHUB_EVENT_NAME" in
+            workflow_run)
+              if jq -e --arg repo "$GITHUB_REPOSITORY" '
+                .workflow_run.event == "pull_request" and
+                .workflow_run.status == "completed" and
+                .workflow_run.path == ".github/workflows/factory-ci.yml" and
+                .workflow_run.head_repository.full_name == $repo
+              ' "$GITHUB_EVENT_PATH" >/dev/null; then
+                event_type='factory-ci-completed'
+              fi
+              ;;
+            pull_request_target)
+              if jq -e --arg repo "$GITHUB_REPOSITORY" '
+                .action == "closed" and .pull_request.merged == true and
+                .pull_request.base.repo.full_name == $repo
+              ' "$GITHUB_EVENT_PATH" >/dev/null; then
+                event_type='factory-pr-merged'
+              fi
+              ;;
+            issue_comment)
+              if jq -e '
+                .issue.pull_request == null and
+                ((.comment.body // "") | test("<!-- roots-quality-verdict head=[0-9a-f]{40} verdict=(PASS|PASS_WITH_FOLLOW_UP|REWORK|BLOCK) -->"))
+              ' "$GITHUB_EVENT_PATH" >/dev/null; then
+                event_type='factory-quality-verdict'
+              fi
+              ;;
+            issues)
+              if jq -e '
+                .issue.pull_request == null and (
+                  .action == "closed" or
+                  (.action == "labeled" and .label.name == "factory:queued") or
+                  (.action == "unlabeled" and
+                    (.label.name as $label | ["factory:blocked", "factory:human-required", "factory:stalled", "factory:escalated"] | index($label) != null)) or
+                  ((.action as $action | ["opened", "edited", "reopened"] | index($action) != null) and
+                    ([.issue.labels[]?.name] | index("factory:queued") != null))
+                )
+              ' "$GITHUB_EVENT_PATH" >/dev/null; then
+                event_type='factory-queue-updated'
+              fi
+              ;;
+            workflow_dispatch)
+              event_type="$MANUAL_EVENT_TYPE"
+              ;;
+          esac
+          case "$event_type" in
+            ''|factory-quality-verdict|factory-ci-completed|factory-pr-merged|factory-queue-updated) ;;
+            *) echo 'Unsupported factory event type.' >&2; exit 1 ;;
+          esac
+          echo "event_type=$event_type" >> "$GITHUB_OUTPUT"
+
+      - name: Notify the Android control-plane receiver
+        if: steps.event.outputs.event_type != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_EVENT_TOKEN }}
+          EVENT_TYPE: ${{ steps.event.outputs.event_type }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo 'HUMAN_REQUIRED: configure FACTORY_EVENT_TOKEN with Actions write permission on Leion-wp/intent_router.' >&2
+            exit 1
+          fi
+          echo "::add-mask::$GH_TOKEN"
+          payload="$(mktemp)"
+          trap 'rm -f "$payload"' EXIT
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg event_type "$EVENT_TYPE" \
+            '{ref:"Android", inputs:{repository:$repository, event_type:$event_type}}' > "$payload"
+          gh api --method POST \
+            repos/Leion-wp/intent_router/actions/workflows/factory-fleet-events.yml/dispatches \
+            --input "$payload" >/dev/null
+          echo "FLEET_EVENT_SENT: ${GITHUB_REPOSITORY} ${EVENT_TYPE} -> intent_router@Android."

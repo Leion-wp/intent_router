@@ -38,7 +38,8 @@ mutating reconciliation. Auto-merge dry-runs do not hand off to completion.
 
 ## Cross-repository event contract
 
-The receiver accepts these event types:
+The receiver accepts these event types through `repository_dispatch`, or through
+`workflow_dispatch` inputs `repository` and `event_type` on branch `Android`:
 
 | Event | Producer transition |
 | --- | --- |
@@ -63,14 +64,39 @@ otherwise the scan may correctly defer until the next event or recovery cron.
 CI completion also wakes the existing CI REWORK reconciler. The legacy
 `factory-ci-failed` entrypoint remains available.
 
-**Deployment boundary:** `workflow_run` and issue/comment events in a product
-repository are not delivered to the control-plane repository. This change
-installs the receiver and internal handoffs only. Each external producer needs
-an authenticated dispatch to the receiver; a receiver alone cannot observe its
-events. At inspection time the boilerplate had only `factory-ci.yml` and no
-event relay. Wiring that producer or modifying the Quality automation is a
-separate change outside the requested `intent_router` workflow scope. Until
-then, external transitions are discovered by the retained cron/manual entrypoint.
+**Product relay:** install the reviewed template
+`.github/roots/fleet/product-event-relay.yml` as
+`.github/workflows/factory-product-event-relay.yml` on the product's default
+branch. It observes the four producer transitions above and calls the receiver
+via workflow dispatch. It never checks out code or downloads PR artifacts.
+The template is tested and linted by the control-plane CI.
+
+Activation order:
+
+1. Merge the receiver's typed `event_type` input into `intent_router@Android`.
+2. A human provisions `FACTORY_EVENT_TOKEN` in the product repository: a
+   fine-grained PAT or approved GitHub App token scoped to `intent_router` with
+   **Actions: write** (plus GitHub's implicit metadata access). Never copy the
+   broad `FLEET_GITHUB_TOKEN` into a product. GitHub does not offer a PAT scope
+   restricted to one workflow, so keep relay edits under the existing human gate.
+3. Merge the product relay. Use its manual replay for a persisted transition
+   and verify the receiver and successor run in Actions. Missing credentials or
+   a rejected dispatch fail visibly; cron remains the recovery path.
+
+`workflow_run` and issue/comment events stay local to their repository. Installing
+a receiver alone is insufficient. The Quality producer needs no new outbound
+tool: the product relay observes its persisted source-issue verdict comment.
+Native `GITHUB_TOKEN` changes can suppress GitHub Actions triggers; producers
+using that token must explicitly dispatch the receiver after their mutation.
+The current Product Brain/planning workflows already explicitly dispatch the
+scheduler after queue materialization; ordinary external issue events use the relay.
+
+**Quality timing boundary:** at inspection, the ChatGPT Quality Manager runs
+hourly. Relaying its published verdict removes the downstream GitHub cron wait,
+but does not make verdict generation immediate. Available ChatGPT webhook
+triggers do not include CI completion or non-PR issue comments. Full CI → Quality
+event-driven execution needs a separately supported Quality trigger/adapter;
+this relay does not claim to solve that independent producer scheduling problem.
 
 The manual `factory-managed-automerge-handoff.yml` remains a recovery entrypoint.
 Its old automatic subscription is removed to avoid a second completion dispatch
@@ -80,3 +106,7 @@ GitHub semantics: [triggering workflows from workflows](https://docs.github.com/
 `workflow_dispatch` and `repository_dispatch` can be emitted with the control
 plane's existing GitHub token; cross-repository emitters need existing authority
 to dispatch into the control-plane repository.
+
+The product relay uses [workflow dispatch](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event)
+so its dedicated credential only needs Actions write access, rather than the
+Contents write permission required by repository dispatch.
