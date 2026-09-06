@@ -69,6 +69,17 @@ jobs:
           gh workflow run factory-fleet-jules-rework.yml \
             --repo "$GITHUB_REPOSITORY" --ref Android
 
+      - name: Reconcile Quality risk immediately after persisted Quality verdict
+        if: env.EVENT_TYPE == 'factory-quality-verdict'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-quality-risk-reconciler.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android
+          echo 'QUALITY_RISK_EVENT_HANDOFF: persisted exact-head Quality verdict dispatched risk reconciliation.'
+
       - name: Wake the normal reconciliation path
         shell: bash
         env:
