@@ -35,5 +35,5 @@ jobs:
         run: |
           /tmp/actionlint -color \
             -ignore 'SC2129' \
-            -ignore 'unexpected key "copilot-requests"' \
+            -ignore 'copilot-requests' \
             .github/workflows/*.yml .github/roots/fleet/product-event-relay.yml
