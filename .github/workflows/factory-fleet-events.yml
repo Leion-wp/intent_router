@@ -69,6 +69,18 @@ jobs:
           gh workflow run factory-fleet-jules-rework.yml \
             --repo "$GITHUB_REPOSITORY" --ref Android
 
+      - name: Run event-driven Copilot Quality Gate on CI completion
+        if: env.EVENT_TYPE == 'factory-ci-completed'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-copilot-quality-gate.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android \
+            -f repository="$TARGET_REPO"
+          echo 'COPILOT_QUALITY_HANDOFF: CI completion dispatched bounded Quality review.'
+
       - name: Reconcile Quality risk immediately after persisted Quality verdict
         if: env.EVENT_TYPE == 'factory-quality-verdict'
         shell: bash
