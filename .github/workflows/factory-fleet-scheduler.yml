@@ -8,6 +8,11 @@ name: factory-fleet-scheduler-v2
         required: true
         default: false
         type: boolean
+      dispatch_only:
+        description: 'Completion handoff: select the next issue without restarting reconciliation'
+        required: true
+        default: false
+        type: boolean
   schedule:
     - cron: '*/5 * * * *'
 
@@ -32,6 +37,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Trigger Quality REWORK reconciliation
+        if: inputs.dispatch_only != true && env.EXECUTE == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -39,38 +45,19 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref Android
 
-      - name: Trigger and verify managed auto-merge reconciliation
+      - name: Trigger Quality Risk reconciliation before managed auto-merge
+        if: inputs.dispatch_only != true && env.EXECUTE == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          before="$(GH_TOKEN="$CONTROL_TOKEN" gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/factory-managed-automerge.yml/runs?event=workflow_dispatch&per_page=1" --jq '.workflow_runs[0].id // 0')"
-          dispatched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-managed-automerge.yml \
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-quality-risk-reconciler.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref Android \
-            -f execute=true
-
-          run_id=''
-          for _ in $(seq 1 12); do
-            runs_json="$(GH_TOKEN="$CONTROL_TOKEN" gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/factory-managed-automerge.yml/runs?event=workflow_dispatch&per_page=10")"
-            run_id="$(jq -r --arg before "$before" --arg dispatched_at "$dispatched_at" '[.workflow_runs[] | select((.id|tostring) != $before and .created_at >= $dispatched_at)] | sort_by(.created_at) | last | .id // empty' <<< "$runs_json")"
-            [ -n "$run_id" ] && break
-            sleep 5
-          done
-
-          if [ -z "$run_id" ]; then
-            echo "AUTO_MERGE_DISPATCH_FAILED: no workflow_dispatch run materialized after successful dispatch request." >&2
-            exit 1
-          fi
-
-          echo "AUTO_MERGE_DISPATCHED: run_id=${run_id}"
-          echo "### Managed auto-merge dispatch" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Dispatch request accepted at: ${dispatched_at}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Materialized workflow run: ${run_id}" >> "$GITHUB_STEP_SUMMARY"
+            --ref Android
+          echo 'QUALITY_RISK_DISPATCHED: reconciliation owns the handoff to auto-merge; completion will request dispatch_only.'
 
       - name: Discover oldest eligible issue and reconcile dispatch acknowledgements
         id: candidate
+        if: inputs.dispatch_only == true || env.EXECUTE != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -200,6 +187,7 @@ jobs:
           TARGET_REPO: ${{ steps.candidate.outputs.repository }}
           ISSUE_NUMBER: ${{ steps.candidate.outputs.issue_number }}
           GLOBAL_LOCK: ${{ steps.candidate.outputs.global_lock }}
+          DISPATCH_ONLY: ${{ inputs.dispatch_only }}
         run: |
           {
             echo '### Fleet scheduler v2'
@@ -207,6 +195,10 @@ jobs:
             echo "- Candidate issue: ${ISSUE_NUMBER:-none}"
             echo "- Global worker lock: ${GLOBAL_LOCK:-false}"
             echo "- Execute: ${EXECUTE}"
+            echo "- Completion handoff / dispatch only: ${DISPATCH_ONLY:-false}"
+            echo '- Primary path: scheduler -> Quality Risk -> managed auto-merge -> completion -> scheduler dispatch_only.'
+            echo '- A reconciliation request never selects work before completion; dispatch_only never restarts reconciliation.'
+            echo '- Cron only recovers missed events or interrupted handoffs.'
             echo '- Sequential invariant: at most one open dispatching/dispatched/escalated task identity across the managed fleet.'
             echo '- Dispatch invariant: queued -> dispatching -> persisted Jules session -> dispatched.'
             echo '- Exhausted workers transition to escalated + human-required and continue holding the lock fail-closed.'

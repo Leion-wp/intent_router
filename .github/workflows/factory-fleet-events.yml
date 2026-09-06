@@ -1,0 +1,65 @@
+name: factory-fleet-events-v1
+
+"on":
+  repository_dispatch:
+    types: [factory-quality-verdict, factory-ci-completed, factory-pr-merged, factory-queue-updated]
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Managed repository whose state changed (owner/name)'
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-fleet-events
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      TARGET_REPO: ${{ github.event.client_payload.repository || inputs.repository }}
+    steps:
+      - name: Validate managed event source against canonical profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          [[ "$TARGET_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$TARGET_REPO" == "$OWNER/"* ]]
+          test "$TARGET_REPO" != "$GITHUB_REPOSITORY"
+          gh api -H 'Accept: application/vnd.github.raw+json' \
+            "repos/${TARGET_REPO}/contents/.factory/profile.json" > /tmp/profile.json
+          jq -e --arg repo "$TARGET_REPO" \
+            '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
+            /tmp/profile.json >/dev/null
+
+      - name: Reconcile CI rework on CI completion
+        if: github.event.action == 'factory-ci-completed'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-fleet-jules-rework.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android
+
+      - name: Wake the normal reconciliation path
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-fleet-scheduler.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
+          echo 'FLEET_EVENT_HANDOFF: scheduler dispatched; event data grants no risk, merge or worker authority.'

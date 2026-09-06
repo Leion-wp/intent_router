@@ -1,9 +1,8 @@
 name: factory-managed-automerge-handoff-v1
 
 "on":
-  workflow_run:
-    workflows: ["factory-managed-automerge-v1"]
-    types: [completed]
+  # Manual recovery entrypoint. Auto-merge now dispatches completion directly,
+  # after its successful execute=true scan, without a duplicate workflow_run.
   workflow_dispatch:
 
 permissions:
@@ -16,7 +15,6 @@ concurrency:
 
 jobs:
   handoff:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -36,7 +34,7 @@ jobs:
         run: |
           {
             echo '### Managed auto-merge completion handoff'
-            echo '- Trigger: successful factory-managed-automerge-v1 run.'
+            echo '- Trigger: manual recovery request; auto-merge owns its direct completion handoff.'
             echo '- Action: dispatch factory-fleet-completion-reconciler.yml immediately.'
             echo '- Scheduled completion reconciliation remains the fallback.'
             echo '- No product, secret, permission, production, or spending authority is expanded.'
