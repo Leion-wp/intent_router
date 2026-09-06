@@ -301,8 +301,11 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def drain(self, start=0):
+        # Planning is a separate control-plane subsystem with its own contract tests.
+        # This execution-loop harness verifies that the handoff is emitted but does
+        # not emulate the planner's milestone/issue GitHub API surface.
         sinks = {'factory-cross-repo-dispatch.yml', 'factory-fleet-jules-quality-rework.yml',
-                 'factory-fleet-jules-rework.yml'}
+                 'factory-fleet-jules-rework.yml', 'factory-autonomous-planning.yml'}
         cursor = start
         while cursor < len(self.get()['dispatches']):
             self.assertLess(cursor - start, 12, 'Pipeline failed to terminate')
