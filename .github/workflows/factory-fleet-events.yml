@@ -71,15 +71,17 @@ jobs:
 
       - name: Run event-driven Copilot Quality Gate on CI completion
         if: env.EVENT_TYPE == 'factory-ci-completed'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh workflow run factory-copilot-quality-gate.yml \
-            --repo "$GITHUB_REPOSITORY" --ref Android \
-            -f repository="$TARGET_REPO"
-          echo 'COPILOT_QUALITY_HANDOFF: CI completion dispatched bounded Quality review.'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'factory-copilot-quality-gate.yml',
+              ref: 'Android',
+              inputs: { repository: process.env.TARGET_REPO },
+            });
+            core.info('COPILOT_QUALITY_HANDOFF: CI completion dispatched bounded Quality review.');
 
       - name: Reconcile Quality risk immediately after persisted Quality verdict
         if: env.EVENT_TYPE == 'factory-quality-verdict'
