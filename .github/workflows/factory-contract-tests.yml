@@ -5,16 +5,7 @@ name: factory-contract-tests
     branches: [Android]
     paths:
       - '.github/roots/**'
-      - '.github/workflows/factory-product-brain.yml'
-      - '.github/workflows/factory-product-telemetry.yml'
-      - '.github/workflows/factory-fleet-watchdog.yml'
-      - '.github/workflows/factory-fleet-scheduler.yml'
-      - '.github/workflows/factory-credential-readiness.yml'
-      - '.github/workflows/factory-dynamic-planning-handoff.yml'
-      - '.github/workflows/factory-portfolio-telemetry.yml'
-      - '.github/workflows/factory-managed-automerge.yml'
-      - '.github/workflows/factory-quality-risk-reconciler.yml'
-      - '.github/workflows/factory-release-readiness.yml'
+      - '.github/workflows/factory-*.yml'
   workflow_dispatch:
 
 permissions:
@@ -30,7 +21,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install validator dependency
-        run: python -m pip install --disable-pip-version-check 'jsonschema==4.23.0'
+        run: python -m pip install --disable-pip-version-check 'jsonschema==4.23.0' 'PyYAML==6.0.3'
       - name: Validate committed schemas and fixed manifests
         shell: bash
         run: |
@@ -50,3 +41,5 @@ jobs:
         run: python .github/roots/test-managed-automerge-risk.py
       - name: Run Quality LOW_RISK handoff contract tests
         run: python .github/roots/test-quality-risk-reconciler.py
+      - name: Run event-driven fleet pipeline regression tests
+        run: python .github/roots/test-fleet-pipeline.py

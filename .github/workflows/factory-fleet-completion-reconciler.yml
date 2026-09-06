@@ -47,7 +47,14 @@ jobs:
               /tmp/profile.json >/dev/null || continue
             branch="$(jq -r '.default_branch' /tmp/profile.json)"
 
-            gh issue list --repo "$repo" --state open --limit 100 --json number,labels \
+            gh issue list --repo "$repo" --state open --limit 100 --json number,labels > /tmp/open-issues.json
+            # GitHub may have closed the source issue via "Fixes #N" during merge.
+            # Include completed issues still carrying the worker state, but never
+            # revive a task a human closed as NOT_PLANNED.
+            gh issue list --repo "$repo" --state closed --label 'factory:dispatched' \
+              --limit 100 --json number,labels,stateReason \
+              | jq '[.[] | select(.stateReason == "COMPLETED")]' > /tmp/closed-issues.json
+            jq -s 'add | unique_by(.number)' /tmp/open-issues.json /tmp/closed-issues.json \
               | jq -r -f .github/roots/fleet/reconcile-candidates.jq > /tmp/candidates.txt
 
             while IFS= read -r issue; do
@@ -81,14 +88,17 @@ jobs:
               pr_url="$(jq -r '.[0].url' /tmp/linked-merged.json)"
               merged_at="$(jq -r '.[0].mergedAt // "unknown"' /tmp/linked-merged.json)"
               done_marker="<!-- roots-fleet-task-done issue=${issue} pr=${pr} -->"
-              jq -e --arg marker "$done_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null && continue
-
               gh label create 'factory:done' --repo "$repo" --color 0E8A16 \
-                --description 'Factory task completed by merged pull request' --force >/dev/null 2>&1 || true
-              gh issue edit "$issue" --repo "$repo" --add-label 'factory:done' --remove-label 'factory:dispatched' >/dev/null 2>&1 || true
-              gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                -f body="${done_marker}\nRoots Fleet reconciled merged PR #${pr} as task completion. PR: ${pr_url}. Merged: ${merged_at}." >/dev/null
-              gh issue close "$issue" --repo "$repo" --reason completed >/dev/null
+                --description 'Factory task completed by merged pull request' --force >/dev/null
+              # Close before removing the recoverable worker label. Repeating a
+              # partial transition must finish it even if its marker already exists.
+              gh api --method PATCH "repos/${repo}/issues/${issue}" \
+                -f state=closed -f state_reason=completed >/dev/null
+              if ! jq -e --arg marker "$done_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                  -f body="${done_marker}\nRoots Fleet reconciled merged PR #${pr} as task completion. PR: ${pr_url}. Merged: ${merged_at}." >/dev/null
+              fi
+              gh issue edit "$issue" --repo "$repo" --add-label 'factory:done' --remove-label 'factory:dispatched' >/dev/null
               completed="$((completed + 1))"
               echo "TASK_DONE: ${repo}#${issue} via PR #${pr}."
             done < /tmp/candidates.txt
@@ -98,12 +108,11 @@ jobs:
           echo "Reconciled completed tasks: $completed"
 
       - name: Dispatch next eligible issue
-        if: steps.reconcile.outputs.completed != '0'
         shell: bash
         run: |
           set -euo pipefail
           GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-fleet-scheduler.yml \
-            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
+            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true -f dispatch_only=true
 
       - name: Summary
         shell: bash
@@ -114,6 +123,8 @@ jobs:
             echo '### Fleet completion reconciler'
             echo "- Completed issues reconciled: ${COMPLETED:-0}"
             echo '- Candidates: dispatched tasks plus unlabeled recovery tasks; explicit blocked/human/stalled/escalated/done states are excluded.'
-            echo '- Rule: merged linked PR -> close issue -> trigger scheduler for exactly one next eligible issue.'
+            echo '- Rule: merged linked PR -> close issue -> trigger scheduler dispatch_only for at most one next eligible issue.'
+            echo '- Already auto-closed tasks and partial transitions are reconciled idempotently.'
+            echo '- Every successful scan hands off, including zero completions; the scheduler rechecks the global lock.'
             echo '- Correlation: explicit issue reference first, persisted Jules session ID in PR branch as fallback.'
           } >> "$GITHUB_STEP_SUMMARY"
