@@ -196,6 +196,7 @@ class PipelineTests(unittest.TestCase):
         executable = self.bin / 'gh'
         executable.write_text(FAKE_GH)
         executable.chmod(0o755)
+        # Any accidental worker/network invocation fails the regression test.
         for name in ['curl', 'wget']:
             executable = self.bin / name
             executable.write_text('#!/bin/sh\nexit 99\n')
@@ -300,11 +301,8 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def drain(self, start=0):
-        # Autonomous planning is a separately tested control-plane owner. This
-        # pipeline harness verifies that completion requests that handoff, while
-        # keeping its fake GitHub surface focused on execution-fleet semantics.
         sinks = {'factory-cross-repo-dispatch.yml', 'factory-fleet-jules-quality-rework.yml',
-                 'factory-fleet-jules-rework.yml', 'factory-autonomous-planning.yml'}
+                 'factory-fleet-jules-rework.yml'}
         cursor = start
         while cursor < len(self.get()['dispatches']):
             self.assertLess(cursor - start, 12, 'Pipeline failed to terminate')
@@ -320,9 +318,6 @@ class PipelineTests(unittest.TestCase):
     def workers(self):
         return [row for row in self.get()['dispatches'] if row['workflow'] == 'factory-cross-repo-dispatch.yml']
 
-    def planning_handoffs(self):
-        return [row for row in self.get()['dispatches'] if row['workflow'] == 'factory-autonomous-planning.yml']
-
     def test_scheduler_hands_off_before_selecting_work(self):
         self.success('factory-fleet-scheduler', inputs={'execute': True})
         self.assertEqual([x['workflow'] for x in self.get()['dispatches']],
@@ -334,8 +329,6 @@ class PipelineTests(unittest.TestCase):
         state = self.get()
         self.assertEqual(state['issues']['17']['state'], 'CLOSED')
         self.assertEqual(state['issues']['17']['labels'], [{'name': 'factory:done'}, {'name': 'factory:risk-low'}])
-        self.assertEqual(len(self.planning_handoffs()), 1)
-        self.assertEqual(self.planning_handoffs()[0]['inputs'].get('execute'), 'true')
         self.assertEqual(len(self.workers()), 1)
         self.assertEqual(self.workers()[0]['inputs']['issue_number'], '18')
         mutations = state['mutations']
@@ -378,7 +371,6 @@ class PipelineTests(unittest.TestCase):
         self.assertFalse(self.get()['dispatches'], 'Failed transition advanced the scheduler')
         self.success('factory-fleet-completion-reconciler')
         self.drain()
-        self.assertEqual(len(self.planning_handoffs()), 1)
         self.assertEqual(len(self.workers()), 1)
         comments = self.get()['issues']['17']['comments']
         self.assertEqual(sum('roots-fleet-task-done' in item['body'] for item in comments), 1)
@@ -390,7 +382,6 @@ class PipelineTests(unittest.TestCase):
         self.put(state)
         self.success('factory-fleet-completion-reconciler')
         self.drain()
-        self.assertEqual(len(self.planning_handoffs()), 1)
         self.assertEqual(len(self.workers()), 1)
 
     def test_not_planned_and_human_blocked_tasks_are_not_reconciled(self):
@@ -407,25 +398,55 @@ class PipelineTests(unittest.TestCase):
 
     def test_failed_dispatch_stops_initial_scheduler(self):
         state = fixture()
-        state['fail_workflow'] = 'factory-cross-repo-dispatch.yml'
+        state['fail_workflow'] = 'factory-quality-risk-reconciler.yml'
         self.put(state)
-        self.assertNotEqual(self.run_workflow('factory-fleet-scheduler', inputs={'execute': True}, event='schedule').returncode, 0)
+        self.assertNotEqual(self.run_workflow('factory-fleet-scheduler', inputs={'execute': True}).returncode, 0)
         self.assertFalse(self.workers())
+        self.assertFalse(self.get()['mutations'])
 
     def test_failed_merge_scan_never_hands_off(self):
         state = fixture()
-        state['fail_api'] = f'repos/{REPO}/pulls/21/merge'
+        state['fail_api'] = 'user'
         self.put(state)
-        self.start()
-        self.assertFalse(self.workers())
+        self.assertNotEqual(self.run_workflow('factory-managed-automerge').returncode, 0)
+        self.assertFalse(self.get()['dispatches'])
+
+    def test_scheduler_dry_run_starts_no_mutation_and_automerge_dry_run_no_handoff(self):
+        self.success('factory-fleet-scheduler', inputs={'execute': False})
+        self.assertFalse(self.get()['dispatches'])
+        self.assertFalse(self.get()['mutations'])
+        self.success('factory-managed-automerge', inputs={'execute': False})
+        self.assertFalse(self.get()['dispatches'])
+
+    def test_event_receiver_validates_profile_and_ignores_payload_authority(self):
+        self.success('factory-fleet-events', inputs={'repository': REPO},
+                     event='repository_dispatch', action='factory-ci-completed')
+        self.assertEqual([row['workflow'] for row in self.get()['dispatches']],
+                         ['factory-fleet-jules-rework.yml', 'factory-fleet-scheduler.yml'])
+        self.assertEqual(self.get()['dispatches'][1]['inputs'], {'execute': 'true'})
+        for target in ['other/product', CONTROL, 'Leion-wp/../../evil', REPO]:
+            state = fixture()
+            state['profile']['managed'] = False
+            self.put(state)
+            self.assertNotEqual(self.run_workflow('factory-fleet-events', inputs={'repository': target}).returncode, 0)
+            self.assertFalse(self.get()['dispatches'])
 
     def test_fallback_crons_and_no_duplicate_automerge_subscription(self):
-        completion = self.workflow('factory-fleet-completion-reconciler')
-        self.assertTrue(completion['on'].get('schedule'))
+        for name in ['factory-fleet-scheduler', 'factory-managed-automerge', 'factory-fleet-completion-reconciler']:
+            self.assertTrue(self.workflow(name)['on']['schedule'])
+            self.assertFalse(self.workflow(name)['concurrency']['cancel-in-progress'])
+        self.assertNotIn('workflow_run', self.workflow('factory-managed-automerge-handoff')['on'])
 
     def test_workflow_dispatch_ci_hint_matches_repository_dispatch(self):
-        self.assertTrue(self.workflow('factory-fleet-scheduler')['on'].get('workflow_dispatch') is not None)
+        self.success('factory-fleet-events', inputs={'repository': REPO, 'event_type': 'factory-ci-completed'})
+        self.assertEqual([row['workflow'] for row in self.get()['dispatches']],
+                         ['factory-fleet-jules-rework.yml', 'factory-fleet-scheduler.yml'])
+        state = fixture()
+        self.put(state)
+        self.assertNotEqual(self.run_workflow('factory-fleet-events', inputs={
+            'repository': REPO, 'event_type': 'run-arbitrary-workflow'}).returncode, 0)
+        self.assertFalse(self.get()['dispatches'])
 
-    def test_not_planned_and_human_blocked_tasks_are_not_reconciled_again(self):
-        # Compatibility sentinel: the main behavioral test above owns this invariant.
-        self.assertTrue(True)
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)
