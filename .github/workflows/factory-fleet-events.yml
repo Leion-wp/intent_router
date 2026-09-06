@@ -9,6 +9,16 @@ name: factory-fleet-events-v1
         description: 'Managed repository whose state changed (owner/name)'
         required: true
         type: string
+      event_type:
+        description: 'Persisted product transition; this is only a reconciliation hint'
+        required: true
+        default: factory-queue-updated
+        type: choice
+        options:
+          - factory-quality-verdict
+          - factory-ci-completed
+          - factory-pr-merged
+          - factory-queue-updated
 
 permissions:
   actions: write
@@ -26,11 +36,16 @@ jobs:
       FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
       OWNER: ${{ github.repository_owner }}
       TARGET_REPO: ${{ github.event.client_payload.repository || inputs.repository }}
+      EVENT_TYPE: ${{ github.event.action || inputs.event_type || 'factory-queue-updated' }}
     steps:
       - name: Validate managed event source against canonical profile
         shell: bash
         run: |
           set -euo pipefail
+          case "$EVENT_TYPE" in
+            factory-quality-verdict|factory-ci-completed|factory-pr-merged|factory-queue-updated) ;;
+            *) echo 'Unsupported factory event type.' >&2; exit 1 ;;
+          esac
           test -n "$FLEET_TOKEN"
           echo "::add-mask::$FLEET_TOKEN"
           export GH_TOKEN="$FLEET_TOKEN"
@@ -45,7 +60,7 @@ jobs:
             /tmp/profile.json >/dev/null
 
       - name: Reconcile CI rework on CI completion
-        if: github.event.action == 'factory-ci-completed'
+        if: env.EVENT_TYPE == 'factory-ci-completed'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
