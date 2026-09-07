@@ -2,7 +2,7 @@ name: factory-fleet-events-v1
 
 "on":
   repository_dispatch:
-    types: [factory-quality-verdict, factory-ci-completed, factory-pr-merged, factory-queue-updated]
+    types: [factory-quality-verdict, factory-ci-completed, factory-pr-active, factory-pr-merged, factory-queue-updated]
   workflow_dispatch:
     inputs:
       repository:
@@ -17,6 +17,7 @@ name: factory-fleet-events-v1
         options:
           - factory-quality-verdict
           - factory-ci-completed
+          - factory-pr-active
           - factory-pr-merged
           - factory-queue-updated
 
@@ -43,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$EVENT_TYPE" in
-            factory-quality-verdict|factory-ci-completed|factory-pr-merged|factory-queue-updated) ;;
+            factory-quality-verdict|factory-ci-completed|factory-pr-active|factory-pr-merged|factory-queue-updated) ;;
             *) echo 'Unsupported factory event type.' >&2; exit 1 ;;
           esac
           test -n "$FLEET_TOKEN"
@@ -58,6 +59,17 @@ jobs:
           jq -e --arg repo "$TARGET_REPO" \
             '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
             /tmp/profile.json >/dev/null
+
+      - name: Reconcile stalled state immediately on active PR signal
+        if: env.EVENT_TYPE == 'factory-pr-active'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-stalled-reconciler.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android
+          echo 'STALLED_EVENT_HANDOFF: active PR signal dispatched stalled reconciliation.'
 
       - name: Reconcile CI rework on CI completion
         if: env.EVENT_TYPE == 'factory-ci-completed'

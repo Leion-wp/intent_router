@@ -6,7 +6,7 @@ name: factory-product-event-relay
     workflows: [factory-ci]
     types: [completed]
   pull_request_target:
-    types: [closed]
+    types: [opened, reopened, synchronize, ready_for_review, closed]
   issue_comment:
     types: [created, edited]
   issues:
@@ -21,6 +21,7 @@ name: factory-product-event-relay
         options:
           - factory-quality-verdict
           - factory-ci-completed
+          - factory-pr-active
           - factory-pr-merged
           - factory-queue-updated
 
@@ -54,6 +55,11 @@ jobs:
               ;;
             pull_request_target)
               if jq -e --arg repo "$GITHUB_REPOSITORY" '
+                .pull_request.base.repo.full_name == $repo and
+                (.action as $action | ["opened", "reopened", "synchronize", "ready_for_review"] | index($action) != null)
+              ' "$GITHUB_EVENT_PATH" >/dev/null; then
+                event_type='factory-pr-active'
+              elif jq -e --arg repo "$GITHUB_REPOSITORY" '
                 .action == "closed" and .pull_request.merged == true and
                 .pull_request.base.repo.full_name == $repo
               ' "$GITHUB_EVENT_PATH" >/dev/null; then
@@ -87,7 +93,7 @@ jobs:
               ;;
           esac
           case "$event_type" in
-            ''|factory-quality-verdict|factory-ci-completed|factory-pr-merged|factory-queue-updated) ;;
+            ''|factory-quality-verdict|factory-ci-completed|factory-pr-active|factory-pr-merged|factory-queue-updated) ;;
             *) echo 'Unsupported factory event type.' >&2; exit 1 ;;
           esac
           echo "event_type=$event_type" >> "$GITHUB_OUTPUT"
