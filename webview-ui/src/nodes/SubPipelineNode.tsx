@@ -35,9 +35,9 @@ const SubPipelineNode = ({ data, id }: NodeProps) => {
 
   return (
     <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '320px' }}>
-      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-6px', background: themeColor }} />
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '34%', right: '-6px', background: '#4caf50' }} />
-      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '72%', right: '-6px', background: '#f44336' }} />
+      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-6px', top: '24px', background: themeColor }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '24px', right: '-6px', background: '#4caf50' }} />
+      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '64px', right: '-6px', background: '#f44336' }} />
 
       <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}22 0%, transparent 100%)` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>

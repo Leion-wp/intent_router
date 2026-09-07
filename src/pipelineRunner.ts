@@ -209,6 +209,7 @@ function inferRuntimeScriptInterpreter(scriptPath: string): string {
     if (lower.endsWith('.py')) return 'python';
     if (lower.endsWith('.js')) return 'node';
     if (lower.endsWith('.sh')) return 'bash';
+    if (getRuntimePlatform() === 'win32' && (lower.endsWith('.bat') || lower.endsWith('.cmd'))) return 'cmd /c';
     return '';
 }
 
@@ -363,7 +364,7 @@ export function detectIntentWritesFiles(intent: Intent): boolean {
     if (intentName.startsWith('git.') || intentName.startsWith('docker.')) return true;
     if (intentName !== 'terminal.run') return false;
     const command = String(intent.payload?.command || '').toLowerCase();
-    return /(>>?|set-content|add-content|out-file|\brm\b|\bdel\b|\bmv\b|\bmove-item\b|\bcp\b|\bcopy-item\b|\bmkdir\b|\bnew-item\b|\bni\b|\btouch\b)/i.test(command);
+    return /(>>?|set-content|add-content|out-file|\brm\b|\bdel\b|\bmv\b|\bmove-item\b|\bcp\b|\bcopy-item\b|\bmkdir\b|\bnew-item\b|\bni\b|\btouch\b|git\s+(checkout|switch|restore|reset|clean|add|commit|merge|rebase|cherry-pick|revert|stash)\b)/i.test(command);
 }
 
 function resolveRuntimeSandboxPolicy(step: Intent, pipelineDefaultTimeoutMs?: number): RuntimeSandboxPolicy {

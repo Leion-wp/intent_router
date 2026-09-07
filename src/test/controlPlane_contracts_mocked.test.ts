@@ -68,6 +68,32 @@ suite('Control Plane Contracts (Mocked)', () => {
     }
   });
 
+  test('code-changing delivery flows require approval before local branch mutation', () => {
+    for (const pipelinePath of [
+      'pipeline/product-1/delivery.issue-to-pr.intent.json',
+      'pipeline/product-1/delivery.pr-review-fix.intent.json'
+    ]) {
+      const pipeline = readPipeline(pipelinePath);
+      const byId = new Map<string, any>((pipeline.steps || []).map((step: any) => [String(step.id || ''), step]));
+      const branchGate = byId.get('branch_gate');
+      const prepareBranch = byId.get('prepare_branch');
+
+      assert.ok(branchGate, `Missing branch_gate in ${pipelinePath}.`);
+      assert.strictEqual(branchGate.intent, 'system.pause', `branch_gate in ${pipelinePath} must be a human pause.`);
+      assert.ok(branchGate.payload?.__sandbox, `branch_gate in ${pipelinePath} must declare __sandbox.`);
+      assert.strictEqual(branchGate.payload.__sandbox.allowFileWrite, false, `branch_gate in ${pipelinePath} must not write files.`);
+      assert.ok(prepareBranch, `Missing prepare_branch in ${pipelinePath}.`);
+      assert.strictEqual(prepareBranch.payload?.__sandbox?.allowFileWrite, true, `prepare_branch in ${pipelinePath} must declare Git state mutation.`);
+
+      const gateIndex = pipeline.steps.findIndex((step: any) => String(step.id || '') === 'branch_gate');
+      const prepareIndex = pipeline.steps.findIndex((step: any) => String(step.id || '') === 'prepare_branch');
+      assert.ok(
+        gateIndex >= 0 && prepareIndex > gateIndex,
+        `prepare_branch in ${pipelinePath} must run only after branch_gate.`
+      );
+    }
+  });
+
   test('delivery github steps avoid implicit repo assumptions', () => {
     const issueToPr = readPipeline('pipeline/product-1/delivery.issue-to-pr.intent.json');
     const prReviewFix = readPipeline('pipeline/product-1/delivery.pr-review-fix.intent.json');

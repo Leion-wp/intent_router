@@ -656,6 +656,61 @@
                     },
                     "description": "Codex CLI args template. Placeholders: {model}, {reasoningEffort}, {stdin}, {prompt}."
                 },
+                "intentRouter.ai.codex.models": {
+                    "type": "array",
+                    "default": [
+                        "gpt-5.4",
+                        "gpt-5.4-mini",
+                        "gpt-5.3-codex",
+                        "gpt-5.2"
+                    ],
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Suggested Codex models shown in the AI node. You can still type any model supported by your installed Codex CLI."
+                },
+                "intentRouter.ai.gemini.models": {
+                    "type": "array",
+                    "default": [
+                        "gemini-2.5-flash",
+                        "gemini-2.5-pro",
+                        "gemini-2.0-flash-exp"
+                    ],
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Suggested Gemini models shown in the AI node."
+                },
+                "intentRouter.ai.prompt.maxChars": {
+                    "type": "number",
+                    "default": 120000,
+                    "minimum": 4096,
+                    "description": "Maximum prompt size in characters sent to AI CLIs before context is truncated."
+                },
+                "intentRouter.ai.context.maxFiles": {
+                    "type": "number",
+                    "default": 8,
+                    "minimum": 1,
+                    "description": "Maximum number of matched context files injected into an AI prompt."
+                },
+                "intentRouter.ai.context.maxFileChars": {
+                    "type": "number",
+                    "default": 12000,
+                    "minimum": 256,
+                    "description": "Maximum number of characters loaded per context file before truncation."
+                },
+                "intentRouter.ai.spec.maxFiles": {
+                    "type": "number",
+                    "default": 4,
+                    "minimum": 1,
+                    "description": "Maximum number of matched spec files injected into an AI prompt."
+                },
+                "intentRouter.ai.spec.maxFileChars": {
+                    "type": "number",
+                    "default": 8000,
+                    "minimum": 256,
+                    "description": "Maximum number of characters loaded per spec file before truncation."
+                },
                 "intentRouter.ai.team.reviewerVoteWeight": {
                     "type": "number",
                     "default": 2,

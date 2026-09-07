@@ -23,11 +23,8 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
   const collapsed = !!data.collapsed;
   const inputHandles = ['in', 'commandId', 'argsJson'];
   const handleTop = (index: number, total: number) => {
-    if (total <= 1) return '50%';
-    const min = 24;
-    const max = 80;
-    const value = min + ((max - min) * index) / (total - 1);
-    return `${value}%`;
+    if (total <= 1) return '24px';
+    return `${24 + index * 40}px`;
   };
 
   // Sync from external updates (e.g. drawer edits)
@@ -97,7 +94,7 @@ const VSCodeCommandNode = ({ data, id }: NodeProps) => {
           />
         </div>
       ))}
-      <Handle id="success" type="source" position={Position.Right} style={{ ...handleStyle, top: '50%', right: '-5px', background: '#007acc' }} />
+      <Handle id="success" type="source" position={Position.Right} style={{ ...handleStyle, top: '24px', right: '-5px', background: '#007acc' }} />
 
       <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
         <div style={{ 

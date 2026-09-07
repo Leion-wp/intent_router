@@ -100,11 +100,8 @@ const CustomNode = ({ data, id }: NodeProps) => {
   }, [schema]);
 
   const handleTop = (index: number, total: number) => {
-    if (total <= 1) return '50%';
-    const min = 24;
-    const max = 82;
-    const value = min + ((max - min) * index) / (total - 1);
-    return `${value}%`;
+    if (total <= 1) return '24px';
+    return `${24 + index * 40}px`;
   };
 
   const handleStyle = {
@@ -146,7 +143,7 @@ const CustomNode = ({ data, id }: NodeProps) => {
         position={Position.Right}
         id="failure"
         title="On Failure"
-        style={{ ...handleStyle, top: '30%', right: '-5px', background: 'var(--ir-status-error)' }}
+        style={{ ...handleStyle, top: '64px', right: '-5px', background: 'var(--ir-status-error)' }}
       />
 
       <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
@@ -211,7 +208,7 @@ const CustomNode = ({ data, id }: NodeProps) => {
         )}
       </div>
 
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-5px', background: '#d4d4d4' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '24px', right: '-5px', background: '#d4d4d4' }} />
 
       {!collapsed && logs.length > 0 && (
         <div className="nodrag" style={{ marginTop: '8px', borderTop: '1px solid var(--vscode-widget-border)' }}>

@@ -65,7 +65,7 @@
           "deletable": false,
           "measured": {
             "width": 282,
-            "height": 221
+            "height": 259
           },
           "selected": false,
           "dragging": false
@@ -90,8 +90,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 1016,
-            "height": 561
+            "width": 914,
+            "height": 678
           },
           "selected": false,
           "dragging": false
@@ -117,7 +117,7 @@
           },
           "measured": {
             "width": 857,
-            "height": 561
+            "height": 678
           },
           "selected": false,
           "dragging": false
@@ -126,8 +126,8 @@
           "id": "node_5",
           "type": "actionNode",
           "position": {
-            "x": 1440,
-            "y": -390
+            "x": 930,
+            "y": -435
           },
           "data": {
             "provider": "terminal",
@@ -142,8 +142,8 @@
             "status": "idle"
           },
           "measured": {
-            "width": 1016,
-            "height": 561
+            "width": 914,
+            "height": 678
           },
           "selected": false,
           "dragging": false
@@ -152,8 +152,8 @@
           "id": "node_7",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 2535,
-            "y": -420
+            "x": 1980,
+            "y": -135
           },
           "data": {
             "commandId": "workbench.extensions.action.installVSIX",
@@ -165,7 +165,7 @@
           },
           "measured": {
             "width": 282,
-            "height": 226
+            "height": 241
           },
           "selected": true,
           "dragging": false
@@ -174,8 +174,8 @@
           "id": "node_9",
           "type": "vscodeCommandNode",
           "position": {
-            "x": 2565,
-            "y": -135
+            "x": 2385,
+            "y": -345
           },
           "data": {
             "commandId": "workbench.action.reloadWindow",
@@ -187,7 +187,7 @@
           },
           "measured": {
             "width": 282,
-            "height": 226
+            "height": 241
           },
           "selected": false,
           "dragging": false

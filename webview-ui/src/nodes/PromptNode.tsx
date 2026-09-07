@@ -22,11 +22,8 @@ const PromptNode = ({ data, id }: NodeProps) => {
   const collapsed = !!data.collapsed;
   const inputHandles = ['in', 'name', 'default'];
   const handleTop = (index: number, total: number) => {
-    if (total <= 1) return '50%';
-    const min = 26;
-    const max = 78;
-    const value = min + ((max - min) * index) / (total - 1);
-    return `${value}%`;
+    if (total <= 1) return '24px';
+    return `${24 + index * 40}px`;
   };
 
   // Sync from external updates (e.g. drawer edits)
@@ -70,8 +67,8 @@ const PromptNode = ({ data, id }: NodeProps) => {
           />
         </div>
       ))}
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-6px', background: themeColor }} />
-      <Handle type="source" position={Position.Right} id="out_value" style={{ ...handleStyle, top: '74%', right: '-6px', background: '#7e57c2' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '24px', right: '-6px', background: themeColor }} />
+      <Handle type="source" position={Position.Right} id="out_value" style={{ ...handleStyle, top: '64px', right: '-6px', background: '#7e57c2' }} />
 
       <div>
         <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}15 0%, transparent 100%)` }}>

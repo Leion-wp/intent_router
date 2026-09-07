@@ -39,6 +39,8 @@ suite('Runtime Sandbox (Mocked)', () => {
 
     assert.strictEqual(detectIntentWritesFiles({ intent: 'vscode.reviewDiff', payload: {} }), true);
     assert.strictEqual(detectIntentWritesFiles({ intent: 'terminal.run', payload: { command: 'echo hi > out.txt' } }), true);
+    assert.strictEqual(detectIntentWritesFiles({ intent: 'terminal.run', payload: { command: 'git checkout -B feature main' } }), true);
+    assert.strictEqual(detectIntentWritesFiles({ intent: 'terminal.run', payload: { command: 'git commit -m \"fix: issue #1\"' } }), true);
     assert.strictEqual(detectIntentWritesFiles({ intent: 'system.form', payload: {} }), false);
   });
 

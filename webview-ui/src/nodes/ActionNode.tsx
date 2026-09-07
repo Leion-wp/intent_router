@@ -141,10 +141,8 @@ const ActionNode = ({ data, id }: NodeProps) => {
   }, [schemaArgs]);
 
   const handleTop = (index: number, total: number) => {
-    if (total <= 1) return '50%';
-    const min = 24;
-    const max = 82;
-    return `${min + ((max - min) * index) / (total - 1)}%`;
+    if (total <= 1) return '24px';
+    return `${24 + index * 40}px`;
   };
 
   const theme = PROVIDER_THEMES[provider] || PROVIDER_THEMES.default;
@@ -189,8 +187,8 @@ const ActionNode = ({ data, id }: NodeProps) => {
       ))}
       
       {/* Source Handles */}
-      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '30%', right: '-6px', background: '#ff4d4d' }} />
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-6px', background: '#00ff88' }} />
+      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '64px', right: '-6px', background: '#ff4d4d' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '24px', right: '-6px', background: '#00ff88' }} />
 
       <div>
         {/* Header */}

@@ -83,12 +83,9 @@ const SwitchNode = ({ data, id }: NodeProps) => {
   const isRunning = status === 'running';
   const themeColor = '#4ec9b0';
 
-  const handleTop = (i: number, total: number) => {
-    if (total <= 1) return '40%';
-    const min = 28;
-    const max = 78;
-    const t = min + ((max - min) * i) / (total - 1);
-    return `${t}%`;
+  const handleTop = (index: number, total: number) => {
+    if (total <= 1) return '24px';
+    return `${24 + index * 40}px`;
   };
 
   const handleStyle = {
@@ -186,13 +183,13 @@ const SwitchNode = ({ data, id }: NodeProps) => {
           position={Position.Right}
           id="default"
           title="default"
-          style={{ ...handleStyle, top: '92%', right: '-6px', background: 'rgba(255,255,255,0.3)' }}
+          style={{ ...handleStyle, top: handleTop(routes.length, Math.max(routes.length + 1, 1)), right: '-6px', background: 'rgba(255,255,255,0.3)' }}
         />
         <div
           style={{
             position: 'absolute',
             right: '12px',
-            top: '92%',
+            top: handleTop(routes.length, Math.max(routes.length + 1, 1)),
             transform: 'translate(0, -50%)',
             fontSize: '10px',
             fontWeight: 700,

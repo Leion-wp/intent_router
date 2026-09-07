@@ -108,9 +108,9 @@ const TeamNode = ({ data, id }: NodeProps) => {
       color: '#ece8ff',
       fontFamily: 'var(--vscode-font-family)'
     }}>
-      <Handle type="target" position={Position.Left} id="in" style={{ width: 12, height: 12, left: -10, background: '#7e57c2', border: '2px solid #1e1e23' }} />
-      <Handle type="source" position={Position.Right} id="success" style={{ width: 12, height: 12, right: -10, top: '30%', background: '#4caf50', border: '2px solid #1e1e23' }} />
-      <Handle type="source" position={Position.Right} id="failure" style={{ width: 12, height: 12, right: -10, top: '70%', background: '#f44336', border: '2px solid #1e1e23' }} />
+      <Handle type="target" position={Position.Left} id="in" style={{ width: 12, height: 12, left: -10, top: '24px', background: '#7e57c2', border: '2px solid #1e1e23' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ width: 12, height: 12, right: -10, top: '24px', background: '#4caf50', border: '2px solid #1e1e23' }} />
+      <Handle type="source" position={Position.Right} id="failure" style={{ width: 12, height: 12, right: -10, top: '64px', background: '#f44336', border: '2px solid #1e1e23' }} />
 
       <div style={{ padding: '12px 14px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <span className="codicon codicon-organization" style={{ color: '#b39ddb' }}></span>

@@ -10,6 +10,11 @@ Sell `Leion Delivery` as a hybrid SaaS product without pretending the runtime is
 
 ## Product Boundary
 
+Current state on `2026-05-05`:
+
+- the shipped local template files in `pipeline/product-1/` are manual-entry pipelines
+- webhook and cron execution remain control-plane or runner capabilities, not trigger steps embedded in those local template JSON files today
+
 ### Open-core
 
 - VS Code extension

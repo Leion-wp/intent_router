@@ -134,6 +134,27 @@ suite('Compiler Mocked Test', () => {
         assert.strictEqual(compiled.payload.cwd, cwd);
     });
 
+    test('Script compilation on Windows supports batch files', async () => {
+        pipelineRunner.__test__?.setPlatformOverride?.('win32');
+        const store = new Map<string, any>();
+        store.set('trigger_path', 'D:/workspace/repo/script/run hello.bat');
+        const cwd = 'D:/workspace/repo';
+
+        const intent = {
+            intent: 'terminal.run',
+            payload: {
+                __kind: 'script',
+                scriptPath: '${var:trigger_path}',
+                cwd
+            }
+        };
+
+        const compiled = await compileStep(intent, store, cwd, cwd);
+
+        assert.strictEqual(compiled.payload.command, 'cmd /c "D:/workspace/repo/script/run hello.bat"');
+        assert.strictEqual(compiled.payload.cwd, cwd);
+    });
+
     test('Non-compilable Intent Passthrough', async () => {
         const store = new Map<string, any>();
         const cwd = '/root';

@@ -11,7 +11,14 @@ Module.prototype.require = function (request: string) {
   return originalRequire.apply(this, arguments);
 };
 
-const { resolveAiCliSpec, normalizeAgentRole, applyInstructionTemplate, normalizeOutputContract } = require('../../out/providers/aiAdapter');
+const {
+  resolveAiCliSpec,
+  normalizeAgentRole,
+  applyInstructionTemplate,
+  normalizeOutputContract,
+  resolveAiPromptBudgetConfig,
+  truncateForPromptBudget
+} = require('../../out/providers/aiAdapter');
 Module.prototype.require = originalRequire;
 
 suite('AI Adapter Provider Resolution (Mocked)', () => {
@@ -65,5 +72,25 @@ suite('AI Adapter Provider Resolution (Mocked)', () => {
     assert.strictEqual(normalizeOutputContract('path_result'), 'path_result');
     assert.strictEqual(normalizeOutputContract('unified_diff'), 'unified_diff');
     assert.strictEqual(normalizeOutputContract('unknown'), 'path_result');
+  });
+
+  test('resolveAiPromptBudgetConfig reads workspace overrides', () => {
+    mockVscode.__mock.configStore.set('intentRouter.ai.prompt.maxChars', 64000);
+    mockVscode.__mock.configStore.set('intentRouter.ai.context.maxFiles', 3);
+    mockVscode.__mock.configStore.set('intentRouter.ai.context.maxFileChars', 4000);
+    mockVscode.__mock.configStore.set('intentRouter.ai.spec.maxFiles', 2);
+    mockVscode.__mock.configStore.set('intentRouter.ai.spec.maxFileChars', 1500);
+    const config = resolveAiPromptBudgetConfig();
+    assert.strictEqual(config.maxPromptChars, 64000);
+    assert.strictEqual(config.maxContextFiles, 3);
+    assert.strictEqual(config.maxContextFileChars, 4000);
+    assert.strictEqual(config.maxSpecFiles, 2);
+    assert.strictEqual(config.maxSpecFileChars, 1500);
+  });
+
+  test('truncateForPromptBudget appends notice when text is trimmed', () => {
+    const truncated = truncateForPromptBudget('abcdefghijklmnopqrstuvwxyz', 14, '[cut]');
+    assert.ok(truncated.includes('[cut]'));
+    assert.ok(truncated.length <= 14);
   });
 });

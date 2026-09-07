@@ -29,6 +29,11 @@ type CommandGroup = {
     commands: (Capability | CompositeCapability)[];
 };
 
+type AiWebviewSettings = {
+    geminiModels: string[];
+    codexModels: string[];
+};
+
 function summarizeUiPresetDiff(releasePreset: any, draftPreset: any): string {
     const releaseTabs = Array.isArray(releasePreset?.sidebar?.tabs) ? releasePreset.sidebar.tabs : [];
     const draftTabs = Array.isArray(draftPreset?.sidebar?.tabs) ? draftPreset.sidebar.tabs : [];
@@ -92,6 +97,34 @@ export class PipelineBuilder {
     private disposables: vscode.Disposable[] = [];
 
     constructor(private readonly extensionUri: vscode.Uri) {}
+
+    private getAiWebviewSettings(): AiWebviewSettings {
+        const cfg = vscode.workspace.getConfiguration('intentRouter');
+        const normalize = (values: unknown, fallback: string[]): string[] => {
+            const input = Array.isArray(values) ? values : fallback;
+            const unique = new Set<string>();
+            for (const entry of input) {
+                const value = String(entry || '').trim();
+                if (!value) continue;
+                unique.add(value);
+            }
+            return Array.from(unique);
+        };
+
+        return {
+            geminiModels: normalize(cfg.get('ai.gemini.models', [
+                'gemini-2.5-flash',
+                'gemini-2.5-pro',
+                'gemini-2.0-flash-exp'
+            ]), []),
+            codexModels: normalize(cfg.get('ai.codex.models', [
+                'gpt-5.4',
+                'gpt-5.4-mini',
+                'gpt-5.3-codex',
+                'gpt-5.2'
+            ]), [])
+        };
+    }
 
     async open(pipeline?: PipelineFile, uri?: vscode.Uri): Promise<void> {
         // If we already have a panel, reveal it. But if opening a different URI, we might want to replace content.
@@ -209,15 +242,26 @@ export class PipelineBuilder {
             if (e.affectsConfiguration('leionRoots.adminMode')) {
                 void pushUiPreset();
             }
-            if (!e.affectsConfiguration('intentRouter.environment')) return;
-            try {
-                const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
-                this.panel?.webview.postMessage({
-                    type: 'environmentUpdate',
-                    environment
-                });
-            } catch {
-                // Best-effort sync.
+            if (e.affectsConfiguration('intentRouter.environment')) {
+                try {
+                    const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
+                    this.panel?.webview.postMessage({
+                        type: 'environmentUpdate',
+                        environment
+                    });
+                } catch {
+                    // Best-effort sync.
+                }
+            }
+            if (e.affectsConfiguration('intentRouter.ai.gemini.models') || e.affectsConfiguration('intentRouter.ai.codex.models')) {
+                try {
+                    this.panel?.webview.postMessage({
+                        type: 'aiSettingsUpdate',
+                        aiSettings: this.getAiWebviewSettings()
+                    });
+                } catch {
+                    // Best-effort sync.
+                }
             }
         });
         this.disposables.push(configSub);
@@ -236,6 +280,7 @@ export class PipelineBuilder {
 	        await historyManager.whenReady();
 	        const history = historyManager.getHistory();
 	        const environment = vscode.workspace.getConfiguration('intentRouter').get('environment') || {};
+            const aiSettings = this.getAiWebviewSettings();
             const customNodes = await readCustomNodesFromWorkspace();
             const devMode = vscode.workspace.getConfiguration('intentRouter').get<boolean>('devMode', false);
             const adminMode = vscode.workspace.getConfiguration().get<boolean>('leionRoots.adminMode', false);
@@ -261,6 +306,7 @@ export class PipelineBuilder {
             templates,
             history,
             environment,
+            aiSettings,
             customNodes,
             devMode,
             adminMode,
@@ -793,6 +839,20 @@ export class PipelineBuilder {
         return parts[parts.length - 1] || 'pipeline';
     }
 
+    private sameFileUri(left: vscode.Uri, right: vscode.Uri): boolean {
+        const normalize = (uri: vscode.Uri): string => {
+            const raw = String(uri?.fsPath || uri?.path || '').trim();
+            if (!raw) return '';
+            const normalized = path.normalize(raw);
+            return process.platform === 'win32'
+                ? normalized.toLowerCase()
+                : normalized;
+        };
+        const leftPath = normalize(left);
+        const rightPath = normalize(right);
+        return !!leftPath && leftPath === rightPath;
+    }
+
     private async savePipeline(pipeline: PipelineFile): Promise<boolean> {
         if (!pipeline.name) {
             vscode.window.showErrorMessage('Pipeline name is required.');
@@ -811,8 +871,17 @@ export class PipelineBuilder {
             const currentFileName = path.posix.basename(targetUri.path);
             const shouldRename = typeof this.lastSavedName === 'string' && pipeline.name !== this.lastSavedName;
             if (shouldRename && desiredFileName !== currentFileName) {
-                const parent = vscode.Uri.joinPath(targetUri, '..');
-                const newUri = vscode.Uri.joinPath(parent, desiredFileName);
+                const currentFsPath = String(targetUri.fsPath || '').trim();
+                const parentFsPath = currentFsPath
+                    ? path.dirname(currentFsPath)
+                    : path.posix.dirname(targetUri.path);
+                const newUri = vscode.Uri.file(path.join(parentFsPath, desiredFileName));
+                if (this.sameFileUri(targetUri, newUri)) {
+                    await writePipelineToUri(targetUri, pipeline);
+                    if (this.panel) this.panel.title = this.getTitle(pipeline, targetUri);
+                    this.lastSavedName = pipeline.name;
+                    return true;
+                }
                 try {
                     await vscode.workspace.fs.stat(newUri);
                     vscode.window.showErrorMessage(`Cannot rename pipeline: ${desiredFileName} already exists.`);

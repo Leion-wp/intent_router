@@ -52,11 +52,8 @@ const ScriptNode = ({ data, id }: NodeProps) => {
   const effectiveInterpreter = String(interpreter || '').trim() || inferredInterpreter;
   const inputHandles = ['in', 'scriptPath', 'args', 'cwd', 'interpreter'];
   const handleTop = (index: number, total: number) => {
-    if (total <= 1) return '50%';
-    const min = 22;
-    const max = 84;
-    const value = min + ((max - min) * index) / (total - 1);
-    return `${value}%`;
+    if (total <= 1) return '24px';
+    return `${24 + index * 40}px`;
   };
 
   const browseScript = () => {
@@ -130,8 +127,8 @@ const ScriptNode = ({ data, id }: NodeProps) => {
           />
         </div>
       ))}
-      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '30%', right: '-5px', background: 'var(--ir-status-error)' }} />
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-5px', background: 'var(--ir-status-success)' }} />
+      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '64px', right: '-5px', background: 'var(--ir-status-error)' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '24px', right: '-5px', background: 'var(--ir-status-success)' }} />
 
       <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
         <div style={{ 

@@ -88,9 +88,9 @@ const HttpNode = ({ data, id }: NodeProps) => {
       transition: 'all 0.4s ease'
     }}>
       {/* Handles */}
-      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-10px' }} />
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, background: '#4caf50', top: '30%', right: '-10px' }} />
-      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, background: '#f44336', top: '70%', right: '-10px' }} />
+      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-10px', top: '24px' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, background: '#4caf50', top: '24px', right: '-10px' }} />
+      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, background: '#f44336', top: '64px', right: '-10px' }} />
 
       <div style={{ borderRadius: '14px', overflow: 'hidden' }}>
         {/* Header */}

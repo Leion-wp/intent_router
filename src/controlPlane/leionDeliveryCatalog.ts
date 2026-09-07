@@ -175,16 +175,16 @@ export const LEION_DELIVERY_CATALOG: LeionDeliveryCatalog = {
             key: 'issue_to_pr',
             name: 'Issue to PR',
             pipelinePath: 'pipeline/product-1/delivery.issue-to-pr.intent.json',
-            humanApprovalStepId: 'review_patch',
-            defaultTriggerModes: ['manual', 'webhook'],
+            humanApprovalStepId: 'publish_gate',
+            defaultTriggerModes: ['manual'],
             proofGoal: 'Show an issue moving to a reviewed PR with explicit approval.'
         },
         {
             key: 'pr_review_fix',
             name: 'PR Review Fix',
             pipelinePath: 'pipeline/product-1/delivery.pr-review-fix.intent.json',
-            humanApprovalStepId: 'review_patch',
-            defaultTriggerModes: ['manual', 'webhook'],
+            humanApprovalStepId: 'publish_gate',
+            defaultTriggerModes: ['manual'],
             proofGoal: 'Show a PR fix loop with human review before validation and push.'
         },
         {
@@ -192,7 +192,7 @@ export const LEION_DELIVERY_CATALOG: LeionDeliveryCatalog = {
             name: 'Release Gate',
             pipelinePath: 'pipeline/product-1/delivery.release-gate.intent.json',
             humanApprovalStepId: 'human_gate',
-            defaultTriggerModes: ['manual', 'cron', 'webhook'],
+            defaultTriggerModes: ['manual'],
             proofGoal: 'Show QA and security checks ending in an explicit release approval.'
         }
     ],
@@ -202,7 +202,7 @@ export const LEION_DELIVERY_CATALOG: LeionDeliveryCatalog = {
         foundingPilot: 'docs/offers/leion-delivery-founding-pilot.md',
         securityFaq: 'docs/offers/leion-delivery-security-faq.md',
         onboardingChecklist: 'docs/offers/leion-delivery-onboarding-checklist.md',
-        salesPlaybook: 'docs/sales/leion-delivery-founder-sales.md',
+        salesPlaybook: 'docs/sales/leion-delivery-outbound-plan.md',
         proofScript: 'docs/proof/leion-delivery-demo-script.md'
     }
 };

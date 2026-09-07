@@ -225,6 +225,7 @@ function Flow({
   const [focusGraph, setFocusGraph] = useState<boolean>(false);
   const [chromeCollapsed, setChromeCollapsed] = useState<boolean>(false);
   const [chromePanelPos, setChromePanelPos] = useState<{ x: number; y: number }>({ x: 430, y: 56 });
+  const [showChromePanel, setShowChromePanel] = useState<boolean>(true);
   const [runMenuOpen, setRunMenuOpen] = useState<boolean>(false);
   const [runPillStatus, setRunPillStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -1295,28 +1296,59 @@ function Flow({
          Auto Layout
        </button>
 
-        <ChromeControlsPanel
-          chromePanelPos={chromePanelPos}
-          chromeCollapsed={chromeCollapsed}
-          setChromeCollapsed={setChromeCollapsed}
-          setChromePanelPos={setChromePanelPos}
-          chromePanelDragRef={chromePanelDragRef}
-          chromeOpacity={chromeOpacity}
-          focusGraph={focusGraph}
-          toggleFocusGraph={toggleFocusGraph}
-          showMiniMap={showMiniMap}
-          setShowMiniMap={setShowMiniMap}
-          showControls={showControls}
-          setShowControls={setShowControls}
-          canUndo={canUndo}
-          undoGraph={undoGraph}
-          canRedo={canRedo}
-          redoGraph={redoGraph}
-          selectedNodeId={selectedNodeId}
-          runPipelineFromHere={runPipelineFromHere}
-          resetRuntimeUiState={resetRuntimeUiState}
-          setChromeOpacity={setChromeOpacity}
-        />
+        {showChromePanel ? (
+          <ChromeControlsPanel
+            chromePanelPos={chromePanelPos}
+            chromeCollapsed={chromeCollapsed}
+            setChromeCollapsed={setChromeCollapsed}
+            setChromePanelPos={setChromePanelPos}
+            chromePanelDragRef={chromePanelDragRef}
+            chromeOpacity={chromeOpacity}
+            focusGraph={focusGraph}
+            toggleFocusGraph={toggleFocusGraph}
+            showMiniMap={showMiniMap}
+            setShowMiniMap={setShowMiniMap}
+            showControls={showControls}
+            setShowControls={setShowControls}
+            canUndo={canUndo}
+            undoGraph={undoGraph}
+            canRedo={canRedo}
+            redoGraph={redoGraph}
+            selectedNodeId={selectedNodeId}
+            runPipelineFromHere={runPipelineFromHere}
+            resetRuntimeUiState={resetRuntimeUiState}
+            setChromeOpacity={setChromeOpacity}
+            onHide={() => setShowChromePanel(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowChromePanel(true)}
+            aria-label="Show Controls Panel"
+            style={{
+              position: 'absolute',
+              bottom: '24px',
+              left: '24px',
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: 'var(--ir-glass-bg)',
+              backdropFilter: 'var(--ir-glass-blur)',
+              border: '1px solid var(--ir-glass-border)',
+              color: 'var(--ir-node-text)',
+              cursor: 'pointer',
+              zIndex: 940,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: 'var(--ir-glass-shadow)',
+              transition: 'all 0.2s ease'
+            }}
+            title="Show Controls Panel"
+          >
+            <span className="codicon codicon-settings-gear" style={{ fontSize: '20px' }}></span>
+          </button>
+        )}
 
        <button
          type="button"

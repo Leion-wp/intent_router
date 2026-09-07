@@ -26,6 +26,19 @@ const CODEX_MODEL_OPTIONS = [
   { value: 'gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini' }
 ];
 
+function normalizeModelSuggestions(values: unknown, fallback: Array<{ value: string; label: string }>) {
+  const source = Array.isArray(values) ? values : fallback.map((entry) => entry.value);
+  const seen = new Set<string>();
+  const items: Array<{ value: string; label: string }> = [];
+  source.forEach((entry) => {
+    const value = String(entry || '').trim();
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    items.push({ value, label: value });
+  });
+  return items.length ? items : fallback;
+}
+
 const AGENT_PROVIDER_OPTIONS = [
   { value: 'gemini', label: 'Gemini CLI' },
   { value: 'codex', label: 'Codex CLI' }
@@ -82,12 +95,22 @@ const AgentNode = ({ data, id }: NodeProps) => {
   const [editingLabel, setEditingLabel] = useState(false);
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [dynamicModelOptions, setDynamicModelOptions] = useState(() => ({
+    gemini: normalizeModelSuggestions(window.initialData?.aiSettings?.geminiModels, MODEL_OPTIONS),
+    codex: normalizeModelSuggestions(window.initialData?.aiSettings?.codexModels, CODEX_MODEL_OPTIONS)
+  }));
   
   const logsRef = useRef<HTMLDivElement>(null);
   const collapsed = !!data.collapsed;
   const activeModelOptions = useMemo(
-    () => (agent === 'codex' ? CODEX_MODEL_OPTIONS : MODEL_OPTIONS),
-    [agent]
+    () => {
+      const configured = agent === 'codex' ? dynamicModelOptions.codex : dynamicModelOptions.gemini;
+      if (!model || configured.some((entry) => entry.value === model)) {
+        return configured;
+      }
+      return [{ value: model, label: `${model} (current)` }, ...configured];
+    },
+    [agent, dynamicModelOptions, model]
   );
 
   useEffect(() => {
@@ -126,13 +149,16 @@ const AgentNode = ({ data, id }: NodeProps) => {
   const logs = (data.logs as any[]) || [];
 
   useEffect(() => {
-    if (!activeModelOptions.some((entry) => entry.value === model)) {
-      const next = activeModelOptions[0]?.value || '';
-      if (!next) return;
-      setModel(next);
-      updateField({ model: next });
-    }
-  }, [activeModelOptions, model]);
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'aiSettingsUpdate') return;
+      setDynamicModelOptions({
+        gemini: normalizeModelSuggestions(event.data?.aiSettings?.geminiModels, MODEL_OPTIONS),
+        codex: normalizeModelSuggestions(event.data?.aiSettings?.codexModels, CODEX_MODEL_OPTIONS)
+      });
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   useEffect(() => {
     if (isConsoleOpen && logsRef.current) {
@@ -168,9 +194,9 @@ const AgentNode = ({ data, id }: NodeProps) => {
 
   return (
     <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '340px' }}>
-      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, background: themeColor, left: '-6px' }} />
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, background: '#00ff88', top: '30%', right: '-6px' }} />
-      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, background: '#ff4d4d', top: '70%', right: '-6px' }} />
+      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, background: themeColor, left: '-6px', top: '24px' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, background: '#00ff88', top: '24px', right: '-6px' }} />
+      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, background: '#ff4d4d', top: '64px', right: '-6px' }} />
 
       <div>
         {/* Header */}
@@ -273,17 +299,23 @@ const AgentNode = ({ data, id }: NodeProps) => {
                           </div>
                           <div className="glass-node-input-group">
                               <label className="glass-node-input-label">Intelligence Model</label>
-                              <select
+                              <input
                                   className="nodrag"
                                   value={model}
+                                  list={`agent-models-${id}`}
                                   onChange={(e) => { setModel(e.target.value); updateField({ model: e.target.value }); }}
-                              >
+                                  placeholder={agent === 'codex' ? 'gpt-5.4' : 'gemini-2.5-flash'}
+                              />
+                              <datalist id={`agent-models-${id}`}>
                                   {activeModelOptions.map(opt => (
-                                    <option key={opt.value} value={opt.value} style={{ background: '#1a1a20', color: '#fff' }}>
+                                    <option key={opt.value} value={opt.value}>
                                       {opt.label}
                                     </option>
                                   ))}
-                              </select>
+                              </datalist>
+                              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)', marginTop: '6px' }}>
+                                Suggestions come from VS Code settings. You can also type any CLI-exposed model manually.
+                              </div>
                           </div>
                           {agent === 'codex' && (
                             <div className="glass-node-input-group">

@@ -37,6 +37,17 @@ type TeamMember = {
 };
 
 type SessionMemoryMode = 'runtime_only' | 'read_only' | 'write_only' | 'read_write';
+type ContextLoadOptions = {
+    maxFiles: number;
+    maxCharsPerFile: number;
+};
+type AiPromptBudgetConfig = {
+    maxPromptChars: number;
+    maxContextFiles: number;
+    maxContextFileChars: number;
+    maxSpecFiles: number;
+    maxSpecFileChars: number;
+};
 
 export function registerAiProvider(context: vscode.ExtensionContext) {
     registerCapabilities({
@@ -125,6 +136,7 @@ export async function executeAiCommand(args: any): Promise<any> {
     const systemPrompt = String(args?.systemPrompt || '').trim();
     const instructionResolved = applyInstructionTemplate(args?.instructionTemplate, instruction);
     const outputContract = normalizeOutputContract(args?.outputContract);
+    const promptBudget = resolveAiPromptBudgetConfig();
     const contractRules = outputContract === 'unified_diff'
         ? [
             '1. Use ONLY this format:',
@@ -162,10 +174,16 @@ export async function executeAiCommand(args: any): Promise<any> {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
     const effectiveCwd = resolveAiWorkingDirectory(args?.cwd, meta?.cwd, workspaceRoot, log);
 
-    contextContent += await loadContextFilesBlock(contextFiles, workspaceRoot, log, 'FILE');
-    contextContent += await loadContextFilesBlock(agentSpecFiles, workspaceRoot, log, 'SPEC');
+    contextContent += await loadContextFilesBlock(contextFiles, workspaceRoot, log, 'FILE', {
+        maxFiles: promptBudget.maxContextFiles,
+        maxCharsPerFile: promptBudget.maxContextFileChars
+    });
+    contextContent += await loadContextFilesBlock(agentSpecFiles, workspaceRoot, log, 'SPEC', {
+        maxFiles: promptBudget.maxSpecFiles,
+        maxCharsPerFile: promptBudget.maxSpecFileChars
+    });
 
-    const fullPrompt = `
+    const promptPrefix = `
 IMPORTANT: You are an AI Architect. 
 Your role is to PROPOSE changes.
 ${buildAgentRoleBlock(role)}
@@ -177,7 +195,9 @@ ${contractRules.join('\n')}
 5. Return only the final answer blocks. No intro, no explanation.
 
 CONTEXT:
-${contextContent}
+`.trimEnd();
+
+    const promptSuffix = `
 
 ${buildPersistedSessionBlock(persistedSession)}
 
@@ -185,21 +205,37 @@ INSTRUCTION:
 ${instructionResolved}
     `.trim();
 
+    const availableContextChars = Math.max(0, promptBudget.maxPromptChars - promptPrefix.length - promptSuffix.length - 4);
+    const boundedContextContent = truncateForPromptBudget(
+        contextContent,
+        availableContextChars,
+        '[CONTEXT TRUNCATED: reduce contextFiles/agentSpecFiles or raise intentRouter.ai.prompt.maxChars]'
+    );
+    if (boundedContextContent.length < contextContent.length) {
+        log(
+            `[AI Agent] Prompt context truncated to ${availableContextChars} chars. ` +
+            `Tune intentRouter.ai.prompt.maxChars or reduce context files.\n`,
+            'stderr'
+        );
+    }
+
+    const fullPrompt = `${promptPrefix}\n${boundedContextContent}\n${promptSuffix}`.trim();
+
     const modelName = args.model || 'gemini-2.0-flash-exp';
     const cliSpec = resolveAiCliSpec(agent, modelName, fullPrompt, String(args?.reasoningEffort || 'medium'));
     log(`\nExecuting ${agent} CLI [Model: ${modelName}]...\n`);
     
     return new Promise((resolve, reject) => {
         const envOverrides = vscode.workspace.getConfiguration('intentRouter').get<Record<string, string>>('environment') || {};
-        const env = { ...process.env, ...envOverrides };
+        const env = withWindowsAiSpawnEnvironment({ ...process.env, ...envOverrides });
         let settled = false;
 
         const launch = (spec: AiCliSpec, allowReasoningFallback: boolean) => {
-            const child = cp.spawn(spec.executable, spec.args, {
-                cwd: effectiveCwd,
-                env,
-                shell: process.platform === 'win32'
-            });
+            const child = cp.spawn(
+                spec.executable,
+                spec.args,
+                buildAiSpawnOptions(effectiveCwd, env)
+            ) as cp.ChildProcessWithoutNullStreams;
 
             let fullOutput = '';
             let fullStderr = '';
@@ -778,12 +814,16 @@ async function loadContextFilesBlock(
     patterns: any,
     workspaceRoot: string,
     log: (text: string, stream?: 'stdout' | 'stderr') => void,
-    label: 'FILE' | 'SPEC'
+    label: 'FILE' | 'SPEC',
+    options?: Partial<ContextLoadOptions>
 ): Promise<string> {
     let aggregated = '';
     if (!Array.isArray(patterns) || patterns.length === 0) {
         return aggregated;
     }
+    const maxFiles = Number.isFinite(options?.maxFiles) ? Math.max(1, Math.floor(Number(options?.maxFiles))) : 8;
+    const maxCharsPerFile = Number.isFinite(options?.maxCharsPerFile) ? Math.max(256, Math.floor(Number(options?.maxCharsPerFile))) : 12000;
+    let loadedFiles = 0;
 
     for (const pattern of patterns) {
         if (!pattern || typeof pattern !== 'string') continue;
@@ -791,10 +831,20 @@ async function loadContextFilesBlock(
             const files = await glob(pattern, { cwd: workspaceRoot, nodir: true, absolute: true });
             if (!Array.isArray(files)) continue;
             for (const fullPath of files) {
+                if (loadedFiles >= maxFiles) {
+                    log(`[AI Agent] ${label} context file limit reached (${maxFiles}). Remaining matches skipped.\n`, 'stderr');
+                    return aggregated;
+                }
                 const relativePath = path.relative(workspaceRoot, fullPath);
                 try {
                     const content = fs.readFileSync(fullPath, 'utf-8');
-                    aggregated += `\n--- ${label}: ${relativePath} ---\n${content}\n`;
+                    const boundedContent = truncateForPromptBudget(
+                        content,
+                        maxCharsPerFile,
+                        `\n[TRUNCATED ${label}: ${relativePath}]`
+                    );
+                    aggregated += `\n--- ${label}: ${relativePath} ---\n${boundedContent}\n`;
+                    loadedFiles += 1;
                 } catch (readErr: any) {
                     log(`! Error reading ${relativePath}: ${readErr.message}\n`, 'stderr');
                 }
@@ -804,6 +854,41 @@ async function loadContextFilesBlock(
         }
     }
     return aggregated;
+}
+
+export function resolveAiPromptBudgetConfig(): AiPromptBudgetConfig {
+    const cfg = vscode.workspace.getConfiguration('intentRouter');
+    return {
+        maxPromptChars: sanitizePositiveInt(cfg.get<number>('ai.prompt.maxChars', 120000), 120000, 4096),
+        maxContextFiles: sanitizePositiveInt(cfg.get<number>('ai.context.maxFiles', 8), 8, 1),
+        maxContextFileChars: sanitizePositiveInt(cfg.get<number>('ai.context.maxFileChars', 12000), 12000, 256),
+        maxSpecFiles: sanitizePositiveInt(cfg.get<number>('ai.spec.maxFiles', 4), 4, 1),
+        maxSpecFileChars: sanitizePositiveInt(cfg.get<number>('ai.spec.maxFileChars', 8000), 8000, 256)
+    };
+}
+
+export function truncateForPromptBudget(input: string, maxCharsRaw: number, notice: string): string {
+    const text = String(input || '');
+    const maxChars = sanitizePositiveInt(maxCharsRaw, 0, 0);
+    if (maxChars <= 0 || text.length <= maxChars) {
+        return maxChars <= 0 ? '' : text;
+    }
+    const suffix = String(notice || '').trim();
+    if (!suffix) {
+        return text.slice(0, maxChars);
+    }
+    if (suffix.length >= maxChars) {
+        return suffix.slice(0, maxChars);
+    }
+    return `${text.slice(0, Math.max(0, maxChars - suffix.length - 1)).trimEnd()}\n${suffix}`;
+}
+
+function sanitizePositiveInt(value: any, fallback: number, min: number): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return fallback;
+    }
+    return Math.max(min, Math.floor(numeric));
 }
 
 function normalizeAgentProvider(agent: string): 'gemini' | 'codex' {
@@ -832,7 +917,79 @@ function resolveAiWorkingDirectory(
         log(`[AI Agent] cwd "${rawCandidate}" is outside workspace; fallback to workspace root.\n`, 'stderr');
         return baseRoot;
     }
+    try {
+        if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+            log(`[AI Agent] cwd "${rawCandidate}" does not exist or is not a directory; fallback to workspace root.\n`, 'stderr');
+            return baseRoot;
+        }
+    } catch {
+        log(`[AI Agent] cwd "${rawCandidate}" cannot be inspected; fallback to workspace root.\n`, 'stderr');
+        return baseRoot;
+    }
     return resolved;
+}
+
+function resolveWindowsShellExecutable(env: NodeJS.ProcessEnv): string {
+    const candidates = [
+        env.ComSpec,
+        env.comspec,
+        env.SystemRoot ? path.join(env.SystemRoot, 'System32', 'cmd.exe') : '',
+        env.WINDIR ? path.join(env.WINDIR, 'System32', 'cmd.exe') : '',
+        'C:\\Windows\\System32\\cmd.exe',
+        'C:\\WINDOWS\\system32\\cmd.exe'
+    ].map((candidate) => String(candidate || '').trim()).filter(Boolean);
+
+    for (const candidate of candidates) {
+        try {
+            if (fs.existsSync(candidate)) {
+                return candidate;
+            }
+        } catch {
+            // Keep trying candidates.
+        }
+    }
+
+    return candidates[0] || 'cmd.exe';
+}
+
+function withWindowsAiSpawnEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    if (process.platform !== 'win32') {
+        return env;
+    }
+
+    const next: NodeJS.ProcessEnv = { ...env };
+    const systemRoot = String(next.SystemRoot || next.WINDIR || 'C:\\Windows').trim();
+    const windir = String(next.WINDIR || systemRoot).trim();
+    const system32 = path.join(systemRoot, 'System32');
+    const shell = resolveWindowsShellExecutable({ ...next, SystemRoot: systemRoot, WINDIR: windir });
+    const currentPath = String(next.Path || next.PATH || '').trim();
+    const pathParts = currentPath
+        ? currentPath.split(';').map((entry) => entry.trim()).filter(Boolean)
+        : [];
+    const hasSystem32 = pathParts.some((entry) => entry.toLowerCase() === system32.toLowerCase());
+    const patchedPath = hasSystem32 ? pathParts.join(';') : [system32, ...pathParts].join(';');
+
+    next.SystemRoot = systemRoot;
+    next.WINDIR = windir;
+    next.ComSpec = shell;
+    next.Path = patchedPath;
+    next.PATH = patchedPath;
+
+    return next;
+}
+
+function buildAiSpawnOptions(cwd: string, env: NodeJS.ProcessEnv): cp.SpawnOptions {
+    if (process.platform !== 'win32') {
+        return { cwd, env };
+    }
+
+    const patchedEnv = withWindowsAiSpawnEnvironment(env);
+    return {
+        cwd,
+        env: patchedEnv,
+        shell: resolveWindowsShellExecutable(patchedEnv),
+        windowsHide: true
+    };
 }
 
 function hasReasoningEffortFlag(args: string[]): boolean {

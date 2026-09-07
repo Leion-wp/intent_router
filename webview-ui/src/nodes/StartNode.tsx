@@ -79,7 +79,7 @@ const StartNode = ({ data, id }: NodeProps) => {
         </div>
       </div>
 
-      <Handle type="source" position={Position.Right} id="success" style={handleStyle} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '24px' }} />
     </div>
   );
 };

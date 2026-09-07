@@ -21,6 +21,7 @@ type ChromeControlsPanelProps = {
   runPipelineFromHere: (nodeId: string, dryRun?: boolean) => void;
   resetRuntimeUiState: () => void;
   setChromeOpacity: (value: number) => void;
+  onHide?: () => void;
 };
 
 function ChromeControlsPanel(props: ChromeControlsPanelProps) {
@@ -44,7 +45,8 @@ function ChromeControlsPanel(props: ChromeControlsPanelProps) {
     selectedNodeId,
     runPipelineFromHere,
     resetRuntimeUiState,
-    setChromeOpacity
+    setChromeOpacity,
+    onHide
   } = props;
 
   return (
@@ -64,7 +66,7 @@ function ChromeControlsPanel(props: ChromeControlsPanelProps) {
         backdropFilter: 'var(--ir-glass-blur)',
         border: '1px solid var(--ir-glass-border)',
         opacity: chromeOpacity,
-        width: chromeCollapsed ? '260px' : '820px',
+        width: chromeCollapsed ? '300px' : '820px',
         maxWidth: 'calc(100vw - 40px)',
         boxSizing: 'border-box',
         boxShadow: 'var(--ir-glass-shadow)',
@@ -134,6 +136,35 @@ function ChromeControlsPanel(props: ChromeControlsPanelProps) {
           >
             {chromeCollapsed ? 'Expand' : 'Collapse'}
           </button>
+          {onHide && (
+            <button
+              type="button"
+              className="nodrag"
+              onClick={onHide}
+              aria-label="Hide controls panel completely"
+              style={{ 
+                background: 'rgba(255, 60, 60, 0.2)', 
+                color: '#fff', 
+                border: '1px solid rgba(255, 60, 60, 0.4)', 
+                borderRadius: '6px', 
+                padding: '4px 8px', 
+                cursor: 'pointer', 
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease'
+              }}
+              title="Hide panel completely"
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 60, 60, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 60, 60, 0.2)';
+              }}
+            >
+              <span className="codicon codicon-close" style={{ fontSize: '12px' }}></span>
+            </button>
+          )}
         </div>
       </div>
 

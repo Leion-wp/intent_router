@@ -62,14 +62,14 @@ const IfElseNode = ({ data, id }: NodeProps) => {
 
   return (
     <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '300px' }}>
-      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-6px', background: themeColor }} />
-      <Handle type="source" position={Position.Right} id="true" style={{ ...handleStyle, top: '38%', right: '-6px', background: '#4caf50' }} />
-      <Handle type="source" position={Position.Right} id="false" style={{ ...handleStyle, top: '72%', right: '-6px', background: '#f44336' }} />
+      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-6px', top: '24px', background: themeColor }} />
+      <Handle type="source" position={Position.Right} id="true" style={{ ...handleStyle, top: '24px', right: '-6px', background: '#4caf50' }} />
+      <Handle type="source" position={Position.Right} id="false" style={{ ...handleStyle, top: '64px', right: '-6px', background: '#f44336' }} />
 
-      <div style={{ position: 'absolute', right: '12px', top: '38%', transform: 'translateY(-50%)', fontSize: '10px', fontWeight: 700, opacity: 0.55, pointerEvents: 'none', textTransform: 'uppercase' }}>
+      <div style={{ position: 'absolute', right: '12px', top: '24px', transform: 'translateY(-50%)', fontSize: '10px', fontWeight: 700, opacity: 0.55, pointerEvents: 'none', textTransform: 'uppercase' }}>
         true
       </div>
-      <div style={{ position: 'absolute', right: '12px', top: '72%', transform: 'translateY(-50%)', fontSize: '10px', fontWeight: 700, opacity: 0.55, pointerEvents: 'none', textTransform: 'uppercase' }}>
+      <div style={{ position: 'absolute', right: '12px', top: '64px', transform: 'translateY(-50%)', fontSize: '10px', fontWeight: 700, opacity: 0.55, pointerEvents: 'none', textTransform: 'uppercase' }}>
         false
       </div>
 

@@ -91,6 +91,7 @@ export type WebviewInboundMessage =
     }
   | { type: 'historyUpdate'; history: PipelineRun[] }
   | { type: 'environmentUpdate'; environment: Record<string, string> }
+  | { type: 'aiSettingsUpdate'; aiSettings: { geminiModels?: string[]; codexModels?: string[] } }
   | { type: 'customNodesUpdate'; nodes: Array<any> }
   | { type: 'customNodesExported'; scope: 'one' | 'all'; id?: string; json: string }
   | { type: 'customNodesImported'; imported: Array<any>; renames: Record<string, string>; total: number }

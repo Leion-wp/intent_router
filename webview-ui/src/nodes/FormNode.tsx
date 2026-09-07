@@ -51,11 +51,8 @@ const FormNode = ({ data, id }: NodeProps) => {
   const borderColor = STATUS_COLORS[status as keyof typeof STATUS_COLORS] || STATUS_COLORS.idle;
   const inputHandles = ['in', ...fields.map((field) => String(field.key || field.label || 'field').trim()).filter((name) => name.length > 0)];
   const handleTop = (index: number, total: number) => {
-    if (total <= 1) return '50%';
-    const min = 22;
-    const max = 84;
-    const value = min + ((max - min) * index) / (total - 1);
-    return `${value}%`;
+    if (total <= 1) return '24px';
+    return `${24 + index * 40}px`;
   };
 
   const updateField = (index: number, patch: Partial<FormField>) => {
@@ -101,8 +98,8 @@ const FormNode = ({ data, id }: NodeProps) => {
           />
         </div>
       ))}
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-6px', background: themeColor }} />
-      <Handle type="source" position={Position.Right} id="out_values" style={{ ...handleStyle, top: '76%', right: '-6px', background: '#ff9800' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '24px', right: '-6px', background: themeColor }} />
+      <Handle type="source" position={Position.Right} id="out_values" style={{ ...handleStyle, top: '64px', right: '-6px', background: '#ff9800' }} />
 
       <div>
         <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}15 0%, transparent 100%)` }}>

@@ -61,13 +61,13 @@ const LoopNode = ({ data, id }: NodeProps) => {
 
   return (
     <div className={`glass-node ${isRunning ? 'running' : ''}`} style={{ minWidth: '330px' }}>
-      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-6px', background: themeColor }} />
-      <Handle type="source" position={Position.Right} id="body" style={{ ...handleStyle, top: '28%', right: '-6px', background: '#4fc3f7' }} />
-      <Handle type="source" position={Position.Right} id="done" style={{ ...handleStyle, top: '56%', right: '-6px', background: '#4caf50' }} />
-      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '84%', right: '-6px', background: '#f44336' }} />
-      <div style={{ position: 'absolute', right: '12px', top: '28%', transform: 'translateY(-50%)', fontSize: '10px', fontWeight: 700, opacity: 0.55, pointerEvents: 'none', textTransform: 'uppercase' }}>body</div>
-      <div style={{ position: 'absolute', right: '12px', top: '56%', transform: 'translateY(-50%)', fontSize: '10px', fontWeight: 700, opacity: 0.55, pointerEvents: 'none', textTransform: 'uppercase' }}>done</div>
-      <div style={{ position: 'absolute', right: '12px', top: '84%', transform: 'translateY(-50%)', fontSize: '10px', fontWeight: 700, opacity: 0.55, pointerEvents: 'none', textTransform: 'uppercase' }}>failure</div>
+      <Handle type="target" position={Position.Left} id="in" style={{ ...handleStyle, left: '-6px', top: '24px', background: themeColor }} />
+      <Handle type="source" position={Position.Right} id="body" style={{ ...handleStyle, top: '24px', right: '-6px', background: '#4fc3f7' }} />
+      <Handle type="source" position={Position.Right} id="done" style={{ ...handleStyle, top: '64px', right: '-6px', background: '#4caf50' }} />
+      <Handle type="source" position={Position.Right} id="failure" style={{ ...handleStyle, top: '104px', right: '-6px', background: '#f44336' }} />
+      <div style={{ position: 'absolute', right: '12px', top: '24px', transform: 'translateY(-50%)', fontSize: '10px', fontWeight: 700, opacity: 0.55, pointerEvents: 'none', textTransform: 'uppercase' }}>body</div>
+      <div style={{ position: 'absolute', right: '12px', top: '64px', transform: 'translateY(-50%)', fontSize: '10px', fontWeight: 700, opacity: 0.55, pointerEvents: 'none', textTransform: 'uppercase' }}>done</div>
+      <div style={{ position: 'absolute', right: '12px', top: '104px', transform: 'translateY(-50%)', fontSize: '10px', fontWeight: 700, opacity: 0.55, pointerEvents: 'none', textTransform: 'uppercase' }}>failure</div>
 
       <div className="glass-node-header" style={{ background: `linear-gradient(90deg, ${themeColor}22 0%, transparent 100%)` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>

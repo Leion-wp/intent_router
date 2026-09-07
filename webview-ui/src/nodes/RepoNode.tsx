@@ -21,11 +21,8 @@ const RepoNode = ({ data, id }: NodeProps) => {
   const collapsed = !!data.collapsed;
   const inputHandles = ['in', 'path'];
   const handleTop = (index: number, total: number) => {
-    if (total <= 1) return '50%';
-    const min = 32;
-    const max = 68;
-    const value = min + ((max - min) * index) / (total - 1);
-    return `${value}%`;
+    if (total <= 1) return '24px';
+    return `${24 + index * 40}px`;
   };
 
   // Sync from external updates (e.g. drawer edits)
@@ -104,8 +101,8 @@ const RepoNode = ({ data, id }: NodeProps) => {
           />
         </div>
       ))}
-      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '50%', right: '-5px', background: '#5c6bc0' }} />
-      <Handle type="source" position={Position.Right} id="out_path" style={{ ...handleStyle, top: '72%', right: '-5px', background: '#8bc34a' }} />
+      <Handle type="source" position={Position.Right} id="success" style={{ ...handleStyle, top: '24px', right: '-5px', background: '#5c6bc0' }} />
+      <Handle type="source" position={Position.Right} id="out_path" style={{ ...handleStyle, top: '64px', right: '-5px', background: '#8bc34a' }} />
 
       <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
         <div style={{ 
