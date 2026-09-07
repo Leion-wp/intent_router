@@ -6,6 +6,7 @@ name: factory-stalled-reconciler-v1
     - cron: '*/5 * * * *'
 
 permissions:
+  actions: write
   contents: read
   issues: write
   pull-requests: read
@@ -103,6 +104,18 @@ jobs:
           echo "inspected=$inspected" >> "$GITHUB_OUTPUT"
           echo "reconciled=$reconciled" >> "$GITHUB_OUTPUT"
 
+      - name: Reconcile Quality risk immediately after stalled recovery
+        if: steps.reconcile.outputs.reconciled != '0'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-quality-risk-reconciler.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref Android
+          echo 'STALLED_RECOVERY_HANDOFF: Quality Risk reconciler dispatched.'
+
       - name: Summary
         shell: bash
         env:
@@ -118,4 +131,5 @@ jobs:
             echo '- Otherwise: leave factory:stalled unchanged.'
             echo '- Correlation: explicit issue reference first, persisted Jules session ID in PR branch as fallback.'
             echo '- Multiple correlated open PRs are treated as a control-plane anomaly and remain fail-closed.'
+            echo '- Successful recovery hands off immediately to Quality Risk; cron remains recovery-only.'
           } >> "$GITHUB_STEP_SUMMARY"
