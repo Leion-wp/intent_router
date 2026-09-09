@@ -2,7 +2,7 @@ name: factory-fleet-events-v2
 
 "on":
   repository_dispatch:
-    types: [factory-quality-verdict, factory-ci-completed, factory-pr-active, factory-pr-merged, factory-queue-updated]
+    types: [factory-quality-verdict, factory-ci-completed, factory-pr-active, factory-pr-merged, factory-queue-updated, factory-product-proposal]
   workflow_dispatch:
     inputs:
       repository:
@@ -20,6 +20,7 @@ name: factory-fleet-events-v2
           - factory-pr-active
           - factory-pr-merged
           - factory-queue-updated
+          - factory-product-proposal
 
 permissions:
   actions: write
@@ -44,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$EVENT_TYPE" in
-            factory-quality-verdict|factory-ci-completed|factory-pr-active|factory-pr-merged|factory-queue-updated) ;;
+            factory-quality-verdict|factory-ci-completed|factory-pr-active|factory-pr-merged|factory-queue-updated|factory-product-proposal) ;;
             *) echo 'Unsupported factory event type.' >&2; exit 1 ;;
           esac
           test -n "$FLEET_TOKEN"
@@ -139,6 +140,28 @@ jobs:
             -f execute=true -f dispatch_only=true
           echo 'EVENT_ROUTE: factory-queue-updated -> scheduler dispatch_only.'
 
+      - name: Validate Product Brain proposal signal
+        if: env.EVENT_TYPE == 'factory-product-proposal'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GH_TOKEN="$FLEET_TOKEN"
+          proposals="$(gh issue list --repo "$TARGET_REPO" --state open --label 'factory:brain-proposal' --limit 100 --json number --jq 'length')"
+          [ "$proposals" -ge 1 ] || { echo 'PRODUCT_PROPOSAL_EVENT_NOOP: no persisted factory:brain-proposal exists.'; exit 0; }
+          echo "PRODUCT_PROPOSAL_EVENT_VALID: ${TARGET_REPO} has ${proposals} open proposal(s); Product Brain will enforce uniqueness/preconditions."
+
+      - name: Run Product Brain on persisted proposal
+        if: env.EVENT_TYPE == 'factory-product-proposal'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-product-brain.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android \
+            -f execute=true
+          echo 'EVENT_ROUTE: factory-product-proposal -> Product Brain.'
+
       - name: Summary
         shell: bash
         run: |
@@ -147,7 +170,7 @@ jobs:
             echo "- Repository: ${TARGET_REPO}"
             echo "- Persisted event: ${EVENT_TYPE}"
             echo '- Events route directly to the transition owner; the receiver does not restart the full reconciliation loop.'
-            echo '- CI -> CI rework + native Quality; Quality verdict -> same-session Quality rework + risk; merge -> completion; queue -> dispatch_only.'
+            echo '- CI -> CI rework + native Quality; Quality verdict -> same-session Quality rework + risk; merge -> completion; queue -> dispatch_only; product proposal -> Product Brain.'
             echo '- Event payloads are wake-up hints only. Every successor re-reads canonical GitHub state and remains fail-closed.'
-            echo '- Cron/manual full scheduler remains a recovery scan, not the nominal event path.'
+            echo '- Cron/manual scans remain recovery paths, not nominal dependencies.'
           } >> "$GITHUB_STEP_SUMMARY"
