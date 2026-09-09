@@ -14,11 +14,24 @@ SPEC.loader.exec_module(legacy)
 
 
 class ParallelPipelineTests(legacy.PipelineTests):
+    def setUp(self):
+        super().setUp()
+        state = self.get()
+        state["profile"]["worker_policy"] = {
+            "enabled": ["jules", "chatgpt"],
+            "preferred": "jules",
+        }
+        self.put(state)
+
     def test_negative_stale_unclassified_and_denied_risk_hold_lock(self):
         """A bad task holds its own identity, not the whole Jules pool."""
         for change in ["REWORK", "BLOCK", "stale", "unclassified", "denied", "ci_failure"]:
             with self.subTest(change=change):
                 state = legacy.fixture()
+                state["profile"]["worker_policy"] = {
+                    "enabled": ["jules", "chatgpt"],
+                    "preferred": "jules",
+                }
                 comment = state["issues"]["17"]["comments"][1]
                 if change in ("REWORK", "BLOCK"):
                     comment["body"] = comment["body"].replace("PASS", change)
@@ -54,6 +67,10 @@ class ParallelPipelineTests(legacy.PipelineTests):
     def test_dispatch_only_fills_pool_without_exceeding_capacity(self):
         """One active identity plus excess queue fills exactly the 14 free Jules slots."""
         state = legacy.fixture()
+        state["profile"]["worker_policy"] = {
+            "enabled": ["jules", "chatgpt"],
+            "preferred": "jules",
+        }
         for number in range(18, 38):
             state["issues"][str(number)] = {
                 "number": number,
@@ -87,6 +104,10 @@ class ParallelPipelineTests(legacy.PipelineTests):
     def test_jules_scheduler_does_not_claim_chatgpt_routed_queue(self):
         """Explicit ChatGPT routing removes a queued task from Jules candidate selection."""
         state = legacy.fixture()
+        state["profile"]["worker_policy"] = {
+            "enabled": ["jules", "chatgpt"],
+            "preferred": "jules",
+        }
         state["issues"]["18"]["labels"].append({"name": "factory:agent:chatgpt"})
         state["issues"]["19"] = {
             "number": 19,
@@ -111,6 +132,10 @@ class ParallelPipelineTests(legacy.PipelineTests):
     def test_chatgpt_identity_uses_shared_quality_merge_and_completion(self):
         """A persisted ChatGPT identity follows the same deterministic downstream gates."""
         state = legacy.fixture()
+        state["profile"]["worker_policy"] = {
+            "enabled": ["jules", "chatgpt"],
+            "preferred": "jules",
+        }
         state["issues"]["17"]["labels"].append({"name": "factory:agent:chatgpt"})
         state["issues"]["17"]["comments"][0] = {
             "body": "<!-- roots-chatgpt-worker task_id=Leion-wp/product#17 branch=chatgpt-17 pr=21 -->"
