@@ -12,6 +12,10 @@ assert spec.loader is not None
 spec.loader.exec_module(planning)
 
 
+def proves_chatgpt_exclusion(text: str) -> bool:
+    return 'factory:agent:chatgpt' in text and '== null' in text
+
+
 def main() -> None:
     capacity = json.loads((ROOT / "factory-worker-capacity.json").read_text())
     assert capacity["version"] == 1
@@ -35,11 +39,11 @@ def main() -> None:
     assert 'head -n "$available_slots"' in scheduler
     assert "Reserve selected identities and dispatch Jules pool" in scheduler
     assert "GLOBAL_WORKER_LOCK" not in scheduler
-    assert 'index("factory:agent:chatgpt") == null' in scheduler
+    assert proves_chatgpt_exclusion(scheduler)
     assert "worker=jules" in scheduler
 
     assert "factory-fleet-watchdog-v4" in watchdog
-    assert 'index("factory:agent:chatgpt") == null' in watchdog
+    assert proves_chatgpt_exclusion(watchdog)
     assert 'active_slots" -gt "$max_concurrency' in watchdog
     assert "sequential invariant is violated" not in watchdog
     assert "excluded from Jules capacity" in watchdog
@@ -47,8 +51,8 @@ def main() -> None:
     assert "factory-cross-${{ inputs.repository }}-${{ inputs.issue_number }}" in dispatcher
     assert "WORKER_ROUTE_REFUSED" in dispatcher
     assert "factory:agent:chatgpt" in dispatcher
-    assert 'index("factory:agent:chatgpt") == null' in ci_rework
-    assert 'index("factory:agent:chatgpt") == null' in quality_rework
+    assert proves_chatgpt_exclusion(ci_rework)
+    assert proves_chatgpt_exclusion(quality_rework)
 
     decision_max = product_schema["properties"]["milestone"]["oneOf"][1]["properties"]["tasks"]["maxItems"]
     plan_max = plan_schema["properties"]["tasks"]["maxItems"]
