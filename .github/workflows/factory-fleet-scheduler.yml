@@ -1,15 +1,15 @@
-name: factory-fleet-scheduler-v2
+name: factory-fleet-scheduler-v3
 
 "on":
   workflow_dispatch:
     inputs:
       execute:
-        description: 'Dispatch one eligible issue across the managed fleet'
+        description: 'Dispatch eligible issues up to available worker capacity'
         required: true
         default: false
         type: boolean
       dispatch_only:
-        description: 'Completion handoff: select the next issue without restarting reconciliation'
+        description: 'Event handoff: select eligible work without restarting reconciliation'
         required: true
         default: false
         type: boolean
@@ -27,12 +27,13 @@ concurrency:
 jobs:
   schedule:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
       CONTROL_TOKEN: ${{ github.token }}
       OWNER: ${{ github.repository_owner }}
       EXECUTE: ${{ github.event_name == 'schedule' || inputs.execute }}
+      CAPACITY_FILE: .github/roots/factory-worker-capacity.json
     steps:
       - uses: actions/checkout@v4
 
@@ -53,19 +54,26 @@ jobs:
           GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-quality-risk-reconciler.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref Android
-          echo 'QUALITY_RISK_DISPATCHED: reconciliation owns the handoff to auto-merge; completion will request dispatch_only.'
+          echo 'QUALITY_RISK_DISPATCHED: reconciliation owns the handoff to auto-merge.'
 
-      - name: Discover oldest eligible issue and reconcile dispatch acknowledgements
-        id: candidate
-        if: inputs.dispatch_only == true || env.EXECUTE != 'true'
+      - name: Discover eligible issues and available Jules slots
+        id: candidates
         shell: bash
         run: |
           set -euo pipefail
           test -n "$FLEET_TOKEN"
+          test -f "$CAPACITY_FILE"
           echo "::add-mask::$FLEET_TOKEN"
           export GH_TOKEN="$FLEET_TOKEN"
           authenticated_login="$(gh api user --jq '.login')"
           test "$authenticated_login" = "$OWNER"
+
+          max_concurrency="$(jq -r '.workers.jules.max_concurrency' "$CAPACITY_FILE")"
+          if ! [[ "$max_concurrency" =~ ^[0-9]+$ ]] || [ "$max_concurrency" -lt 1 ] || [ "$max_concurrency" -gt 15 ]; then
+            echo "CONTROL_PLANE_ANOMALY: invalid Jules max_concurrency=${max_concurrency}; expected 1..15." >&2
+            exit 1
+          fi
+
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
           : > candidates.tsv
@@ -76,10 +84,11 @@ jobs:
             if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
               continue
             fi
-            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null || continue
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1" and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
             echo "$repo" >> managed-repos.txt
 
             while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
               comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
               if jq -e --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '.[] | select((.body // "") | contains($prefix))' <<< "$comments" >/dev/null; then
                 if [ "$EXECUTE" = 'true' ]; then
@@ -101,25 +110,30 @@ jobs:
             done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq '.[].number')
           done < repos.txt
 
-          active=0
+          active_slots=0
+          escalated_identities=0
           while IFS= read -r repo; do
             [ -z "$repo" ] && continue
-            dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 1 --json number --jq 'length')"
-            dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 1 --json number --jq 'length')"
-            escalated="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 1 --json number --jq 'length')"
-            if [ "$dispatching" -gt 0 ] || [ "$dispatched" -gt 0 ] || [ "$escalated" -gt 0 ]; then
-              active=1
-              echo "GLOBAL_WORKER_LOCK: active or escalated task identity exists in ${repo}; no new dispatch this run."
-              break
-            fi
+            dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
+            dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
+            escalated="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq 'length')"
+            active_slots="$((active_slots + dispatching + dispatched))"
+            escalated_identities="$((escalated_identities + escalated))"
           done < managed-repos.txt
 
-          if [ "$active" -eq 1 ]; then
-            echo 'repository=' >> "$GITHUB_OUTPUT"
-            echo 'issue_number=' >> "$GITHUB_OUTPUT"
-            echo 'global_lock=true' >> "$GITHUB_OUTPUT"
+          if [ "$active_slots" -gt "$max_concurrency" ]; then
+            echo "CONTROL_PLANE_ANOMALY: Jules active slots ${active_slots} exceed configured capacity ${max_concurrency}; fail closed." >&2
+            echo "capacity=${max_concurrency}" >> "$GITHUB_OUTPUT"
+            echo "active_slots=${active_slots}" >> "$GITHUB_OUTPUT"
+            echo 'available_slots=0' >> "$GITHUB_OUTPUT"
+            echo 'selected_count=0' >> "$GITHUB_OUTPUT"
+            echo "escalated_identities=${escalated_identities}" >> "$GITHUB_OUTPUT"
+            echo 'capacity_violation=true' >> "$GITHUB_OUTPUT"
+            : > selected.tsv
             exit 0
           fi
+
+          available_slots="$((max_concurrency - active_slots))"
 
           while IFS= read -r repo; do
             [ -z "$repo" ] && continue
@@ -129,8 +143,9 @@ jobs:
               issue="$(jq -r '.number' <<< "$row")"
               body="$(jq -r '.body // ""' <<< "$row")"
               created="$(jq -r '.createdAt' <<< "$row")"
-              gh pr list --repo "$repo" --state open --search "#${issue}" --json body,baseRefName > /tmp/prs.json
               branch="$(jq -r '.default_branch' /tmp/profile.json)"
+
+              gh pr list --repo "$repo" --state open --search "#${issue}" --json body,baseRefName > /tmp/prs.json
               linked="$(jq --argjson issue "$issue" --arg branch "$branch" '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))] | length' /tmp/prs.json)"
               [ "$linked" -gt 0 ] && continue
 
@@ -149,58 +164,89 @@ jobs:
             done
           done < managed-repos.txt
 
-          echo 'global_lock=false' >> "$GITHUB_OUTPUT"
-          if [ ! -s candidates.tsv ]; then
-            echo 'repository=' >> "$GITHUB_OUTPUT"
-            echo 'issue_number=' >> "$GITHUB_OUTPUT"
-            exit 0
+          : > selected.tsv
+          if [ "$available_slots" -gt 0 ] && [ -s candidates.tsv ]; then
+            sort candidates.tsv | head -n "$available_slots" > selected.tsv
           fi
-          sort candidates.tsv | head -n 1 > selected.tsv
-          echo "repository=$(cut -f2 selected.tsv)" >> "$GITHUB_OUTPUT"
-          echo "issue_number=$(cut -f3 selected.tsv)" >> "$GITHUB_OUTPUT"
+          selected_count="$(wc -l < selected.tsv | tr -d ' ')"
 
-      - name: Enter acknowledged dispatching state and trigger dispatcher
-        if: steps.candidate.outputs.repository != '' && env.EXECUTE == 'true'
+          echo "capacity=${max_concurrency}" >> "$GITHUB_OUTPUT"
+          echo "active_slots=${active_slots}" >> "$GITHUB_OUTPUT"
+          echo "available_slots=${available_slots}" >> "$GITHUB_OUTPUT"
+          echo "selected_count=${selected_count}" >> "$GITHUB_OUTPUT"
+          echo "escalated_identities=${escalated_identities}" >> "$GITHUB_OUTPUT"
+          echo 'capacity_violation=false' >> "$GITHUB_OUTPUT"
+
+      - name: Reserve selected identities and dispatch Jules pool
+        if: steps.candidates.outputs.selected_count != '0' && env.EXECUTE == 'true'
         shell: bash
-        env:
-          TARGET_REPO: ${{ steps.candidate.outputs.repository }}
-          ISSUE_NUMBER: ${{ steps.candidate.outputs.issue_number }}
         run: |
           set -euo pipefail
-          marker="<!-- roots-dispatch-request issue=${ISSUE_NUMBER} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} -->"
-          GH_TOKEN="$FLEET_TOKEN" gh issue edit "$ISSUE_NUMBER" --repo "$TARGET_REPO" \
-            --remove-label 'factory:queued' --add-label 'factory:dispatching'
-          GH_TOKEN="$FLEET_TOKEN" gh api --method POST "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments" \
-            -f body="${marker}\nDispatch requested by central scheduler. State remains factory:dispatching until a worker-session marker is persisted."
+          : > reserved.tsv
+          slot=0
 
-          if ! GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-cross-repo-dispatch.yml \
-            --repo "$GITHUB_REPOSITORY" --ref Android \
-            -f repository="$TARGET_REPO" -f issue_number="$ISSUE_NUMBER" -f execute=true; then
-            GH_TOKEN="$FLEET_TOKEN" gh issue edit "$ISSUE_NUMBER" --repo "$TARGET_REPO" \
-              --remove-label 'factory:dispatching' --add-label 'factory:queued' || true
+          while IFS=$'\t' read -r _created repo issue; do
+            [ -z "$repo" ] && continue
+            labels="$(GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
+            if ! jq -e 'index("factory:queued") != null and index("factory:dispatching") == null and index("factory:dispatched") == null and index("factory:escalated") == null' <<< "$labels" >/dev/null; then
+              echo "DISPATCH_SKIPPED: ${repo}#${issue} changed state after candidate selection."
+              continue
+            fi
+            slot="$((slot + 1))"
+            marker="<!-- roots-dispatch-request issue=${issue} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} slot=${slot} -->"
+            GH_TOKEN="$FLEET_TOKEN" gh issue edit "$issue" --repo "$repo" \
+              --remove-label 'factory:queued' --add-label 'factory:dispatching'
+            GH_TOKEN="$FLEET_TOKEN" gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+              -f body="${marker}\nDispatch requested by central scheduler. This task owns one bounded Jules slot until completion; state remains factory:dispatching until the session marker is persisted."
+            printf '%s\t%s\n' "$repo" "$issue" >> reserved.tsv
+          done < selected.tsv
+
+          failures=0
+          while IFS=$'\t' read -r repo issue; do
+            [ -z "$repo" ] && continue
+            if ! GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-cross-repo-dispatch.yml \
+              --repo "$GITHUB_REPOSITORY" --ref Android \
+              -f repository="$repo" -f issue_number="$issue" -f execute=true; then
+              failures="$((failures + 1))"
+              GH_TOKEN="$FLEET_TOKEN" gh issue edit "$issue" --repo "$repo" \
+                --remove-label 'factory:dispatching' --add-label 'factory:queued' || true
+              GH_TOKEN="$FLEET_TOKEN" gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                -f body="<!-- roots-dispatch-launch-failed issue=${issue} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} -->\nCross-repo dispatch failed before a Jules session was acknowledged; the task was returned to factory:queued." >/dev/null || true
+              continue
+            fi
+            echo "JULES_SLOT_DISPATCHED: ${repo}#${issue}"
+          done < reserved.tsv
+
+          if [ "$failures" -gt 0 ]; then
+            echo "${failures} Jules dispatch request(s) failed and were returned to queue." >&2
             exit 1
           fi
 
       - name: Summary
         shell: bash
         env:
-          TARGET_REPO: ${{ steps.candidate.outputs.repository }}
-          ISSUE_NUMBER: ${{ steps.candidate.outputs.issue_number }}
-          GLOBAL_LOCK: ${{ steps.candidate.outputs.global_lock }}
+          CAPACITY: ${{ steps.candidates.outputs.capacity }}
+          ACTIVE_SLOTS: ${{ steps.candidates.outputs.active_slots }}
+          AVAILABLE_SLOTS: ${{ steps.candidates.outputs.available_slots }}
+          SELECTED_COUNT: ${{ steps.candidates.outputs.selected_count }}
+          ESCALATED_IDENTITIES: ${{ steps.candidates.outputs.escalated_identities }}
+          CAPACITY_VIOLATION: ${{ steps.candidates.outputs.capacity_violation }}
           DISPATCH_ONLY: ${{ inputs.dispatch_only }}
         run: |
           {
-            echo '### Fleet scheduler v2'
-            echo "- Candidate repository: ${TARGET_REPO:-none}"
-            echo "- Candidate issue: ${ISSUE_NUMBER:-none}"
-            echo "- Global worker lock: ${GLOBAL_LOCK:-false}"
+            echo '### Fleet scheduler v3 — bounded parallel Jules pool'
+            echo "- Jules capacity: ${CAPACITY:-unknown}"
+            echo "- Active Jules slots before dispatch: ${ACTIVE_SLOTS:-unknown}"
+            echo "- Available slots before dispatch: ${AVAILABLE_SLOTS:-unknown}"
+            echo "- Selected eligible tasks: ${SELECTED_COUNT:-0}"
+            echo "- Escalated identities (task-locked, not capacity-consuming): ${ESCALATED_IDENTITIES:-0}"
+            echo "- Capacity violation: ${CAPACITY_VIOLATION:-false}"
             echo "- Execute: ${EXECUTE}"
-            echo "- Completion handoff / dispatch only: ${DISPATCH_ONLY:-false}"
-            echo '- Primary path: scheduler -> Quality Risk -> managed auto-merge -> completion -> scheduler dispatch_only.'
-            echo '- A reconciliation request never selects work before completion; dispatch_only never restarts reconciliation.'
-            echo '- Cron only recovers missed events or interrupted handoffs.'
-            echo '- Sequential invariant: at most one open dispatching/dispatched/escalated task identity across the managed fleet.'
-            echo '- Dispatch invariant: queued -> dispatching -> persisted Jules session -> dispatched.'
-            echo '- Exhausted workers transition to escalated + human-required and continue holding the lock fail-closed.'
-            echo '- Missing acknowledgement after 20 minutes is reconciled back to queued.'
+            echo "- Dispatch only: ${DISPATCH_ONLY:-false}"
+            echo '- Capacity invariant: dispatching + dispatched identities <= configured Jules max_concurrency.'
+            echo '- Identity invariant: one issue -> one Jules session -> one branch -> one PR; rework reuses that identity.'
+            echo '- Escalated/HUMAN_REQUIRED identities remain blocked against replacement but do not consume compute capacity.'
+            echo '- Scheduler runs are globally serialized so slot reservation is atomic with respect to other scheduler runs.'
+            echo '- Cross-repo dispatcher concurrency remains scoped per repository + issue, allowing independent sessions to start in parallel.'
+            echo '- Cron is recovery/fallback; event-driven dispatch_only remains the nominal queue handoff.'
           } >> "$GITHUB_STEP_SUMMARY"
