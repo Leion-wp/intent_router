@@ -24,6 +24,7 @@ name: factory-product-event-relay
           - factory-pr-active
           - factory-pr-merged
           - factory-queue-updated
+          - factory-product-proposal
 
 # The local GITHUB_TOKEN has no cross-repository authority. This workflow never
 # checks out a PR, downloads artifacts, or executes any product/PR code.
@@ -76,6 +77,13 @@ jobs:
               ;;
             issues)
               if jq -e '
+                .issue.pull_request == null and
+                .action == "labeled" and
+                .label.name == "factory:brain-proposal" and
+                ([.issue.labels[]?.name] | index("factory:brain-proposal") != null)
+              ' "$GITHUB_EVENT_PATH" >/dev/null; then
+                event_type='factory-product-proposal'
+              elif jq -e '
                 .issue.pull_request == null and (
                   .action == "closed" or
                   (.action == "labeled" and .label.name == "factory:queued") or
@@ -93,7 +101,7 @@ jobs:
               ;;
           esac
           case "$event_type" in
-            ''|factory-quality-verdict|factory-ci-completed|factory-pr-active|factory-pr-merged|factory-queue-updated) ;;
+            ''|factory-quality-verdict|factory-ci-completed|factory-pr-active|factory-pr-merged|factory-queue-updated|factory-product-proposal) ;;
             *) echo 'Unsupported factory event type.' >&2; exit 1 ;;
           esac
           echo "event_type=$event_type" >> "$GITHUB_OUTPUT"
