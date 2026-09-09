@@ -43,6 +43,8 @@ jobs:
         run: python .github/roots/test-quality-risk-reconciler.py
       - name: Run event-driven fleet pipeline regression tests
         run: python .github/roots/test-fleet-pipeline.py
+      - name: Run completion-planning ownership regression tests
+        run: python .github/roots/test-completion-planning-handoff.py
       - name: Run Copilot Quality Gate contract tests
         run: python .github/roots/test-copilot-quality-gate.py
       - name: Run product event relay regression tests
