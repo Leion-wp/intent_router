@@ -179,7 +179,7 @@ jobs:
           echo 'capacity_violation=false' >> "$GITHUB_OUTPUT"
 
       - name: Reserve selected identities and dispatch Jules pool
-        if: steps.candidates.outputs.selected_count != '0' && env.EXECUTE == 'true'
+        if: steps.candidates.outputs.selected_count != '' && steps.candidates.outputs.selected_count != '0' && env.EXECUTE == 'true'
         shell: bash
         run: |
           set -euo pipefail
