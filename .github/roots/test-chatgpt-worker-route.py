@@ -18,19 +18,22 @@ telemetry = (WORKFLOWS / 'factory-portfolio-telemetry.yml').read_text()
 telemetry_schema = json.loads((ROOT / 'factory-portfolio-telemetry.schema.json').read_text())
 doc = (ROOT / 'factory-chatgpt-worker-v1.md').read_text()
 
+
+def proves_exclusion(text: str) -> bool:
+    return 'factory:agent:chatgpt' in text and '== null' in text
+
+
 assert capacity['workers']['jules']['max_concurrency'] == 15
 assert capacity['workers']['chatgpt']['max_concurrency'] == 1
 assert capacity['workers']['chatgpt']['selection_label'] == 'factory:agent:chatgpt'
 
 # Jules must not claim or recover a ChatGPT-routed task.
 assert 'factory-fleet-scheduler-v4' in scheduler
-assert 'factory:agent:chatgpt' in scheduler
-assert 'index("factory:agent:chatgpt") == null' in scheduler
+assert proves_exclusion(scheduler)
 assert 'WORKER_ROUTE_REFUSED' in dispatcher
-assert 'factory:agent:chatgpt' in watchdog
-assert 'index("factory:agent:chatgpt") == null' in watchdog
-assert 'index("factory:agent:chatgpt") == null' in ci_rework
-assert 'index("factory:agent:chatgpt") == null' in quality_rework
+assert proves_exclusion(watchdog)
+assert proves_exclusion(ci_rework)
+assert proves_exclusion(quality_rework)
 
 # Shared downstream stages accept one recognized worker identity and fail on conflicts.
 for workflow in (risk, automerge, completion):
