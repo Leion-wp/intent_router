@@ -61,6 +61,16 @@ class RelayTests(unittest.TestCase):
                      '$(touch /tmp/should-not-run)', None]:
             self.assertEqual(self.classify('issue_comment', {'issue': {}, 'comment': {'body': body}}), '')
 
+    def test_product_brain_proposal_label_has_dedicated_event(self):
+        payload = {
+            'action': 'labeled',
+            'label': {'name': 'factory:brain-proposal'},
+            'issue': {'labels': [{'name': 'factory:brain-proposal'}]},
+        }
+        self.assertEqual(self.classify('issues', payload), 'factory-product-proposal')
+        payload['issue']['pull_request'] = {'url': 'https://example.com/pr'}
+        self.assertEqual(self.classify('issues', payload), '')
+
     def test_queue_producers_and_blocker_resolution(self):
         for action in ['opened', 'edited', 'reopened']:
             payload = {'action': action, 'issue': {'labels': [{'name': 'factory:queued'}]}}
