@@ -44,7 +44,17 @@ jobs:
       - name: Run Quality LOW_RISK handoff contract tests
         run: python .github/roots/test-quality-risk-reconciler.py
       - name: Run event-driven fleet pipeline regression tests
-        run: python .github/roots/test-fleet-pipeline.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python .github/roots/test-fleet-pipeline.py 2>&1 | tee /tmp/fleet-pipeline.log
+      - name: Upload fleet pipeline diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleet-pipeline-diagnostics
+          path: /tmp/fleet-pipeline.log
+          if-no-files-found: error
       - name: Run completion-planning ownership regression tests
         run: python .github/roots/test-completion-planning-handoff.py
       - name: Run Copilot Quality Gate contract tests
