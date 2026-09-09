@@ -102,19 +102,13 @@ jobs:
           echo "completed=$completed" >> "$GITHUB_OUTPUT"
           echo "Reconciled completed tasks: $completed"
 
-      - name: Reconcile deterministic planning immediately
+      - name: Reconcile deterministic planning and let it own queue dispatch
         shell: bash
         run: |
           set -euo pipefail
           GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-autonomous-planning.yml \
             --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
-
-      - name: Dispatch next eligible issue
-        shell: bash
-        run: |
-          set -euo pipefail
-          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-fleet-scheduler.yml \
-            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true -f dispatch_only=true
+          echo 'COMPLETION_HANDOFF: planning dispatched; planner owns materialization then dispatch_only.'
 
       - name: Summary
         shell: bash
@@ -125,8 +119,9 @@ jobs:
             echo '### Fleet completion reconciler'
             echo "- Completed issues reconciled: ${COMPLETED:-0}"
             echo '- Candidates: dispatched tasks plus unlabeled recovery tasks; explicit blocked/human/stalled/escalated/done states are excluded.'
-            echo '- Rule: merged linked PR -> close issue -> deterministic planner -> scheduler.'
-            echo '- Planner owns milestone close, next milestone materialization and its own scheduler handoff; direct scheduler remains an idempotent wake-up for existing queued work.'
+            echo '- Rule: merged linked PR -> close issue -> deterministic planner.'
+            echo '- Planner owns milestone close, next milestone materialization and scheduler dispatch_only after the queue exists.'
+            echo '- Completion never races the planner by dispatching the scheduler before planning has finished.'
             echo '- Already auto-closed tasks and partial transitions are reconciled idempotently.'
             echo '- Correlation: explicit issue reference first, persisted Jules session ID in PR branch as fallback.'
           } >> "$GITHUB_STEP_SUMMARY"
