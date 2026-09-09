@@ -4,7 +4,7 @@ name: factory-autonomous-planning-v1
   workflow_dispatch:
     inputs:
       execute:
-        description: 'Apply planning mutations and hand off to the scheduler'
+        description: 'Apply planning mutations and hand off queued work to dispatch_only'
         required: true
         default: true
         type: boolean
@@ -230,7 +230,8 @@ jobs:
         run: |
           set -euo pipefail
           GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-fleet-scheduler.yml \
-            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
+            --repo "$GITHUB_REPOSITORY" --ref Android \
+            -f execute=true -f dispatch_only=true
 
       - name: Summary
         shell: bash
@@ -248,6 +249,7 @@ jobs:
             echo "- Issues created: ${ISSUES:-0}"
             echo "- Anomalies blocked: ${ANOMALIES:-0}"
             echo "- Scheduler handoff required: ${NEEDS_SCHEDULE:-0}"
-            echo '- State machine: milestone reconcile -> validated next plan -> issue graph -> one-task scheduler handoff.'
+            echo '- State machine: milestone reconcile -> validated next plan -> issue graph -> scheduler dispatch_only.'
+            echo '- Planning never restarts Quality/rework/merge reconciliation when its output is only newly queued work.'
             echo '- Human-owned boundaries remain credentials, permissions, workflows/policy, real-money authority and production deployment.'
           } >> "$GITHUB_STEP_SUMMARY"
