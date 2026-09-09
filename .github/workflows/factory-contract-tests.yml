@@ -53,7 +53,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fleet-pipeline-diagnostics
-          path: /tmp/fleet-pipeline.log
+          path: |
+            /tmp/fleet-pipeline.log
+            .github/roots/test-fleet-pipeline.py
           if-no-files-found: error
       - name: Run completion-planning ownership regression tests
         run: python .github/roots/test-completion-planning-handoff.py
