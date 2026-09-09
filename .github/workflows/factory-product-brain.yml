@@ -331,13 +331,14 @@ jobs:
           echo "issues_created=$issues_created" >> "$GITHUB_OUTPUT"
           echo "needs_schedule=$needs_schedule" >> "$GITHUB_OUTPUT"
 
-      - name: Hand validated work to the execution fleet
+      - name: Hand validated work directly to dispatch selection
         if: steps.brain.outputs.needs_schedule == '1' && env.EXECUTE == 'true'
         shell: bash
         run: |
           set -euo pipefail
           GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-fleet-scheduler.yml \
-            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
+            --repo "$GITHUB_REPOSITORY" --ref Android \
+            -f execute=true -f dispatch_only=true
 
       - name: Summary
         shell: bash
@@ -356,5 +357,6 @@ jobs:
             echo "- Milestones reconciled closed: ${CLOSED:-0}"
             echo "- Executable issues materialized: ${ISSUES:-0}"
             echo '- Authority split: fuzzy product decisions arrive as proposals; deterministic schemas/state/preconditions own all mutations.'
+            echo '- Newly materialized queue goes directly to scheduler dispatch_only; Product Brain never restarts Quality/rework/merge reconciliation.'
             echo '- Secrets, permissions, workflow policy, production deployment and unbounded real-money spending remain outside Product Brain authority.'
           } >> "$GITHUB_STEP_SUMMARY"
