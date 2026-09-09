@@ -17,8 +17,8 @@
       "additionalProperties": false,
       "required": ["enabled", "preferred"],
       "properties": {
-        "enabled": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["jules", "codex", "claude", "gemini"]}},
-        "preferred": {"enum": ["jules", "codex", "claude", "gemini"]}
+        "enabled": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["jules", "chatgpt", "codex", "claude", "gemini"]}},
+        "preferred": {"enum": ["jules", "chatgpt", "codex", "claude", "gemini"]}
       }
     },
     "ci": {
