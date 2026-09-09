@@ -1,10 +1,10 @@
-name: factory-fleet-scheduler-v3
+name: factory-fleet-scheduler-v4
 
 "on":
   workflow_dispatch:
     inputs:
       execute:
-        description: 'Dispatch eligible issues up to available worker capacity'
+        description: 'Dispatch Jules-eligible issues up to available worker capacity'
         required: true
         default: false
         type: boolean
@@ -56,7 +56,7 @@ jobs:
             --ref Android
           echo 'QUALITY_RISK_DISPATCHED: reconciliation owns the handoff to auto-merge.'
 
-      - name: Discover eligible issues and available Jules slots
+      - name: Discover Jules-eligible issues and available slots
         id: candidates
         if: inputs.dispatch_only == true || env.EXECUTE != 'true'
         shell: bash
@@ -70,10 +70,15 @@ jobs:
           test "$authenticated_login" = "$OWNER"
 
           max_concurrency="$(jq -r '.workers.jules.max_concurrency' "$CAPACITY_FILE")"
+          chatgpt_label="$(jq -r '.workers.chatgpt.selection_label' "$CAPACITY_FILE")"
           if ! [[ "$max_concurrency" =~ ^[0-9]+$ ]] || [ "$max_concurrency" -lt 1 ] || [ "$max_concurrency" -gt 15 ]; then
             echo "CONTROL_PLANE_ANOMALY: invalid Jules max_concurrency=${max_concurrency}; expected 1..15." >&2
             exit 1
           fi
+          [ "$chatgpt_label" = 'factory:agent:chatgpt' ] || {
+            echo "CONTROL_PLANE_ANOMALY: unexpected ChatGPT selection label '${chatgpt_label}'." >&2
+            exit 1
+          }
 
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
@@ -85,7 +90,7 @@ jobs:
             if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
               continue
             fi
-            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null || continue
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1" and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
             echo "$repo" >> managed-repos.txt
 
             while IFS= read -r issue; do
@@ -105,19 +110,23 @@ jobs:
               if [ "$stale" = 'true' ] && [ "$EXECUTE" = 'true' ]; then
                 gh issue edit "$issue" --repo "$repo" --remove-label 'factory:dispatching' --add-label 'factory:queued' >/dev/null
                 gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                  -f body="<!-- roots-dispatch-recovered issue=${issue} -->\nDispatch acknowledgement timed out after 20 minutes with no persisted Jules session; returned safely to factory:queued." >/dev/null
+                  -f body="<!-- roots-dispatch-recovered issue=${issue} -->\nJules dispatch acknowledgement timed out after 20 minutes with no persisted Jules session; returned safely to factory:queued." >/dev/null
                 echo "DISPATCH_TIMEOUT_RECOVERED: ${repo}#${issue}"
               fi
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq '.[].number')
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number,labels \
+              --jq '.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null) | .number')
           done < repos.txt
 
           active_slots=0
           escalated_identities=0
           while IFS= read -r repo; do
             [ -z "$repo" ] && continue
-            dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
-            dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
-            escalated="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq 'length')"
+            dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json labels \
+              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
+            dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json labels \
+              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
+            escalated="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json labels \
+              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
             active_slots="$((active_slots + dispatching + dispatched))"
             escalated_identities="$((escalated_identities + escalated))"
           done < managed-repos.txt
@@ -139,8 +148,8 @@ jobs:
           while IFS= read -r repo; do
             [ -z "$repo" ] && continue
             gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json
-            gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number,body,createdAt \
-              | jq -c '.[]' | while IFS= read -r row; do
+            gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number,body,createdAt,labels \
+              | jq -c '.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)' | while IFS= read -r row; do
               issue="$(jq -r '.number' <<< "$row")"
               body="$(jq -r '.body // ""' <<< "$row")"
               created="$(jq -r '.createdAt' <<< "$row")"
@@ -190,16 +199,16 @@ jobs:
             [ -z "$repo" ] && continue
             : "$created"
             labels="$(GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
-            if ! jq -e 'index("factory:queued") != null and index("factory:dispatching") == null and index("factory:dispatched") == null and index("factory:escalated") == null' <<< "$labels" >/dev/null; then
-              echo "DISPATCH_SKIPPED: ${repo}#${issue} changed state after candidate selection."
+            if ! jq -e 'index("factory:queued") != null and index("factory:dispatching") == null and index("factory:dispatched") == null and index("factory:escalated") == null and index("factory:agent:chatgpt") == null' <<< "$labels" >/dev/null; then
+              echo "DISPATCH_SKIPPED: ${repo}#${issue} changed state or worker route after candidate selection."
               continue
             fi
             slot="$((slot + 1))"
-            marker="<!-- roots-dispatch-request issue=${issue} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} slot=${slot} -->"
+            marker="<!-- roots-dispatch-request issue=${issue} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} slot=${slot} worker=jules -->"
             GH_TOKEN="$FLEET_TOKEN" gh issue edit "$issue" --repo "$repo" \
               --remove-label 'factory:queued' --add-label 'factory:dispatching'
             GH_TOKEN="$FLEET_TOKEN" gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-              -f body="${marker}\nDispatch requested by central scheduler. This task owns one bounded Jules slot until completion; state remains factory:dispatching until the session marker is persisted."
+              -f body="${marker}\nDispatch requested by central scheduler for Jules. This task owns one bounded Jules slot until completion; state remains factory:dispatching until the session marker is persisted."
             printf '%s\t%s\n' "$repo" "$issue" >> reserved.tsv
           done < selected.tsv
 
@@ -213,7 +222,7 @@ jobs:
               GH_TOKEN="$FLEET_TOKEN" gh issue edit "$issue" --repo "$repo" \
                 --remove-label 'factory:dispatching' --add-label 'factory:queued' || true
               GH_TOKEN="$FLEET_TOKEN" gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                -f body="<!-- roots-dispatch-launch-failed issue=${issue} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} -->\nCross-repo dispatch failed before a Jules session was acknowledged; the task was returned to factory:queued." >/dev/null || true
+                -f body="<!-- roots-dispatch-launch-failed issue=${issue} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} worker=jules -->\nCross-repo Jules dispatch failed before a session was acknowledged; the task was returned to factory:queued." >/dev/null || true
               continue
             fi
             echo "JULES_SLOT_DISPATCHED: ${repo}#${issue}"
@@ -236,19 +245,18 @@ jobs:
           DISPATCH_ONLY: ${{ inputs.dispatch_only }}
         run: |
           {
-            echo '### Fleet scheduler v3 — bounded parallel Jules pool'
+            echo '### Fleet scheduler v4 — routed Jules pool'
             echo "- Jules capacity: ${CAPACITY:-unknown}"
             echo "- Active Jules slots before dispatch: ${ACTIVE_SLOTS:-unknown}"
-            echo "- Available slots before dispatch: ${AVAILABLE_SLOTS:-unknown}"
-            echo "- Selected eligible tasks: ${SELECTED_COUNT:-0}"
-            echo "- Escalated identities (task-locked, not capacity-consuming): ${ESCALATED_IDENTITIES:-0}"
+            echo "- Available Jules slots before dispatch: ${AVAILABLE_SLOTS:-unknown}"
+            echo "- Selected Jules-eligible tasks: ${SELECTED_COUNT:-0}"
+            echo "- Escalated Jules identities: ${ESCALATED_IDENTITIES:-0}"
             echo "- Capacity violation: ${CAPACITY_VIOLATION:-false}"
             echo "- Execute: ${EXECUTE}"
             echo "- Dispatch only: ${DISPATCH_ONLY:-false}"
-            echo '- Capacity invariant: dispatching + dispatched identities <= configured Jules max_concurrency.'
-            echo '- Identity invariant: one issue -> one Jules session -> one branch -> one PR; rework reuses that identity.'
-            echo '- Escalated/HUMAN_REQUIRED identities remain blocked against replacement but do not consume compute capacity.'
-            echo '- Scheduler runs are globally serialized so slot reservation is atomic with respect to other scheduler runs.'
-            echo '- Cross-repo dispatcher concurrency remains scoped per repository + issue, allowing independent sessions to start in parallel.'
+            echo '- Jules scheduling requires worker_policy.enabled to contain jules.'
+            echo '- factory:agent:chatgpt is an explicit worker route and is excluded from Jules selection, acknowledgement recovery and capacity.'
+            echo '- Capacity invariant: Jules dispatching + dispatched identities <= configured Jules max_concurrency.'
+            echo '- Identity invariant remains one issue -> one worker identity -> one branch -> one PR.'
             echo '- Cron is recovery/fallback; event-driven dispatch_only remains the nominal queue handoff.'
           } >> "$GITHUB_STEP_SUMMARY"

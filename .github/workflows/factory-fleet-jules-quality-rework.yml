@@ -1,4 +1,4 @@
-name: factory-fleet-jules-quality-rework-v1
+name: factory-fleet-jules-quality-rework-v2
 
 "on":
   workflow_dispatch:
@@ -82,8 +82,8 @@ jobs:
                 printf '%s\n' "Repository: ${repo}"
                 printf '%s\n' "Base branch: ${branch}"
                 printf '%s\n' "PR: ${pr_url}"
-                printf '%s\n\n' "Head SHA evaluated by Quality Manager: ${sha}"
-                printf '%s\n\n' 'The Factory Quality Manager rejected this exact head against the source issue acceptance criteria. Treat the feedback below as authoritative rework requirements. Make the smallest correct fix, run relevant tests, then commit and push ONLY to the existing PR branch.'
+                printf '%s\n\n' "Head SHA evaluated by Quality: ${sha}"
+                printf '%s\n\n' 'The native Quality pipeline rejected this exact head against the source issue acceptance criteria. Treat the feedback below as authoritative rework requirements. Make the smallest correct fix, run relevant tests, then commit and push ONLY to the existing PR branch.'
                 printf '%s\n' 'QUALITY FEEDBACK'
                 printf '%s\n' '----------------'
                 printf '%s\n' "$verdict_body"
@@ -99,7 +99,8 @@ jobs:
               gh api --method POST "repos/${repo}/issues/${issue}/comments" \
                 -f body="${dedupe}\nRoots Fleet sent Quality REWORK for PR #${pr} head ${sha} to the existing Jules session. Same session/branch/PR preserved." >/dev/null
               sent=$((sent + 1))
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number,labels \
+              --jq '.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null) | .number')
           done < repos.txt
 
-          echo "Fleet Quality rework scan completed. Messages sent: ${sent}."
+          echo "Fleet Jules Quality rework scan completed. Messages sent: ${sent}. ChatGPT-routed identities are excluded."

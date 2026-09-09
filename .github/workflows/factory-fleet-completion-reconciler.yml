@@ -1,4 +1,4 @@
-name: factory-fleet-completion-reconciler-v1
+name: factory-fleet-completion-reconciler-v2
 
 "on":
   workflow_dispatch:
@@ -57,11 +57,25 @@ jobs:
             while IFS= read -r issue; do
               [ -z "$issue" ] && continue
               comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
-              marker="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-jules-session task_id='"${repo}#${issue}"' "))] | last | .body // empty' <<< "$comments")"
-              [ -z "$marker" ] && continue
-              session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$marker" | head -n 1)"
-              [ -z "$session" ] && continue
-              session_id="${session##*/}"
+              jules_marker="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
+              chatgpt_marker="$(jq -r --arg prefix "<!-- roots-chatgpt-worker task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
+              if [ -n "$jules_marker" ] && [ -n "$chatgpt_marker" ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has conflicting worker identities." >&2
+                continue
+              fi
+              worker_token=''
+              worker_provider=''
+              if [ -n "$jules_marker" ]; then
+                session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$jules_marker" | head -n1)"
+                worker_token="${session##*/}"
+                worker_provider='jules'
+              elif [ -n "$chatgpt_marker" ]; then
+                worker_token="$(sed -n 's/.* branch=\([^ ]*\) pr=.*/\1/p' <<< "$chatgpt_marker" | head -n1)"
+                worker_provider='chatgpt'
+              else
+                continue
+              fi
+              [ -n "$worker_token" ] || continue
 
               gh pr list --repo "$repo" --state merged --limit 100 \
                 --json number,body,headRefName,baseRefName,url,mergedAt > /tmp/merged-prs.json
@@ -70,14 +84,14 @@ jobs:
                 /tmp/merged-prs.json > /tmp/linked-merged.json
               count="$(jq 'length' /tmp/linked-merged.json)"
               if [ "$count" -eq 0 ]; then
-                jq --arg branch "$branch" --arg session_id "$session_id" \
-                  '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' \
+                jq --arg branch "$branch" --arg token "$worker_token" \
+                  '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($token))]' \
                   /tmp/merged-prs.json > /tmp/linked-merged.json
                 count="$(jq 'length' /tmp/linked-merged.json)"
               fi
               [ "$count" -eq 0 ] && continue
               if [ "$count" -gt 1 ]; then
-                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${count} merged PR candidates for Jules session ${session}." >&2
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${count} merged PR candidates for worker=${worker_provider}." >&2
                 continue
               fi
 
@@ -91,11 +105,11 @@ jobs:
                 -f state=closed -f state_reason=completed >/dev/null
               if ! jq -e --arg marker "$done_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
                 gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                  -f body="${done_marker}\nRoots Fleet reconciled merged PR #${pr} as task completion. PR: ${pr_url}. Merged: ${merged_at}." >/dev/null
+                  -f body="${done_marker}\nRoots Fleet reconciled merged PR #${pr} from worker=${worker_provider} as task completion. PR: ${pr_url}. Merged: ${merged_at}." >/dev/null
               fi
               gh issue edit "$issue" --repo "$repo" --add-label 'factory:done' --remove-label 'factory:dispatched' >/dev/null
               completed="$((completed + 1))"
-              echo "TASK_DONE: ${repo}#${issue} via PR #${pr}."
+              echo "TASK_DONE: ${repo}#${issue} via PR #${pr} worker=${worker_provider}."
             done < /tmp/candidates.txt
           done < repos.txt
 
@@ -116,12 +130,11 @@ jobs:
           COMPLETED: ${{ steps.reconcile.outputs.completed }}
         run: |
           {
-            echo '### Fleet completion reconciler'
+            echo '### Fleet completion reconciler v2'
             echo "- Completed issues reconciled: ${COMPLETED:-0}"
             echo '- Candidates: dispatched tasks plus unlabeled recovery tasks; explicit blocked/human/stalled/escalated/done states are excluded.'
+            echo '- Persisted worker identity may be Jules or ChatGPT; conflicting identities fail closed.'
             echo '- Rule: merged linked PR -> close issue -> deterministic planner.'
-            echo '- Planner owns milestone close, next milestone materialization and scheduler dispatch_only after the queue exists.'
-            echo '- Completion never races the planner by dispatching the scheduler before planning has finished.'
-            echo '- Already auto-closed tasks and partial transitions are reconciled idempotently.'
-            echo '- Correlation: explicit issue reference first, persisted Jules session ID in PR branch as fallback.'
+            echo '- Correlation: explicit issue reference first, worker branch/session token only as fallback.'
+            echo '- Completion releases only the completed identity and never interferes with other active workers.'
           } >> "$GITHUB_STEP_SUMMARY"

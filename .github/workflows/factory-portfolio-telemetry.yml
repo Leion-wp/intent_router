@@ -1,4 +1,4 @@
-name: factory-portfolio-telemetry-v2
+name: factory-portfolio-telemetry-v3
 
 "on":
   workflow_dispatch:
@@ -36,9 +36,14 @@ jobs:
           echo "::add-mask::$FLEET_TOKEN"
           export GH_TOKEN="$FLEET_TOKEN"
           test "$(gh api user --jq '.login')" = "$OWNER"
-          max_concurrency="$(jq -r '.workers.jules.max_concurrency' "$CAPACITY_FILE")"
-          if ! [[ "$max_concurrency" =~ ^[0-9]+$ ]] || [ "$max_concurrency" -lt 1 ] || [ "$max_concurrency" -gt 15 ]; then
-            echo "CONTROL_PLANE_ANOMALY: invalid Jules max_concurrency=${max_concurrency}." >&2
+          jules_max="$(jq -r '.workers.jules.max_concurrency' "$CAPACITY_FILE")"
+          chatgpt_max="$(jq -r '.workers.chatgpt.max_concurrency' "$CAPACITY_FILE")"
+          if ! [[ "$jules_max" =~ ^[0-9]+$ ]] || [ "$jules_max" -lt 1 ] || [ "$jules_max" -gt 15 ]; then
+            echo "CONTROL_PLANE_ANOMALY: invalid Jules max_concurrency=${jules_max}." >&2
+            exit 1
+          fi
+          if ! [[ "$chatgpt_max" =~ ^[0-9]+$ ]] || [ "$chatgpt_max" -lt 1 ] || [ "$chatgpt_max" -gt 15 ]; then
+            echo "CONTROL_PLANE_ANOMALY: invalid ChatGPT max_concurrency=${chatgpt_max}." >&2
             exit 1
           fi
 
@@ -46,8 +51,11 @@ jobs:
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
           jq -r '.milestones[].title' "$ROADMAP" | sort -u > /tmp/expected-roadmap.txt
           : > /tmp/repositories.ndjson
-          : > /tmp/active.tsv
-          : > /tmp/escalated.tsv
+          : > /tmp/jules-active.tsv
+          : > /tmp/chatgpt-active.tsv
+          : > /tmp/jules-escalated.tsv
+          : > /tmp/chatgpt-escalated.tsv
+          : > /tmp/all-active.tsv
 
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
@@ -83,18 +91,28 @@ jobs:
             human_required="$(gh issue list --repo "$repo" --state open --label 'factory:human-required' --limit 100 --json number --jq 'length')"
             open_prs="$(gh pr list --repo "$repo" --state open --limit 100 --json number --jq 'length')"
 
-            while IFS= read -r issue; do
-              [ -z "$issue" ] && continue
-              printf '%s\t%s\n' "$repo" "$issue" >> /tmp/active.tsv
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq '.[].number')
-            while IFS= read -r issue; do
-              [ -z "$issue" ] && continue
-              printf '%s\t%s\n' "$repo" "$issue" >> /tmp/active.tsv
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
-            while IFS= read -r issue; do
-              [ -z "$issue" ] && continue
-              printf '%s\t%s\n' "$repo" "$issue" >> /tmp/escalated.tsv
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq '.[].number')
+            for lifecycle in factory:dispatching factory:dispatched; do
+              gh issue list --repo "$repo" --state open --label "$lifecycle" --limit 100 --json number,labels \
+                | jq -c '.[]' | while IFS= read -r row; do
+                  issue="$(jq -r '.number' <<< "$row")"
+                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/all-active.tsv
+                  if jq -e '[.labels[].name] | index("factory:agent:chatgpt") != null' <<< "$row" >/dev/null; then
+                    printf '%s\t%s\n' "$repo" "$issue" >> /tmp/chatgpt-active.tsv
+                  else
+                    printf '%s\t%s\n' "$repo" "$issue" >> /tmp/jules-active.tsv
+                  fi
+                done
+            done
+
+            gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number,labels \
+              | jq -c '.[]' | while IFS= read -r row; do
+                issue="$(jq -r '.number' <<< "$row")"
+                if jq -e '[.labels[].name] | index("factory:agent:chatgpt") != null' <<< "$row" >/dev/null; then
+                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/chatgpt-escalated.tsv
+                else
+                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/jules-escalated.tsv
+                fi
+              done
 
             jq -n \
               --arg repository "$repo" \
@@ -120,19 +138,28 @@ jobs:
             printf '%s\n' '[]' > /tmp/repositories.json
           fi
 
-          active_count="$(sort -u /tmp/active.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
-          escalated_count="$(sort -u /tmp/escalated.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
-          available_slots=0
-          if [ "$active_count" -le "$max_concurrency" ]; then
-            available_slots="$((max_concurrency - active_count))"
+          jules_active="$(sort -u /tmp/jules-active.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          chatgpt_active="$(sort -u /tmp/chatgpt-active.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          jules_escalated="$(sort -u /tmp/jules-escalated.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          chatgpt_escalated="$(sort -u /tmp/chatgpt-escalated.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          jules_available=0
+          chatgpt_available=0
+          if [ "$jules_active" -le "$jules_max" ]; then
+            jules_available="$((jules_max - jules_active))"
           else
-            echo "CONTROL_PLANE_ANOMALY: active Jules slots ${active_count} exceed configured capacity ${max_concurrency}." >&2
+            echo "CONTROL_PLANE_ANOMALY: active Jules slots ${jules_active} exceed configured capacity ${jules_max}." >&2
+          fi
+          if [ "$chatgpt_active" -le "$chatgpt_max" ]; then
+            chatgpt_available="$((chatgpt_max - chatgpt_active))"
+          else
+            echo "CONTROL_PLANE_ANOMALY: active ChatGPT slots ${chatgpt_active} exceed configured capacity ${chatgpt_max}." >&2
           fi
 
           lock_repo=''
           lock_issue=''
-          if [ "$active_count" -gt 0 ]; then
-            sort -u /tmp/active.tsv | head -n 1 > /tmp/first-active.tsv
+          all_active="$(sort -u /tmp/all-active.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [ "$all_active" -gt 0 ]; then
+            sort -u /tmp/all-active.tsv | head -n 1 > /tmp/first-active.tsv
             lock_repo="$(cut -f1 /tmp/first-active.tsv)"
             lock_issue="$(cut -f2 /tmp/first-active.tsv)"
           fi
@@ -151,10 +178,15 @@ jobs:
             --arg owner "$OWNER" \
             --arg lock_repo "$lock_repo" \
             --arg lock_issue "$lock_issue" \
-            --argjson active_count "$active_count" \
-            --argjson max_concurrency "$max_concurrency" \
-            --argjson available_slots "$available_slots" \
-            --argjson escalated_count "$escalated_count" \
+            --argjson all_active "$all_active" \
+            --argjson jules_active "$jules_active" \
+            --argjson jules_max "$jules_max" \
+            --argjson jules_available "$jules_available" \
+            --argjson jules_escalated "$jules_escalated" \
+            --argjson chatgpt_active "$chatgpt_active" \
+            --argjson chatgpt_max "$chatgpt_max" \
+            --argjson chatgpt_available "$chatgpt_available" \
+            --argjson chatgpt_escalated "$chatgpt_escalated" \
             --slurpfile repositories /tmp/repositories.json \
             --argjson managed "$managed" \
             --argjson active_products "$active_products" \
@@ -163,7 +195,7 @@ jobs:
             --argjson brain_needed "$brain_needed_total" \
             --argjson human_required "$human_total" \
             --argjson idle_without_next "$idle_without_next" \
-            '{version:1,generated_at:$generated_at,owner:$owner,worker_lock:{active:($active_count > 0),repository:(if $lock_repo == "" then null else $lock_repo end),issue:(if $lock_issue == "" then null else ($lock_issue|tonumber) end)},worker_capacity:{provider:"jules",max_concurrency:$max_concurrency,active_slots:$active_count,available_slots:$available_slots,escalated_identities:$escalated_count},repositories:$repositories[0],summary:{managed_repositories:$managed,active_products:$active_products,queued:$queued,blocked:$blocked,brain_needed:$brain_needed,human_required:$human_required,idle_without_next_transition:$idle_without_next}}' \
+            '{version:1,generated_at:$generated_at,owner:$owner,worker_lock:{active:($all_active > 0),repository:(if $lock_repo == "" then null else $lock_repo end),issue:(if $lock_issue == "" then null else ($lock_issue|tonumber) end)},worker_capacity:{provider:"jules",max_concurrency:$jules_max,active_slots:$jules_active,available_slots:$jules_available,escalated_identities:$jules_escalated},chatgpt_capacity:{provider:"chatgpt",max_concurrency:$chatgpt_max,active_slots:$chatgpt_active,available_slots:$chatgpt_available,escalated_identities:$chatgpt_escalated},repositories:$repositories[0],summary:{managed_repositories:$managed,active_products:$active_products,queued:$queued,blocked:$blocked,brain_needed:$brain_needed,human_required:$human_required,idle_without_next_transition:$idle_without_next}}' \
             > /tmp/portfolio.json
 
           python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
