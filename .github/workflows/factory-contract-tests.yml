@@ -37,6 +37,8 @@ jobs:
         run: python .github/roots/test-worker-capacity.py
       - name: Run ChatGPT worker routing contract tests
         run: python .github/roots/test-chatgpt-worker-route.py
+      - name: Run worker route bootstrap contract tests
+        run: python .github/roots/test-worker-route-bootstrap.py
       - name: Run worker escalation contract tests
         run: python .github/roots/test-worker-escalation.py
       - name: Run Product Brain contract tests
