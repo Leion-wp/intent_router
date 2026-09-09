@@ -16,6 +16,38 @@ class ProductBrainContractTests(unittest.TestCase):
     repo = "Leion-wp/example-product"
 
     def decision(self):
+        tasks = [
+            {
+                "id": "value-flow",
+                "title": "Implement the bounded value flow",
+                "scope": ["Implement one end-to-end user workflow."],
+                "acceptance_criteria": ["The workflow has a deterministic successful completion state."],
+                "done": ["Relevant tests pass and the flow is documented."],
+                "priority": 10,
+                "blocked_by": [],
+            },
+            {
+                "id": "value-signal",
+                "title": "Instrument the value success signal",
+                "scope": ["Record the successful workflow completion through the existing analytics boundary."],
+                "acceptance_criteria": ["The signal is emitted only after successful completion."],
+                "done": ["A test proves success emits the signal and failure does not."],
+                "priority": 20,
+                "blocked_by": ["value-flow"],
+            },
+        ]
+        for index in range(1, 22):
+            tasks.append(
+                {
+                    "id": f"parallel-{index:02d}",
+                    "title": f"Implement independent product slice {index:02d}",
+                    "scope": [f"Implement bounded independent slice {index:02d}."],
+                    "acceptance_criteria": [f"Slice {index:02d} has deterministic tests."],
+                    "done": [f"Slice {index:02d} tests pass and behavior is documented."],
+                    "priority": 30 + index,
+                    "blocked_by": [],
+                }
+            )
         return {
             "version": 1,
             "decision_id": "build-value-v1",
@@ -25,41 +57,22 @@ class ProductBrainContractTests(unittest.TestCase):
                 "expected_phase": None,
             },
             "action": "BUILD",
-            "objective": "Deliver one testable user value slice without privileged side effects.",
-            "hypothesis": "A narrow end-to-end workflow will provide a measurable activation signal.",
-            "success_metric": "A user can complete the workflow and reach the defined success state.",
+            "objective": "Deliver a capacity-sized set of testable user value slices without privileged side effects.",
+            "hypothesis": "A wide but bounded milestone can feed the parallel worker pool while preserving independent task identities.",
+            "success_metric": "Users can complete the defined workflows and each slice reaches its deterministic success state.",
             "product_context": {
-                "value_proposition": "Reduce a repetitive workflow to a reliable guided action.",
-                "target_user": "A small business operator with a recurring operational task.",
-                "next_question": "Does the target user complete the workflow and return to use it again?",
+                "value_proposition": "Reduce repetitive workflows through reliable bounded product actions.",
+                "target_user": "A small business operator with recurring operational tasks.",
+                "next_question": "Which delivered slices produce repeated successful usage?",
             },
             "confidence": 0.7,
             "risk": "LOW",
             "evidence": ["The repository foundation and CI are available."],
             "milestone": {
                 "id": "value-slice-v1",
-                "title": "Deliver the first value slice",
-                "description": "Implement one bounded end-to-end product workflow and instrument its success state.",
-                "tasks": [
-                    {
-                        "id": "value-flow",
-                        "title": "Implement the bounded value flow",
-                        "scope": ["Implement one end-to-end user workflow."],
-                        "acceptance_criteria": ["The workflow has a deterministic successful completion state."],
-                        "done": ["Relevant tests pass and the flow is documented."],
-                        "priority": 10,
-                        "blocked_by": [],
-                    },
-                    {
-                        "id": "value-signal",
-                        "title": "Instrument the value success signal",
-                        "scope": ["Record the successful workflow completion through the existing analytics boundary."],
-                        "acceptance_criteria": ["The signal is emitted only after successful completion."],
-                        "done": ["A test proves success emits the signal and failure does not."],
-                        "priority": 20,
-                        "blocked_by": ["value-flow"],
-                    },
-                ],
+                "title": "Deliver capacity-sized value slices",
+                "description": "Implement a bounded milestone with enough independent work to feed the configured Jules pool.",
+                "tasks": tasks,
             },
             "human_gate": {"required": False, "reason": ""},
             "extensions": {},
@@ -70,7 +83,10 @@ class ProductBrainContractTests(unittest.TestCase):
         path.write_text(json.dumps(value), encoding="utf-8")
         return path
 
-    def test_valid_decision_compiles_to_plan(self):
+    def test_capacity_contract_requires_23_dynamic_tasks(self):
+        self.assertEqual(planning.dynamic_minimum_task_count(), 23)
+
+    def test_valid_decision_compiles_to_capacity_plan(self):
         with tempfile.TemporaryDirectory() as directory:
             decision_path = self.write_json(directory, "decision.json", self.decision())
             plan_path = pathlib.Path(directory) / "plan.json"
@@ -78,8 +94,29 @@ class ProductBrainContractTests(unittest.TestCase):
             planning.decision_to_plan(decision_path, plan_path)
             planning.validate_plan(plan_path)
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            order = planning.topological_tasks(plan["tasks"])
             self.assertEqual(plan["repository"], self.repo)
-            self.assertEqual(planning.topological_tasks(plan["tasks"]), ["value-flow", "value-signal"])
+            self.assertEqual(len(plan["tasks"]), 23)
+            self.assertEqual(set(order), {task["id"] for task in plan["tasks"]})
+            self.assertEqual(plan["extensions"]["worker_capacity"], 15)
+
+    def test_too_narrow_dynamic_milestone_is_rejected(self):
+        decision = self.decision()
+        decision["milestone"]["tasks"] = decision["milestone"]["tasks"][:10]
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_json(directory, "decision.json", decision)
+            with self.assertRaisesRegex(ValueError, "requires at least 23 tasks"):
+                planning.validate_decision(path, self.repo)
+
+    def test_parallel_frontier_must_feed_worker_pool(self):
+        decision = self.decision()
+        parallel = [task for task in decision["milestone"]["tasks"] if task["id"].startswith("parallel-")]
+        for task in parallel[13:]:
+            task["blocked_by"] = ["value-flow"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_json(directory, "decision.json", decision)
+            with self.assertRaisesRegex(ValueError, "parallel frontier requires at least 15"):
+                planning.validate_decision(path, self.repo)
 
     def test_repository_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
