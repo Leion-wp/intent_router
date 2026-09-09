@@ -350,7 +350,7 @@ class PipelineTests(unittest.TestCase):
         self.drain(offset)
         self.assertEqual(len(self.workers()), 1, 'Duplicate event dispatched a second worker')
 
-    def test_negative_stale_unclassified_and_denied_risk_hold_lock(self):
+    def test_negative_quality_blocks_only_affected_identity(self):
         for change in ['REWORK', 'BLOCK', 'stale', 'unclassified', 'denied', 'ci_failure']:
             with self.subTest(change=change):
                 state = fixture()
@@ -367,8 +367,28 @@ class PipelineTests(unittest.TestCase):
                     state['ci'] = 'failure'
                 self.put(state)
                 self.start()
-                self.assertFalse(self.workers())
-                self.assertFalse(any(row['kind'] == 'merge' for row in self.get()['mutations']))
+                workers = self.workers()
+                self.assertEqual(len(workers), 1, 'An independent queued identity should use a free Jules slot')
+                self.assertEqual(workers[0]['inputs']['issue_number'], '18')
+                self.assertFalse(any(row['kind'] == 'merge' for row in self.get()['mutations']),
+                                 'Negative/stale Quality evidence must never merge the affected identity')
+                self.assertEqual(self.get()['issues']['17']['state'], 'OPEN')
+
+    def test_dispatch_only_fills_multiple_free_slots(self):
+        state = fixture()
+        for number in [19, 20]:
+            clone = dict(state['issues']['18'])
+            clone['number'] = number
+            clone['labels'] = [{'name': 'factory:queued'}]
+            clone['comments'] = []
+            clone['createdAt'] = f'2026-09-0{number - 16}T00:00:00Z'
+            state['issues'][str(number)] = clone
+        self.put(state)
+        self.success('factory-fleet-scheduler', inputs={'execute': True, 'dispatch_only': True})
+        workers = self.workers()
+        self.assertEqual(len(workers), 3)
+        self.assertEqual([row['inputs']['issue_number'] for row in workers], ['18', '19', '20'])
+        self.assertEqual(self.get()['issues']['17']['labels'], [{'name': 'factory:dispatched'}])
 
     def test_completion_finishes_partial_transition_even_with_marker(self):
         state = fixture()

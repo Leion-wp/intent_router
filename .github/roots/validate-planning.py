@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import math
 import pathlib
 import re
 import sys
@@ -37,6 +38,59 @@ def load(name: str):
 def load_path(path: pathlib.Path):
     with path.open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def worker_capacity_contract():
+    contract = load("factory-worker-capacity.json")
+    if contract.get("version") != 1:
+        raise ValueError("unsupported worker capacity contract version")
+    jules = contract.get("workers", {}).get("jules", {})
+    planning = contract.get("planning", {})
+    max_concurrency = jules.get("max_concurrency")
+    threshold = planning.get("parallel_threshold")
+    multiplier = planning.get("issue_multiplier")
+    floor = planning.get("minimum_issues_floor")
+    max_issues = planning.get("max_issues_per_milestone")
+    if not isinstance(max_concurrency, int) or not 1 <= max_concurrency <= 15:
+        raise ValueError("Jules max_concurrency must be an integer in 1..15")
+    if not isinstance(threshold, int) or threshold < 1:
+        raise ValueError("parallel_threshold must be a positive integer")
+    if not isinstance(multiplier, (int, float)) or multiplier < 1:
+        raise ValueError("issue_multiplier must be >= 1")
+    if not isinstance(floor, int) or floor < 1:
+        raise ValueError("minimum_issues_floor must be a positive integer")
+    if not isinstance(max_issues, int) or max_issues < floor:
+        raise ValueError("max_issues_per_milestone must be >= minimum_issues_floor")
+    return contract
+
+
+def dynamic_minimum_task_count(contract=None):
+    contract = contract or worker_capacity_contract()
+    max_concurrency = contract["workers"]["jules"]["max_concurrency"]
+    planning = contract["planning"]
+    floor = planning["minimum_issues_floor"]
+    if max_concurrency <= planning["parallel_threshold"]:
+        return floor
+    return max(floor, math.ceil(max_concurrency * planning["issue_multiplier"]))
+
+
+def validate_dynamic_parallelism(tasks):
+    contract = worker_capacity_contract()
+    max_concurrency = contract["workers"]["jules"]["max_concurrency"]
+    max_issues = contract["planning"]["max_issues_per_milestone"]
+    minimum = dynamic_minimum_task_count(contract)
+    if len(tasks) < minimum:
+        raise ValueError(
+            f"dynamic milestone requires at least {minimum} tasks for Jules capacity {max_concurrency}; got {len(tasks)}"
+        )
+    if len(tasks) > max_issues:
+        raise ValueError(f"dynamic milestone exceeds configured maximum of {max_issues} tasks")
+    initially_ready = sum(1 for task in tasks if not task["blocked_by"])
+    required_frontier = min(max_concurrency, len(tasks))
+    if initially_ready < required_frontier:
+        raise ValueError(
+            f"dynamic milestone initial parallel frontier requires at least {required_frontier} unblocked tasks; got {initially_ready}"
+        )
 
 
 def schema_store():
@@ -165,6 +219,7 @@ def validate_decision(path: pathlib.Path, expected_repo: str | None = None):
     if milestone:
         reject_forbidden_text(milestone["title"] + " " + milestone["description"], f"decision {decision['decision_id']} milestone")
         semantic_validate_tasks(milestone["tasks"])
+        validate_dynamic_parallelism(milestone["tasks"])
     if decision["action"] == "PAUSE" and decision["human_gate"]["required"]:
         raise ValueError("PAUSE must remain a reversible product-state decision and cannot request privileged side effects")
 
@@ -201,10 +256,12 @@ def decision_to_plan(decision_path: pathlib.Path, out_path: pathlib.Path):
             "success_metric": decision["success_metric"],
             "confidence": decision["confidence"],
             "risk": decision["risk"],
+            "worker_capacity": worker_capacity_contract()["workers"]["jules"]["max_concurrency"],
         },
     }
     validate_schema(plan, "factory-milestone-plan.schema.json")
     semantic_validate_tasks(plan["tasks"])
+    validate_dynamic_parallelism(plan["tasks"])
     out_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 

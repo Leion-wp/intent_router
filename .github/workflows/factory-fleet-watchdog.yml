@@ -1,4 +1,4 @@
-name: factory-fleet-watchdog-v2
+name: factory-fleet-watchdog-v3
 
 "on":
   workflow_dispatch:
@@ -20,6 +20,7 @@ jobs:
       FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
       JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
       OWNER: ${{ github.repository_owner }}
+      CAPACITY_FILE: .github/roots/factory-worker-capacity.json
     steps:
       - uses: actions/checkout@v4
 
@@ -29,16 +30,24 @@ jobs:
           set -euo pipefail
           test -n "$FLEET_TOKEN"
           test -n "$JULES_API_KEY"
+          test -f "$CAPACITY_FILE"
           echo "::add-mask::$FLEET_TOKEN"
           echo "::add-mask::$JULES_API_KEY"
           export GH_TOKEN="$FLEET_TOKEN"
           test "$(gh api user --jq '.login')" = "$OWNER"
+          max_concurrency="$(jq -r '.workers.jules.max_concurrency' "$CAPACITY_FILE")"
+          if ! [[ "$max_concurrency" =~ ^[0-9]+$ ]] || [ "$max_concurrency" -lt 1 ] || [ "$max_concurrency" -gt 15 ]; then
+            echo "CONTROL_PLANE_ANOMALY: invalid Jules capacity ${max_concurrency}." >&2
+            exit 1
+          fi
+
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
 
-          active_total=0
+          active_slots=0
+          escalated_identities=0
           feedback_recoveries=0
-          escalated=0
+          escalated_now=0
           anomalies=0
 
           while IFS= read -r repo; do
@@ -61,7 +70,8 @@ jobs:
             dispatching_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
             dispatched_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
             escalated_count="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq 'length')"
-            active_total="$((active_total + dispatching_count + dispatched_count + escalated_count))"
+            active_slots="$((active_slots + dispatching_count + dispatched_count))"
+            escalated_identities="$((escalated_identities + escalated_count))"
 
             while IFS= read -r issue; do
               [ -z "$issue" ] && continue
@@ -187,7 +197,7 @@ jobs:
                   --add-label 'factory:stalled' \
                   --add-label 'factory:escalated' \
                   --add-label 'factory:human-required' >/dev/null
-                escalated="$((escalated + 1))"
+                escalated_now="$((escalated_now + 1))"
                 echo "JULES_STATE_ESCALATED: ${task_id} state=${state}."
                 continue
               fi
@@ -196,21 +206,25 @@ jobs:
             done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
           done < repos.txt
 
-          if [ "$active_total" -gt 1 ]; then
+          if [ "$active_slots" -gt "$max_concurrency" ]; then
             anomalies="$((anomalies + 1))"
-            echo "CONTROL_PLANE_ANOMALY: fleet has ${active_total} dispatching/dispatched/escalated task identities; sequential invariant is violated." >&2
+            echo "CONTROL_PLANE_ANOMALY: fleet has ${active_slots} active Jules slots; configured maximum is ${max_concurrency}." >&2
           fi
 
           {
-            echo '### Fleet watchdog v2'
-            echo "- Active worker identities: ${active_total}"
+            echo '### Fleet watchdog v3 — bounded parallel Jules pool'
+            echo "- Jules capacity: ${max_concurrency}"
+            echo "- Active Jules slots (dispatching + dispatched): ${active_slots}"
+            echo "- Available Jules slots: $(( max_concurrency > active_slots ? max_concurrency - active_slots : 0 ))"
+            echo "- Escalated identities (blocked, not capacity-consuming): ${escalated_identities}"
             echo "- AWAITING_USER_FEEDBACK same-session recoveries: ${feedback_recoveries}"
-            echo "- Explicit-state human escalations: ${escalated}"
+            echo "- Explicit-state human escalations this run: ${escalated_now}"
             echo "- Control-plane anomalies: ${anomalies}"
+            echo '- Capacity is fleet-wide; identity locks remain per repository + issue.'
             echo '- Decision source: live Jules SessionState + durable PR/output evidence. Elapsed time is observability only, never proof of a stall.'
             echo '- QUEUED, PLANNING and IN_PROGRESS never trigger a timeout recovery or escalation.'
             echo '- AWAITING_USER_FEEDBACK receives at most one bounded same-session recovery; repeated feedback wait becomes HUMAN_REQUIRED.'
             echo '- PAUSED, FAILED, COMPLETED-without-output and unexpected plan approval states fail closed to human resolution.'
             echo '- Recovery never creates a replacement Jules session, branch or PR.'
-            echo '- Escalated identities retain the global worker lock until a human resolves them.'
+            echo '- Escalated identities remain task-locked until human resolution but do not consume a Jules capacity slot.'
           } >> "$GITHUB_STEP_SUMMARY"
