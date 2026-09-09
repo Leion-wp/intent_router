@@ -4,7 +4,16 @@
 
 `factory:agent:chatgpt` is an explicit worker-routing label for managed product tasks. It does not create a second control plane. The task keeps the common factory lifecycle and all deterministic CI, Quality, Risk, merge and completion gates.
 
-Absence of `factory:agent:chatgpt` remains the backward-compatible Jules route.
+Absence of `factory:agent:chatgpt` remains the backward-compatible Jules route **only when the repository profile enables Jules**.
+
+## Provider authorization
+
+The route label is selection, not authority. A repository must explicitly include the provider in `.factory/profile.json`:
+
+- Jules work requires `worker_policy.enabled` to contain `jules`.
+- ChatGPT work requires `worker_policy.enabled` to contain `chatgpt`.
+
+The central repository profile schema recognizes `chatgpt` as a worker provider. A label cannot enable a provider that the product profile does not admit. Provider opt-in is persisted configuration and remains subject to the repository's governance boundary.
 
 ## Capacity
 
@@ -22,7 +31,17 @@ A task may never own both a Jules session marker and a ChatGPT worker marker.
 
 A managed issue with `factory:queued` and `factory:agent:chatgpt` is invisible to Jules selection. The Jules scheduler, dispatcher, watchdog, CI REWORK and Quality REWORK all re-check the route and fail closed if asked to claim such a task.
 
-The ChatGPT worker automation owns only `factory:agent:chatgpt` issues. It must re-read the route immediately before claiming work.
+The ChatGPT worker automation owns only issues that satisfy all of the following at claim time:
+
+1. managed repository/profile validated;
+2. `worker_policy.enabled` contains `chatgpt`;
+3. `factory:queued` + `factory:agent:chatgpt` are still present;
+4. no blocking/human/escalated lifecycle label applies;
+5. dependencies are closed;
+6. no active Jules or ChatGPT worker identity/PR already owns the issue;
+7. ChatGPT active slots remain below configured capacity.
+
+It must re-read these conditions immediately before claiming work.
 
 ## ChatGPT worker identity
 
@@ -44,7 +63,8 @@ The ChatGPT worker may modify ordinary product code and tests within the managed
 
 It must not:
 
-- modify `.github/workflows` or Roots control-plane policy;
+- modify `.github/workflows`, `.github/roots` or control-plane policy;
+- modify `.factory/profile.json` or expand its own provider authority;
 - modify repository permissions or protection rules;
 - inspect, export, create, modify or rotate secrets/credentials;
 - activate providers;
@@ -77,4 +97,4 @@ Repeated identical rework must be fingerprinted and bounded. The initial worker 
 
 The ChatGPT worker is a scheduled cognitive adapter, not the nominal dependency mechanism. Product GitHub events still drive CI, Quality, Risk, merge, completion and planning. The worker schedule only provides compute opportunities to claim/resume ChatGPT-routed work.
 
-Future worker routers may assign `factory:agent:chatgpt` deterministically, but v1 intentionally requires an explicit persisted route so provider selection cannot be guessed by the worker itself.
+Future worker routers may assign `factory:agent:chatgpt` deterministically, but v1 intentionally requires an explicit persisted route plus profile opt-in so provider selection cannot be guessed by the worker itself.
