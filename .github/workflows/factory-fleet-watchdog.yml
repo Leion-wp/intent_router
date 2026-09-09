@@ -1,4 +1,4 @@
-name: factory-fleet-watchdog-v3
+name: factory-fleet-watchdog-v4
 
 "on":
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Detect stalled or inconsistent worker state from Jules state
+      - name: Detect stalled or inconsistent Jules state
         shell: bash
         run: |
           set -euo pipefail
@@ -67,9 +67,12 @@ jobs:
             gh label create 'factory:human-required' --repo "$repo" --color FBCA04 \
               --description 'A human decision is required before factory execution can continue' --force >/dev/null 2>&1 || true
 
-            dispatching_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
-            dispatched_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
-            escalated_count="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq 'length')"
+            dispatching_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json labels \
+              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
+            dispatched_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json labels \
+              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
+            escalated_count="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json labels \
+              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
             active_slots="$((active_slots + dispatching_count + dispatched_count))"
             escalated_identities="$((escalated_identities + escalated_count))"
 
@@ -80,7 +83,7 @@ jobs:
               session_body="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-jules-session task_id='"${task_id}"' "))] | last | .body // empty' <<< "$comments")"
               if [ -z "$session_body" ]; then
                 anomalies="$((anomalies + 1))"
-                echo "CONTROL_PLANE_ANOMALY: ${task_id} is dispatched without persisted Jules session." >&2
+                echo "CONTROL_PLANE_ANOMALY: ${task_id} is Jules-routed dispatched work without persisted Jules session." >&2
                 continue
               fi
               session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_body" | head -n 1)"
@@ -203,7 +206,8 @@ jobs:
               fi
 
               echo "JULES_STATE_NORMAL: ${task_id} state=${state} updateTime=${update_time} output_pr=${output_pr_state}; no watchdog mutation."
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number,labels \
+              --jq '.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null) | .number')
           done < repos.txt
 
           if [ "$active_slots" -gt "$max_concurrency" ]; then
@@ -212,19 +216,15 @@ jobs:
           fi
 
           {
-            echo '### Fleet watchdog v3 — bounded parallel Jules pool'
+            echo '### Fleet watchdog v4 — routed Jules pool'
             echo "- Jules capacity: ${max_concurrency}"
-            echo "- Active Jules slots (dispatching + dispatched): ${active_slots}"
+            echo "- Active Jules slots: ${active_slots}"
             echo "- Available Jules slots: $(( max_concurrency > active_slots ? max_concurrency - active_slots : 0 ))"
-            echo "- Escalated identities (blocked, not capacity-consuming): ${escalated_identities}"
+            echo "- Escalated Jules identities: ${escalated_identities}"
             echo "- AWAITING_USER_FEEDBACK same-session recoveries: ${feedback_recoveries}"
             echo "- Explicit-state human escalations this run: ${escalated_now}"
             echo "- Control-plane anomalies: ${anomalies}"
-            echo '- Capacity is fleet-wide; identity locks remain per repository + issue.'
-            echo '- Decision source: live Jules SessionState + durable PR/output evidence. Elapsed time is observability only, never proof of a stall.'
-            echo '- QUEUED, PLANNING and IN_PROGRESS never trigger a timeout recovery or escalation.'
-            echo '- AWAITING_USER_FEEDBACK receives at most one bounded same-session recovery; repeated feedback wait becomes HUMAN_REQUIRED.'
-            echo '- PAUSED, FAILED, COMPLETED-without-output and unexpected plan approval states fail closed to human resolution.'
+            echo '- factory:agent:chatgpt identities are excluded from Jules capacity and Jules watchdog logic.'
+            echo '- Decision source: live Jules SessionState + durable PR/output evidence; elapsed time never proves a stall.'
             echo '- Recovery never creates a replacement Jules session, branch or PR.'
-            echo '- Escalated identities remain task-locked until human resolution but do not consume a Jules capacity slot.'
           } >> "$GITHUB_STEP_SUMMARY"
