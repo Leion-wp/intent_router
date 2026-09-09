@@ -1,4 +1,4 @@
-name: factory-fleet-events-v1
+name: factory-fleet-events-v2
 
 "on":
   repository_dispatch:
@@ -30,7 +30,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  wake:
+  route:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -60,7 +60,7 @@ jobs:
             '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
             /tmp/profile.json >/dev/null
 
-      - name: Reconcile stalled state immediately on active PR signal
+      - name: Reconcile stalled state on active PR signal
         if: env.EVENT_TYPE == 'factory-pr-active'
         shell: bash
         env:
@@ -69,9 +69,9 @@ jobs:
           set -euo pipefail
           gh workflow run factory-stalled-reconciler.yml \
             --repo "$GITHUB_REPOSITORY" --ref Android
-          echo 'STALLED_EVENT_HANDOFF: active PR signal dispatched stalled reconciliation.'
+          echo 'EVENT_ROUTE: factory-pr-active -> stalled reconciler.'
 
-      - name: Reconcile CI rework on CI completion
+      - name: Feed failed CI to the existing Jules session
         if: env.EVENT_TYPE == 'factory-ci-completed'
         shell: bash
         env:
@@ -80,22 +80,32 @@ jobs:
           set -euo pipefail
           gh workflow run factory-fleet-jules-rework.yml \
             --repo "$GITHUB_REPOSITORY" --ref Android
+          echo 'EVENT_ROUTE: factory-ci-completed -> CI rework reconciler.'
 
-      - name: Run event-driven Copilot Quality Gate on CI completion
+      - name: Run native exact-head Quality on completed CI
         if: env.EVENT_TYPE == 'factory-ci-completed'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'factory-copilot-quality-gate.yml',
-              ref: 'Android',
-              inputs: { repository: process.env.TARGET_REPO },
-            });
-            core.info('COPILOT_QUALITY_HANDOFF: CI completion dispatched bounded Quality review.');
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-copilot-quality-gate.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android \
+            -f repository="$TARGET_REPO"
+          echo 'EVENT_ROUTE: factory-ci-completed -> native Quality gate.'
 
-      - name: Reconcile Quality risk immediately after persisted Quality verdict
+      - name: Feed Quality REWORK to the existing Jules session
+        if: env.EVENT_TYPE == 'factory-quality-verdict'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-fleet-jules-quality-rework.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android
+          echo 'EVENT_ROUTE: factory-quality-verdict -> Quality rework reconciler.'
+
+      - name: Reconcile explicit exact-head Quality risk
         if: env.EVENT_TYPE == 'factory-quality-verdict'
         shell: bash
         env:
@@ -104,14 +114,40 @@ jobs:
           set -euo pipefail
           gh workflow run factory-quality-risk-reconciler.yml \
             --repo "$GITHUB_REPOSITORY" --ref Android
-          echo 'QUALITY_RISK_EVENT_HANDOFF: persisted exact-head Quality verdict dispatched risk reconciliation.'
+          echo 'EVENT_ROUTE: factory-quality-verdict -> Quality risk reconciler.'
 
-      - name: Wake the normal reconciliation path
+      - name: Reconcile completion after persisted merge
+        if: env.EVENT_TYPE == 'factory-pr-merged'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-fleet-completion-reconciler.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android
+          echo 'EVENT_ROUTE: factory-pr-merged -> completion reconciler.'
+
+      - name: Dispatch one eligible queued task after queue update
+        if: env.EVENT_TYPE == 'factory-queue-updated'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh workflow run factory-fleet-scheduler.yml \
-            --repo "$GITHUB_REPOSITORY" --ref Android -f execute=true
-          echo 'FLEET_EVENT_HANDOFF: scheduler dispatched; event data grants no risk, merge or worker authority.'
+            --repo "$GITHUB_REPOSITORY" --ref Android \
+            -f execute=true -f dispatch_only=true
+          echo 'EVENT_ROUTE: factory-queue-updated -> scheduler dispatch_only.'
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo '### Fleet event router v2'
+            echo "- Repository: ${TARGET_REPO}"
+            echo "- Persisted event: ${EVENT_TYPE}"
+            echo '- Events route directly to the transition owner; the receiver does not restart the full reconciliation loop.'
+            echo '- CI -> CI rework + native Quality; Quality verdict -> same-session Quality rework + risk; merge -> completion; queue -> dispatch_only.'
+            echo '- Event payloads are wake-up hints only. Every successor re-reads canonical GitHub state and remains fail-closed.'
+            echo '- Cron/manual full scheduler remains a recovery scan, not the nominal event path.'
+          } >> "$GITHUB_STEP_SUMMARY"
