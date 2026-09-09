@@ -90,10 +90,8 @@ jobs:
             if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
               continue
             fi
-            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null || continue
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1" and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
             echo "$repo" >> managed-repos.txt
-            gh label create "$chatgpt_label" --repo "$repo" --color 1D76DB \
-              --description 'Factory task routed to the ChatGPT worker adapter' --force >/dev/null 2>&1 || true
 
             while IFS= read -r issue; do
               [ -z "$issue" ] && continue
@@ -256,6 +254,7 @@ jobs:
             echo "- Capacity violation: ${CAPACITY_VIOLATION:-false}"
             echo "- Execute: ${EXECUTE}"
             echo "- Dispatch only: ${DISPATCH_ONLY:-false}"
+            echo '- Jules scheduling requires worker_policy.enabled to contain jules.'
             echo '- factory:agent:chatgpt is an explicit worker route and is excluded from Jules selection, acknowledgement recovery and capacity.'
             echo '- Capacity invariant: Jules dispatching + dispatched identities <= configured Jules max_concurrency.'
             echo '- Identity invariant remains one issue -> one worker identity -> one branch -> one PR.'
