@@ -1,112 +1,69 @@
 # Event-driven fleet pipeline
 
-Issue: #283. Control plane: `Leion-wp/intent_router`, branch `Android`.
+Control plane: `Leion-wp/intent_router`, branch `Android`.
 
-## Primary path
+## Invariants
 
-1. An authenticated `repository_dispatch` wakes `factory-fleet-events.yml`.
-   The receiver validates the managed repository profile, then dispatches the scheduler.
-2. The scheduler requests same-session Quality REWORK reconciliation and Quality
-   Risk reconciliation. It does **not** select new work in this phase.
-3. Quality Risk re-reads the persisted session, correlated PR and exact-head
-   verdict. Only an explicit accepted `Risk: low` materializes `factory:risk-low`.
-   After its successful scan, it explicitly dispatches managed auto-merge.
-4. Managed auto-merge revalidates its existing gates and, after a successful
-   `execute=true` scan, explicitly dispatches completion reconciliation.
-5. Completion reconciles merged tasks, including issues GitHub already closed
-   with `Fixes #N`. It always dispatches the scheduler with `dispatch_only=true`,
-   even when there are zero new completions.
-6. That terminal scheduler pass rechecks the global worker lock and selects at
-   most one queued task. It never restarts Quality Risk or auto-merge.
+GitHub is the deterministic control plane. Events are wake-up hints, never authority. Every successor re-reads canonical repository state, profile, session, PR, exact HEAD, labels and gates before mutating anything.
 
-All dispatches target `Android`. The distinction between reconciliation and
-dispatch is what terminates the chain; there is no completion → full scheduler
-→ completion loop. A successful API dispatch is a handoff request, not proof
-that the successor has finished. The predecessor exits and the successor owns
-its next transition. No timestamp-based run guessing or cron wait is used.
+The sequential worker invariant remains unchanged: at most one `factory:dispatching`, `factory:dispatched` or `factory:escalated` task identity is active across the managed fleet. Replays must be idempotent. Human-required, escalated and protected transitions remain fail-closed.
 
-## Recovery and duplicate events
+## Primary event path — v2 direct routing
 
-The existing crons remain recovery paths. Explicit dispatch failures fail the
-run. A later event or cron can replay the chain. Existing concurrency groups
-serialize each stage, and the terminal scheduler re-reads the persisted global
-lock before reserving work. Replaying a completed task does not create a new
-worker session. Completion markers suppress duplicate comments, never the
-remaining state transition. Human-blocked, escalated and NOT_PLANNED tasks
-remain excluded. A scheduler dry-run only reads candidates and starts no
-mutating reconciliation. Auto-merge dry-runs do not hand off to completion.
+`factory-fleet-events.yml` validates the managed repository profile and routes each persisted transition directly to its owner. It no longer restarts the full scheduler reconciliation loop for every event.
 
-## Cross-repository event contract
+| Persisted event | Direct successor(s) | Purpose |
+| --- | --- | --- |
+| `factory-pr-active` | `factory-stalled-reconciler.yml` | Reconcile active-PR/stalled state |
+| `factory-ci-completed` | `factory-fleet-jules-rework.yml` + `factory-copilot-quality-gate.yml` | Same-session CI repair when needed and immediate native exact-head Quality review |
+| `factory-quality-verdict` | `factory-fleet-jules-quality-rework.yml` + `factory-quality-risk-reconciler.yml` | REWORK returns to the same Jules session; accepted explicit low risk can advance to managed merge |
+| `factory-pr-merged` | `factory-fleet-completion-reconciler.yml` | Persist completion, release the task identity and advance planning |
+| `factory-queue-updated` | `factory-fleet-scheduler.yml` with `dispatch_only=true` | Select at most one eligible queued task without restarting reconciliation |
 
-The receiver accepts these event types through `repository_dispatch`, or through
-`workflow_dispatch` inputs `repository` and `event_type` on branch `Android`:
+The two branches of `factory-quality-verdict` are intentionally idempotent. The Quality REWORK reconciler acts only on an exact-head `REWORK`; the risk reconciler fails closed on REWORK/BLOCK/unclassified/stale verdicts and materializes `factory:risk-low` only from an accepted exact-head verdict containing explicit `Risk: low`.
 
-| Event | Producer transition |
-| --- | --- |
-| `factory-quality-verdict` | The Quality producer has persisted its verdict comment |
-| `factory-ci-completed` | CI has completed on a product PR, with any conclusion |
-| `factory-pr-merged` | A product PR has been merged, including a human merge |
-| `factory-queue-updated` | The producer has queued work or resolved a blocker |
+## Terminal execution chain
 
-Send `POST /repos/Leion-wp/intent_router/dispatches` with:
+For a successful managed product change, the nominal path is:
 
-```json
-{
-  "event_type": "factory-quality-verdict",
-  "client_payload": {"repository": "Leion-wp/micro-saas-boilerplate"}
-}
-```
+`queued -> dispatch_only -> worker session -> PR -> CI -> native Quality -> Quality Risk -> managed auto-merge -> completion -> planning -> queued -> dispatch_only`
 
-This payload is only a wake-up hint. It supplies no verdict, label, head SHA,
-workflow path, execution flag or permission. The workflows re-read GitHub's
-canonical state. A producer must emit **after** persisting its transition;
-otherwise the scan may correctly defer until the next event or recovery cron.
-CI completion also wakes the existing CI REWORK reconciler. The legacy
-`factory-ci-failed` entrypoint remains available.
+Important boundaries:
 
-**Product relay:** install the reviewed template
-`.github/roots/fleet/product-event-relay.yml` as
-`.github/workflows/factory-product-event-relay.yml` on the product's default
-branch. It observes the four producer transitions above and calls the receiver
-via workflow dispatch. It never checks out code or downloads PR artifacts.
-The template is tested and linted by the control-plane CI.
+1. A dispatch request is not proof that its workflow completed.
+2. A Quality PASS does not imply LOW_RISK.
+3. LOW_RISK does not bypass CI, protected paths, review, mergeability or human gates.
+4. Completion owns release of the current task identity before another worker can be selected.
+5. Cron schedules are recovery scans only; they are not the dependency mechanism of the nominal chain.
 
-Activation order:
+## Recovery path
 
-1. Merge the receiver's typed `event_type` input into `intent_router@Android`.
-2. A human provisions `FACTORY_EVENT_TOKEN` in the product repository: a
-   fine-grained PAT or approved GitHub App token scoped to `intent_router` with
-   **Actions: write** (plus GitHub's implicit metadata access). Never copy the
-   broad `FLEET_GITHUB_TOKEN` into a product. GitHub does not offer a PAT scope
-   restricted to one workflow, so keep relay edits under the existing human gate.
-3. Merge the product relay. Use its manual replay for a persisted transition
-   and verify the receiver and successor run in Actions. Missing credentials or
-   a rejected dispatch fail visibly; cron remains the recovery path.
+The full `factory-fleet-scheduler.yml` execution remains available on cron/manual dispatch as a broad recovery scan. It may reconcile missed Quality REWORK / Quality Risk handoffs, but product events should not invoke that broad path when a more specific successor is known.
 
-`workflow_run` and issue/comment events stay local to their repository. Installing
-a receiver alone is insufficient. The Quality producer needs no new outbound
-tool: the product relay observes its persisted source-issue verdict comment.
-Native `GITHUB_TOKEN` changes can suppress GitHub Actions triggers; producers
-using that token must explicitly dispatch the receiver after their mutation.
-The current Product Brain/planning workflows already explicitly dispatch the
-scheduler after queue materialization; ordinary external issue events use the relay.
+Specialized reconciler crons remain fallback for missed events. Their concurrency groups serialize each stage and all mutations must remain idempotent.
 
-**Quality timing boundary:** at inspection, the ChatGPT Quality Manager runs
-hourly. Relaying its published verdict removes the downstream GitHub cron wait,
-but does not make verdict generation immediate. Available ChatGPT webhook
-triggers do not include CI completion or non-PR issue comments. Full CI → Quality
-event-driven execution needs a separately supported Quality trigger/adapter;
-this relay does not claim to solve that independent producer scheduling problem.
+## Cross-repository relay contract
 
-The manual `factory-managed-automerge-handoff.yml` remains a recovery entrypoint.
-Its old automatic subscription is removed to avoid a second completion dispatch
-and to prevent an auto-merge dry-run from waking the execution path.
+Install the reviewed template `.github/roots/fleet/product-event-relay.yml` as `.github/workflows/factory-product-event-relay.yml` on each managed product default branch. It observes only persisted GitHub transitions and dispatches `factory-fleet-events.yml` on `intent_router@Android`.
 
-GitHub semantics: [triggering workflows from workflows](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
-`workflow_dispatch` and `repository_dispatch` can be emitted with the control
-plane's existing GitHub token; cross-repository emitters need existing authority
-to dispatch into the control-plane repository.
+The relay never checks out PR code, downloads artifacts or executes product code. `FACTORY_EVENT_TOKEN` is human-provisioned and limited to the authority required to dispatch the control-plane workflow. Never copy the broad fleet token into a product repository.
 
-The product relay uses [workflow dispatch](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event)
-so its dedicated credential only needs Actions write access, rather than the
-Contents write permission required by repository dispatch.
+The receiver accepts only:
+
+- `factory-quality-verdict`
+- `factory-ci-completed`
+- `factory-pr-active`
+- `factory-pr-merged`
+- `factory-queue-updated`
+
+The payload contains only repository identity and event type. It cannot supply a verdict, risk classification, HEAD, execution permission, workflow path or bypass flag.
+
+## Quality ownership
+
+The GitHub-native `factory-copilot-quality-gate.yml` is the machine producer of exact-head `roots-quality-verdict` comments for managed products. Downstream automation reacts only after that verdict is persisted. External/ChatGPT reviewers may audit it, but must not create a competing machine verdict producer.
+
+The Quality gate itself remains bounded by exact-head evidence and the managed profile. Any inability to establish the required evidence must defer or block rather than invent success.
+
+## Loop termination
+
+There is no event -> full scheduler -> Quality Risk -> auto-merge -> completion -> full scheduler cycle in the nominal path. Event routing targets the known owner, and `dispatch_only` is the terminal selector for newly queued work. This keeps retries local, makes fingerprints meaningful and prevents duplicated fan-out from becoming an implicit scheduler.
