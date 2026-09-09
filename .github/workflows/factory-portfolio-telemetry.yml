@@ -77,7 +77,6 @@ jobs:
             queued="$(gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number --jq 'length')"
             dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
             dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
-            escalated="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq 'length')"
             blocked="$(gh issue list --repo "$repo" --state open --label 'factory:blocked' --limit 100 --json number --jq 'length')"
             brain_needed="$(gh issue list --repo "$repo" --state open --label 'factory:brain-needed' --limit 100 --json number --jq 'length')"
             brain_proposals="$(gh issue list --repo "$repo" --state open --label 'factory:brain-proposal' --limit 100 --json number --jq 'length')"
