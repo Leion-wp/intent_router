@@ -53,6 +53,7 @@ jobs:
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
 
           needs_schedule=0
+          needs_dynamic_handoff=0
           milestones_closed=0
           milestones_created=0
           issues_created=0
@@ -129,6 +130,7 @@ jobs:
             roadmap_len="$(jq '.milestones | length' "$ROADMAP")"
             if [ "$next_index" -ge "$roadmap_len" ]; then
               echo "ROADMAP_DONE: ${repo}"
+              needs_dynamic_handoff=1
               continue
             fi
 
@@ -219,6 +221,7 @@ jobs:
           done < repos.txt
 
           echo "needs_schedule=$needs_schedule" >> "$GITHUB_OUTPUT"
+          echo "needs_dynamic_handoff=$needs_dynamic_handoff" >> "$GITHUB_OUTPUT"
           echo "milestones_closed=$milestones_closed" >> "$GITHUB_OUTPUT"
           echo "milestones_created=$milestones_created" >> "$GITHUB_OUTPUT"
           echo "issues_created=$issues_created" >> "$GITHUB_OUTPUT"
@@ -233,6 +236,15 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --ref Android \
             -f execute=true -f dispatch_only=true
 
+      - name: Hand completed fixed roadmap directly to dynamic planning
+        if: steps.planning.outputs.needs_dynamic_handoff == '1' && env.EXECUTE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-dynamic-planning-handoff.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android
+          echo 'PLANNING_HANDOFF: fixed roadmap complete -> dynamic planning handoff.'
+
       - name: Summary
         shell: bash
         env:
@@ -241,6 +253,7 @@ jobs:
           ISSUES: ${{ steps.planning.outputs.issues_created }}
           ANOMALIES: ${{ steps.planning.outputs.anomalies }}
           NEEDS_SCHEDULE: ${{ steps.planning.outputs.needs_schedule }}
+          NEEDS_DYNAMIC: ${{ steps.planning.outputs.needs_dynamic_handoff }}
         run: |
           {
             echo '### Autonomous planning fleet'
@@ -248,8 +261,10 @@ jobs:
             echo "- Milestones created: ${CREATED:-0}"
             echo "- Issues created: ${ISSUES:-0}"
             echo "- Anomalies blocked: ${ANOMALIES:-0}"
-            echo "- Scheduler handoff required: ${NEEDS_SCHEDULE:-0}"
-            echo '- State machine: milestone reconcile -> validated next plan -> issue graph -> scheduler dispatch_only.'
+            echo "- Scheduler dispatch_only required: ${NEEDS_SCHEDULE:-0}"
+            echo "- Dynamic Product Brain handoff required: ${NEEDS_DYNAMIC:-0}"
+            echo '- State machine: fixed roadmap -> dynamic handoff OR validated next plan -> issue graph -> scheduler dispatch_only.'
             echo '- Planning never restarts Quality/rework/merge reconciliation when its output is only newly queued work.'
+            echo '- Dynamic planning cron remains a fallback; fixed-roadmap completion is the nominal trigger.'
             echo '- Human-owned boundaries remain credentials, permissions, workflows/policy, real-money authority and production deployment.'
           } >> "$GITHUB_STEP_SUMMARY"
