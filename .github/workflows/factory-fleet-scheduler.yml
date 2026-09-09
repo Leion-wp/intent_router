@@ -58,6 +58,7 @@ jobs:
 
       - name: Discover eligible issues and available Jules slots
         id: candidates
+        if: inputs.dispatch_only == true || env.EXECUTE != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -84,7 +85,7 @@ jobs:
             if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
               continue
             fi
-            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1" and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null || continue
             echo "$repo" >> managed-repos.txt
 
             while IFS= read -r issue; do
@@ -185,8 +186,9 @@ jobs:
           : > reserved.tsv
           slot=0
 
-          while IFS=$'\t' read -r _created repo issue; do
+          while IFS=$'\t' read -r created repo issue; do
             [ -z "$repo" ] && continue
+            : "$created"
             labels="$(GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
             if ! jq -e 'index("factory:queued") != null and index("factory:dispatching") == null and index("factory:dispatched") == null and index("factory:escalated") == null' <<< "$labels" >/dev/null; then
               echo "DISPATCH_SKIPPED: ${repo}#${issue} changed state after candidate selection."
