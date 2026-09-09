@@ -33,7 +33,17 @@ jobs:
       - name: Lint GitHub Actions workflows
         shell: bash
         run: |
+          set -o pipefail
           /tmp/actionlint -color \
             -ignore 'SC2129' \
             -ignore 'copilot-requests' \
-            .github/workflows/*.yml .github/roots/fleet/product-event-relay.yml
+            .github/workflows/*.yml .github/roots/fleet/product-event-relay.yml \
+            2>&1 | tee /tmp/actionlint.log
+
+      - name: Upload actionlint diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actionlint-diagnostics
+          path: /tmp/actionlint.log
+          if-no-files-found: error
