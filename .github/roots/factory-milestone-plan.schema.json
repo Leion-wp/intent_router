@@ -19,7 +19,7 @@
         "description": {"type": "string", "minLength": 10, "maxLength": 1000}
       }
     },
-    "tasks": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"$ref": "factory-issue-plan.schema.json"}},
+    "tasks": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "factory-issue-plan.schema.json"}},
     "extensions": {"type": "object"}
   }
 }
