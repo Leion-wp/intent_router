@@ -425,14 +425,46 @@ class PipelineTests(unittest.TestCase):
         self.success('factory-fleet-events', inputs={'repository': REPO},
                      event='repository_dispatch', action='factory-ci-completed')
         self.assertEqual([row['workflow'] for row in self.get()['dispatches']],
-                         ['factory-fleet-jules-rework.yml', 'factory-fleet-scheduler.yml'])
-        self.assertEqual(self.get()['dispatches'][1]['inputs'], {'execute': 'true'})
+                         ['factory-fleet-jules-rework.yml', 'factory-copilot-quality-gate.yml'])
+        self.assertEqual(self.get()['dispatches'][1]['inputs'], {'repository': REPO})
         for target in ['other/product', CONTROL, 'Leion-wp/../../evil', REPO]:
             state = fixture()
             state['profile']['managed'] = False
             self.put(state)
             self.assertNotEqual(self.run_workflow('factory-fleet-events', inputs={'repository': target}).returncode, 0)
             self.assertFalse(self.get()['dispatches'])
+
+    def test_event_router_dispatches_each_persisted_transition_to_owner(self):
+        cases = {
+            'factory-pr-active': [
+                ('factory-stalled-reconciler.yml', {}),
+            ],
+            'factory-ci-completed': [
+                ('factory-fleet-jules-rework.yml', {}),
+                ('factory-copilot-quality-gate.yml', {'repository': REPO}),
+            ],
+            'factory-quality-verdict': [
+                ('factory-fleet-jules-quality-rework.yml', {}),
+                ('factory-quality-risk-reconciler.yml', {}),
+            ],
+            'factory-pr-merged': [
+                ('factory-fleet-completion-reconciler.yml', {}),
+            ],
+            'factory-queue-updated': [
+                ('factory-fleet-scheduler.yml', {'execute': 'true', 'dispatch_only': 'true'}),
+            ],
+        }
+        for event_type, expected in cases.items():
+            with self.subTest(event_type=event_type):
+                self.put(fixture())
+                self.success('factory-fleet-events', inputs={
+                    'repository': REPO, 'event_type': event_type})
+                actual = [(row['workflow'], row['inputs']) for row in self.get()['dispatches']]
+                self.assertEqual(actual, expected)
+                if event_type != 'factory-queue-updated':
+                    self.assertFalse(any(row['workflow'] == 'factory-fleet-scheduler.yml'
+                                         for row in self.get()['dispatches']),
+                                     'Specialized event unexpectedly restarted the full scheduler')
 
     def test_fallback_crons_and_no_duplicate_automerge_subscription(self):
         for name in ['factory-fleet-scheduler', 'factory-managed-automerge', 'factory-fleet-completion-reconciler']:
@@ -443,7 +475,8 @@ class PipelineTests(unittest.TestCase):
     def test_workflow_dispatch_ci_hint_matches_repository_dispatch(self):
         self.success('factory-fleet-events', inputs={'repository': REPO, 'event_type': 'factory-ci-completed'})
         self.assertEqual([row['workflow'] for row in self.get()['dispatches']],
-                         ['factory-fleet-jules-rework.yml', 'factory-fleet-scheduler.yml'])
+                         ['factory-fleet-jules-rework.yml', 'factory-copilot-quality-gate.yml'])
+        self.assertEqual(self.get()['dispatches'][1]['inputs'], {'repository': REPO})
         state = fixture()
         self.put(state)
         self.assertNotEqual(self.run_workflow('factory-fleet-events', inputs={
