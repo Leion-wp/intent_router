@@ -4,7 +4,7 @@
   "title": "FactoryPortfolioTelemetry",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "generated_at", "owner", "worker_lock", "worker_capacity", "repositories", "summary"],
+  "required": ["version", "generated_at", "owner", "worker_lock", "worker_capacity", "chatgpt_capacity", "repositories", "summary"],
   "properties": {
     "version": {"type": "integer", "const": 1},
     "generated_at": {"type": "string", "format": "date-time"},
@@ -25,6 +25,18 @@
       "required": ["provider", "max_concurrency", "active_slots", "available_slots", "escalated_identities"],
       "properties": {
         "provider": {"type": "string", "const": "jules"},
+        "max_concurrency": {"type": "integer", "minimum": 1, "maximum": 15},
+        "active_slots": {"type": "integer", "minimum": 0},
+        "available_slots": {"type": "integer", "minimum": 0},
+        "escalated_identities": {"type": "integer", "minimum": 0}
+      }
+    },
+    "chatgpt_capacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "max_concurrency", "active_slots", "available_slots", "escalated_identities"],
+      "properties": {
+        "provider": {"type": "string", "const": "chatgpt"},
         "max_concurrency": {"type": "integer", "minimum": 1, "maximum": 15},
         "active_slots": {"type": "integer", "minimum": 0},
         "available_slots": {"type": "integer", "minimum": 0},
