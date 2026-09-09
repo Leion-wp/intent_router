@@ -301,17 +301,24 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def drain(self, start=0):
-        # Planning is a separate control-plane subsystem with its own contract tests.
-        # This execution-loop harness verifies that the handoff is emitted but does
-        # not emulate the planner's milestone/issue GitHub API surface.
+        # Planning owns the post-completion queue handoff. The planner's GitHub API
+        # surface is tested separately, so this execution harness models only its
+        # contractual terminal output: scheduler execute=true, dispatch_only=true.
         sinks = {'factory-cross-repo-dispatch.yml', 'factory-fleet-jules-quality-rework.yml',
-                 'factory-fleet-jules-rework.yml', 'factory-autonomous-planning.yml'}
+                 'factory-fleet-jules-rework.yml'}
         cursor = start
         while cursor < len(self.get()['dispatches']):
-            self.assertLess(cursor - start, 12, 'Pipeline failed to terminate')
+            self.assertLess(cursor - start, 16, 'Pipeline failed to terminate')
             item = self.get()['dispatches'][cursor]
             cursor += 1
-            if item['workflow'] not in sinks:
+            if item['workflow'] == 'factory-autonomous-planning.yml':
+                state = self.get()
+                state['dispatches'].append({
+                    'workflow': 'factory-fleet-scheduler.yml',
+                    'inputs': {'execute': 'true', 'dispatch_only': 'true'},
+                })
+                self.put(state)
+            elif item['workflow'] not in sinks:
                 self.success(item['workflow'][:-4], inputs=item['inputs'])
 
     def start(self):
