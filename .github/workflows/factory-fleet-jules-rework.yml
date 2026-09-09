@@ -1,4 +1,4 @@
-name: factory-fleet-jules-rework-v1
+name: factory-fleet-jules-rework-v2
 
 "on":
   workflow_dispatch:
@@ -174,7 +174,8 @@ jobs:
               gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="$comment_body" >/dev/null
               current="$(cat "$sent_file")"
               printf '%s' "$((current + 1))" > "$sent_file"
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number,labels \
+              --jq '.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null) | .number')
           done < repos.txt
 
-          echo "Fleet CI rework scan completed. Messages sent: $(cat "$sent_file")."
+          echo "Fleet CI Jules rework scan completed. Messages sent: $(cat "$sent_file"). ChatGPT-routed identities are excluded."
