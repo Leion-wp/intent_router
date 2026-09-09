@@ -1,4 +1,4 @@
-name: factory-portfolio-telemetry-v1
+name: factory-portfolio-telemetry-v2
 
 "on":
   workflow_dispatch:
@@ -23,6 +23,7 @@ jobs:
       OWNER: ${{ github.repository_owner }}
       ROADMAP: .github/roots/micro-saas-roadmap-v1.json
       SCHEMA: .github/roots/factory-portfolio-telemetry.schema.json
+      CAPACITY_FILE: .github/roots/factory-worker-capacity.json
     steps:
       - uses: actions/checkout@v4
 
@@ -31,14 +32,22 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$FLEET_TOKEN"
+          test -f "$CAPACITY_FILE"
           echo "::add-mask::$FLEET_TOKEN"
           export GH_TOKEN="$FLEET_TOKEN"
           test "$(gh api user --jq '.login')" = "$OWNER"
+          max_concurrency="$(jq -r '.workers.jules.max_concurrency' "$CAPACITY_FILE")"
+          if ! [[ "$max_concurrency" =~ ^[0-9]+$ ]] || [ "$max_concurrency" -lt 1 ] || [ "$max_concurrency" -gt 15 ]; then
+            echo "CONTROL_PLANE_ANOMALY: invalid Jules max_concurrency=${max_concurrency}." >&2
+            exit 1
+          fi
+
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
           jq -r '.milestones[].title' "$ROADMAP" | sort -u > /tmp/expected-roadmap.txt
           : > /tmp/repositories.ndjson
           : > /tmp/active.tsv
+          : > /tmp/escalated.tsv
 
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
@@ -68,6 +77,7 @@ jobs:
             queued="$(gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number --jq 'length')"
             dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
             dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
+            escalated="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq 'length')"
             blocked="$(gh issue list --repo "$repo" --state open --label 'factory:blocked' --limit 100 --json number --jq 'length')"
             brain_needed="$(gh issue list --repo "$repo" --state open --label 'factory:brain-needed' --limit 100 --json number --jq 'length')"
             brain_proposals="$(gh issue list --repo "$repo" --state open --label 'factory:brain-proposal' --limit 100 --json number --jq 'length')"
@@ -84,7 +94,7 @@ jobs:
             done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
             while IFS= read -r issue; do
               [ -z "$issue" ] && continue
-              printf '%s\t%s\n' "$repo" "$issue" >> /tmp/active.tsv
+              printf '%s\t%s\n' "$repo" "$issue" >> /tmp/escalated.tsv
             done < <(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq '.[].number')
 
             jq -n \
@@ -112,15 +122,20 @@ jobs:
           fi
 
           active_count="$(sort -u /tmp/active.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          escalated_count="$(sort -u /tmp/escalated.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          available_slots=0
+          if [ "$active_count" -le "$max_concurrency" ]; then
+            available_slots="$((max_concurrency - active_count))"
+          else
+            echo "CONTROL_PLANE_ANOMALY: active Jules slots ${active_count} exceed configured capacity ${max_concurrency}." >&2
+          fi
+
           lock_repo=''
           lock_issue=''
           if [ "$active_count" -gt 0 ]; then
             sort -u /tmp/active.tsv | head -n 1 > /tmp/first-active.tsv
             lock_repo="$(cut -f1 /tmp/first-active.tsv)"
             lock_issue="$(cut -f2 /tmp/first-active.tsv)"
-          fi
-          if [ "$active_count" -gt 1 ]; then
-            echo "CONTROL_PLANE_ANOMALY: global sequential worker lock has ${active_count} active or escalated task identities." >&2
           fi
 
           managed="$(jq 'length' /tmp/repositories.json)"
@@ -138,6 +153,9 @@ jobs:
             --arg lock_repo "$lock_repo" \
             --arg lock_issue "$lock_issue" \
             --argjson active_count "$active_count" \
+            --argjson max_concurrency "$max_concurrency" \
+            --argjson available_slots "$available_slots" \
+            --argjson escalated_count "$escalated_count" \
             --slurpfile repositories /tmp/repositories.json \
             --argjson managed "$managed" \
             --argjson active_products "$active_products" \
@@ -146,7 +164,7 @@ jobs:
             --argjson brain_needed "$brain_needed_total" \
             --argjson human_required "$human_total" \
             --argjson idle_without_next "$idle_without_next" \
-            '{version:1,generated_at:$generated_at,owner:$owner,worker_lock:{active:($active_count > 0),repository:(if $lock_repo == "" then null else $lock_repo end),issue:(if $lock_issue == "" then null else ($lock_issue|tonumber) end)},repositories:$repositories[0],summary:{managed_repositories:$managed,active_products:$active_products,queued:$queued,blocked:$blocked,brain_needed:$brain_needed,human_required:$human_required,idle_without_next_transition:$idle_without_next}}' \
+            '{version:1,generated_at:$generated_at,owner:$owner,worker_lock:{active:($active_count > 0),repository:(if $lock_repo == "" then null else $lock_repo end),issue:(if $lock_issue == "" then null else ($lock_issue|tonumber) end)},worker_capacity:{provider:"jules",max_concurrency:$max_concurrency,active_slots:$active_count,available_slots:$available_slots,escalated_identities:$escalated_count},repositories:$repositories[0],summary:{managed_repositories:$managed,active_products:$active_products,queued:$queued,blocked:$blocked,brain_needed:$brain_needed,human_required:$human_required,idle_without_next_transition:$idle_without_next}}' \
             > /tmp/portfolio.json
 
           python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
