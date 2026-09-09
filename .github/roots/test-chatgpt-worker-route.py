@@ -6,6 +6,7 @@ ROOT = Path('.github/roots')
 WORKFLOWS = Path('.github/workflows')
 
 capacity = json.loads((ROOT / 'factory-worker-capacity.json').read_text())
+profile_schema = json.loads((ROOT / 'factory-repository-profile.schema.json').read_text())
 scheduler = (WORKFLOWS / 'factory-fleet-scheduler.yml').read_text()
 dispatcher = (WORKFLOWS / 'factory-cross-repo-dispatch.yml').read_text()
 watchdog = (WORKFLOWS / 'factory-fleet-watchdog.yml').read_text()
@@ -26,9 +27,13 @@ def proves_exclusion(text: str) -> bool:
 assert capacity['workers']['jules']['max_concurrency'] == 15
 assert capacity['workers']['chatgpt']['max_concurrency'] == 1
 assert capacity['workers']['chatgpt']['selection_label'] == 'factory:agent:chatgpt'
+worker_enum = profile_schema['properties']['worker_policy']['properties']['enabled']['items']['enum']
+assert 'jules' in worker_enum
+assert 'chatgpt' in worker_enum
 
-# Jules must not claim or recover a ChatGPT-routed task.
+# Jules requires explicit provider authorization and must not claim/recover ChatGPT-routed tasks.
 assert 'factory-fleet-scheduler-v4' in scheduler
+assert '.worker_policy.enabled | index("jules") != null' in scheduler
 assert proves_exclusion(scheduler)
 assert 'WORKER_ROUTE_REFUSED' in dispatcher
 assert proves_exclusion(watchdog)
@@ -57,7 +62,8 @@ assert 'chatgpt-active.tsv' in telemetry
 assert 'chatgpt_capacity' in telemetry_schema['required']
 assert telemetry_schema['properties']['chatgpt_capacity']['properties']['provider']['const'] == 'chatgpt'
 
-# The cognitive adapter contract remains bounded and does not own Quality/merge.
+# The cognitive adapter contract remains profile-authorized, bounded and does not own Quality/merge.
+assert 'worker_policy.enabled` contains `chatgpt`' in doc
 assert '<!-- roots-chatgpt-worker task_id=<owner/repo>#<issue> branch=<branch> pr=<number> -->' in doc
 assert 'must not' in doc.lower()
 assert 'publish `roots-quality-verdict`' in doc
