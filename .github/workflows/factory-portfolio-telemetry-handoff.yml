@@ -6,7 +6,7 @@ name: factory-portfolio-telemetry-handoff-v1
     workflows:
       - factory-fleet-watchdog-v4
       - factory-fleet-scheduler-v4
-      - factory-cross-repo-dispatch-v2
+      - factory-cross-repo-dispatch-v3
       - factory-fleet-completion-reconciler-v2
       - factory-managed-automerge-v2
       - factory-autonomous-planning-v1
