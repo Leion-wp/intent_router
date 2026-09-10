@@ -70,6 +70,8 @@ jobs:
 
           max_concurrency="$(jq -r '.workers.jules.max_concurrency' "$CAPACITY_FILE")"
           chatgpt_label="$(jq -r '.workers.chatgpt.selection_label' "$CAPACITY_FILE")"
+          jules_ownership_label="$(jq -r '.workers.jules.ownership_label' "$CAPACITY_FILE")"
+          chatgpt_ownership_label="$(jq -r '.workers.chatgpt.ownership_label' "$CAPACITY_FILE")"
           if ! [[ "$max_concurrency" =~ ^[0-9]+$ ]] || [ "$max_concurrency" -lt 1 ] || [ "$max_concurrency" -gt 15 ]; then
             echo "CONTROL_PLANE_ANOMALY: invalid Jules max_concurrency=${max_concurrency}; expected 1..15." >&2
             exit 1
@@ -78,6 +80,8 @@ jobs:
             echo "CONTROL_PLANE_ANOMALY: unexpected ChatGPT selection label '${chatgpt_label}'." >&2
             exit 1
           }
+          [ "$jules_ownership_label" = 'factory:worker:jules' ] || exit 1
+          [ "$chatgpt_ownership_label" = 'factory:worker:chatgpt' ] || exit 1
 
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
@@ -130,9 +134,10 @@ jobs:
               [ -z "$requested_at" ] && continue
               stale="$(python3 -c 'from datetime import datetime, timezone; import sys; stamp=datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")); print("true" if (datetime.now(timezone.utc)-stamp).total_seconds() > 1200 else "false")' "$requested_at")"
               if [ "$stale" = 'true' ] && [ "$EXECUTE" = 'true' ]; then
-                gh issue edit "$issue" --repo "$repo" --remove-label 'factory:dispatching' --add-label 'factory:queued' >/dev/null
+                gh issue edit "$issue" --repo "$repo" \
+                  --remove-label 'factory:dispatching' --remove-label "$jules_ownership_label" --add-label 'factory:queued' >/dev/null
                 gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                  -f body="<!-- roots-dispatch-recovered issue=${issue} worker=jules -->\nJules dispatch acknowledgement timed out after 20 minutes with no persisted Jules session; returned safely to factory:queued." >/dev/null
+                  -f body="<!-- roots-dispatch-recovered issue=${issue} worker=jules -->\nJules dispatch acknowledgement timed out after 20 minutes with no persisted Jules session; returned safely to factory:queued and released its Jules ownership reservation." >/dev/null
                 echo "DISPATCH_TIMEOUT_RECOVERED: ${repo}#${issue}"
               fi
             done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq '.[].number')
@@ -213,6 +218,21 @@ jobs:
               body="$(jq -r '.body // ""' <<< "$row")"
               created="$(jq -r '.createdAt' <<< "$row")"
               branch="$(jq -r '.default_branch' /tmp/profile.json)"
+              labels="$(jq '[.labels[].name]' <<< "$row")"
+
+              if jq -e 'index("factory:worker:jules") != null or index("factory:worker:chatgpt") != null' <<< "$labels" >/dev/null; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} is queued but still has active worker ownership; not selecting it." >&2
+                continue
+              fi
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              printf '%s\n' "$labels" > /tmp/queued-labels.json
+              printf '%s\n' "$comments" > /tmp/queued-comments.json
+              if ! python3 .github/roots/factory_worker_provider.py \
+                --repo "$repo" --issue "$issue" --lifecycle 'factory:queued' \
+                --labels-json /tmp/queued-labels.json --comments-json /tmp/queued-comments.json >/dev/null; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} queued identity is not safe to claim." >&2
+                continue
+              fi
 
               gh pr list --repo "$repo" --state open --search "#${issue}" --json body,baseRefName > /tmp/prs.json
               linked="$(jq --argjson issue "$issue" --arg branch "$branch" '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))] | length' /tmp/prs.json)"
@@ -252,6 +272,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          jules_ownership_label="$(jq -r '.workers.jules.ownership_label' "$CAPACITY_FILE")"
+          chatgpt_ownership_label="$(jq -r '.workers.chatgpt.ownership_label' "$CAPACITY_FILE")"
           : > reserved.tsv
           slot=0
 
@@ -259,16 +281,18 @@ jobs:
             [ -z "$repo" ] && continue
             : "$created"
             labels="$(GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
-            if ! jq -e 'index("factory:queued") != null and index("factory:dispatching") == null and index("factory:dispatched") == null and index("factory:escalated") == null and index("factory:agent:chatgpt") == null' <<< "$labels" >/dev/null; then
-              echo "DISPATCH_SKIPPED: ${repo}#${issue} changed state or worker route after candidate selection."
+            if ! jq -e --arg jules_owner "$jules_ownership_label" --arg chatgpt_owner "$chatgpt_ownership_label" 'index("factory:queued") != null and index("factory:dispatching") == null and index("factory:dispatched") == null and index("factory:escalated") == null and index("factory:agent:chatgpt") == null and index($jules_owner) == null and index($chatgpt_owner) == null' <<< "$labels" >/dev/null; then
+              echo "DISPATCH_SKIPPED: ${repo}#${issue} changed state, route or ownership after candidate selection."
               continue
             fi
             slot="$((slot + 1))"
             marker="<!-- roots-dispatch-request issue=${issue} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} slot=${slot} worker=jules -->"
-            GH_TOKEN="$FLEET_TOKEN" gh issue edit "$issue" --repo "$repo" \
-              --remove-label 'factory:queued' --add-label 'factory:dispatching'
+            GH_TOKEN="$FLEET_TOKEN" gh label create "$jules_ownership_label" --repo "$repo" \
+              --color C5DEF5 --description 'Factory active task ownership reserved to Jules' --force >/dev/null
             GH_TOKEN="$FLEET_TOKEN" gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-              -f body="${marker}\nDispatch requested by central scheduler for Jules. This task owns one bounded Jules slot until completion; state remains factory:dispatching until the session marker is persisted."
+              -f body="${marker}\nDispatch requested by central scheduler for Jules. This marker is audit trace only; active provider authority is the machine ownership label plus lifecycle/worker identity."
+            GH_TOKEN="$FLEET_TOKEN" gh issue edit "$issue" --repo "$repo" \
+              --remove-label 'factory:queued' --add-label 'factory:dispatching' --add-label "$jules_ownership_label"
             printf '%s\t%s\n' "$repo" "$issue" >> reserved.tsv
           done < selected.tsv
 
@@ -280,9 +304,9 @@ jobs:
               -f repository="$repo" -f issue_number="$issue" -f execute=true; then
               failures="$((failures + 1))"
               GH_TOKEN="$FLEET_TOKEN" gh issue edit "$issue" --repo "$repo" \
-                --remove-label 'factory:dispatching' --add-label 'factory:queued' || true
+                --remove-label 'factory:dispatching' --remove-label "$jules_ownership_label" --add-label 'factory:queued' || true
               GH_TOKEN="$FLEET_TOKEN" gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                -f body="<!-- roots-dispatch-launch-failed issue=${issue} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} worker=jules -->\nCross-repo Jules dispatch failed before a session was acknowledged; the task was returned to factory:queued." >/dev/null || true
+                -f body="<!-- roots-dispatch-launch-failed issue=${issue} run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} worker=jules -->\nCross-repo Jules dispatch failed before a session was acknowledged; the task was returned to factory:queued and its Jules ownership reservation was released." >/dev/null || true
               continue
             fi
             echo "JULES_SLOT_DISPATCHED: ${repo}#${issue}"
@@ -316,8 +340,9 @@ jobs:
             echo "- Provider ownership anomaly: ${PROVIDER_ANOMALY:-false}"
             echo "- Execute: ${EXECUTE}"
             echo "- Dispatch only: ${DISPATCH_ONLY:-false}"
-            echo '- Queued provider selection uses factory:agent:chatgpt; active provider accounting uses persisted reservation/worker identity.'
+            echo '- Queued provider selection uses factory:agent:chatgpt; dispatching ownership uses dedicated machine ownership labels; dispatched ownership uses the durable worker identity.'
             echo '- Route drift after claim never releases or transfers an active provider slot; mismatches fail closed for new reservation.'
+            echo '- Issue/comment text is audit context, not provider authority.'
             echo '- Capacity invariant: Jules dispatching + dispatched identities <= configured Jules max_concurrency.'
             echo '- Identity invariant remains one issue -> one worker identity -> one branch -> one PR.'
             echo '- Cron is recovery/fallback; event-driven dispatch_only remains the nominal queue handoff.'
