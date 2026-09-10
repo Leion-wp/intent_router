@@ -67,6 +67,8 @@ jobs:
         run: python .github/roots/test-completion-planning-handoff.py
       - name: Run Copilot Quality Gate contract tests
         run: python .github/roots/test-copilot-quality-gate.py
+      - name: Run portfolio telemetry handoff contract tests
+        run: python .github/roots/test-portfolio-telemetry-handoff.py
       - name: Run product event relay regression tests
         run: python .github/roots/test-product-event-relay.py
       - name: Run Product Brain event routing regression tests
