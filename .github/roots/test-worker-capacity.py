@@ -60,10 +60,11 @@ def main() -> None:
     assert "WORKER_ROUTE_REFUSED" in dispatcher
     # Once Jules reservation exists, provider authority must come from the
     # canonical reservation/identity resolver rather than the mutable route label.
-    assert "factory_worker_provider.py" in dispatcher
-    assert "factory:agent:chatgpt" not in dispatcher
-    assert proves_chatgpt_exclusion(ci_rework)
-    assert proves_chatgpt_exclusion(quality_rework)
+    for active_jules_workflow in (dispatcher, ci_rework, quality_rework):
+        assert "factory_worker_provider.py" in active_jules_workflow
+        assert "factory:agent:chatgpt" not in active_jules_workflow
+    assert "Durable worker identity, not mutable route labels" in ci_rework
+    assert "Durable worker identity, not mutable route labels" in quality_rework
 
     decision_max = product_schema["properties"]["milestone"]["oneOf"][1]["properties"]["tasks"]["maxItems"]
     plan_max = plan_schema["properties"]["tasks"]["maxItems"]
