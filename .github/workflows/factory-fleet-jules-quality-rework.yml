@@ -1,4 +1,4 @@
-name: factory-fleet-jules-quality-rework-v2
+name: factory-fleet-jules-quality-rework-v3
 
 "on":
   workflow_dispatch:
@@ -43,7 +43,21 @@ jobs:
             branch="$(jq -r '.default_branch' /tmp/profile.json)"
 
             while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
               comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              printf '%s\n' "$comments" > /tmp/provider-comments.json
+              gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]' > /tmp/provider-labels.json
+              if ! provider_json="$(python3 .github/roots/factory_worker_provider.py \
+                --repo "$repo" --issue "$issue" --lifecycle 'factory:dispatched' \
+                --labels-json /tmp/provider-labels.json --comments-json /tmp/provider-comments.json)"; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ambiguous active worker ownership; Quality rework fails closed." >&2
+                continue
+              fi
+              [ "$(jq -r '.provider' <<< "$provider_json")" = 'jules' ] || continue
+              if [ "$(jq -r '.route_mismatch' <<< "$provider_json")" = 'true' ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} route label drifted, but durable Jules identity remains the Quality rework owner." >&2
+              fi
+
               session_marker="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-jules-session task_id='"${repo}#${issue}"' "))] | last | .body // empty' <<< "$comments")"
               [ -z "$session_marker" ] && continue
               session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_marker" | head -n 1)"
@@ -99,8 +113,7 @@ jobs:
               gh api --method POST "repos/${repo}/issues/${issue}/comments" \
                 -f body="${dedupe}\nRoots Fleet sent Quality REWORK for PR #${pr} head ${sha} to the existing Jules session. Same session/branch/PR preserved." >/dev/null
               sent=$((sent + 1))
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number,labels \
-              --jq '.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null) | .number')
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
           done < repos.txt
 
-          echo "Fleet Jules Quality rework scan completed. Messages sent: ${sent}. ChatGPT-routed identities are excluded."
+          echo "Fleet Jules Quality rework scan completed. Messages sent: ${sent}. Durable worker identity, not mutable route labels, owns active rework."
