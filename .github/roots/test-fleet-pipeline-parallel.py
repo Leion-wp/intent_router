@@ -28,6 +28,28 @@ legacy.fixture = routed_fixture
 
 
 class ParallelPipelineTests(legacy.PipelineTests):
+    def test_scheduler_hands_off_before_selecting_work(self):
+        """Manual execute=true is a real recovery path, not a reconciliation-only no-op."""
+        self.success("factory-fleet-scheduler", inputs={"execute": True})
+        dispatches = self.get()["dispatches"]
+
+        self.assertEqual(
+            [row["workflow"] for row in dispatches[:2]],
+            ["factory-fleet-jules-quality-rework.yml", "factory-quality-risk-reconciler.yml"],
+        )
+        workers = self.workers()
+        self.assertEqual([row["inputs"]["issue_number"] for row in workers], ["18"])
+        labels18 = {row["name"] for row in self.get()["issues"]["18"]["labels"]}
+        self.assertEqual(labels18, {"factory:dispatching"})
+
+    def test_schedule_recovery_selects_jules_work_without_dispatch_only(self):
+        """Cron fallback independently discovers and reserves queued Jules work."""
+        self.success("factory-fleet-scheduler", event="schedule")
+        workers = self.workers()
+        self.assertEqual([row["inputs"]["issue_number"] for row in workers], ["18"])
+        labels18 = {row["name"] for row in self.get()["issues"]["18"]["labels"]}
+        self.assertEqual(labels18, {"factory:dispatching"})
+
     def test_negative_stale_unclassified_and_denied_risk_hold_lock(self):
         """A bad task holds its own identity, not the whole Jules pool."""
         for change in ["REWORK", "BLOCK", "stale", "unclassified", "denied", "ci_failure"]:
