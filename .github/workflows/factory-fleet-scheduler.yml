@@ -58,7 +58,6 @@ jobs:
 
       - name: Discover Jules-eligible issues and available slots
         id: candidates
-        if: inputs.dispatch_only == true || env.EXECUTE != 'true'
         shell: bash
         run: |
           set -euo pipefail
