@@ -40,7 +40,7 @@ class ParallelPipelineTests(legacy.PipelineTests):
         workers = self.workers()
         self.assertEqual([row["inputs"]["issue_number"] for row in workers], ["18"])
         labels18 = {row["name"] for row in self.get()["issues"]["18"]["labels"]}
-        self.assertEqual(labels18, {"factory:dispatching"})
+        self.assertEqual(labels18, {"factory:dispatching", "factory:worker:jules"})
 
     def test_schedule_recovery_selects_jules_work_without_dispatch_only(self):
         """Cron fallback independently discovers and reserves queued Jules work."""
@@ -48,7 +48,7 @@ class ParallelPipelineTests(legacy.PipelineTests):
         workers = self.workers()
         self.assertEqual([row["inputs"]["issue_number"] for row in workers], ["18"])
         labels18 = {row["name"] for row in self.get()["issues"]["18"]["labels"]}
-        self.assertEqual(labels18, {"factory:dispatching"})
+        self.assertEqual(labels18, {"factory:dispatching", "factory:worker:jules"})
 
     def test_negative_stale_unclassified_and_denied_risk_hold_lock(self):
         """A bad task holds its own identity, not the whole Jules pool."""
