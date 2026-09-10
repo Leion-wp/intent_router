@@ -1,4 +1,4 @@
-name: factory-cross-repo-dispatch-v2
+name: factory-cross-repo-dispatch-v3
 
 "on":
   workflow_dispatch:
@@ -58,16 +58,21 @@ jobs:
             .governance.workflow_changes == "HUMAN_REQUIRED"
           ' profile.json >/dev/null
 
-      - name: Read untrusted source issue and worker route
+      - name: Read untrusted source issue and validate Jules reservation
         shell: bash
         run: |
           set -euo pipefail
           gh api "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}" > issue.json
           test "$(jq -r '.state' issue.json)" = 'open'
           test "$(jq -r '.pull_request // empty' issue.json)" = ''
-          labels="$(jq '[.labels[].name]' issue.json)"
-          if jq -e 'index("factory:agent:chatgpt") != null' <<< "$labels" >/dev/null; then
-            echo "WORKER_ROUTE_REFUSED: ${TARGET_REPO}#${ISSUE_NUMBER} is routed to ChatGPT; Jules dispatcher must not claim it." >&2
+          jq '[.labels[].name]' issue.json > labels.json
+          gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments" > comments.json
+          provider_json="$(python3 .github/roots/factory_worker_provider.py \
+            --repo "$TARGET_REPO" --issue "$ISSUE_NUMBER" --lifecycle 'factory:dispatching' \
+            --labels-json labels.json --comments-json comments.json)"
+          test "$(jq -r '.provider' <<< "$provider_json")" = 'jules'
+          if [ "$(jq -r '.route_mismatch' <<< "$provider_json")" = 'true' ]; then
+            echo "WORKER_ROUTE_REFUSED: ${TARGET_REPO}#${ISSUE_NUMBER} route changed after Jules reservation; retaining Jules ownership but refusing session creation until reconciled." >&2
             exit 1
           fi
 
@@ -169,22 +174,32 @@ jobs:
           gh api --method POST "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments" -f body="$body" >/dev/null
 
           labels="$(gh api "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}" --jq '[.labels[].name]')"
-          jq -e 'index("factory:dispatching") != null and index("factory:agent:chatgpt") == null' <<< "$labels" >/dev/null || {
-            echo 'CONTROL_PLANE_ANOMALY: persisted Jules session but source issue is not exclusively Jules-routed dispatching state.' >&2
+          jq -e 'index("factory:dispatching") != null' <<< "$labels" >/dev/null || {
+            echo 'CONTROL_PLANE_ANOMALY: Jules session exists but source issue is no longer dispatching; identity was persisted to avoid orphaning the remote session.' >&2
             exit 1
           }
           gh issue edit "$ISSUE_NUMBER" --repo "$TARGET_REPO" --remove-label 'factory:dispatching' --add-label 'factory:dispatched' >/dev/null
-          labels="$(gh api "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}" --jq '[.labels[].name]')"
+
+          gh api "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}" --jq '[.labels[].name]' > labels.json
+          gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments" > comments.json
+          provider_json="$(python3 .github/roots/factory_worker_provider.py \
+            --repo "$TARGET_REPO" --issue "$ISSUE_NUMBER" --lifecycle 'factory:dispatched' \
+            --labels-json labels.json --comments-json comments.json)"
+          test "$(jq -r '.provider' <<< "$provider_json")" = 'jules'
+          if [ "$(jq -r '.route_mismatch' <<< "$provider_json")" = 'true' ]; then
+            echo "CONTROL_PLANE_ANOMALY: ${task_id} route changed after session creation; durable Jules identity was persisted and retains provider ownership." >&2
+          fi
+          labels="$(cat labels.json)"
           jq -e 'index("factory:dispatched") != null and index("factory:dispatching") == null' <<< "$labels" >/dev/null || {
             echo 'CONTROL_PLANE_ANOMALY: dispatch acknowledgement label transition did not persist.' >&2
             exit 1
           }
           {
-            echo '### Cross-repo dispatch v2'
+            echo '### Cross-repo dispatch v3'
             echo "- Target: ${task_id}"
             echo "- Session: ${session}"
-            echo '- Worker route: Jules'
+            echo '- Worker owner: Jules'
             echo '- Delivery mode: AUTO_CREATE_PR'
-            echo '- Rework identity persisted on target issue.'
+            echo '- Durable identity persisted on target issue.'
             echo '- State: factory:dispatched.'
           } >> "$GITHUB_STEP_SUMMARY"
