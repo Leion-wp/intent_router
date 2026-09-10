@@ -34,9 +34,11 @@ def main() -> None:
         "portfolio telemetry handoff subscriptions drifted from current workflow names: "
         f"expected={expected_names!r} actual={subscribed_names!r}"
     )
-    assert 'gh workflow run factory-portfolio-telemetry.yml \\\n            --repo "$GITHUB_REPOSITORY" \\\n            --ref Android' in handoff_text, (
+    assert "gh workflow run factory-portfolio-telemetry.yml" in handoff_text
+    assert '--repo "$GITHUB_REPOSITORY"' in handoff_text, (
         "telemetry handoff must pass --repo explicitly because it intentionally has no checkout"
     )
+    assert "--ref Android" in handoff_text
 
     print("portfolio telemetry handoff tests passed")
 
