@@ -38,6 +38,9 @@ jobs:
           [[ "$TARGET_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           [[ "$TARGET_REPO" == "$OWNER/"* ]]
           test "$TARGET_REPO" != "$GITHUB_REPOSITORY"
+          identity_helper="$GITHUB_WORKSPACE/.github/roots/factory_worker_identity.py"
+          test -f "$identity_helper"
+
           gh api -H 'Accept: application/vnd.github.raw+json' "repos/${TARGET_REPO}/contents/.factory/profile.json" > /tmp/profile.json
           jq -e --arg repo "$TARGET_REPO" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null
           default_branch="$(jq -r '.default_branch' /tmp/profile.json)"
@@ -50,6 +53,10 @@ jobs:
             exit 0
           fi
 
+          # PR bodies are untrusted hints. Canonical source identity comes only from persisted
+          # roots-jules-session / roots-chatgpt-worker markers.
+          gh issue list --repo "$TARGET_REPO" --state open --limit 200 --json number,comments > /tmp/issues.json
+
           selected_pr=''
           selected_issue=''
           selected_sha=''
@@ -57,20 +64,27 @@ jobs:
           while IFS= read -r candidate; do
             pr="$(jq -r '.number' <<< "$candidate")"
             sha="$(jq -r '.headRefOid' <<< "$candidate")"
-            body="$(jq -r '.body // ""' <<< "$candidate")"
-            head_ref="$(jq -r '.headRefName // ""' <<< "$candidate")"
+            printf '%s\n' "$candidate" > /tmp/candidate.json
 
-            issue="$(grep -Eio '(fixes|closes|resolves|refs|references)[[:space:]]+#[0-9]+' <<< "$body" | grep -Eo '[0-9]+' | head -n1 || true)"
-            if [ -z "$issue" ]; then
-              session_id="$(grep -Eo '[0-9]{10,}' <<< "$head_ref" | tail -n1 || true)"
-              if [ -n "$session_id" ]; then
-                issue="$(gh issue list --repo "$TARGET_REPO" --state open --limit 100 --json number,comments --jq ".[] | select(any(.comments[]?; (.body // \"\") | contains(\"session=sessions/${session_id}\"))) | .number" | head -n1)"
+            set +e
+            python "$identity_helper" resolve \
+              --repo "$TARGET_REPO" \
+              --pr-json /tmp/candidate.json \
+              --issues-json /tmp/issues.json \
+              --base "$default_branch" \
+              > /tmp/identity.json 2>/tmp/identity.err
+            identity_rc=$?
+            set -e
+            if [ "$identity_rc" -ne 0 ]; then
+              detail="$(cat /tmp/identity.err)"
+              if [ "$identity_rc" -eq 3 ]; then
+                echo "QUALITY_GATE_IDENTITY_BLOCK: PR #${pr} ${detail}"
+              else
+                echo "QUALITY_GATE_SKIP: PR #${pr} ${detail}"
               fi
-            fi
-            if [ -z "$issue" ]; then
-              echo "QUALITY_GATE_SKIP: PR #${pr} source issue unresolved."
               continue
             fi
+            issue="$(jq -r '.issue' /tmp/identity.json)"
 
             gh api "repos/${TARGET_REPO}/actions/runs?head_sha=${sha}&event=pull_request&per_page=100" > /tmp/runs.json
             if ! jq -e '.workflow_runs | any(.name == "factory-ci" and .status == "completed" and .conclusion == "success")' /tmp/runs.json >/dev/null; then
@@ -130,6 +144,23 @@ jobs:
           [ "$(jq -r '.base.ref' /tmp/pr.json)" = "$default_branch" ] || { echo 'QUALITY_GATE_DEFERRED: selected PR base changed.'; exit 0; }
           [ "$(jq -r '.state' /tmp/pr.json)" = open ] || exit 0
           [ "$(jq -r '.draft' /tmp/pr.json)" = false ] || exit 0
+
+          gh api --paginate "repos/${TARGET_REPO}/issues/${issue}/comments" > /tmp/identity-comments.json
+          set +e
+          python "$identity_helper" validate \
+            --repo "$TARGET_REPO" \
+            --issue "$issue" \
+            --comments-json /tmp/identity-comments.json \
+            --pr-json /tmp/pr.json \
+            --base "$default_branch" \
+            >/tmp/identity-revalidate.json 2>/tmp/identity-revalidate.err
+          identity_rc=$?
+          set -e
+          if [ "$identity_rc" -ne 0 ]; then
+            echo "QUALITY_GATE_DEFERRED: canonical worker identity changed before review: $(cat /tmp/identity-revalidate.err)"
+            exit 0
+          fi
+
           gh api -H 'Accept: application/vnd.github.v3.diff' "repos/${TARGET_REPO}/pulls/${pr}" > /tmp/pr.diff
           jq '{number,title,body,labels:[.labels[].name],milestone:(.milestone.title // null)}' /tmp/issue.json > /tmp/issue-context.json
           jq '{number,title,body,base:.base.ref,head:.head.ref,head_sha:.head.sha,changed_files,additions,deletions}' /tmp/pr.json > /tmp/pr-context.json
@@ -137,6 +168,7 @@ jobs:
           printf '%s\n' "$issue" > /tmp/issue-number.txt
           printf '%s\n' "$pr" > /tmp/pr-number.txt
           printf '%s\n' "$sha" > /tmp/head-sha.txt
+          printf '%s\n' "$default_branch" > /tmp/default-branch.txt
           echo 'ready=true' >> "$GITHUB_OUTPUT"
           echo "QUALITY_GATE_SELECTED: ${TARGET_REPO}#${issue} PR #${pr} head ${sha}."
 
@@ -189,14 +221,35 @@ jobs:
           issue="$(cat /tmp/issue-number.txt)"
           pr="$(cat /tmp/pr-number.txt)"
           sha="$(cat /tmp/head-sha.txt)"
+          default_branch="$(cat /tmp/default-branch.txt)"
           verdict="$(jq -r '.verdict' /tmp/quality.json)"
           risk="$(jq -r '.risk' /tmp/quality.json)"
           summary="$(jq -r '.summary' /tmp/quality.json)"
           findings="$(jq -r '.findings[]? | "- " + .' /tmp/quality.json)"
+          identity_helper="$GITHUB_WORKSPACE/.github/roots/factory_worker_identity.py"
 
-          current_sha="$(gh api "repos/${repo}/pulls/${pr}" --jq '.head.sha')"
+          gh api "repos/${repo}/pulls/${pr}" > /tmp/current-pr.json
+          current_sha="$(jq -r '.head.sha' /tmp/current-pr.json)"
           [ "$current_sha" = "$sha" ] || { echo 'QUALITY_GATE_DEFERRED: PR head changed during review.'; exit 0; }
-          comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+          [ "$(jq -r '.base.ref' /tmp/current-pr.json)" = "$default_branch" ] || { echo 'QUALITY_GATE_DEFERRED: PR base changed during review.'; exit 0; }
+
+          gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/current-comments.json
+          set +e
+          python "$identity_helper" validate \
+            --repo "$repo" \
+            --issue "$issue" \
+            --comments-json /tmp/current-comments.json \
+            --pr-json /tmp/current-pr.json \
+            --base "$default_branch" \
+            >/tmp/current-identity.json 2>/tmp/current-identity.err
+          identity_rc=$?
+          set -e
+          if [ "$identity_rc" -ne 0 ]; then
+            echo "QUALITY_GATE_DEFERRED: canonical worker identity changed during review: $(cat /tmp/current-identity.err)"
+            exit 0
+          fi
+
+          comments="$(cat /tmp/current-comments.json)"
           if jq -e --arg sha "$sha" '.[] | select((.body // "") | contains("<!-- roots-quality-verdict head=" + $sha + " verdict="))' <<< "$comments" >/dev/null; then
             echo 'QUALITY_GATE_NOOP: another exact-head verdict won the race.'
             exit 0
