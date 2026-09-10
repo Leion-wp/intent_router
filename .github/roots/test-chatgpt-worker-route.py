@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+import factory_worker_provider as provider
+
 ROOT = Path('.github/roots')
 WORKFLOWS = Path('.github/workflows')
 
@@ -31,14 +33,71 @@ worker_enum = profile_schema['properties']['worker_policy']['properties']['enabl
 assert 'jules' in worker_enum
 assert 'chatgpt' in worker_enum
 
-# Jules requires explicit provider authorization and must not claim/recover ChatGPT-routed tasks.
+# Jules requires explicit provider authorization and must not claim ChatGPT-routed queued tasks.
 assert 'factory-fleet-scheduler-v4' in scheduler
 assert '.worker_policy.enabled | index("jules") != null' in scheduler
 assert proves_exclusion(scheduler)
 assert 'WORKER_ROUTE_REFUSED' in dispatcher
-assert proves_exclusion(watchdog)
 assert proves_exclusion(ci_rework)
 assert proves_exclusion(quality_rework)
+
+# Active capacity/watchdog/telemetry must resolve provider from reservation/identity,
+# never from a freely mutable route label after claim.
+for workflow in (scheduler, watchdog, telemetry):
+    assert 'factory_worker_provider.py' in workflow
+assert 'route_mismatch' in scheduler
+assert 'route_mismatch' in watchdog
+assert 'route_mismatch' in telemetry
+
+# Canonical provider resolver: queued uses route; active work uses reservation/identity.
+assert provider.resolve_provider(
+    'Leion-wp/product', 17, 'factory:queued',
+    ['factory:queued', 'factory:agent:chatgpt'], [],
+)['provider'] == 'chatgpt'
+
+jules_comments = [
+    {'body': '<!-- roots-dispatch-request issue=17 run=1-1 slot=1 worker=jules -->'},
+    {'body': '<!-- roots-jules-session task_id=Leion-wp/product#17 session=sessions/abc -->'},
+]
+jules_drift = provider.resolve_provider(
+    'Leion-wp/product', 17, 'factory:dispatched',
+    ['factory:dispatched', 'factory:agent:chatgpt'], jules_comments,
+)
+assert jules_drift['provider'] == 'jules'
+assert jules_drift['source'] == 'identity'
+assert jules_drift['route_mismatch'] is True
+
+chatgpt_comments = [
+    {'body': '<!-- roots-chatgpt-worker task_id=Leion-wp/product#17 branch=chatgpt-17 pr=21 -->'},
+]
+chatgpt_drift = provider.resolve_provider(
+    'Leion-wp/product', 17, 'factory:dispatched',
+    ['factory:dispatched'], chatgpt_comments,
+)
+assert chatgpt_drift['provider'] == 'chatgpt'
+assert chatgpt_drift['route_mismatch'] is True
+
+dispatching_drift = provider.resolve_provider(
+    'Leion-wp/product', 17, 'factory:dispatching',
+    ['factory:dispatching', 'factory:agent:chatgpt'],
+    [{'body': '<!-- roots-dispatch-request issue=17 run=1-1 slot=1 worker=jules -->'}],
+)
+assert dispatching_drift['provider'] == 'jules'
+assert dispatching_drift['source'] == 'reservation'
+assert dispatching_drift['route_mismatch'] is True
+
+try:
+    provider.resolve_provider(
+        'Leion-wp/product', 17, 'factory:dispatched', ['factory:dispatched'],
+        [
+            {'body': '<!-- roots-jules-session task_id=Leion-wp/product#17 session=sessions/abc -->'},
+            {'body': '<!-- roots-chatgpt-worker task_id=Leion-wp/product#17 branch=chatgpt-17 pr=21 -->'},
+        ],
+    )
+except provider.ProviderConflict:
+    pass
+else:
+    raise AssertionError('conflicting provider identities must fail closed')
 
 # Shared downstream stages accept one recognized worker identity and fail on conflicts.
 for workflow in (risk, automerge, completion):
@@ -65,6 +124,8 @@ assert telemetry_schema['properties']['chatgpt_capacity']['properties']['provide
 # The cognitive adapter contract remains profile-authorized, bounded and does not own Quality/merge.
 assert 'worker_policy.enabled` contains `chatgpt`' in doc
 assert '<!-- roots-chatgpt-worker task_id=<owner/repo>#<issue> branch=<branch> pr=<number> -->' in doc
+assert 'roots-dispatch-request' in doc
+assert 'worker=chatgpt' in doc
 assert 'must not' in doc.lower()
 assert 'publish `roots-quality-verdict`' in doc
 assert 'merge its own PR' in doc
