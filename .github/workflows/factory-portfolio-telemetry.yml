@@ -56,6 +56,16 @@ jobs:
           : > /tmp/jules-escalated.tsv
           : > /tmp/chatgpt-escalated.tsv
           : > /tmp/all-active.tsv
+          provider_anomaly=false
+
+          resolve_provider() {
+            local repo="$1" issue="$2" lifecycle="$3" comments="$4"
+            printf '%s\n' "$comments" > /tmp/provider-comments.json
+            GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]' > /tmp/provider-labels.json
+            python3 .github/roots/factory_worker_provider.py \
+              --repo "$repo" --issue "$issue" --lifecycle "$lifecycle" \
+              --labels-json /tmp/provider-labels.json --comments-json /tmp/provider-comments.json
+          }
 
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
@@ -92,27 +102,46 @@ jobs:
             open_prs="$(gh pr list --repo "$repo" --state open --limit 100 --json number --jq 'length')"
 
             for lifecycle in factory:dispatching factory:dispatched; do
-              gh issue list --repo "$repo" --state open --label "$lifecycle" --limit 100 --json number,labels \
-                | jq -c '.[]' | while IFS= read -r row; do
-                  issue="$(jq -r '.number' <<< "$row")"
-                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/all-active.tsv
-                  if jq -e '[.labels[].name] | index("factory:agent:chatgpt") != null' <<< "$row" >/dev/null; then
-                    printf '%s\t%s\n' "$repo" "$issue" >> /tmp/chatgpt-active.tsv
-                  else
-                    printf '%s\t%s\n' "$repo" "$issue" >> /tmp/jules-active.tsv
-                  fi
-                done
+              while IFS= read -r issue; do
+                [ -z "$issue" ] && continue
+                printf '%s\t%s\n' "$repo" "$issue" >> /tmp/all-active.tsv
+                comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+                if ! provider_json="$(resolve_provider "$repo" "$issue" "$lifecycle" "$comments")"; then
+                  provider_anomaly=true
+                  echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} ${lifecycle} provider ownership is missing or conflicting; provider availability will fail closed." >&2
+                  continue
+                fi
+                provider="$(jq -r '.provider' <<< "$provider_json")"
+                if [ "$(jq -r '.route_mismatch' <<< "$provider_json")" = 'true' ]; then
+                  provider_anomaly=true
+                  echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} route label disagrees with canonical ${provider} ownership; telemetry retains canonical ownership." >&2
+                fi
+                if [ "$provider" = 'chatgpt' ]; then
+                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/chatgpt-active.tsv
+                else
+                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/jules-active.tsv
+                fi
+              done < <(gh issue list --repo "$repo" --state open --label "$lifecycle" --limit 100 --json number --jq '.[].number')
             done
 
-            gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number,labels \
-              | jq -c '.[]' | while IFS= read -r row; do
-                issue="$(jq -r '.number' <<< "$row")"
-                if jq -e '[.labels[].name] | index("factory:agent:chatgpt") != null' <<< "$row" >/dev/null; then
-                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/chatgpt-escalated.tsv
-                else
-                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/jules-escalated.tsv
-                fi
-              done
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              if ! provider_json="$(resolve_provider "$repo" "$issue" 'factory:escalated' "$comments")"; then
+                provider_anomaly=true
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} escalated provider ownership is missing or conflicting." >&2
+                continue
+              fi
+              provider="$(jq -r '.provider' <<< "$provider_json")"
+              if [ "$(jq -r '.route_mismatch' <<< "$provider_json")" = 'true' ]; then
+                provider_anomaly=true
+              fi
+              if [ "$provider" = 'chatgpt' ]; then
+                printf '%s\t%s\n' "$repo" "$issue" >> /tmp/chatgpt-escalated.tsv
+              else
+                printf '%s\t%s\n' "$repo" "$issue" >> /tmp/jules-escalated.tsv
+              fi
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq '.[].number')
 
             jq -n \
               --arg repository "$repo" \
@@ -144,15 +173,18 @@ jobs:
           chatgpt_escalated="$(sort -u /tmp/chatgpt-escalated.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
           jules_available=0
           chatgpt_available=0
-          if [ "$jules_active" -le "$jules_max" ]; then
+          if [ "$provider_anomaly" != 'true' ] && [ "$jules_active" -le "$jules_max" ]; then
             jules_available="$((jules_max - jules_active))"
-          else
+          elif [ "$jules_active" -gt "$jules_max" ]; then
             echo "CONTROL_PLANE_ANOMALY: active Jules slots ${jules_active} exceed configured capacity ${jules_max}." >&2
           fi
-          if [ "$chatgpt_active" -le "$chatgpt_max" ]; then
+          if [ "$provider_anomaly" != 'true' ] && [ "$chatgpt_active" -le "$chatgpt_max" ]; then
             chatgpt_available="$((chatgpt_max - chatgpt_active))"
-          else
+          elif [ "$chatgpt_active" -gt "$chatgpt_max" ]; then
             echo "CONTROL_PLANE_ANOMALY: active ChatGPT slots ${chatgpt_active} exceed configured capacity ${chatgpt_max}." >&2
+          fi
+          if [ "$provider_anomaly" = 'true' ]; then
+            echo 'CONTROL_PLANE_ANOMALY: provider ownership anomaly detected; both provider available-slot metrics fail closed at zero.' >&2
           fi
 
           lock_repo=''
@@ -207,7 +239,7 @@ jobs:
           title='[FACTORY] Portfolio telemetry'
           issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label 'factory:telemetry' --limit 50 --json number,title --jq '.[] | select(.title == "[FACTORY] Portfolio telemetry") | .number' | head -n 1)"
           fence="$(printf '\140\140\140')"
-          body="$(printf '%s\n%sjson\n%s\n%s\n\n%s' '<!-- roots-portfolio-telemetry:v1 -->' "$fence" "$(cat /tmp/portfolio.json)" "$fence" 'Operational telemetry only. Market, revenue and spend evidence must come from separately authorized sources; absent evidence is not inferred.')"
+          body="$(printf '%s\n%sjson\n%s\n%s\n\n%s' '<!-- roots-portfolio-telemetry:v1 -->' "$fence" "$(cat /tmp/portfolio.json)" "$fence" 'Operational telemetry only. Provider active-slot ownership is derived from canonical reservation/worker identity; route-label drift cannot transfer capacity. Market, revenue and spend evidence must come from separately authorized sources; absent evidence is not inferred.')"
           if [ -z "$issue" ]; then
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label 'factory:telemetry' --body "$body" >/dev/null
           else
