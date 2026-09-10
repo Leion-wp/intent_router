@@ -33,6 +33,7 @@ jobs:
           echo "::add-mask::$FLEET_TOKEN"
           export GH_TOKEN="$FLEET_TOKEN"
           test "$(gh api user --jq '.login')" = "$OWNER"
+          # Shared correlation owns both persisted identity forms: roots-jules-session and roots-chatgpt-worker.
           identity_helper="$GITHUB_WORKSPACE/.github/roots/factory_worker_identity.py"
           test -f "$identity_helper"
 
