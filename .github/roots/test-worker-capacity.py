@@ -27,6 +27,7 @@ def main() -> None:
 
     scheduler = (WORKFLOWS / "factory-fleet-scheduler.yml").read_text()
     watchdog = (WORKFLOWS / "factory-fleet-watchdog.yml").read_text()
+    telemetry = (WORKFLOWS / "factory-portfolio-telemetry.yml").read_text()
     dispatcher = (WORKFLOWS / "factory-cross-repo-dispatch.yml").read_text()
     ci_rework = (WORKFLOWS / "factory-fleet-jules-rework.yml").read_text()
     quality_rework = (WORKFLOWS / "factory-fleet-jules-quality-rework.yml").read_text()
@@ -39,14 +40,21 @@ def main() -> None:
     assert 'head -n "$available_slots"' in scheduler
     assert "Reserve selected identities and dispatch Jules pool" in scheduler
     assert "GLOBAL_WORKER_LOCK" not in scheduler
+    # Route exclusion remains correct only for still-queued candidate selection.
     assert proves_chatgpt_exclusion(scheduler)
     assert "worker=jules" in scheduler
+    assert "factory_worker_provider.py" in scheduler
+    assert "route/provider mismatch" in scheduler
 
     assert "factory-fleet-watchdog-v4" in watchdog
-    assert proves_chatgpt_exclusion(watchdog)
+    assert "factory_worker_provider.py" in watchdog
+    assert "canonical ${provider} ownership" in watchdog
     assert 'active_slots" -gt "$max_concurrency' in watchdog
     assert "sequential invariant is violated" not in watchdog
-    assert "excluded from Jules capacity" in watchdog
+
+    assert "factory-portfolio-telemetry-v3" in telemetry
+    assert "factory_worker_provider.py" in telemetry
+    assert "telemetry retains canonical ownership" in telemetry
 
     assert "factory-cross-${{ inputs.repository }}-${{ inputs.issue_number }}" in dispatcher
     assert "WORKER_ROUTE_REFUSED" in dispatcher
