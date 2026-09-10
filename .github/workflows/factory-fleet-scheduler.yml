@@ -83,6 +83,16 @@ jobs:
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
           : > candidates.tsv
           : > managed-repos.txt
+          provider_anomaly=false
+
+          resolve_provider() {
+            local repo="$1" issue="$2" lifecycle="$3" comments="$4"
+            printf '%s\n' "$comments" > /tmp/provider-comments.json
+            GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]' > /tmp/provider-labels.json
+            python3 .github/roots/factory_worker_provider.py \
+              --repo "$repo" --issue "$issue" --lifecycle "$lifecycle" \
+              --labels-json /tmp/provider-labels.json --comments-json /tmp/provider-comments.json
+          }
 
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
@@ -95,6 +105,19 @@ jobs:
             while IFS= read -r issue; do
               [ -z "$issue" ] && continue
               comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              if ! provider_json="$(resolve_provider "$repo" "$issue" 'factory:dispatching' "$comments")"; then
+                provider_anomaly=true
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} dispatching provider ownership is missing or conflicting." >&2
+                continue
+              fi
+              provider="$(jq -r '.provider' <<< "$provider_json")"
+              route_mismatch="$(jq -r '.route_mismatch' <<< "$provider_json")"
+              if [ "$route_mismatch" = 'true' ]; then
+                provider_anomaly=true
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} route label disagrees with canonical ${provider} ownership; ownership is retained and new reservation fails closed." >&2
+              fi
+              [ "$provider" = 'jules' ] || continue
+
               if jq -e --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '.[] | select((.body // "") | contains($prefix))' <<< "$comments" >/dev/null; then
                 if [ "$EXECUTE" = 'true' ]; then
                   gh issue edit "$issue" --repo "$repo" --remove-label 'factory:dispatching' --add-label 'factory:dispatched' >/dev/null
@@ -103,31 +126,54 @@ jobs:
                 continue
               fi
 
-              requested_at="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-dispatch-request issue='"${issue}"' "))] | last | .created_at // empty' <<< "$comments")"
+              requested_at="$(jq -r '[.[] | select(((.body // "") | contains("<!-- roots-dispatch-request issue='"${issue}"' ")) and ((.body // "") | contains(" worker=jules -->")))] | last | .created_at // empty' <<< "$comments")"
               [ -z "$requested_at" ] && continue
               stale="$(python3 -c 'from datetime import datetime, timezone; import sys; stamp=datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")); print("true" if (datetime.now(timezone.utc)-stamp).total_seconds() > 1200 else "false")' "$requested_at")"
               if [ "$stale" = 'true' ] && [ "$EXECUTE" = 'true' ]; then
                 gh issue edit "$issue" --repo "$repo" --remove-label 'factory:dispatching' --add-label 'factory:queued' >/dev/null
                 gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                  -f body="<!-- roots-dispatch-recovered issue=${issue} -->\nJules dispatch acknowledgement timed out after 20 minutes with no persisted Jules session; returned safely to factory:queued." >/dev/null
+                  -f body="<!-- roots-dispatch-recovered issue=${issue} worker=jules -->\nJules dispatch acknowledgement timed out after 20 minutes with no persisted Jules session; returned safely to factory:queued." >/dev/null
                 echo "DISPATCH_TIMEOUT_RECOVERED: ${repo}#${issue}"
               fi
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number,labels \
-              --jq '.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null) | .number')
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq '.[].number')
           done < repos.txt
 
           active_slots=0
           escalated_identities=0
           while IFS= read -r repo; do
             [ -z "$repo" ] && continue
-            dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json labels \
-              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
-            dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json labels \
-              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
-            escalated="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json labels \
-              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
-            active_slots="$((active_slots + dispatching + dispatched))"
-            escalated_identities="$((escalated_identities + escalated))"
+            for lifecycle in factory:dispatching factory:dispatched; do
+              while IFS= read -r issue; do
+                [ -z "$issue" ] && continue
+                comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+                if ! provider_json="$(resolve_provider "$repo" "$issue" "$lifecycle" "$comments")"; then
+                  provider_anomaly=true
+                  echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} ${lifecycle} provider ownership is missing or conflicting." >&2
+                  continue
+                fi
+                provider="$(jq -r '.provider' <<< "$provider_json")"
+                if [ "$(jq -r '.route_mismatch' <<< "$provider_json")" = 'true' ]; then
+                  provider_anomaly=true
+                  echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} route/provider mismatch; canonical ${provider} slot remains occupied." >&2
+                fi
+                [ "$provider" = 'jules' ] && active_slots="$((active_slots + 1))"
+              done < <(gh issue list --repo "$repo" --state open --label "$lifecycle" --limit 100 --json number --jq '.[].number')
+            done
+
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              if ! provider_json="$(resolve_provider "$repo" "$issue" 'factory:escalated' "$comments")"; then
+                provider_anomaly=true
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} escalated provider ownership is missing or conflicting." >&2
+                continue
+              fi
+              provider="$(jq -r '.provider' <<< "$provider_json")"
+              if [ "$(jq -r '.route_mismatch' <<< "$provider_json")" = 'true' ]; then
+                provider_anomaly=true
+              fi
+              [ "$provider" = 'jules' ] && escalated_identities="$((escalated_identities + 1))"
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq '.[].number')
           done < managed-repos.txt
 
           if [ "$active_slots" -gt "$max_concurrency" ]; then
@@ -138,6 +184,20 @@ jobs:
             echo 'selected_count=0' >> "$GITHUB_OUTPUT"
             echo "escalated_identities=${escalated_identities}" >> "$GITHUB_OUTPUT"
             echo 'capacity_violation=true' >> "$GITHUB_OUTPUT"
+            echo "provider_anomaly=${provider_anomaly}" >> "$GITHUB_OUTPUT"
+            : > selected.tsv
+            exit 0
+          fi
+
+          if [ "$provider_anomaly" = 'true' ]; then
+            echo 'CONTROL_PLANE_ANOMALY: provider ownership mismatch/ambiguity detected; no new Jules reservation will be made.' >&2
+            echo "capacity=${max_concurrency}" >> "$GITHUB_OUTPUT"
+            echo "active_slots=${active_slots}" >> "$GITHUB_OUTPUT"
+            echo 'available_slots=0' >> "$GITHUB_OUTPUT"
+            echo 'selected_count=0' >> "$GITHUB_OUTPUT"
+            echo "escalated_identities=${escalated_identities}" >> "$GITHUB_OUTPUT"
+            echo 'capacity_violation=false' >> "$GITHUB_OUTPUT"
+            echo 'provider_anomaly=true' >> "$GITHUB_OUTPUT"
             : > selected.tsv
             exit 0
           fi
@@ -185,6 +245,7 @@ jobs:
           echo "selected_count=${selected_count}" >> "$GITHUB_OUTPUT"
           echo "escalated_identities=${escalated_identities}" >> "$GITHUB_OUTPUT"
           echo 'capacity_violation=false' >> "$GITHUB_OUTPUT"
+          echo 'provider_anomaly=false' >> "$GITHUB_OUTPUT"
 
       - name: Reserve selected identities and dispatch Jules pool
         if: steps.candidates.outputs.selected_count != '' && steps.candidates.outputs.selected_count != '0' && env.EXECUTE == 'true'
@@ -241,6 +302,7 @@ jobs:
           SELECTED_COUNT: ${{ steps.candidates.outputs.selected_count }}
           ESCALATED_IDENTITIES: ${{ steps.candidates.outputs.escalated_identities }}
           CAPACITY_VIOLATION: ${{ steps.candidates.outputs.capacity_violation }}
+          PROVIDER_ANOMALY: ${{ steps.candidates.outputs.provider_anomaly }}
           DISPATCH_ONLY: ${{ inputs.dispatch_only }}
         run: |
           {
@@ -251,10 +313,11 @@ jobs:
             echo "- Selected Jules-eligible tasks: ${SELECTED_COUNT:-0}"
             echo "- Escalated Jules identities: ${ESCALATED_IDENTITIES:-0}"
             echo "- Capacity violation: ${CAPACITY_VIOLATION:-false}"
+            echo "- Provider ownership anomaly: ${PROVIDER_ANOMALY:-false}"
             echo "- Execute: ${EXECUTE}"
             echo "- Dispatch only: ${DISPATCH_ONLY:-false}"
-            echo '- Jules scheduling requires worker_policy.enabled to contain jules.'
-            echo '- factory:agent:chatgpt is an explicit worker route and is excluded from Jules selection, acknowledgement recovery and capacity.'
+            echo '- Queued provider selection uses factory:agent:chatgpt; active provider accounting uses persisted reservation/worker identity.'
+            echo '- Route drift after claim never releases or transfers an active provider slot; mismatches fail closed for new reservation.'
             echo '- Capacity invariant: Jules dispatching + dispatched identities <= configured Jules max_concurrency.'
             echo '- Identity invariant remains one issue -> one worker identity -> one branch -> one PR.'
             echo '- Cron is recovery/fallback; event-driven dispatch_only remains the nominal queue handoff.'
