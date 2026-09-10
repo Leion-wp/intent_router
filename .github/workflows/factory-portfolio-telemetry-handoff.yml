@@ -4,11 +4,11 @@ name: factory-portfolio-telemetry-handoff-v1
   workflow_dispatch:
   workflow_run:
     workflows:
-      - factory-fleet-watchdog-v1
-      - factory-fleet-scheduler-v2
-      - factory-cross-repo-dispatch-v1
-      - factory-fleet-completion-reconciler-v1
-      - factory-managed-automerge-v1
+      - factory-fleet-watchdog-v4
+      - factory-fleet-scheduler-v4
+      - factory-cross-repo-dispatch-v2
+      - factory-fleet-completion-reconciler-v2
+      - factory-managed-automerge-v2
       - factory-autonomous-planning-v1
       - factory-product-brain-v1
     types: [completed]
@@ -36,7 +36,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh workflow run factory-portfolio-telemetry.yml --ref Android
+          gh workflow run factory-portfolio-telemetry.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref Android
           {
             echo '### Portfolio telemetry handoff'
             echo "- Source event: ${SOURCE_EVENT}"
