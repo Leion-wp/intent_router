@@ -14,6 +14,9 @@ REPO = 'Leion-wp/product'
 CONTROL = 'Leion-wp/intent_router'
 SHA_A = 'a' * 40
 SHA_B = 'b' * 40
+TOKEN_A = '11111111111'
+TOKEN_B = '22222222222'
+
 
 FAKE_GH = r'''#!/usr/bin/env python3
 import json
@@ -52,13 +55,37 @@ def api_endpoint():
             return args[i].split('?', 1)[0]
     raise SystemExit('missing api endpoint: ' + repr(args))
 
+mismatch_first = os.environ.get('MISMATCH_FIRST', 'false') == 'true'
+chatgpt_bad_pr = os.environ.get('CHATGPT_BAD_PR', 'false') == 'true'
+conflict_first = os.environ.get('CONFLICT_FIRST', 'false') == 'true'
+first_branch = 'chatgpt-17' if chatgpt_bad_pr else 'jules-a-11111111111'
+first_body = 'Fixes #18' if mismatch_first else 'Fixes #17'
+
+issue17_comments = []
+if chatgpt_bad_pr:
+    issue17_comments.append({
+        'body': '<!-- roots-chatgpt-worker task_id=Leion-wp/product#17 branch=chatgpt-17 pr=999 -->'
+    })
+else:
+    issue17_comments.append({
+        'body': '<!-- roots-jules-session task_id=Leion-wp/product#17 session=sessions/11111111111 -->'
+    })
+if conflict_first:
+    issue17_comments.append({
+        'body': '<!-- roots-chatgpt-worker task_id=Leion-wp/product#17 branch=' + first_branch + ' pr=21 -->'
+    })
+
+issue18_comments = [{
+    'body': '<!-- roots-jules-session task_id=Leion-wp/product#18 session=sessions/22222222222 -->'
+}]
+
 if args[:2] == ['pr', 'list']:
     emit([
         {
             'number': 21,
-            'body': 'Fixes #17',
+            'body': first_body,
             'headRefOid': 'a' * 40,
-            'headRefName': 'jules-a',
+            'headRefName': first_branch,
             'baseRefName': 'main',
             'isDraft': False,
             'createdAt': '2026-09-10T00:00:00Z',
@@ -67,7 +94,7 @@ if args[:2] == ['pr', 'list']:
             'number': 22,
             'body': 'Fixes #18',
             'headRefOid': 'b' * 40,
-            'headRefName': 'jules-b',
+            'headRefName': 'jules-b-22222222222',
             'baseRefName': 'main',
             'isDraft': False,
             'createdAt': '2026-09-10T00:01:00Z',
@@ -75,7 +102,10 @@ if args[:2] == ['pr', 'list']:
     ])
 
 if args[:2] == ['issue', 'list']:
-    emit([])
+    emit([
+        {'number': 17, 'comments': issue17_comments},
+        {'number': 18, 'comments': issue18_comments},
+    ])
 
 if args and args[0] == 'api':
     endpoint = api_endpoint()
@@ -106,11 +136,12 @@ if args and args[0] == 'api':
             'started_at': '2026-09-10T00:02:00Z',
         }]})
     if endpoint.endswith('/issues/17/comments'):
+        comments = list(issue17_comments)
         if os.environ.get('FIRST_REVIEWED', 'true') == 'true':
-            emit([{'body': '<!-- roots-quality-verdict head=' + ('a' * 40) + ' verdict=PASS -->\nRisk: low'}])
-        emit([])
+            comments.append({'body': '<!-- roots-quality-verdict head=' + ('a' * 40) + ' verdict=PASS -->\nRisk: low'})
+        emit(comments)
     if endpoint.endswith('/issues/18/comments'):
-        emit([])
+        emit(issue18_comments)
     if endpoint.endswith('/issues/17'):
         emit({'number': 17, 'title': 'first', 'body': '', 'labels': [], 'milestone': None})
     if endpoint.endswith('/issues/18'):
@@ -120,9 +151,9 @@ if args and args[0] == 'api':
             print('diff --git a/one b/one')
             raise SystemExit(0)
         emit({
-            'number': 21, 'title': 'one', 'body': 'Fixes #17',
+            'number': 21, 'title': 'one', 'body': first_body,
             'state': 'open', 'draft': False,
-            'base': {'ref': 'main'}, 'head': {'ref': 'jules-a', 'sha': 'a' * 40},
+            'base': {'ref': 'main'}, 'head': {'ref': first_branch, 'sha': 'a' * 40},
             'changed_files': 1, 'additions': 1, 'deletions': 0,
         })
     if endpoint.endswith('/pulls/22'):
@@ -132,7 +163,7 @@ if args and args[0] == 'api':
         emit({
             'number': 22, 'title': 'two', 'body': 'Fixes #18',
             'state': 'open', 'draft': False,
-            'base': {'ref': 'main'}, 'head': {'ref': 'jules-b', 'sha': 'b' * 40},
+            'base': {'ref': 'main'}, 'head': {'ref': 'jules-b-22222222222', 'sha': 'b' * 40},
             'changed_files': 1, 'additions': 1, 'deletions': 0,
         })
 
@@ -154,7 +185,7 @@ class CopilotQualityGateTests(unittest.TestCase):
         self.assertIn('--ref Android', script)
         self.assertIn('-f repository="$TARGET_REPO"', script)
 
-    def test_quality_gate_is_parallel_pool_aware_bounded_exact_head_and_profile_ci_aware(self):
+    def test_quality_gate_is_parallel_pool_aware_bounded_exact_head_and_identity_aware(self):
         workflow = self.workflow('factory-copilot-quality-gate.yml')
         self.assertEqual(workflow['name'], 'factory-copilot-quality-gate-v2')
         self.assertEqual(workflow['permissions']['contents'], 'read')
@@ -169,11 +200,19 @@ class CopilotQualityGateTests(unittest.TestCase):
         self.assertIn('no eligible green unreviewed managed PR', scripts)
         self.assertIn('factory-ci is not green', scripts)
         self.assertIn('required_jobs', scripts)
+        self.assertIn('factory_worker_identity.py', scripts)
+        self.assertIn('canonical worker identity changed', scripts)
         self.assertIn('current_sha=', scripts)
         self.assertIn('roots-quality-verdict head=${sha} verdict=${verdict}', scripts)
         self.assertIn('another exact-head verdict won the race', scripts)
 
-    def run_resolver(self, first_reviewed=True):
+    def run_resolver(
+        self,
+        first_reviewed=True,
+        mismatch_first=False,
+        chatgpt_bad_pr=False,
+        conflict_first=False,
+    ):
         workflow = self.workflow('factory-copilot-quality-gate.yml')
         step = next(item for item in workflow['jobs']['review']['steps'] if item.get('id') == 'target')
         with tempfile.TemporaryDirectory() as tmp:
@@ -193,8 +232,12 @@ class CopilotQualityGateTests(unittest.TestCase):
                 'OWNER': 'Leion-wp',
                 'TARGET_REPO': REPO,
                 'GITHUB_REPOSITORY': CONTROL,
+                'GITHUB_WORKSPACE': str(ROOT),
                 'GITHUB_OUTPUT': str(output),
                 'FIRST_REVIEWED': 'true' if first_reviewed else 'false',
+                'MISMATCH_FIRST': 'true' if mismatch_first else 'false',
+                'CHATGPT_BAD_PR': 'true' if chatgpt_bad_pr else 'false',
+                'CONFLICT_FIRST': 'true' if conflict_first else 'false',
             }
             script = step['run'].replace('/tmp/', f'{scratch}/')
             result = subprocess.run(
@@ -224,6 +267,26 @@ class CopilotQualityGateTests(unittest.TestCase):
         result, selected = self.run_resolver(first_reviewed=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(selected, {'pr': '21', 'issue': '17', 'sha': SHA_A})
+
+    def test_body_cannot_substitute_another_factory_identity(self):
+        result, selected = self.run_resolver(first_reviewed=False, mismatch_first=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(selected, {'pr': '22', 'issue': '18', 'sha': SHA_B})
+        self.assertIn('IDENTITY_CONFLICT', result.stdout)
+        self.assertIn('canonical worker identity is 17', result.stdout)
+
+    def test_chatgpt_marker_pr_mismatch_is_fail_closed(self):
+        result, selected = self.run_resolver(first_reviewed=False, chatgpt_bad_pr=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(selected, {'pr': '22', 'issue': '18', 'sha': SHA_B})
+        self.assertIn('IDENTITY_CONFLICT', result.stdout)
+        self.assertIn('persisted pr=999', result.stdout)
+
+    def test_conflicting_worker_markers_do_not_claim_pr(self):
+        result, selected = self.run_resolver(first_reviewed=False, conflict_first=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(selected, {'pr': '22', 'issue': '18', 'sha': SHA_B})
+        self.assertIn('conflicting/ambiguous worker identities', result.stdout)
 
 
 if __name__ == '__main__':
