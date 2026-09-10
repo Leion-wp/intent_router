@@ -120,6 +120,45 @@ class ParallelPipelineTests(legacy.PipelineTests):
                 active_labels += 1
         self.assertEqual(active_labels, 15)
 
+    def test_late_route_drift_never_frees_a_jules_slot(self):
+        """Fifteen Jules identities stay full even if one route label flips to ChatGPT."""
+        state = legacy.fixture()
+        state["prs"] = []
+        state["issues"] = {}
+        for number in range(17, 32):
+            labels = [{"name": "factory:dispatched"}]
+            if number == 17:
+                labels.append({"name": "factory:agent:chatgpt"})
+            state["issues"][str(number)] = {
+                "number": number,
+                "labels": labels,
+                "state": "OPEN",
+                "stateReason": None,
+                "body": "",
+                "comments": [{
+                    "body": f"<!-- roots-jules-session task_id={legacy.REPO}#{number} session=sessions/{number} -->"
+                }],
+                "createdAt": f"2026-09-01T00:{number - 17:02d}:00Z",
+            }
+        state["issues"]["32"] = {
+            "number": 32,
+            "labels": [{"name": "factory:queued"}],
+            "state": "OPEN",
+            "stateReason": None,
+            "body": "",
+            "comments": [],
+            "createdAt": "2026-09-01T01:00:00Z",
+        }
+        self.put(state)
+
+        self.success(
+            "factory-fleet-scheduler",
+            inputs={"execute": True, "dispatch_only": True},
+        )
+        self.assertFalse(self.workers(), "Route drift must never permit a sixteenth Jules reservation")
+        labels32 = {row["name"] for row in self.get()["issues"]["32"]["labels"]}
+        self.assertEqual(labels32, {"factory:queued"})
+
     def test_jules_scheduler_does_not_claim_chatgpt_routed_queue(self):
         """Explicit ChatGPT routing removes a queued task from Jules candidate selection."""
         state = legacy.fixture()
