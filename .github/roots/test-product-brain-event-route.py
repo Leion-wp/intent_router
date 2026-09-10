@@ -21,6 +21,15 @@ class ProductBrainEventRouteTests(unittest.TestCase):
         self.assertIn('-f execute=true', step['run'])
         self.assertNotIn('factory-fleet-scheduler.yml', step['run'])
 
+    def test_receiver_concurrency_is_isolated_by_managed_repository(self):
+        workflow = yaml.safe_load((WORKFLOWS / 'factory-fleet-events.yml').read_text())
+        concurrency = workflow['concurrency']
+        group = concurrency['group']
+        self.assertNotEqual(group, 'factory-fleet-events')
+        self.assertIn('github.event.client_payload.repository', group)
+        self.assertIn('inputs.repository', group)
+        self.assertFalse(concurrency['cancel-in-progress'])
+
     def test_relay_template_exposes_product_proposal_event(self):
         relay = yaml.safe_load((ROOT / '.github/roots/fleet/product-event-relay.yml').read_text())
         options = relay['on']['workflow_dispatch']['inputs']['event_type']['options']
