@@ -10,6 +10,10 @@ SPEC = importlib.util.spec_from_file_location("planning", ROOT / "validate-plann
 planning = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(planning)
+WIDTH_SPEC = importlib.util.spec_from_file_location("planning_width", ROOT / "factory_planning_width.py")
+planning_width = importlib.util.module_from_spec(WIDTH_SPEC)
+assert WIDTH_SPEC.loader is not None
+WIDTH_SPEC.loader.exec_module(planning_width)
 
 
 class ProductBrainContractTests(unittest.TestCase):
@@ -99,6 +103,31 @@ class ProductBrainContractTests(unittest.TestCase):
             self.assertEqual(len(plan["tasks"]), 23)
             self.assertEqual(set(order), {task["id"] for task in plan["tasks"]})
             self.assertEqual(plan["extensions"]["worker_capacity"], 15)
+
+    def test_planning_width_profile_is_deterministic_and_does_not_penalize_final_tail(self):
+        tasks = self.decision()["milestone"]["tasks"]
+        profile = planning_width.width_profile(tasks, 15)
+        self.assertEqual(profile["task_count"], 23)
+        self.assertEqual(profile["worker_capacity"], 15)
+        self.assertEqual(profile["wave_widths"], [22, 1])
+        self.assertEqual(profile["initial_ready"], 22)
+        self.assertEqual(profile["min_nonfinal_wave"], 22)
+        self.assertEqual(profile["nonfinal_under_capacity_waves"], [])
+
+    def test_planning_width_profile_exposes_nonfinal_frontier_cliff_without_rewriting_dag(self):
+        tasks = []
+        for index in range(15):
+            tasks.append({"id": f"root-{index:02d}", "blocked_by": []})
+        tasks.append({"id": "gate", "blocked_by": [f"root-{index:02d}" for index in range(15)]})
+        for index in range(7):
+            tasks.append({"id": f"tail-{index:02d}", "blocked_by": ["gate"]})
+        profile = planning_width.width_profile(tasks, 15)
+        self.assertEqual(profile["task_count"], 23)
+        self.assertEqual(profile["wave_widths"], [15, 1, 7])
+        self.assertEqual(profile["initial_ready"], 15)
+        self.assertEqual(profile["min_nonfinal_wave"], 1)
+        self.assertEqual(profile["nonfinal_under_capacity_waves"], [1])
+        self.assertEqual(tasks[15]["blocked_by"], [f"root-{index:02d}" for index in range(15)])
 
     def test_too_narrow_dynamic_milestone_is_rejected(self):
         decision = self.decision()
