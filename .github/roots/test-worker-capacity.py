@@ -58,7 +58,10 @@ def main() -> None:
 
     assert "factory-cross-${{ inputs.repository }}-${{ inputs.issue_number }}" in dispatcher
     assert "WORKER_ROUTE_REFUSED" in dispatcher
-    assert "factory:agent:chatgpt" in dispatcher
+    # Once Jules reservation exists, provider authority must come from the
+    # canonical reservation/identity resolver rather than the mutable route label.
+    assert "factory_worker_provider.py" in dispatcher
+    assert "factory:agent:chatgpt" not in dispatcher
     assert proves_chatgpt_exclusion(ci_rework)
     assert proves_chatgpt_exclusion(quality_rework)
 
