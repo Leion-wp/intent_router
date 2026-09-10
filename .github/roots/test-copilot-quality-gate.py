@@ -49,7 +49,7 @@ def api_endpoint():
         elif args[i].startswith('-'):
             i += 1
         else:
-            return args[i]
+            return args[i].split('?', 1)[0]
     raise SystemExit('missing api endpoint: ' + repr(args))
 
 if args[:2] == ['pr', 'list']:
@@ -79,6 +79,7 @@ if args[:2] == ['issue', 'list']:
 
 if args and args[0] == 'api':
     endpoint = api_endpoint()
+    raw_endpoint = next((arg for arg in args[1:] if not arg.startswith('-') and arg not in values('-H') and arg not in values('--jq')), endpoint)
     if endpoint == 'user':
         emit({'login': 'Leion-wp'})
     if endpoint.endswith('/contents/.factory/profile.json'):
@@ -89,8 +90,8 @@ if args and args[0] == 'api':
             'default_branch': 'main',
             'ci': {'required_jobs': ['quality']},
         })
-    if '/actions/runs?' in endpoint:
-        run_id = 1 if ('a' * 40) in endpoint else 2
+    if endpoint.endswith('/actions/runs'):
+        run_id = 1 if ('a' * 40) in raw_endpoint else 2
         emit({'workflow_runs': [{
             'id': run_id,
             'name': 'factory-ci',
