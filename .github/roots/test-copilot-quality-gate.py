@@ -1,4 +1,8 @@
 from pathlib import Path
+import json
+import os
+import subprocess
+import tempfile
 import unittest
 
 import yaml
@@ -6,6 +10,133 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / '.github/workflows'
+REPO = 'Leion-wp/product'
+CONTROL = 'Leion-wp/intent_router'
+SHA_A = 'a' * 40
+SHA_B = 'b' * 40
+
+FAKE_GH = r'''#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import sys
+
+args = sys.argv[1:]
+
+def values(flag):
+    return [args[i + 1] for i, arg in enumerate(args[:-1]) if arg == flag]
+
+def value(flag, default=None):
+    vals = values(flag)
+    return vals[0] if vals else default
+
+def emit(data):
+    expression = value('--jq')
+    if expression:
+        result = subprocess.run(['jq', '-r', expression], input=json.dumps(data), text=True, capture_output=True)
+        sys.stdout.write(result.stdout)
+        sys.stderr.write(result.stderr)
+        raise SystemExit(result.returncode)
+    print(json.dumps(data))
+    raise SystemExit(0)
+
+def api_endpoint():
+    valued = {'-H', '--jq', '--method', '-f', '-F', '--input'}
+    i = 1
+    while i < len(args):
+        if args[i] in valued:
+            i += 2
+        elif args[i].startswith('-'):
+            i += 1
+        else:
+            return args[i]
+    raise SystemExit('missing api endpoint: ' + repr(args))
+
+if args[:2] == ['pr', 'list']:
+    emit([
+        {
+            'number': 21,
+            'body': 'Fixes #17',
+            'headRefOid': 'a' * 40,
+            'headRefName': 'jules-a',
+            'baseRefName': 'main',
+            'isDraft': False,
+            'createdAt': '2026-09-10T00:00:00Z',
+        },
+        {
+            'number': 22,
+            'body': 'Fixes #18',
+            'headRefOid': 'b' * 40,
+            'headRefName': 'jules-b',
+            'baseRefName': 'main',
+            'isDraft': False,
+            'createdAt': '2026-09-10T00:01:00Z',
+        },
+    ])
+
+if args[:2] == ['issue', 'list']:
+    emit([])
+
+if args and args[0] == 'api':
+    endpoint = api_endpoint()
+    if endpoint == 'user':
+        emit({'login': 'Leion-wp'})
+    if endpoint.endswith('/contents/.factory/profile.json'):
+        emit({
+            'managed': True,
+            'repository': 'Leion-wp/product',
+            'blueprint': 'roots-micro-saas-v1',
+            'default_branch': 'main',
+            'ci': {'required_jobs': ['quality']},
+        })
+    if '/actions/runs?' in endpoint:
+        run_id = 1 if ('a' * 40) in endpoint else 2
+        emit({'workflow_runs': [{
+            'id': run_id,
+            'name': 'factory-ci',
+            'status': 'completed',
+            'conclusion': 'success',
+        }]})
+    if endpoint.endswith('/jobs'):
+        emit({'jobs': [{
+            'name': 'quality',
+            'status': 'completed',
+            'conclusion': 'success',
+            'started_at': '2026-09-10T00:02:00Z',
+        }]})
+    if endpoint.endswith('/issues/17/comments'):
+        if os.environ.get('FIRST_REVIEWED', 'true') == 'true':
+            emit([{'body': '<!-- roots-quality-verdict head=' + ('a' * 40) + ' verdict=PASS -->\nRisk: low'}])
+        emit([])
+    if endpoint.endswith('/issues/18/comments'):
+        emit([])
+    if endpoint.endswith('/issues/17'):
+        emit({'number': 17, 'title': 'first', 'body': '', 'labels': [], 'milestone': None})
+    if endpoint.endswith('/issues/18'):
+        emit({'number': 18, 'title': 'second', 'body': '', 'labels': [], 'milestone': None})
+    if endpoint.endswith('/pulls/21'):
+        if any('application/vnd.github.v3.diff' in header for header in values('-H')):
+            print('diff --git a/one b/one')
+            raise SystemExit(0)
+        emit({
+            'number': 21, 'title': 'one', 'body': 'Fixes #17',
+            'state': 'open', 'draft': False,
+            'base': {'ref': 'main'}, 'head': {'ref': 'jules-a', 'sha': 'a' * 40},
+            'changed_files': 1, 'additions': 1, 'deletions': 0,
+        })
+    if endpoint.endswith('/pulls/22'):
+        if any('application/vnd.github.v3.diff' in header for header in values('-H')):
+            print('diff --git a/two b/two')
+            raise SystemExit(0)
+        emit({
+            'number': 22, 'title': 'two', 'body': 'Fixes #18',
+            'state': 'open', 'draft': False,
+            'base': {'ref': 'main'}, 'head': {'ref': 'jules-b', 'sha': 'b' * 40},
+            'changed_files': 1, 'additions': 1, 'deletions': 0,
+        })
+
+raise SystemExit('Unexpected gh call: ' + repr(args))
+'''
 
 
 class CopilotQualityGateTests(unittest.TestCase):
@@ -22,19 +153,76 @@ class CopilotQualityGateTests(unittest.TestCase):
         self.assertIn('--ref Android', script)
         self.assertIn('-f repository="$TARGET_REPO"', script)
 
-    def test_quality_gate_is_bounded_exact_head_and_profile_ci_aware(self):
+    def test_quality_gate_is_parallel_pool_aware_bounded_exact_head_and_profile_ci_aware(self):
         workflow = self.workflow('factory-copilot-quality-gate.yml')
+        self.assertEqual(workflow['name'], 'factory-copilot-quality-gate-v2')
         self.assertEqual(workflow['permissions']['contents'], 'read')
         self.assertEqual(workflow['permissions']['copilot-requests'], 'write')
         self.assertIn('workflow_dispatch', workflow['on'])
+        self.assertEqual(workflow['concurrency']['group'], 'factory-copilot-quality-gate-${{ inputs.repository }}')
         job = workflow['jobs']['review']
         self.assertEqual(job['timeout-minutes'], 10)
         scripts = '\n'.join(step.get('run', '') for step in job['steps'])
+        self.assertNotIn('expected exactly one active managed PR', scripts)
+        self.assertIn('sort_by([.createdAt, .number])[]', scripts)
+        self.assertIn('no eligible green unreviewed managed PR', scripts)
         self.assertIn('factory-ci is not green', scripts)
         self.assertIn('required_jobs', scripts)
         self.assertIn('current_sha=', scripts)
         self.assertIn('roots-quality-verdict head=${sha} verdict=${verdict}', scripts)
         self.assertIn('another exact-head verdict won the race', scripts)
+
+    def run_resolver(self, first_reviewed=True):
+        workflow = self.workflow('factory-copilot-quality-gate.yml')
+        step = next(item for item in workflow['jobs']['review']['steps'] if item.get('id') == 'target')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bin_dir = root / 'bin'
+            bin_dir.mkdir()
+            gh = bin_dir / 'gh'
+            gh.write_text(FAKE_GH)
+            gh.chmod(0o755)
+            scratch = root / 'tmp'
+            scratch.mkdir()
+            output = root / 'output'
+            env = {
+                **os.environ,
+                'PATH': f'{bin_dir}:{os.environ["PATH"]}',
+                'FLEET_TOKEN': 'offline',
+                'OWNER': 'Leion-wp',
+                'TARGET_REPO': REPO,
+                'GITHUB_REPOSITORY': CONTROL,
+                'GITHUB_OUTPUT': str(output),
+                'FIRST_REVIEWED': 'true' if first_reviewed else 'false',
+            }
+            script = step['run'].replace('/tmp/', f'{scratch}/')
+            result = subprocess.run(
+                ['bash', '-e', '-o', 'pipefail', '-c', script],
+                cwd=root,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=20,
+            )
+            selected = None
+            if result.returncode == 0 and output.exists() and 'ready=true' in output.read_text():
+                selected = {
+                    'pr': (scratch / 'pr-number.txt').read_text().strip(),
+                    'issue': (scratch / 'issue-number.txt').read_text().strip(),
+                    'sha': (scratch / 'head-sha.txt').read_text().strip(),
+                }
+            return result, selected
+
+    def test_multiple_active_prs_skip_reviewed_head_and_select_next_eligible_identity(self):
+        result, selected = self.run_resolver(first_reviewed=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(selected, {'pr': '22', 'issue': '18', 'sha': SHA_B})
+        self.assertIn('exact-head verdict already exists for PR #21', result.stdout)
+
+    def test_multiple_unreviewed_prs_choose_deterministic_oldest_candidate(self):
+        result, selected = self.run_resolver(first_reviewed=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(selected, {'pr': '21', 'issue': '17', 'sha': SHA_A})
 
 
 if __name__ == '__main__':
