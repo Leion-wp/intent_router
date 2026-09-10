@@ -27,9 +27,21 @@ Provider capacity and task identity are independent invariants:
 
 A task may never own both a Jules session marker and a ChatGPT worker marker.
 
+## Provider ownership after claim
+
+The route label is consulted only while an issue is still `factory:queued`. Once a worker reserves the issue, provider ownership is frozen for that active identity and later route-label drift cannot transfer or release capacity.
+
+The reservation transition must persist a provider-qualified request marker before or with `factory:dispatching`:
+
+`<!-- roots-dispatch-request issue=<issue> run=<run>-<attempt> slot=<slot> worker=<jules|chatgpt> -->`
+
+For `factory:dispatching` before a durable worker identity exists, that reservation provider owns the active slot. Once a durable `roots-jules-session` or `roots-chatgpt-worker` identity exists, the persisted worker identity is authoritative for provider accounting. A mismatch between the current route label and the reserved/persisted provider is a control-plane anomaly: it must fail closed and must never free a slot from the provider that actually owns the task.
+
+Comments remain untrusted task content in general; provider resolution therefore requires the machine lifecycle plus a unique reservation/identity correlation and fails closed on missing, conflicting or cross-provider evidence. A marker by itself never authorizes a provider or creates an active lifecycle state.
+
 ## Routing
 
-A managed issue with `factory:queued` and `factory:agent:chatgpt` is invisible to Jules selection. The Jules scheduler, dispatcher, watchdog, CI REWORK and Quality REWORK all re-check the route and fail closed if asked to claim such a task.
+A managed issue with `factory:queued` and `factory:agent:chatgpt` is invisible to Jules selection. The Jules scheduler, dispatcher, watchdog, CI REWORK and Quality REWORK all re-check the route before claim and fail closed if asked to claim such a queued task.
 
 The ChatGPT worker automation owns only issues that satisfy all of the following at claim time:
 
@@ -41,7 +53,7 @@ The ChatGPT worker automation owns only issues that satisfy all of the following
 6. no active Jules or ChatGPT worker identity/PR already owns the issue;
 7. ChatGPT active slots remain below configured capacity.
 
-It must re-read these conditions immediately before claiming work.
+It must re-read these conditions immediately before claiming work. When it claims the issue, it must persist a `roots-dispatch-request ... worker=chatgpt` reservation and then move the task to `factory:dispatching`; later route changes do not alter that ownership.
 
 ## ChatGPT worker identity
 
@@ -87,7 +99,7 @@ Quality Risk, managed auto-merge and completion accept exactly one recognized pe
 
 ## Rework
 
-The Jules-specific REWORK workflows never act on `factory:agent:chatgpt` tasks.
+The Jules-specific REWORK workflows never act on `factory:agent:chatgpt` tasks before claim. Once an active identity exists, provider ownership comes from the reservation/identity, not from later route-label edits.
 
 The ChatGPT worker automation must, on later runs, prefer resuming its existing active identity over claiming a new task. It reads the current PR HEAD, CI and native Quality verdict. A CI failure or Quality REWORK may update only the existing branch/PR. Pending evidence causes no mutation. BLOCK or a real human boundary fails closed.
 
