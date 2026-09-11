@@ -31,6 +31,7 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 - **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
 - **System URL Scheme Validation**: `system:open_url` strictly enforces web capability safety by permitting only explicit `https:` and `http:` URL schemes (case-insensitive). Non-HTTP(S) schemes (such as `javascript:`, `data:`, `file:`, `content:`, `intent:`, `tel:`, `sms:`, or custom deep link schemes) and relative URLs are rejected prior to calling `window.open` with a structured `url_scheme_not_allowed` error.
+- **Run-Scoped Output Variables**: Pipelines support step-to-step data chaining without temporary files. A step can declare `outputVar`, `outputVarPath`, or `outputVarChanges` in its payload to capture outputs into a run-local memory store. Subsequent steps can reference these variables using `${var:variable_name}`, which is resolved recursively in payload strings, objects, and arrays before step execution. Missing variables cause early step rejection with a `pipeline_variable_missing` error code without invoking the step handler.
 
 ## API Example
 ```javascript
@@ -66,6 +67,26 @@ intentRouter.execute({
   action: 'system:open_url',
   data: { url: 'https://example.com' }
 });
+
+// Run-Scoped Output Variable Chaining Example in a Pipeline (.intent.json)
+{
+  "steps": [
+    {
+      "intent": "ai.generate",
+      "payload": {
+        "prompt": "Summarize latest changes",
+        "outputVar": "summary"
+      }
+    },
+    {
+      "intent": "file.write",
+      "payload": {
+        "path": "file:///sdcard/Documents/summary.txt",
+        "content": "${var:summary}"
+      }
+    }
+  ]
+}
 ```
 
 ## Testing & CI
