@@ -89,20 +89,31 @@ jobs:
 
             default_branch="$(jq -r '.default_branch' /tmp/profile.json)"
             ci_workflow="$(jq -r '.ci.workflow' /tmp/profile.json)"
+            current_head="$(gh api "repos/${repo}/git/ref/heads/${default_branch}" --jq '.object.sha')"
+            if ! [[ "$current_head" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "RELEASE_WAITING: ${repo} current default-branch HEAD is invalid or unavailable." >&2
+              waiting="$((waiting + 1))"
+              continue
+            fi
             gh api "repos/${repo}/actions/workflows/${ci_workflow}/runs?branch=${default_branch}&event=push&per_page=20" > /tmp/runs.json
-            latest_run="$(jq -c '.workflow_runs | sort_by(.created_at) | last // null' /tmp/runs.json)"
+            latest_run="$(jq -c --arg head "$current_head" '[.workflow_runs[] | select(.head_sha == $head)] | sort_by(.created_at // "") | last // null' /tmp/runs.json)"
             if [ "$latest_run" = 'null' ]; then
-              echo "RELEASE_WAITING: ${repo} has no default-branch push CI run." >&2
+              echo "RELEASE_WAITING: ${repo} has no push CI run for current default-branch HEAD ${current_head}." >&2
               waiting="$((waiting + 1))"
               continue
             fi
             if [ "$(jq -r '.status' <<< "$latest_run")" != 'completed' ] || [ "$(jq -r '.conclusion' <<< "$latest_run")" != 'success' ]; then
-              echo "RELEASE_WAITING: ${repo} latest default-branch CI is not successful." >&2
+              echo "RELEASE_WAITING: ${repo} current default-branch HEAD ${current_head} CI is not successful." >&2
               waiting="$((waiting + 1))"
               continue
             fi
             run_id="$(jq -r '.id' <<< "$latest_run")"
             run_sha="$(jq -r '.head_sha' <<< "$latest_run")"
+            if [ "$run_sha" != "$current_head" ]; then
+              echo "RELEASE_WAITING: ${repo} selected CI head ${run_sha} does not match current HEAD ${current_head}." >&2
+              waiting="$((waiting + 1))"
+              continue
+            fi
             gh api "repos/${repo}/actions/runs/${run_id}/jobs?per_page=100" > /tmp/jobs.json
             required_ok=true
             while IFS= read -r required_job; do
@@ -114,7 +125,7 @@ jobs:
               fi
             done < <(jq -r '.ci.required_jobs[]' /tmp/profile.json)
             if [ "$required_ok" != 'true' ]; then
-              echo "RELEASE_WAITING: ${repo} required default-branch CI jobs are not all successful." >&2
+              echo "RELEASE_WAITING: ${repo} required default-branch CI jobs are not all successful on HEAD ${run_sha}." >&2
               waiting="$((waiting + 1))"
               continue
             fi
@@ -133,6 +144,14 @@ jobs:
               "- Verified CI head: ${run_sha}" \
               "- Credential gate: #${credential_gate} (human-attested ready; secret values were never read)" \
               'Human release owner: review the release evidence and, only if production release is intended, add the label factory:release-approved. That label records approval only; deployment requires a separately authorized production controller.')"
+
+            final_head="$(gh api "repos/${repo}/git/ref/heads/${default_branch}" --jq '.object.sha')"
+            if [ "$final_head" != "$run_sha" ]; then
+              echo "RELEASE_WAITING: ${repo} default-branch HEAD advanced from verified ${run_sha} to ${final_head}; waiting for exact-head CI." >&2
+              waiting="$((waiting + 1))"
+              continue
+            fi
+
             if [ -z "$release_issue" ]; then
               gh issue create --repo "$repo" --title "$release_title" \
                 --label 'factory:release-ready' --label 'factory:human-required' --body "$body" >/dev/null
