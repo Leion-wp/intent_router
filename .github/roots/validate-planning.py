@@ -200,15 +200,14 @@ def validate_decision(path: pathlib.Path, expected_repo: str | None = None):
     if expected_repo and decision["repository"] != expected_repo:
         raise ValueError(f"decision repository mismatch: {decision['repository']} != {expected_repo}")
     product_context = decision["product_context"]
+    context_values = [value for value in product_context.values() if isinstance(value, str)]
     reject_forbidden_text(
         " ".join(
             [
                 decision["objective"],
                 decision["hypothesis"],
                 decision["success_metric"],
-                product_context["value_proposition"],
-                product_context["target_user"],
-                product_context["next_question"],
+                *context_values,
                 decision["human_gate"]["reason"],
             ]
             + decision["evidence"]
@@ -252,6 +251,7 @@ def decision_to_plan(decision_path: pathlib.Path, out_path: pathlib.Path):
         "extensions": {
             "planner": "product-brain-v1",
             "decision_id": decision["decision_id"],
+            "repository_role": decision["repository_role"],
             "action": decision["action"],
             "success_metric": decision["success_metric"],
             "confidence": decision["confidence"],
