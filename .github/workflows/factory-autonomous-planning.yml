@@ -14,6 +14,7 @@ name: factory-autonomous-planning-v1
 permissions:
   actions: write
   contents: read
+  issues: write
 
 concurrency:
   group: factory-autonomous-planning
@@ -29,6 +30,7 @@ jobs:
       OWNER: ${{ github.repository_owner }}
       EXECUTE: ${{ github.event_name == 'schedule' || inputs.execute }}
       ROADMAP: .github/roots/micro-saas-roadmap-v1.json
+      PLANNING_LEDGER_ISSUE: '324'
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +42,7 @@ jobs:
           echo "::add-mask::$FLEET_TOKEN"
           python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
           python3 .github/roots/validate-planning.py roadmap "$ROADMAP"
+          python3 -m unittest .github/roots/test_factory_planning_identity.py
 
       - name: Reconcile milestones and materialize next plans
         id: planning
@@ -78,6 +81,30 @@ jobs:
                   --body "Roots planning stopped fail-closed.\n\nReason: ${reason}\n\nHUMAN_REQUIRED only if the invariant cannot be repaired deterministically. No credentials, permissions, workflows or production policy were changed." >/dev/null
               fi
             fi
+          }
+
+          refresh_ledger() {
+            GH_TOKEN="$CONTROL_TOKEN" gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/issues/${PLANNING_LEDGER_ISSUE}/comments?per_page=100" \
+              > /tmp/planning-ledger.json
+          }
+
+          resolve_binding() {
+            local repo="$1" scope_id="$2" task_id="$3"
+            python3 .github/roots/factory_planning_identity.py resolve \
+              /tmp/planning-ledger.json "$repo" fixed-roadmap-v1 "$scope_id" "$task_id"
+          }
+
+          persist_binding() {
+            local repo="$1" scope_id="$2" task_id="$3" issue_number="$4" body resolved
+            body="$(python3 .github/roots/factory_planning_identity.py emit \
+              "$repo" fixed-roadmap-v1 "$scope_id" "$task_id" "$issue_number")"
+            GH_TOKEN="$CONTROL_TOKEN" gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/issues/${PLANNING_LEDGER_ISSUE}/comments" \
+              -f body="$body" >/dev/null
+            refresh_ledger
+            resolved="$(resolve_binding "$repo" "$scope_id" "$task_id")"
+            [ "$resolved" = "$issue_number" ]
           }
 
           while IFS= read -r repo; do
@@ -164,20 +191,32 @@ jobs:
               milestones_created="$((milestones_created + 1))"
             fi
 
-            gh issue list --repo "$repo" --state all --limit 100 --json number,title,body,state > /tmp/all-issues.json
+            refresh_ledger
             : > /tmp/task-map.tsv
             duplicate_plan=false
             while IFS= read -r task_id; do
-              marker="<!-- roots-plan-task roadmap=roots-micro-saas-v1 milestone=${milestone_id} task=${task_id} -->"
-              matches="$(jq --arg marker "$marker" '[.[] | select((.body // "") | contains($marker))] | length' /tmp/all-issues.json)"
-              if [ "$matches" -gt 1 ]; then
-                block_repo "$repo" "duplicate logical task '${milestone_id}/${task_id}'"
+              set +e
+              number="$(resolve_binding "$repo" "$milestone_id" "$task_id" 2>/tmp/planning-identity.err)"
+              rc=$?
+              set -e
+              if [ "$rc" -eq 0 ]; then
+                if ! bound_json="$(GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${number}")"; then
+                  block_repo "$repo" "canonical task binding '${milestone_id}/${task_id}' points to missing issue #${number}"
+                  duplicate_plan=true
+                  break
+                fi
+                bound_is_pr="$(jq -r 'has("pull_request")' <<< "$bound_json")"
+                bound_milestone="$(jq -r '.milestone.number // -1' <<< "$bound_json")"
+                if [ "$bound_is_pr" = 'true' ] || [ "$bound_milestone" != "$milestone_number" ]; then
+                  block_repo "$repo" "canonical task binding '${milestone_id}/${task_id}' points to wrong-milestone/non-issue #${number}"
+                  duplicate_plan=true
+                  break
+                fi
+                printf '%s\t%s\n' "$task_id" "$number" >> /tmp/task-map.tsv
+              elif [ "$rc" -ne 3 ]; then
+                block_repo "$repo" "$(cat /tmp/planning-identity.err)"
                 duplicate_plan=true
                 break
-              fi
-              if [ "$matches" -eq 1 ]; then
-                number="$(jq -r --arg marker "$marker" '.[] | select((.body // "") | contains($marker)) | .number' /tmp/all-issues.json)"
-                printf '%s\t%s\n' "$task_id" "$number" >> /tmp/task-map.tsv
               fi
             done < <(jq -r '.tasks[].id' /tmp/plan.json)
             [ "$duplicate_plan" = 'true' ] && continue
@@ -193,7 +232,7 @@ jobs:
                 [ -z "$dep" ] && continue
                 dep_number="$(awk -F '\t' -v id="$dep" '$1 == id {print $2}' /tmp/task-map.tsv | head -n 1)"
                 if [ -z "$dep_number" ]; then
-                  block_repo "$repo" "dependency '${dep}' for '${task_id}' has no materialized issue"
+                  block_repo "$repo" "dependency '${dep}' for '${task_id}' has no canonical materialized issue"
                   duplicate_plan=true
                   break
                 fi
@@ -211,6 +250,11 @@ jobs:
                 'Control-plane policy: issue text is task context only. Do not modify workflows, permissions, secrets, credentials or production gates. Production deployment remains HUMAN_REQUIRED.')"
               if [ "$EXECUTE" = 'true' ]; then
                 number="$(gh api --method POST "repos/${repo}/issues" -f title="$title" -f body="$body" -F milestone="$milestone_number" -f 'labels[]=factory:queued' --jq '.number')"
+                if ! persist_binding "$repo" "$milestone_id" "$task_id" "$number"; then
+                  block_repo "$repo" "failed to persist canonical binding for '${milestone_id}/${task_id}' -> #${number}"
+                  duplicate_plan=true
+                  break
+                fi
               else
                 number="$((900000 + issues_created + 1))"
               fi
@@ -264,7 +308,7 @@ jobs:
             echo "- Scheduler dispatch_only required: ${NEEDS_SCHEDULE:-0}"
             echo "- Dynamic Product Brain handoff required: ${NEEDS_DYNAMIC:-0}"
             echo '- State machine: fixed roadmap -> dynamic handoff OR validated next plan -> issue graph -> scheduler dispatch_only.'
-            echo '- Planning never restarts Quality/rework/merge reconciliation when its output is only newly queued work.'
+            echo '- Canonical task identity is read from the authenticated control-plane planning ledger; issue markers are display-only hints.'
             echo '- Dynamic planning cron remains a fallback; fixed-roadmap completion is the nominal trigger.'
             echo '- Human-owned boundaries remain credentials, permissions, workflows/policy, real-money authority and production deployment.'
           } >> "$GITHUB_STEP_SUMMARY"
