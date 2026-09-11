@@ -78,5 +78,7 @@ jobs:
         run: python .github/roots/test-copilot-quality-gate.py
       - name: Run product event relay regression tests
         run: python .github/roots/test-product-event-relay.py
+      - name: Run workflow_run subscription contract tests
+        run: python .github/roots/test-workflow-run-subscriptions.py
       - name: Run Product Brain event routing regression tests
         run: python .github/roots/test-product-brain-event-route.py
