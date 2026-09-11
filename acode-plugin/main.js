@@ -146,6 +146,90 @@
     return content;
   }
 
+  function validatePipelineStructure(pipelineData) {
+    if (!pipelineData || typeof pipelineData !== 'object' || Array.isArray(pipelineData)) {
+      const err = new Error('Invalid pipeline structure: pipelineData must be a non-null object');
+      err.code = 'invalid_pipeline_structure';
+      err.errors = [{ index: null, id: null, message: 'pipelineData must be a non-null object' }];
+      throw err;
+    }
+
+    if (!Array.isArray(pipelineData.steps)) {
+      const err = new Error('Invalid pipeline structure: steps array is missing');
+      err.code = 'invalid_pipeline_structure';
+      err.errors = [{ index: null, id: null, message: 'steps array is missing or not an array' }];
+      throw err;
+    }
+
+    const errors = [];
+    const seenIds = new Set();
+    const stepFailureTargets = [];
+
+    for (let i = 0; i < pipelineData.steps.length; i++) {
+      const step = pipelineData.steps[i];
+      const stepIndex = i + 1;
+
+      if (!step || typeof step !== 'object' || Array.isArray(step)) {
+        errors.push({ index: stepIndex, id: null, message: `Step ${stepIndex} must be a non-null object` });
+        continue;
+      }
+
+      const stepId = (typeof step.id === 'string' && step.id.trim()) ? step.id.trim() : null;
+
+      if (typeof step.intent !== 'string' || step.intent.trim() === '') {
+        errors.push({ index: stepIndex, id: stepId, message: `Step ${stepIndex} intent must be a non-empty string` });
+      }
+
+      if (step.payload !== undefined) {
+        if (!step.payload || typeof step.payload !== 'object' || Array.isArray(step.payload)) {
+          errors.push({ index: stepIndex, id: stepId, message: `Step ${stepIndex} payload must be a non-null object when provided` });
+        }
+      }
+
+      if (step.id !== undefined) {
+        if (typeof step.id !== 'string' || step.id.trim() === '') {
+          errors.push({ index: stepIndex, id: null, message: `Step ${stepIndex} id must be a non-empty string when provided` });
+        } else {
+          const trimmedId = step.id.trim();
+          if (seenIds.has(trimmedId)) {
+            errors.push({ index: stepIndex, id: trimmedId, message: `Duplicate step id '${trimmedId}' at step ${stepIndex}` });
+          } else {
+            seenIds.add(trimmedId);
+          }
+        }
+      }
+
+      if (step.continueOnError !== undefined) {
+        if (typeof step.continueOnError !== 'boolean') {
+          errors.push({ index: stepIndex, id: stepId, message: `Step ${stepIndex} continueOnError must be a boolean when provided` });
+        }
+      }
+
+      if (step.onFailure !== undefined) {
+        if (typeof step.onFailure !== 'string' || step.onFailure.trim() === '') {
+          errors.push({ index: stepIndex, id: stepId, message: `Step ${stepIndex} onFailure must be a non-empty string when provided` });
+        } else {
+          stepFailureTargets.push({ stepIndex, stepId, targetId: step.onFailure.trim() });
+        }
+      }
+    }
+
+    for (const item of stepFailureTargets) {
+      if (!seenIds.has(item.targetId)) {
+        errors.push({ index: item.stepIndex, id: item.stepId, message: `Step ${item.stepIndex} onFailure targets unknown step id '${item.targetId}'` });
+      }
+    }
+
+    if (errors.length > 0) {
+      const err = new Error(`Invalid pipeline structure: ${errors.map(e => e.message).join('; ')}`);
+      err.code = 'invalid_pipeline_structure';
+      err.errors = errors;
+      throw err;
+    }
+
+    return true;
+  }
+
 
   class PipelineRunner {
     constructor(router, options = {}) {
@@ -176,9 +260,7 @@
     }
 
     async runPipelineFromData(pipelineData, onProgress) {
-      if (!pipelineData || !Array.isArray(pipelineData.steps)) {
-        throw new Error('Invalid pipeline format: steps array is missing');
-      }
+      validatePipelineStructure(pipelineData);
 
       let stepIndex = 0;
       const totalSteps = pipelineData.steps.length;
@@ -1050,6 +1132,7 @@
       IntentRouter,
       validateMaxBytes,
       validateOpenUrl,
+      validatePipelineStructure,
       getByteLength,
       readBoundedFile
     };
