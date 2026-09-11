@@ -17,10 +17,29 @@ def write(path, value):
     pathlib.Path(path).write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def schema_store():
+    names = (
+        "factory-repository-profile.schema.json",
+        "factory-program-state.schema.json",
+        "factory-product-decision.schema.json",
+        "factory-issue-plan.schema.json",
+    )
+    schemas = {}
+    for name in names:
+        with (ROOT / name).open(encoding="utf-8") as handle:
+            schemas[name] = json.load(handle)
+    return schemas, {
+        schema["$id"]: schema
+        for schema in schemas.values()
+        if "$id" in schema
+    }
+
+
 def validate_schema(document, schema_name):
-    with (ROOT / schema_name).open(encoding="utf-8") as handle:
-        schema = json.load(handle)
-    jsonschema.Draft202012Validator(schema).validate(document)
+    schemas, store = schema_store()
+    schema = schemas[schema_name]
+    resolver = jsonschema.RefResolver.from_schema(schema, store=store)
+    jsonschema.Draft202012Validator(schema, resolver=resolver).validate(document)
 
 
 def load_existing(path):
