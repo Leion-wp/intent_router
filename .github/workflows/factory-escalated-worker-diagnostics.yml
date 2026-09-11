@@ -4,7 +4,7 @@ name: factory-escalated-worker-diagnostics-v1
   workflow_dispatch:
   workflow_run:
     workflows:
-      - factory-fleet-watchdog-v1
+      - factory-fleet-watchdog-v4
     types: [completed]
 
 permissions:
