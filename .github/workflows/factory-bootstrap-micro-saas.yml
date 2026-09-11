@@ -6,7 +6,7 @@ name: factory-bootstrap-micro-saas-v1
       repository_name:
         description: 'New managed repository name'
         required: true
-        default: micro-saas-boilerplate
+        default: micro-saas-product
         type: string
       apply:
         description: 'Human mutation gate'
@@ -46,7 +46,7 @@ jobs:
           authenticated_login="$(gh api user --jq '.login')"
           test "$authenticated_login" = "$OWNER"
           if [ "$APPLY" != 'true' ]; then
-            echo "DRY-RUN: would bootstrap ${OWNER}/${REPO_NAME} from roots-micro-saas-v1."
+            echo "DRY-RUN: would bootstrap ${OWNER}/${REPO_NAME} from roots-micro-saas-v1 as repository_role=generated_product."
             exit 0
           fi
 
@@ -62,7 +62,7 @@ jobs:
               -F auto_init=true \
               -F has_issues=true \
               -F has_projects=true \
-              -f description='Roots fixed-stack micro-SaaS boilerplate and factory seed.' > /tmp/repo.json
+              -f description='Roots-generated micro-SaaS product repository.' > /tmp/repo.json
             test "$(jq -r '.owner.login' /tmp/repo.json)" = "$OWNER"
           fi
           gh api "repos/${OWNER}/${REPO_NAME}" --jq '{full_name,default_branch,visibility}'
@@ -77,7 +77,10 @@ jobs:
           profile="$(jq -nc \
             --arg repo "$full_repo" \
             --arg branch "$default_branch" \
-            '{version:1,managed:true,repository:$repo,default_branch:$branch,workspace:"/",blueprint:"roots-micro-saas-v1",worker_policy:{enabled:["jules"],preferred:"jules"},ci:{workflow:"factory-ci.yml",required_jobs:["quality"]},governance:{production_gate:"HUMAN_REQUIRED",workflow_changes:"HUMAN_REQUIRED",credential_changes:"HUMAN_REQUIRED"}}')"
+            '{version:1,managed:true,repository:$repo,repository_role:"generated_product",default_branch:$branch,workspace:"/",blueprint:"roots-micro-saas-v1",worker_policy:{enabled:["jules"],preferred:"jules"},ci:{workflow:"factory-ci.yml",required_jobs:["quality"]},governance:{production_gate:"HUMAN_REQUIRED",workflow_changes:"HUMAN_REQUIRED",credential_changes:"HUMAN_REQUIRED"}}')"
+          printf '%s' "$profile" > /tmp/profile.json
+          python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
+          python3 .github/roots/validate-repository-role.py profile /tmp/profile.json "$full_repo" >/dev/null
           encoded="$(printf '%s' "$profile" | base64 -w0)"
           endpoint="repos/${full_repo}/contents/.factory/profile.json"
           current="$(gh api "$endpoint" --jq '.sha' 2>/dev/null || true)"
@@ -200,6 +203,7 @@ jobs:
           {
             echo '### Micro-SaaS bootstrap'
             echo "- Repository: ${OWNER}/${REPO_NAME}"
+            echo '- Repository role: generated_product'
             echo '- Blueprint: roots-micro-saas-v1'
             echo '- Fixed providers: Next.js + Supabase + Stripe + Resend + Sentry + PostHog + Vercel'
             echo "- Apply: ${APPLY}"
