@@ -1,0 +1,203 @@
+name: factory-quality-block-human-rework-v1
+
+"on":
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Managed repository containing the blocked source issue (owner/name)'
+        required: true
+        type: string
+      issue:
+        description: 'Blocked source issue number'
+        required: true
+        type: string
+      rationale:
+        description: 'Human resolution explaining why same-session rework is authorized'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-quality-block-human-rework-${{ inputs.repository }}-${{ inputs.issue }}
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+      OWNER: ${{ github.repository_owner }}
+      ACTOR: ${{ github.actor }}
+      TARGET_REPO: ${{ inputs.repository }}
+      ISSUE: ${{ inputs.issue }}
+      RATIONALE: ${{ inputs.rationale }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate owner-authorized Quality BLOCK resolution
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$ACTOR" = "$OWNER" || { echo 'HUMAN_GATE_DENIED: only repository owner may resolve Quality BLOCK.' >&2; exit 1; }
+          test -n "$FLEET_TOKEN"
+          test -n "$JULES_API_KEY"
+          echo "::add-mask::$FLEET_TOKEN"
+          echo "::add-mask::$JULES_API_KEY"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          [[ "$TARGET_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$TARGET_REPO" == "$OWNER/"* ]]
+          [[ "$ISSUE" =~ ^[0-9]+$ ]]
+          [ -n "${RATIONALE//[[:space:]]/}" ]
+          [ "${#RATIONALE}" -le 2000 ] || { echo 'HUMAN_GATE_DENIED: rationale exceeds 2000 characters.' >&2; exit 1; }
+          test "$TARGET_REPO" != "$GITHUB_REPOSITORY"
+
+          gh api -H 'Accept: application/vnd.github.raw+json' \
+            "repos/${TARGET_REPO}/contents/.factory/profile.json" > /tmp/profile.json
+          jq -e --arg repo "$TARGET_REPO" \
+            '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1" and (.worker_policy.enabled | index("jules") != null)' \
+            /tmp/profile.json >/dev/null
+          branch="$(jq -r '.default_branch' /tmp/profile.json)"
+
+          gh api "repos/${TARGET_REPO}/issues/${ISSUE}" > /tmp/issue.json
+          [ "$(jq -r '.state' /tmp/issue.json)" = open ]
+          labels="$(jq '[.labels[].name]' /tmp/issue.json)"
+          jq -e 'index("factory:human-required") != null and index("factory:escalated") != null and index("factory:blocked") != null and index("factory:dispatched") == null' \
+            <<< "$labels" >/dev/null || { echo 'HUMAN_GATE_DENIED: source issue is not in canonical Quality BLOCK state.' >&2; exit 1; }
+
+          gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments" > /tmp/comments.json
+          session_marker="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${TARGET_REPO}#${ISSUE} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' /tmp/comments.json)"
+          [ -n "$session_marker" ] || { echo 'HUMAN_GATE_DENIED: no persisted Jules identity.' >&2; exit 1; }
+          if jq -e --arg prefix "<!-- roots-chatgpt-worker task_id=${TARGET_REPO}#${ISSUE} " '.[] | select((.body // "") | contains($prefix))' /tmp/comments.json >/dev/null; then
+            echo 'HUMAN_GATE_DENIED: conflicting cross-provider worker identity.' >&2
+            exit 1
+          fi
+          session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_marker" | head -n1)"
+          [ -n "$session" ] || { echo 'HUMAN_GATE_DENIED: invalid Jules session marker.' >&2; exit 1; }
+
+          identity_helper="$GITHUB_WORKSPACE/.github/roots/factory_worker_identity.py"
+          test -f "$identity_helper"
+          matches=0
+          pr=''
+          sha=''
+          pr_url=''
+          while IFS= read -r pr_number; do
+            [ -n "$pr_number" ] || continue
+            gh api "repos/${TARGET_REPO}/pulls/${pr_number}" > /tmp/pr.json
+            [ "$(jq -r '.base.ref' /tmp/pr.json)" = "$branch" ] || continue
+            [ "$(jq -r '.state' /tmp/pr.json)" = open ] || continue
+            [ "$(jq -r '.draft' /tmp/pr.json)" = false ] || continue
+            set +e
+            python "$identity_helper" validate \
+              --repo "$TARGET_REPO" \
+              --issue "$ISSUE" \
+              --comments-json /tmp/comments.json \
+              --pr-json /tmp/pr.json \
+              --base "$branch" \
+              >/tmp/identity.json 2>/tmp/identity.err
+            rc=$?
+            set -e
+            [ "$rc" -eq 0 ] || continue
+            matches=$((matches + 1))
+            pr="$pr_number"
+            sha="$(jq -r '.head.sha' /tmp/pr.json)"
+            pr_url="$(jq -r '.html_url' /tmp/pr.json)"
+          done < <(gh pr list --repo "$TARGET_REPO" --state open --limit 100 --json number --jq '.[].number')
+
+          [ "$matches" -eq 1 ] || { echo "HUMAN_GATE_DENIED: expected exactly one canonical open PR, found ${matches}." >&2; exit 1; }
+          block_marker="<!-- roots-quality-verdict head=${sha} verdict=BLOCK -->"
+          block_body="$(jq -r --arg marker "$block_marker" '[.[] | select((.body // "") | contains($marker))] | last | .body // empty' /tmp/comments.json)"
+          [ -n "$block_body" ] || { echo 'HUMAN_GATE_DENIED: current PR head has no exact-head BLOCK verdict.' >&2; exit 1; }
+
+          dedupe="<!-- roots-human-quality-rework head=${sha} -->"
+          if jq -e --arg marker "$dedupe" '.[] | select((.body // "") | contains($marker))' /tmp/comments.json >/dev/null; then
+            echo 'HUMAN_REWORK_NOOP: this exact-head human resolution was already delivered.'
+            exit 0
+          fi
+
+          printf '%s\n' "$session" > /tmp/session.txt
+          printf '%s\n' "$pr" > /tmp/pr.txt
+          printf '%s\n' "$sha" > /tmp/sha.txt
+          printf '%s\n' "$pr_url" > /tmp/pr-url.txt
+          printf '%s\n' "$block_body" > /tmp/block.txt
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+      - name: Resume the same Jules session with human-authorized rework
+        if: steps.target.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GH_TOKEN="$FLEET_TOKEN"
+          session="$(cat /tmp/session.txt)"
+          pr="$(cat /tmp/pr.txt)"
+          sha="$(cat /tmp/sha.txt)"
+          pr_url="$(cat /tmp/pr-url.txt)"
+          block_body="$(cat /tmp/block.txt)"
+          dedupe="<!-- roots-human-quality-rework head=${sha} -->"
+
+          {
+            printf '%s\n\n' 'CONTROL-PLANE HUMAN-AUTHORIZED QUALITY REWORK'
+            printf '%s\n' "Continue the SAME Jules session, SAME branch and SAME PR #${pr}. Never create another session, branch or PR."
+            printf '%s\n' "Repository: ${TARGET_REPO}"
+            printf '%s\n' "PR: ${pr_url}"
+            printf '%s\n\n' "Blocked head: ${sha}"
+            printf '%s\n' 'The repository owner has resolved the human gate and explicitly authorized a bounded rework of this blocked head.'
+            printf '%s\n' 'Human rationale:'
+            printf '%s\n\n' "$RATIONALE"
+            printf '%s\n' 'Original exact-head Quality BLOCK:'
+            printf '%s\n\n' "$block_body"
+            printf '%s\n' 'Re-read the source issue and this human rationale together. Make only the smallest changes actually required by the clarified intent, preserve valid test/local fixtures, run relevant tests, then commit and push only to the existing PR branch. Do not modify workflows, secrets, permissions, production, provider activation or spending.'
+          } > /tmp/rework-message.txt
+          message="$(cat /tmp/rework-message.txt)"
+
+          curl --fail-with-body --silent --show-error -X POST \
+            -H 'Content-Type: application/json' \
+            -H "X-Goog-Api-Key: $JULES_API_KEY" \
+            --data "$(jq -nc --arg prompt "$message" '{prompt:$prompt}')" \
+            "https://jules.googleapis.com/v1alpha/${session}:sendMessage" >/dev/null
+
+          gh api --method POST "repos/${TARGET_REPO}/issues/${ISSUE}/comments" \
+            -f body="${dedupe}\nHUMAN QUALITY RESOLUTION: owner-authorized same-session REWORK for PR #${pr} head ${sha}. Rationale: ${RATIONALE}\nThe canonical Jules identity, branch and PR are preserved." >/dev/null
+
+          gh issue edit "$ISSUE" --repo "$TARGET_REPO" \
+            --remove-label 'factory:blocked' \
+            --remove-label 'factory:escalated' \
+            --remove-label 'factory:human-required' \
+            --remove-label 'factory:stalled' \
+            --add-label 'factory:dispatched' >/dev/null 2>&1 || {
+              echo 'CONTROL_PLANE_ANOMALY: Jules accepted human rework but issue state restoration failed.' >&2
+              exit 1
+            }
+
+          labels="$(gh api "repos/${TARGET_REPO}/issues/${ISSUE}" --jq '[.labels[].name]')"
+          jq -e 'index("factory:dispatched") != null and index("factory:blocked") == null and index("factory:escalated") == null and index("factory:human-required") == null' \
+            <<< "$labels" >/dev/null || {
+              echo 'CONTROL_PLANE_ANOMALY: human rework state did not persist.' >&2
+              exit 1
+            }
+
+          comments="$(gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments")"
+          jq -e --arg marker "$dedupe" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null || {
+            echo 'CONTROL_PLANE_ANOMALY: human rework receipt did not persist.' >&2
+            exit 1
+          }
+
+          echo "HUMAN_REWORK_DELIVERED: ${TARGET_REPO}#${ISSUE} PR #${pr} head ${sha} -> ${session}."
+
+      - name: Summary
+        if: steps.target.outputs.ready == 'true'
+        shell: bash
+        run: |
+          {
+            echo '### Human Quality BLOCK resolution v1'
+            echo "- Repository: ${TARGET_REPO}"
+            echo "- Issue: #${ISSUE}"
+            echo '- Resolution: owner-authorized same-session Jules rework.'
+            echo '- Worker identity, branch and PR are preserved; no replacement worker is created.'
+            echo '- The task returns to factory:dispatched only after Jules accepts the bounded rework message.'
+          } >> "$GITHUB_STEP_SUMMARY"
