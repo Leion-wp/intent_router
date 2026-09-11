@@ -1,4 +1,4 @@
-name: factory-quality-block-human-rework-v1
+name: factory-quality-block-human-rework-v2
 
 "on":
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate owner-authorized Quality BLOCK resolution
+      - name: Validate and persist owner-authorized Quality BLOCK delivery intent
         id: target
         shell: bash
         run: |
@@ -66,11 +66,8 @@ jobs:
 
           gh api "repos/${TARGET_REPO}/issues/${ISSUE}" > /tmp/issue.json
           [ "$(jq -r '.state' /tmp/issue.json)" = open ]
-          labels="$(jq '[.labels[].name]' /tmp/issue.json)"
-          jq -e 'index("factory:human-required") != null and index("factory:escalated") != null and index("factory:blocked") != null and index("factory:dispatched") == null' \
-            <<< "$labels" >/dev/null || { echo 'HUMAN_GATE_DENIED: source issue is not in canonical Quality BLOCK state.' >&2; exit 1; }
-
           gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments" > /tmp/comments.json
+
           session_marker="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${TARGET_REPO}#${ISSUE} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' /tmp/comments.json)"
           [ -n "$session_marker" ] || { echo 'HUMAN_GATE_DENIED: no persisted Jules identity.' >&2; exit 1; }
           if jq -e --arg prefix "<!-- roots-chatgpt-worker task_id=${TARGET_REPO}#${ISSUE} " '.[] | select((.body // "") | contains($prefix))' /tmp/comments.json >/dev/null; then
@@ -114,10 +111,43 @@ jobs:
           block_body="$(jq -r --arg marker "$block_marker" '[.[] | select((.body // "") | contains($marker))] | last | .body // empty' /tmp/comments.json)"
           [ -n "$block_body" ] || { echo 'HUMAN_GATE_DENIED: current PR head has no exact-head BLOCK verdict.' >&2; exit 1; }
 
-          dedupe="<!-- roots-human-quality-rework head=${sha} -->"
-          if jq -e --arg marker "$dedupe" '.[] | select((.body // "") | contains($marker))' /tmp/comments.json >/dev/null; then
-            echo 'HUMAN_REWORK_NOOP: this exact-head human resolution was already delivered.'
-            exit 0
+          safe_repo="${TARGET_REPO//\//-}"
+          token="hqr-${safe_repo}-${ISSUE}-${sha:0:16}"
+          auth_marker="<!-- roots-human-quality-rework-auth head=${sha} token=${token} -->"
+          delivered_marker="<!-- roots-human-quality-rework-delivered head=${sha} token=${token} -->"
+
+          labels="$(jq '[.labels[].name]' /tmp/issue.json)"
+          if jq -e --arg marker "$delivered_marker" '.[] | select((.body // "") | contains($marker))' /tmp/comments.json >/dev/null; then
+            echo 'send=false' >> "$GITHUB_OUTPUT"
+            echo 'finalize=true' >> "$GITHUB_OUTPUT"
+          elif jq -e --arg marker "$auth_marker" '.[] | select((.body // "") | contains($marker))' /tmp/comments.json >/dev/null; then
+            # A prior run persisted delivery intent but not completion. Do not blindly resend.
+            # Reconcile against Jules activity; if the token is visible, finalize GitHub state.
+            if curl --fail-with-body --silent --show-error \
+              -H "X-Goog-Api-Key: $JULES_API_KEY" \
+              "https://jules.googleapis.com/v1alpha/${session}/activities?pageSize=100" > /tmp/activities.json \
+              && grep -Fq "$token" /tmp/activities.json; then
+              echo 'send=false' >> "$GITHUB_OUTPUT"
+              echo 'finalize=true' >> "$GITHUB_OUTPUT"
+              echo 'HUMAN_REWORK_RECOVERY: delivery token observed in Jules activity; finalizing durable GitHub state.'
+            else
+              echo 'HUMAN_REWORK_AMBIGUOUS: durable delivery intent exists but delivery cannot be proven. Refusing duplicate send; keep HUMAN_REQUIRED.' >&2
+              exit 1
+            fi
+          else
+            jq -e 'index("factory:human-required") != null and index("factory:escalated") != null and index("factory:blocked") != null and index("factory:dispatched") == null' \
+              <<< "$labels" >/dev/null || { echo 'HUMAN_GATE_DENIED: source issue is not in canonical Quality BLOCK state.' >&2; exit 1; }
+
+            gh api --method POST "repos/${TARGET_REPO}/issues/${ISSUE}/comments" \
+              -f body="${auth_marker}\nHUMAN QUALITY REWORK AUTHORIZED: owner approved one bounded same-session delivery attempt for PR #${pr} head ${sha}. Delivery token: ${token}. Rationale: ${RATIONALE}" >/dev/null
+
+            comments="$(gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments")"
+            jq -e --arg marker "$auth_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null || {
+              echo 'CONTROL_PLANE_ANOMALY: human rework authorization intent did not persist; refusing remote delivery.' >&2
+              exit 1
+            }
+            echo 'send=true' >> "$GITHUB_OUTPUT"
+            echo 'finalize=true' >> "$GITHUB_OUTPUT"
           fi
 
           printf '%s\n' "$session" > /tmp/session.txt
@@ -125,10 +155,12 @@ jobs:
           printf '%s\n' "$sha" > /tmp/sha.txt
           printf '%s\n' "$pr_url" > /tmp/pr-url.txt
           printf '%s\n' "$block_body" > /tmp/block.txt
+          printf '%s\n' "$token" > /tmp/token.txt
+          printf '%s\n' "$delivered_marker" > /tmp/delivered-marker.txt
           echo 'ready=true' >> "$GITHUB_OUTPUT"
 
-      - name: Resume the same Jules session with human-authorized rework
-        if: steps.target.outputs.ready == 'true'
+      - name: Deliver human-authorized rework to the same Jules session
+        if: steps.target.outputs.ready == 'true' && steps.target.outputs.send == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -138,10 +170,12 @@ jobs:
           sha="$(cat /tmp/sha.txt)"
           pr_url="$(cat /tmp/pr-url.txt)"
           block_body="$(cat /tmp/block.txt)"
-          dedupe="<!-- roots-human-quality-rework head=${sha} -->"
+          token="$(cat /tmp/token.txt)"
+          delivered_marker="$(cat /tmp/delivered-marker.txt)"
 
           {
             printf '%s\n\n' 'CONTROL-PLANE HUMAN-AUTHORIZED QUALITY REWORK'
+            printf '%s\n' "DELIVERY_TOKEN: ${token}"
             printf '%s\n' "Continue the SAME Jules session, SAME branch and SAME PR #${pr}. Never create another session, branch or PR."
             printf '%s\n' "Repository: ${TARGET_REPO}"
             printf '%s\n' "PR: ${pr_url}"
@@ -162,7 +196,36 @@ jobs:
             "https://jules.googleapis.com/v1alpha/${session}:sendMessage" >/dev/null
 
           gh api --method POST "repos/${TARGET_REPO}/issues/${ISSUE}/comments" \
-            -f body="${dedupe}\nHUMAN QUALITY RESOLUTION: owner-authorized same-session REWORK for PR #${pr} head ${sha}. Rationale: ${RATIONALE}\nThe canonical Jules identity, branch and PR are preserved." >/dev/null
+            -f body="${delivered_marker}\nHUMAN QUALITY REWORK DELIVERED: same-session delivery accepted for PR #${pr} head ${sha}. Delivery token: ${token}." >/dev/null
+
+          comments="$(gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments")"
+          jq -e --arg marker "$delivered_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null || {
+            echo 'CONTROL_PLANE_ANOMALY: Jules accepted rework but delivery receipt did not persist; refusing to mutate issue state.' >&2
+            exit 1
+          }
+
+      - name: Converge GitHub state after proven delivery
+        if: steps.target.outputs.ready == 'true' && steps.target.outputs.finalize == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GH_TOKEN="$FLEET_TOKEN"
+          sha="$(cat /tmp/sha.txt)"
+          token="$(cat /tmp/token.txt)"
+          delivered_marker="$(cat /tmp/delivered-marker.txt)"
+
+          comments="$(gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments")"
+          if ! jq -e --arg marker "$delivered_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+            # Recovery path: delivery was proven through Jules activity but receipt was lost.
+            gh api --method POST "repos/${TARGET_REPO}/issues/${ISSUE}/comments" \
+              -f body="${delivered_marker}\nHUMAN QUALITY REWORK DELIVERY RECONCILED: Jules activity proves delivery for head ${sha}. Delivery token: ${token}." >/dev/null
+          fi
+
+          comments="$(gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments")"
+          jq -e --arg marker "$delivered_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null || {
+            echo 'CONTROL_PLANE_ANOMALY: delivery proof is not durable; refusing to reactivate worker slot.' >&2
+            exit 1
+          }
 
           gh issue edit "$ISSUE" --repo "$TARGET_REPO" \
             --remove-label 'factory:blocked' \
@@ -170,34 +233,29 @@ jobs:
             --remove-label 'factory:human-required' \
             --remove-label 'factory:stalled' \
             --add-label 'factory:dispatched' >/dev/null 2>&1 || {
-              echo 'CONTROL_PLANE_ANOMALY: Jules accepted human rework but issue state restoration failed.' >&2
+              echo 'CONTROL_PLANE_ANOMALY: proven delivery exists but issue state restoration failed.' >&2
               exit 1
             }
 
           labels="$(gh api "repos/${TARGET_REPO}/issues/${ISSUE}" --jq '[.labels[].name]')"
           jq -e 'index("factory:dispatched") != null and index("factory:blocked") == null and index("factory:escalated") == null and index("factory:human-required") == null' \
             <<< "$labels" >/dev/null || {
-              echo 'CONTROL_PLANE_ANOMALY: human rework state did not persist.' >&2
+              echo 'CONTROL_PLANE_ANOMALY: human rework state did not converge.' >&2
               exit 1
             }
 
-          comments="$(gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments")"
-          jq -e --arg marker "$dedupe" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null || {
-            echo 'CONTROL_PLANE_ANOMALY: human rework receipt did not persist.' >&2
-            exit 1
-          }
-
-          echo "HUMAN_REWORK_DELIVERED: ${TARGET_REPO}#${ISSUE} PR #${pr} head ${sha} -> ${session}."
+          echo "HUMAN_REWORK_ACTIVE: ${TARGET_REPO}#${ISSUE} head ${sha} token=${token}."
 
       - name: Summary
         if: steps.target.outputs.ready == 'true'
         shell: bash
         run: |
           {
-            echo '### Human Quality BLOCK resolution v1'
+            echo '### Human Quality BLOCK resolution v2'
             echo "- Repository: ${TARGET_REPO}"
             echo "- Issue: #${ISSUE}"
-            echo '- Resolution: owner-authorized same-session Jules rework.'
+            echo '- Authorization is persisted before remote delivery.'
+            echo '- Duplicate delivery is refused unless Jules activity proves the prior attempt completed.'
+            echo '- GitHub active state is restored only after durable delivery proof exists.'
             echo '- Worker identity, branch and PR are preserved; no replacement worker is created.'
-            echo '- The task returns to factory:dispatched only after Jules accepts the bounded rework message.'
           } >> "$GITHUB_STEP_SUMMARY"
