@@ -99,10 +99,24 @@ class ProductBrainContractTests(unittest.TestCase):
             planning.validate_plan(plan_path)
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
             order = planning.topological_tasks(plan["tasks"])
+            expected_width = planning_width.width_profile(plan["tasks"], 15)
             self.assertEqual(plan["repository"], self.repo)
             self.assertEqual(len(plan["tasks"]), 23)
             self.assertEqual(set(order), {task["id"] for task in plan["tasks"]})
             self.assertEqual(plan["extensions"]["worker_capacity"], 15)
+            self.assertEqual(plan["extensions"]["planning_width"], expected_width)
+            self.assertEqual(plan["extensions"]["planning_width"]["wave_widths"], [22, 1])
+
+    def test_compiled_planning_width_profile_is_revalidated_against_task_dag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            decision_path = self.write_json(directory, "decision.json", self.decision())
+            plan_path = pathlib.Path(directory) / "plan.json"
+            planning.decision_to_plan(decision_path, plan_path)
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan["extensions"]["planning_width"]["wave_widths"] = [23]
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "planning width profile does not match deterministic task DAG"):
+                planning.validate_plan(plan_path)
 
     def test_planning_width_profile_is_deterministic_and_does_not_penalize_final_tail(self):
         tasks = self.decision()["milestone"]["tasks"]
