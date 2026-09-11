@@ -140,24 +140,20 @@ jobs:
           block_body="$(cat /tmp/block.txt)"
           dedupe="<!-- roots-human-quality-rework head=${sha} -->"
 
-          message="$(cat <<EOF
-CONTROL-PLANE HUMAN-AUTHORIZED QUALITY REWORK
-
-Continue the SAME Jules session, SAME branch and SAME PR #${pr}. Never create another session, branch or PR.
-Repository: ${TARGET_REPO}
-PR: ${pr_url}
-Blocked head: ${sha}
-
-The repository owner has resolved the human gate and explicitly authorized a bounded rework of this blocked head.
-Human rationale:
-${RATIONALE}
-
-Original exact-head Quality BLOCK:
-${block_body}
-
-Re-read the source issue and this human rationale together. Make only the smallest changes actually required by the clarified intent, preserve valid test/local fixtures, run relevant tests, then commit and push only to the existing PR branch. Do not modify workflows, secrets, permissions, production, provider activation or spending.
-EOF
-)"
+          {
+            printf '%s\n\n' 'CONTROL-PLANE HUMAN-AUTHORIZED QUALITY REWORK'
+            printf '%s\n' "Continue the SAME Jules session, SAME branch and SAME PR #${pr}. Never create another session, branch or PR."
+            printf '%s\n' "Repository: ${TARGET_REPO}"
+            printf '%s\n' "PR: ${pr_url}"
+            printf '%s\n\n' "Blocked head: ${sha}"
+            printf '%s\n' 'The repository owner has resolved the human gate and explicitly authorized a bounded rework of this blocked head.'
+            printf '%s\n' 'Human rationale:'
+            printf '%s\n\n' "$RATIONALE"
+            printf '%s\n' 'Original exact-head Quality BLOCK:'
+            printf '%s\n\n' "$block_body"
+            printf '%s\n' 'Re-read the source issue and this human rationale together. Make only the smallest changes actually required by the clarified intent, preserve valid test/local fixtures, run relevant tests, then commit and push only to the existing PR branch. Do not modify workflows, secrets, permissions, production, provider activation or spending.'
+          } > /tmp/rework-message.txt
+          message="$(cat /tmp/rework-message.txt)"
 
           curl --fail-with-body --silent --show-error -X POST \
             -H 'Content-Type: application/json' \
