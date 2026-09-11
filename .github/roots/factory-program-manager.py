@@ -43,6 +43,22 @@ def validate_profile(profile_path, repo, role):
     return profile
 
 
+def validate_replay(decision, existing):
+    program = decision["program"]
+    if existing["program_id"] != program["program_id"]:
+        raise ValueError("replayed decision changed program identity")
+    if existing["title"] != program["title"]:
+        raise ValueError("replayed decision changed program title")
+    if existing["strategic_objective"] != program["strategic_objective"]:
+        raise ValueError("replayed decision changed program strategic objective")
+    if existing["success_metric"] != program["success_metric"]:
+        raise ValueError("replayed decision changed program success metric")
+    milestone = decision.get("milestone")
+    if milestone is not None and existing.get("current_milestone"):
+        if existing["current_milestone"]["id"] != milestone["id"]:
+            raise ValueError("replayed decision changed current milestone identity")
+
+
 def validate_transition(decision, existing):
     validate_schema(decision, "factory-product-decision.schema.json")
     program = decision["program"]
@@ -57,6 +73,9 @@ def validate_transition(decision, existing):
             raise ValueError(
                 f"program repository role mismatch: {existing['repository_role']} != {role}"
             )
+        if existing["last_decision_id"] == decision["decision_id"]:
+            validate_replay(decision, existing)
+            return program
 
     if transition == "START":
         if existing and existing["status"] != "COMPLETED":
@@ -138,6 +157,9 @@ def build_state(decision_path, repo, timestamp, existing_path, profile_path, out
     existing = load_existing(existing_path)
     validate_profile(profile_path, repo, decision["repository_role"])
     program = validate_transition(decision, existing)
+    if existing and existing["last_decision_id"] == decision["decision_id"]:
+        write(out_path, existing)
+        return
     transition = program["transition"]
 
     completed = append_completed(existing, timestamp) if transition != "START" else []
