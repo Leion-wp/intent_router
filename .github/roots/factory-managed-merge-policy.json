@@ -26,7 +26,8 @@
       ".github/actions/",
       ".github/CODEOWNERS",
       ".factory/profile.json",
-      ".factory/credential-requirements.json"
+      ".factory/credential-requirements.json",
+      ".factory/product-state.json"
     ]
   },
   "ci": {
