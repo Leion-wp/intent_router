@@ -26,10 +26,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -c 'import json; [json.load(open(p)) for p in [".github/roots/factory-program-state.schema.json",".github/roots/factory-product-state.schema.json",".github/roots/factory-product-decision.schema.json",".github/roots/factory-product-telemetry.schema.json",".github/roots/factory-repository-profile.schema.json",".github/roots/factory-credential-requirements.schema.json",".github/roots/factory-portfolio-telemetry.schema.json",".github/roots/factory-managed-merge-policy.schema.json",".github/roots/factory-managed-merge-policy.json",".github/roots/factory-release-policy.schema.json",".github/roots/factory-release-policy.json",".github/roots/factory-worker-capacity.json",".github/roots/micro-saas-credentials-v1.json"]]'
+          python -c 'import json; [json.load(open(p)) for p in [".github/roots/factory-program-state.schema.json",".github/roots/factory-product-state.schema.json",".github/roots/factory-product-decision.schema.json",".github/roots/factory-product-telemetry.schema.json",".github/roots/factory-repository-profile.schema.json",".github/roots/factory-credential-requirements.schema.json",".github/roots/factory-portfolio-telemetry.schema.json",".github/roots/factory-managed-merge-policy.schema.json",".github/roots/factory-managed-merge-policy.json",".github/roots/factory-release-policy.schema.json",".github/roots/factory-release-policy.json",".github/roots/factory-worker-capacity.json",".github/roots/factory-jules-restart-policy.json",".github/roots/micro-saas-credentials-v1.json"]]'
           python -c 'import json,jsonschema; d=json.load(open(".github/roots/micro-saas-credentials-v1.json")); s=json.load(open(".github/roots/factory-credential-requirements.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
           python -c 'import json,jsonschema; d=json.load(open(".github/roots/factory-managed-merge-policy.json")); s=json.load(open(".github/roots/factory-managed-merge-policy.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
           python -c 'import json,jsonschema; d=json.load(open(".github/roots/factory-release-policy.json")); s=json.load(open(".github/roots/factory-release-policy.schema.json")); jsonschema.Draft202012Validator(s).validate(d)'
+          python .github/roots/factory_jules_restart.py validate-policy
           python .github/roots/validate-planning.py roadmap .github/roots/micro-saas-roadmap-v1.json
       - name: Run planning safety regression tests
         run: python .github/roots/test-planning-safety.py
@@ -41,6 +42,8 @@ jobs:
         run: python .github/roots/test-worker-route-bootstrap.py
       - name: Run worker escalation contract tests
         run: python .github/roots/test-worker-escalation.py
+      - name: Run Jules session restart contract tests
+        run: python .github/roots/test-jules-session-restart.py
       - name: Run Product Brain contract tests
         run: python .github/roots/test-product-brain.py
       - name: Run repository role contract tests
