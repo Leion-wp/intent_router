@@ -54,6 +54,8 @@ jobs:
         run: python .github/roots/test-managed-automerge-risk.py
       - name: Run Quality LOW_RISK handoff contract tests
         run: python .github/roots/test-quality-risk-reconciler.py
+      - name: Run release readiness exact-head contract tests
+        run: python .github/roots/test-release-readiness.py
       - name: Run event-driven fleet pipeline regression tests
         shell: bash
         run: |
