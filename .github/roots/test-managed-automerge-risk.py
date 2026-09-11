@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 
+from factory_quality_verdict import latest_exact_head_verdict
 from factory_worker_identity import IdentityConflict, IdentityNoMatch, select_pr, validate_pr
 
 policy = json.loads(Path('.github/roots/factory-managed-merge-policy.json').read_text())
@@ -17,15 +18,18 @@ assert 'factory:escalated' in policy['source_issue']['blocking_labels']
 assert policy['source_issue']['require_persisted_worker_session'] is True
 assert 'risk' in schema['required']
 assert schema['properties']['risk']['properties']['required_low_risk_label']['const'] == 'factory:risk-low'
-assert 'factory-managed-automerge-v2' in workflow
+assert 'factory-managed-automerge-v3' in workflow
 assert 'AUTO_MERGE_HUMAN' in workflow
 assert 'factory:risk-low' in workflow
 assert 'roots-jules-session' in workflow
 assert 'roots-chatgpt-worker' in workflow
 assert 'conflicting worker identities' in workflow
 assert 'factory_worker_identity.py' in workflow
+assert 'factory_quality_verdict.py' in workflow
 assert 'canonical worker/PR correlation failed' in workflow
 assert 'identity changed before merge' in workflow
+assert 'Quality authority changed ambiguously before merge' in workflow
+assert 'latest exact-head Quality changed' in workflow
 assert 'reviewDecision' in workflow
 assert 'head moved' in workflow
 assert 'LOW_RISK managed PR' in workflow
@@ -99,4 +103,13 @@ except IdentityConflict:
 else:
     raise AssertionError('dual worker identity must fail closed')
 
-print('provider-neutral managed auto-merge LOW_RISK + canonical identity contract: PASS')
+sha = 'c' * 40
+quality = [
+    {'body': f'<!-- roots-quality-verdict head={sha} verdict=PASS -->\nRisk: low'},
+    {'body': f'<!-- roots-quality-verdict head={sha} verdict=REWORK -->'},
+]
+assert latest_exact_head_verdict(quality, sha)['verdict'] == 'REWORK'
+quality.append({'body': f'<!-- roots-quality-verdict head={sha} verdict=PASS -->\nRisk: low'})
+assert latest_exact_head_verdict(quality, sha)['verdict'] == 'PASS'
+
+print('provider-neutral managed auto-merge + latest exact-head Quality contract: PASS')
