@@ -36,6 +36,24 @@ def test_unknown_state_and_repeated_escalation_fail_closed() -> None:
     assert decide("FAILED", 0, False, False, True) == "none"
 
 
+def test_human_quality_rework_receipt_requires_authenticated_jules_activity() -> None:
+    workflow = (ROOTS.parent / "workflows" / "factory-quality-block-human-rework.yml").read_text()
+    delivered_branch_start = workflow.index(
+        'if jq -e --arg marker "$delivered_marker"'
+    )
+    auth_branch_start = workflow.index(
+        'elif jq -e --arg marker "$auth_marker"', delivered_branch_start
+    )
+    delivered_branch = workflow[delivered_branch_start:auth_branch_start]
+
+    assert "activities?pageSize=100" in delivered_branch
+    assert 'grep -Fq "$token" /tmp/activities.json' in delivered_branch
+    assert "HUMAN_REWORK_UNPROVEN_RECEIPT" in delivered_branch
+    assert delivered_branch.index("activities?pageSize=100") < delivered_branch.index("finalize=true")
+    assert "roots-chatgpt-worker" in workflow
+    assert "conflicting cross-provider worker identity" in workflow
+
+
 def test_control_plane_wiring_contracts() -> None:
     watchdog = (ROOTS.parent / "workflows" / "factory-fleet-watchdog.yml").read_text()
     scheduler = (ROOTS.parent / "workflows" / "factory-fleet-scheduler.yml").read_text()
@@ -62,5 +80,6 @@ if __name__ == "__main__":
     test_terminal_or_unexpected_human_states_escalate_without_replacement()
     test_pr_or_session_output_is_progress_and_prevents_escalation()
     test_unknown_state_and_repeated_escalation_fail_closed()
+    test_human_quality_rework_receipt_requires_authenticated_jules_activity()
     test_control_plane_wiring_contracts()
     print("worker escalation tests passed")
