@@ -4,11 +4,15 @@
   "title": "FactoryRepositoryProfile",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "managed", "repository", "default_branch", "workspace", "blueprint", "worker_policy", "ci"],
+  "required": ["version", "managed", "repository", "repository_role", "default_branch", "workspace", "blueprint", "worker_policy", "ci"],
   "properties": {
     "version": {"const": 1},
     "managed": {"const": true},
     "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "repository_role": {
+      "type": "string",
+      "enum": ["factory_control_plane", "factory_substrate", "generated_product", "internal_tool"]
+    },
     "default_branch": {"type": "string", "minLength": 1},
     "workspace": {"type": "string", "pattern": "^/"},
     "blueprint": {"type": "string", "const": "roots-micro-saas-v1"},

@@ -38,7 +38,7 @@ jobs:
           test -n "$FLEET_TOKEN"
           echo "::add-mask::$FLEET_TOKEN"
           python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
-          python3 -c 'import json; [json.load(open(p)) for p in [".github/roots/factory-product-state.schema.json",".github/roots/factory-product-decision.schema.json",".github/roots/factory-product-telemetry.schema.json"]]'
+          python3 -c 'import json; [json.load(open(p)) for p in [".github/roots/factory-repository-profile.schema.json",".github/roots/factory-product-state.schema.json",".github/roots/factory-product-decision.schema.json",".github/roots/factory-product-telemetry.schema.json"]]'
 
       - name: Reconcile products and apply the next validated decision
         id: brain
@@ -82,8 +82,28 @@ jobs:
             done < <(gh issue list --repo "$repo" --state open --label 'factory:brain-needed' --limit 20 --json number,title --jq '.[] | select(.title == "[FACTORY] Product decision needed") | .number')
           }
 
+          guidance_for_role() {
+            case "$1" in
+              generated_product)
+                printf '%s' 'Optimize the generated commercial product using product-market evidence, activation, conversion, retention and revenue signals.'
+                ;;
+              factory_substrate)
+                printf '%s' 'Optimize the reusable manufacturing substrate for Roots: reduce idea-to-deploy time, bespoke code, manual intervention, failure rate and worker effort; promote repeated generated-product patterns into reusable or declarative capabilities.'
+                ;;
+              factory_control_plane)
+                printf '%s' 'Optimize deterministic orchestration safety, throughput, convergence, observability and bounded worker utilization; do not treat the control-plane as an external commercial product.'
+                ;;
+              internal_tool)
+                printf '%s' 'Optimize the internal tool for its declared internal consumers and operational outcome; do not invent an external product market without human authorization.'
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
           write_state() {
-            local repo="$1" decision_file="$2"
+            local repo="$1" decision_file="$2" profile_file="$3"
             local now current_path current_sha encoded endpoint
             now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
             current_path='-'
@@ -91,11 +111,13 @@ jobs:
             current_sha=''
             if gh api -H 'Accept: application/vnd.github.raw+json' "$endpoint" > /tmp/current-state.json 2>/dev/null; then
               python3 .github/roots/validate-planning.py state /tmp/current-state.json "$repo"
+              python3 .github/roots/validate-repository-role.py state /tmp/current-state.json "$profile_file"
               current_path='/tmp/current-state.json'
               current_sha="$(gh api "$endpoint" --jq '.sha')"
             fi
             python3 .github/roots/factory-product-brain.py state "$decision_file" "$repo" "$now" "$current_path" /tmp/next-state.json
             python3 .github/roots/validate-planning.py state /tmp/next-state.json "$repo"
+            python3 .github/roots/validate-repository-role.py state /tmp/next-state.json "$profile_file"
             if [ "$EXECUTE" != 'true' ]; then
               return 0
             fi
@@ -113,9 +135,12 @@ jobs:
               "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
               continue
             fi
-            jq -e --arg repo "$repo" \
-              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
-              /tmp/profile.json >/dev/null || continue
+            if ! profile_error="$(python3 .github/roots/validate-repository-role.py profile /tmp/profile.json "$repo" 2>&1)"; then
+              echo "CONTROL_PLANE_ANOMALY: ${repo} has invalid managed repository profile: ${profile_error}" >&2
+              continue
+            fi
+            repository_role="$(jq -r '.repository_role' /tmp/profile.json)"
+            role_guidance="$(guidance_for_role "$repository_role")"
 
             ensure_label "$repo" 'factory:brain-proposal' '0052CC' 'Product-brain decision proposal awaiting deterministic validation'
             ensure_label "$repo" 'factory:brain-applied' '0E8A16' 'Product-brain decision applied to the factory'
@@ -127,7 +152,14 @@ jobs:
             state_exists=false
             if gh api -H 'Accept: application/vnd.github.raw+json' \
               "repos/${repo}/contents/.factory/product-state.json" > /tmp/state.json 2>/dev/null; then
-              python3 .github/roots/validate-planning.py state /tmp/state.json "$repo"
+              if ! state_error="$(python3 .github/roots/validate-planning.py state /tmp/state.json "$repo" 2>&1)"; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo} has invalid product state: ${state_error}" >&2
+                continue
+              fi
+              if ! role_state_error="$(python3 .github/roots/validate-repository-role.py state /tmp/state.json /tmp/profile.json 2>&1)"; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo} product state role mismatch: ${role_state_error}" >&2
+                continue
+              fi
               state_exists=true
             else
               printf '%s\n' '{}' > /tmp/state.json
@@ -173,6 +205,10 @@ jobs:
                 reject_proposal "$repo" "$proposal" "$validation_error"
                 continue
               fi
+              if ! role_validation_error="$(python3 .github/roots/validate-repository-role.py decision /tmp/decision.json /tmp/profile.json 2>&1)"; then
+                reject_proposal "$repo" "$proposal" "$role_validation_error"
+                continue
+              fi
 
               current_last=''
               current_phase=''
@@ -206,7 +242,7 @@ jobs:
               fi
 
               if [ "$action" = 'PAUSE' ]; then
-                write_state "$repo" /tmp/decision.json
+                write_state "$repo" /tmp/decision.json /tmp/profile.json
                 if [ "$EXECUTE" = 'true' ]; then
                   gh issue edit "$proposal" --repo "$repo" --add-label 'factory:brain-applied' --remove-label 'factory:brain-proposal' >/dev/null 2>&1 || true
                   gh issue close "$proposal" --repo "$repo" --reason completed >/dev/null
@@ -298,7 +334,7 @@ jobs:
               done < /tmp/task-order.txt
               [ "$invalid" = 'true' ] && continue
 
-              write_state "$repo" /tmp/decision.json
+              write_state "$repo" /tmp/decision.json /tmp/profile.json
               if [ "$EXECUTE" = 'true' ]; then
                 gh issue edit "$proposal" --repo "$repo" --add-label 'factory:brain-applied' --remove-label 'factory:brain-proposal' --remove-label 'factory:human-required' >/dev/null 2>&1 || true
                 gh api --method POST "repos/${repo}/issues/${proposal}/comments" \
@@ -318,7 +354,7 @@ jobs:
                 if [ -z "$needed" ]; then
                   telemetry="$(gh issue list --repo "$repo" --state open --label 'factory:telemetry' --limit 20 --json number,title --jq '.[] | select(.title == "[FACTORY] Product telemetry") | .number' | head -n 1)"
                   gh issue create --repo "$repo" --title '[FACTORY] Product decision needed' --label 'factory:brain-needed' \
-                    --body="<!-- roots-product-decision-needed:v1 -->\nDynamic planning has no active milestone and no valid decision proposal. Factory Product Manager should inspect product state, telemetry issue #${telemetry:-unknown}, completed work and available market evidence, then publish exactly one factory:brain-proposal using the v1 decision contract. This issue is a planning signal, never executable worker backlog." >/dev/null
+                    --body="<!-- roots-product-decision-needed:v1 repository_role=${repository_role} -->\nDynamic planning has no active milestone and no valid decision proposal. Repository role is ${repository_role}. ${role_guidance} Inspect the role-aware state, telemetry issue #${telemetry:-unknown}, completed work and available evidence, then publish exactly one factory:brain-proposal using the current v1 decision contract with repository_role=${repository_role}. This issue is a planning signal, never executable worker backlog." >/dev/null
                 fi
               fi
             fi
@@ -357,6 +393,7 @@ jobs:
             echo "- Milestones reconciled closed: ${CLOSED:-0}"
             echo "- Executable issues materialized: ${ISSUES:-0}"
             echo '- Authority split: fuzzy product decisions arrive as proposals; deterministic schemas/state/preconditions own all mutations.'
+            echo '- Repository semantic roles are validated before any milestone/task materialization.'
             echo '- Newly materialized queue goes directly to scheduler dispatch_only; Product Brain never restarts Quality/rework/merge reconciliation.'
             echo '- Secrets, permissions, workflow policy, production deployment and unbounded real-money spending remain outside Product Brain authority.'
           } >> "$GITHUB_STEP_SUMMARY"

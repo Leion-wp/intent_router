@@ -52,6 +52,7 @@ class ProductBrainContractTests(unittest.TestCase):
             "version": 1,
             "decision_id": "build-value-v1",
             "repository": self.repo,
+            "repository_role": "generated_product",
             "precondition": {
                 "expected_last_decision_id": None,
                 "expected_phase": None,
