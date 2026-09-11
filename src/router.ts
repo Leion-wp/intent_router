@@ -171,7 +171,7 @@ function getActiveProfile(config: vscode.WorkspaceConfiguration): ProfileConfig 
     return profiles.find(p => p.name === activeName);
 }
 
-export async function resolveVariables(input: any, cache?: Map<string, string>): Promise<any> {
+export async function resolveVariables(input: any, cache?: Map<string, any>): Promise<any> {
     if (typeof input === 'string') {
         const regex = /\$\{input:([^}]+)\}/g;
         let match;
@@ -179,12 +179,29 @@ export async function resolveVariables(input: any, cache?: Map<string, string>):
         while ((match = regex.exec(input)) !== null) {
             const fullMatch = match[0];
             const promptText = match[1];
-            let value = cache?.get(promptText);
-            if (value === undefined) {
-                value = await vscode.window.showInputBox({ prompt: promptText, placeHolder: `Value for ${promptText}` });
-                if (value === undefined) throw new Error(`Input cancelled for variable: ${promptText}`);
-                if (cache) cache.set(promptText, value);
+            let valuePromise = cache?.get(promptText);
+            if (valuePromise === undefined) {
+                const promptTask = (async () => {
+                    const value = await vscode.window.showInputBox({ prompt: promptText, placeHolder: `Value for ${promptText}` });
+                    if (value === undefined) throw new Error(`Input cancelled for variable: ${promptText}`);
+                    return value;
+                })();
+
+                valuePromise = promptTask.catch((err) => {
+                    if (cache) cache.delete(promptText);
+                    throw err;
+                });
+
+                if (cache) {
+                    cache.set(promptText, valuePromise);
+                    promptTask.then((val) => {
+                        if (cache.get(promptText) === valuePromise) {
+                            cache.set(promptText, val);
+                        }
+                    }).catch(() => {});
+                }
             }
+            const value = await valuePromise;
             result = result.replace(fullMatch, value);
         }
         return result;
