@@ -31,6 +31,9 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 - **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
 - **System URL Scheme Validation**: `system:open_url` strictly enforces web capability safety by permitting only explicit `https:` and `http:` URL schemes (case-insensitive). Non-HTTP(S) schemes (such as `javascript:`, `data:`, `file:`, `content:`, `intent:`, `tel:`, `sms:`, or custom deep link schemes) and relative URLs are rejected prior to calling `window.open` with a structured `url_scheme_not_allowed` error.
+- **Capability Argument Metadata**: Custom commands and built-in actions (`file:*`, `network:request`, `terminal:exec`, `terminal:run`, etc.) can expose lightweight, non-executable argument metadata (`description` and `args[]` supporting `string`, `number`, `boolean`, `enum`, and `object` types).
+- **Capability Introspection**: `router:capabilities` returns a clean, serializable snapshot of available actions and their metadata for mobile UI builders and agents, with zero leaked functions, handlers, or secrets.
+- **Opt-in Preflight Payload Validation**: `validatePayloadAgainstArgs(payload, args)` provides a pure helper to validate payloads against capability metadata prior to execution.
 
 ## API Example
 ```javascript
@@ -66,6 +69,24 @@ intentRouter.execute({
   action: 'system:open_url',
   data: { url: 'https://example.com' }
 });
+
+// Register a custom command with argument metadata
+intentRouter.register('custom:greet', (data) => `Hello ${data.name}!`, {
+  description: 'Greets user with configurable style',
+  args: [
+    { name: 'name', type: 'string', required: true, description: 'Name of person to greet' },
+    { name: 'style', type: 'enum', required: false, default: 'friendly', options: ['friendly', 'formal'] }
+  ]
+});
+
+// Inspect capabilities snapshot
+const caps = await intentRouter.route({ action: 'router:capabilities' });
+console.log(caps.data.capabilities);
+
+// Opt-in payload validation against argument metadata
+const { validatePayloadAgainstArgs } = require('./main.js');
+const validation = validatePayloadAgainstArgs({ name: 'Alice', style: 'friendly' }, caps.data.capabilities[0].args);
+console.log(validation.valid); // true
 ```
 
 ## Testing & CI
