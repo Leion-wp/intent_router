@@ -279,10 +279,15 @@ jobs:
                 rc=$?
                 set -e
                 if [ "$rc" -eq 0 ]; then
-                  if ! GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${number}" \
-                    --jq --argjson milestone "$milestone_number" \
-                    'select(.pull_request == null and (.milestone.number // -1) == $milestone) | .number' | grep -qx "$number"; then
-                    reject_proposal "$repo" "$proposal" "canonical task binding ${decision_id}/${task_id} points to missing/wrong-milestone issue #${number}"
+                  if ! bound_json="$(GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${number}")"; then
+                    reject_proposal "$repo" "$proposal" "canonical task binding ${decision_id}/${task_id} points to missing issue #${number}"
+                    invalid=true
+                    break
+                  fi
+                  bound_is_pr="$(jq -r 'has("pull_request")' <<< "$bound_json")"
+                  bound_milestone="$(jq -r '.milestone.number // -1' <<< "$bound_json")"
+                  if [ "$bound_is_pr" = 'true' ] || [ "$bound_milestone" != "$milestone_number" ]; then
+                    reject_proposal "$repo" "$proposal" "canonical task binding ${decision_id}/${task_id} points to wrong-milestone/non-issue #${number}"
                     invalid=true
                     break
                   fi
@@ -299,7 +304,7 @@ jobs:
               while IFS= read -r task_id; do
                 existing="$(awk -F '\t' -v id="$task_id" '$1 == id {print $2}' /tmp/task-map.tsv | head -n 1)"
                 [ -n "$existing" ] && continue
-                task="$(jq -c --arg id="$task_id" '.tasks[] | select(.id == $id)' /tmp/plan.json)"
+                task="$(jq -c --arg id "$task_id" '.tasks[] | select(.id == $id)' /tmp/plan.json)"
                 blocked_lines=''
                 while IFS= read -r dep; do
                   [ -z "$dep" ] && continue
