@@ -1,0 +1,147 @@
+name: factory-quality-block-reconciler-v1
+
+"on":
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - factory-copilot-quality-gate-v2
+    types: [completed]
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-quality-block-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Materialize exact-head Quality BLOCK as HUMAN_REQUIRED
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          identity_helper="$GITHUB_WORKSPACE/.github/roots/factory_worker_identity.py"
+          test -f "$identity_helper"
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+
+          escalated=0
+          deferred=0
+          anomalies=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" \
+              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
+              /tmp/profile.json >/dev/null || continue
+            branch="$(jq -r '.default_branch' /tmp/profile.json)"
+
+            gh label create 'factory:blocked' --repo "$repo" --color B60205 \
+              --description 'Factory stopped fail-closed' --force >/dev/null 2>&1 || true
+            gh label create 'factory:escalated' --repo "$repo" --color 8B0000 \
+              --description 'Worker identity preserved; human resolution required' --force >/dev/null 2>&1 || true
+            gh label create 'factory:human-required' --repo "$repo" --color FBCA04 \
+              --description 'A human decision is required before factory execution can continue' --force >/dev/null 2>&1 || true
+
+            while IFS= read -r issue; do
+              [ -n "$issue" ] || continue
+              gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/comments.json
+              gh pr list --repo "$repo" --state open --limit 100 \
+                --json number,headRefOid,headRefName,baseRefName,isDraft > /tmp/prs.json
+
+              matches=0
+              matched_pr=''
+              matched_sha=''
+              while IFS= read -r pr_number; do
+                [ -n "$pr_number" ] || continue
+                gh api "repos/${repo}/pulls/${pr_number}" > /tmp/pr.json
+                [ "$(jq -r '.base.ref' /tmp/pr.json)" = "$branch" ] || continue
+                [ "$(jq -r '.state' /tmp/pr.json)" = open ] || continue
+                [ "$(jq -r '.draft' /tmp/pr.json)" = false ] || continue
+
+                set +e
+                python "$identity_helper" validate \
+                  --repo "$repo" \
+                  --issue "$issue" \
+                  --comments-json /tmp/comments.json \
+                  --pr-json /tmp/pr.json \
+                  --base "$branch" \
+                  >/tmp/identity.json 2>/tmp/identity.err
+                rc=$?
+                set -e
+                [ "$rc" -eq 0 ] || continue
+
+                matches=$((matches + 1))
+                matched_pr="$pr_number"
+                matched_sha="$(jq -r '.head.sha' /tmp/pr.json)"
+              done < <(jq -r '.[].number' /tmp/prs.json)
+
+              if [ "$matches" -gt 1 ]; then
+                anomalies=$((anomalies + 1))
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${matches} canonical open PR candidates." >&2
+                continue
+              fi
+              if [ "$matches" -ne 1 ]; then
+                deferred=$((deferred + 1))
+                continue
+              fi
+
+              block_marker="<!-- roots-quality-verdict head=${matched_sha} verdict=BLOCK -->"
+              if ! jq -e --arg marker "$block_marker" '.[] | select((.body // "") | contains($marker))' /tmp/comments.json >/dev/null; then
+                continue
+              fi
+
+              dedupe="<!-- roots-quality-block-escalation head=${matched_sha} -->"
+              if jq -e --arg marker "$dedupe" '.[] | select((.body // "") | contains($marker))' /tmp/comments.json >/dev/null; then
+                continue
+              fi
+
+              gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                -f body="${dedupe}\nCONTROL_PLANE QUALITY BLOCK: PR #${matched_pr} head ${matched_sha} is exact-head BLOCK. Worker identity is preserved, automatic execution is suspended, and human resolution is required before same-session continuation." >/dev/null
+
+              gh issue edit "$issue" --repo "$repo" \
+                --remove-label 'factory:dispatched' \
+                --add-label 'factory:blocked' \
+                --add-label 'factory:escalated' \
+                --add-label 'factory:human-required' >/dev/null
+
+              labels="$(gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
+              jq -e 'index("factory:dispatched") == null and index("factory:blocked") != null and index("factory:escalated") != null and index("factory:human-required") != null' \
+                <<< "$labels" >/dev/null || {
+                  echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} Quality BLOCK state did not persist." >&2
+                  exit 1
+                }
+
+              escalated=$((escalated + 1))
+              echo "QUALITY_BLOCK_ESCALATED: ${repo}#${issue} PR #${matched_pr} head ${matched_sha}."
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
+          done < /tmp/repos.txt
+
+          {
+            echo '### Quality BLOCK reconciler v1'
+            echo "- Newly escalated exact-head BLOCK identities: ${escalated}"
+            echo "- Deferred identities: ${deferred}"
+            echo "- Control-plane anomalies: ${anomalies}"
+            echo '- BLOCK preserves the canonical worker identity but removes factory:dispatched so it no longer consumes active worker capacity.'
+            echo '- Human resolution is required before any same-session resume.'
+          } >> "$GITHUB_STEP_SUMMARY"
