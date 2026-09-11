@@ -268,7 +268,6 @@ jobs:
 
               decision_id="$(jq -r '.decision_id' /tmp/decision.json)"
               program_id="$(jq -r '.program.program_id' /tmp/decision.json)"
-              action="$(jq -r '.action' /tmp/decision.json)"
               if [ "$(jq -r '.human_gate.required' /tmp/decision.json)" = 'true' ]; then
                 human_required="$((human_required + 1))"
                 if [ "$EXECUTE" = 'true' ]; then
