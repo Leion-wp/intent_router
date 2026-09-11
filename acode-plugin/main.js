@@ -147,6 +147,138 @@
   }
 
 
+  function actionToIntent(action) {
+    if (typeof action !== 'string') return '';
+    return action.trim().replace(/:/g, '.');
+  }
+
+  function intentToAction(intent) {
+    if (typeof intent !== 'string') return '';
+    return intent.trim().replace(/\./g, ':');
+  }
+
+  function filterRoutableActions(actions) {
+    if (!actions) return [];
+    const list = Array.isArray(actions)
+      ? actions
+      : (actions instanceof Map || actions instanceof Set ? Array.from(actions.keys()) : Object.keys(actions));
+
+    return list
+      .filter(action => typeof action === 'string' && !action.startsWith('router:'))
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  function sanitizePipelineFilename(rawName) {
+    if (typeof rawName !== 'string') {
+      const err = new Error('Pipeline filename must be a non-empty string');
+      err.code = 'invalid_pipeline_filename';
+      throw err;
+    }
+
+    let trimmed = rawName.trim();
+    if (!trimmed) {
+      const err = new Error('Pipeline filename cannot be empty');
+      err.code = 'invalid_pipeline_filename';
+      throw err;
+    }
+
+    // Detect path traversal or path separators
+    if (trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes('..')) {
+      // Strip path directories to extract base name
+      const parts = trimmed.split(/[/\\]/);
+      trimmed = parts[parts.length - 1].replace(/\.\./g, '');
+    }
+
+    // Sanitize unsafe filename characters
+    let safeBase = trimmed.replace(/[^\w\.-]/g, '_').replace(/^_+|_+$/g, '');
+    if (!safeBase) safeBase = 'pipeline';
+
+    // Strip existing .intent.json suffix if present before appending
+    if (safeBase.endsWith('.intent.json')) {
+      safeBase = safeBase.slice(0, -12);
+    } else if (safeBase.endsWith('.json')) {
+      safeBase = safeBase.slice(0, -5);
+    }
+
+    if (!safeBase) safeBase = 'pipeline';
+
+    const fileName = `${safeBase}.intent.json`;
+    return {
+      safeName: safeBase,
+      fileName,
+      relativePath: `pipeline/${fileName}`
+    };
+  }
+
+  function validatePipelineStructure(pipelineData) {
+    const errors = [];
+
+    if (!pipelineData || typeof pipelineData !== 'object' || Array.isArray(pipelineData)) {
+      const err = new Error('Invalid pipeline structure: pipelineData must be a non-null object');
+      err.code = 'invalid_pipeline_structure';
+      err.errors = ['pipelineData must be a non-null object'];
+      throw err;
+    }
+
+    if (!Array.isArray(pipelineData.steps)) {
+      errors.push('pipelineData.steps must be an array');
+    } else {
+      const stepIds = new Set();
+      pipelineData.steps.forEach((step, idx) => {
+        if (!step || typeof step !== 'object' || Array.isArray(step)) {
+          errors.push(`step[${idx}] must be a non-null object`);
+          return;
+        }
+
+        if (typeof step.id !== 'string' || !step.id.trim()) {
+          step.id = `step_${idx + 1}`;
+        }
+
+        if (stepIds.has(step.id)) {
+          errors.push(`step[${idx}].id "${step.id}" is duplicate`);
+        } else {
+          stepIds.add(step.id);
+        }
+
+        if (typeof step.intent !== 'string' || !step.intent.trim()) {
+          errors.push(`step[${idx}].intent must be a non-empty string`);
+        }
+
+        if (!step.payload || typeof step.payload !== 'object' || Array.isArray(step.payload)) {
+          errors.push(`step[${idx}].payload must be a non-null non-array object`);
+        }
+
+        if (step.continueOnError !== undefined && typeof step.continueOnError !== 'boolean') {
+          errors.push(`step[${idx}].continueOnError must be a boolean`);
+        }
+
+        if (step.onFailure !== undefined && step.onFailure !== null) {
+          if (typeof step.onFailure !== 'string') {
+            errors.push(`step[${idx}].onFailure must be a string step ID`);
+          }
+        }
+      });
+
+      // Second pass for onFailure targets validation
+      if (errors.length === 0) {
+        pipelineData.steps.forEach((step, idx) => {
+          if (step && step.onFailure && !stepIds.has(step.onFailure)) {
+            errors.push(`step[${idx}].onFailure target ID "${step.onFailure}" does not exist in pipeline steps`);
+          }
+        });
+      }
+    }
+
+    if (errors.length > 0) {
+      const err = new Error(`Invalid pipeline structure: ${errors.join('; ')}`);
+      err.code = 'invalid_pipeline_structure';
+      err.errors = errors;
+      throw err;
+    }
+
+    return true;
+  }
+
   class PipelineRunner {
     constructor(router, options = {}) {
       this.router = router;
@@ -176,9 +308,7 @@
     }
 
     async runPipelineFromData(pipelineData, onProgress) {
-      if (!pipelineData || !Array.isArray(pipelineData.steps)) {
-        throw new Error('Invalid pipeline format: steps array is missing');
-      }
+      validatePipelineStructure(pipelineData);
 
       let stepIndex = 0;
       const totalSteps = pipelineData.steps.length;
@@ -231,6 +361,462 @@
     }
   }
 
+
+  class PipelineBuilderUI {
+    constructor(router) {
+      this.router = router;
+      this.$container = null;
+      this.pipelineName = 'new-pipeline';
+      this.steps = [
+        { id: 'step_1', action: 'file:read', rawPayload: '{\n  "path": "package.json"\n}' }
+      ];
+      this.previewElement = null;
+      this.validationErrorElement = null;
+    }
+
+    async render() {
+      if (!this.router.$page) {
+        this.router.alert('Error', 'UI page is not initialized.');
+        return;
+      }
+
+      this.router.$page.settitle('New Pipeline');
+      this.router.$page.innerHTML = '';
+
+      this.$container = document.createElement('div');
+      this.$container.style.padding = '16px';
+      this.$container.style.color = 'var(--primary-text-color, #fff)';
+      this.$container.style.display = 'flex';
+      this.$container.style.flexDirection = 'column';
+      this.$container.style.gap = '16px';
+      this.$container.style.height = '100%';
+      this.$container.style.overflow = 'auto';
+
+      this.router.$page.append(this.$container);
+      this.buildUI();
+
+      if (typeof this.router.$page.show === 'function') {
+        this.router.$page.show();
+      }
+    }
+
+    buildUI() {
+      if (!this.$container) return;
+      this.$container.innerHTML = '';
+
+      // Header
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'center';
+
+      const title = document.createElement('h3');
+      title.textContent = 'Pipeline Builder';
+      title.style.margin = '0';
+
+      const backBtn = document.createElement('button');
+      backBtn.textContent = 'Back to Pipelines';
+      backBtn.style.padding = '6px 12px';
+      backBtn.style.background = 'transparent';
+      backBtn.style.border = '1px solid var(--primary-color, #2196f3)';
+      backBtn.style.color = 'var(--primary-color, #2196f3)';
+      backBtn.style.borderRadius = '4px';
+      backBtn.onclick = () => this.router.pipelineUI.render();
+
+      header.appendChild(title);
+      header.appendChild(backBtn);
+      this.$container.appendChild(header);
+
+      // Name Input Field
+      const nameSection = document.createElement('div');
+      nameSection.style.display = 'flex';
+      nameSection.style.flexDirection = 'column';
+      nameSection.style.gap = '6px';
+
+      const nameLabel = document.createElement('label');
+      nameLabel.textContent = 'Pipeline Name:';
+      nameLabel.style.fontWeight = 'bold';
+
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.value = this.pipelineName;
+      nameInput.placeholder = 'my-pipeline-name';
+      nameInput.style.padding = '8px';
+      nameInput.style.borderRadius = '4px';
+      nameInput.style.border = '1px solid var(--border-color, #444)';
+      nameInput.style.background = 'var(--secondary-color, #222)';
+      nameInput.style.color = 'inherit';
+      nameInput.oninput = (e) => {
+        this.pipelineName = e.target.value;
+        this.updatePreview();
+      };
+
+      nameSection.appendChild(nameLabel);
+      nameSection.appendChild(nameInput);
+      this.$container.appendChild(nameSection);
+
+      // Steps Header & Add Button
+      const stepsHeader = document.createElement('div');
+      stepsHeader.style.display = 'flex';
+      stepsHeader.style.justifyContent = 'space-between';
+      stepsHeader.style.alignItems = 'center';
+
+      const stepsTitle = document.createElement('h4');
+      stepsTitle.textContent = 'Steps Sequence';
+      stepsTitle.style.margin = '0';
+
+      const addStepBtn = document.createElement('button');
+      addStepBtn.textContent = '+ Add Step';
+      addStepBtn.style.padding = '6px 12px';
+      addStepBtn.style.background = 'var(--primary-color, #2196f3)';
+      addStepBtn.style.color = '#fff';
+      addStepBtn.style.border = 'none';
+      addStepBtn.style.borderRadius = '4px';
+      addStepBtn.onclick = () => {
+        const availableActions = filterRoutableActions(this.router.commands);
+        const defaultAction = availableActions.length > 0 ? availableActions[0] : 'file:read';
+        this.steps.push({
+          id: `step_${this.steps.length + 1}`,
+          action: defaultAction,
+          rawPayload: '{}'
+        });
+        this.buildUI();
+      };
+
+      stepsHeader.appendChild(stepsTitle);
+      stepsHeader.appendChild(addStepBtn);
+      this.$container.appendChild(stepsHeader);
+
+      // Steps Container
+      const stepsContainer = document.createElement('div');
+      stepsContainer.style.display = 'flex';
+      stepsContainer.style.flexDirection = 'column';
+      stepsContainer.style.gap = '12px';
+
+      const availableActions = filterRoutableActions(this.router.commands);
+
+      this.steps.forEach((step, index) => {
+        stepsContainer.appendChild(this.createStepCard(step, index, availableActions));
+      });
+
+      this.$container.appendChild(stepsContainer);
+
+      // Live JSON Preview Section
+      const previewSection = document.createElement('div');
+      previewSection.style.display = 'flex';
+      previewSection.style.flexDirection = 'column';
+      previewSection.style.gap = '6px';
+
+      const previewLabel = document.createElement('label');
+      previewLabel.textContent = 'Generated JSON Preview:';
+      previewLabel.style.fontWeight = 'bold';
+
+      this.previewElement = document.createElement('pre');
+      this.previewElement.style.padding = '12px';
+      this.previewElement.style.background = 'rgba(0,0,0,0.3)';
+      this.previewElement.style.borderRadius = '4px';
+      this.previewElement.style.overflow = 'auto';
+      this.previewElement.style.maxHeight = '200px';
+      this.previewElement.style.fontSize = '0.85em';
+      this.previewElement.style.whiteSpace = 'pre-wrap';
+
+      previewSection.appendChild(previewLabel);
+      previewSection.appendChild(this.previewElement);
+      this.$container.appendChild(previewSection);
+
+      // Validation Diagnostic Area
+      this.validationErrorElement = document.createElement('div');
+      this.validationErrorElement.style.padding = '10px';
+      this.validationErrorElement.style.borderRadius = '4px';
+      this.validationErrorElement.style.background = 'rgba(244,67,54,0.15)';
+      this.validationErrorElement.style.border = '1px solid #f44336';
+      this.validationErrorElement.style.color = '#f44336';
+      this.validationErrorElement.style.display = 'none';
+      this.$container.appendChild(this.validationErrorElement);
+
+      // Action Footer (Save Button)
+      const footer = document.createElement('div');
+      footer.style.display = 'flex';
+      footer.style.justifyContent = 'flex-end';
+      footer.style.gap = '12px';
+
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = 'Save Pipeline';
+      saveBtn.style.padding = '10px 20px';
+      saveBtn.style.background = '#4caf50';
+      saveBtn.style.color = '#fff';
+      saveBtn.style.border = 'none';
+      saveBtn.style.borderRadius = '4px';
+      saveBtn.style.fontWeight = 'bold';
+      saveBtn.onclick = () => this.savePipeline();
+
+      footer.appendChild(saveBtn);
+      this.$container.appendChild(footer);
+
+      this.updatePreview();
+    }
+
+    createStepCard(step, index, availableActions) {
+      const card = document.createElement('div');
+      card.style.background = 'var(--secondary-color, rgba(0,0,0,0.2))';
+      card.style.padding = '12px';
+      card.style.borderRadius = '6px';
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.gap = '8px';
+      card.style.border = '1px solid var(--border-color, rgba(255,255,255,0.1))';
+
+      // Card Header (Step Index & Reorder / Remove Controls)
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'center';
+
+      const stepTitle = document.createElement('strong');
+      stepTitle.textContent = `Step ${index + 1}`;
+
+      const controls = document.createElement('div');
+      controls.style.display = 'flex';
+      controls.style.gap = '6px';
+
+      const moveUpBtn = document.createElement('button');
+      moveUpBtn.textContent = '↑';
+      moveUpBtn.style.padding = '4px 8px';
+      moveUpBtn.disabled = index === 0;
+      moveUpBtn.onclick = () => {
+        if (index > 0) {
+          const temp = this.steps[index];
+          this.steps[index] = this.steps[index - 1];
+          this.steps[index - 1] = temp;
+          this.buildUI();
+        }
+      };
+
+      const moveDownBtn = document.createElement('button');
+      moveDownBtn.textContent = '↓';
+      moveDownBtn.style.padding = '4px 8px';
+      moveDownBtn.disabled = index === this.steps.length - 1;
+      moveDownBtn.onclick = () => {
+        if (index < this.steps.length - 1) {
+          const temp = this.steps[index];
+          this.steps[index] = this.steps[index + 1];
+          this.steps[index + 1] = temp;
+          this.buildUI();
+        }
+      };
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = '✕';
+      deleteBtn.style.padding = '4px 8px';
+      deleteBtn.style.background = '#f44336';
+      deleteBtn.style.color = '#fff';
+      deleteBtn.style.border = 'none';
+      deleteBtn.style.borderRadius = '3px';
+      deleteBtn.onclick = () => {
+        this.steps.splice(index, 1);
+        this.buildUI();
+      };
+
+      controls.appendChild(moveUpBtn);
+      controls.appendChild(moveDownBtn);
+      controls.appendChild(deleteBtn);
+
+      header.appendChild(stepTitle);
+      header.appendChild(controls);
+      card.appendChild(header);
+
+      // Action Capability Select
+      const actionRow = document.createElement('div');
+      actionRow.style.display = 'flex';
+      actionRow.style.flexDirection = 'column';
+      actionRow.style.gap = '4px';
+
+      const actionLabel = document.createElement('label');
+      actionLabel.textContent = 'Action / Capability:';
+      actionLabel.style.fontSize = '0.9em';
+
+      const select = document.createElement('select');
+      select.style.padding = '6px';
+      select.style.borderRadius = '4px';
+      select.style.background = 'var(--secondary-color, #222)';
+      select.style.color = 'inherit';
+      select.style.border = '1px solid var(--border-color, #444)';
+
+      const actionsList = availableActions.length > 0 ? availableActions : ['file:read', 'file:write', 'terminal:exec', 'network:request'];
+
+      // Ensure step.action is in actionsList or added
+      if (!actionsList.includes(step.action)) {
+        actionsList.unshift(step.action);
+      }
+
+      actionsList.forEach(act => {
+        const option = document.createElement('option');
+        option.value = act;
+        option.textContent = `${act} → (${actionToIntent(act)})`;
+        if (act === step.action) option.selected = true;
+        select.appendChild(option);
+      });
+
+      select.onchange = (e) => {
+        step.action = e.target.value;
+        this.updatePreview();
+      };
+
+      actionRow.appendChild(actionLabel);
+      actionRow.appendChild(select);
+      card.appendChild(actionRow);
+
+      // Payload Textarea
+      const payloadRow = document.createElement('div');
+      payloadRow.style.display = 'flex';
+      payloadRow.style.flexDirection = 'column';
+      payloadRow.style.gap = '4px';
+
+      const payloadLabel = document.createElement('label');
+      payloadLabel.textContent = 'Payload (JSON object):';
+      payloadLabel.style.fontSize = '0.9em';
+
+      const textarea = document.createElement('textarea');
+      textarea.value = step.rawPayload || '{}';
+      textarea.rows = 3;
+      textarea.style.padding = '6px';
+      textarea.style.borderRadius = '4px';
+      textarea.style.background = 'var(--secondary-color, #222)';
+      textarea.style.color = 'inherit';
+      textarea.style.border = '1px solid var(--border-color, #444)';
+      textarea.style.fontFamily = 'monospace';
+      textarea.style.fontSize = '0.85em';
+
+      textarea.oninput = (e) => {
+        step.rawPayload = e.target.value;
+        this.updatePreview();
+      };
+
+      payloadRow.appendChild(payloadLabel);
+      payloadRow.appendChild(textarea);
+      card.appendChild(payloadRow);
+
+      return card;
+    }
+
+    generatePipelineObject() {
+      const compiledSteps = this.steps.map((step, idx) => {
+        let parsedPayload = {};
+        try {
+          parsedPayload = JSON.parse(step.rawPayload || '{}');
+        } catch (_) {
+          parsedPayload = null;
+        }
+
+        return {
+          id: `step_${idx + 1}`,
+          intent: actionToIntent(step.action),
+          payload: parsedPayload
+        };
+      });
+
+      return {
+        name: this.pipelineName.trim() || 'new-pipeline',
+        steps: compiledSteps
+      };
+    }
+
+    updatePreview() {
+      if (!this.previewElement) return;
+
+      const pipelineData = this.generatePipelineObject();
+      this.previewElement.textContent = JSON.stringify(pipelineData, null, 2);
+
+      // Realtime validation feedback
+      try {
+        validatePipelineStructure(pipelineData);
+        if (this.validationErrorElement) {
+          this.validationErrorElement.style.display = 'none';
+          this.validationErrorElement.textContent = '';
+        }
+      } catch (err) {
+        if (this.validationErrorElement) {
+          this.validationErrorElement.style.display = 'block';
+          this.validationErrorElement.textContent = `Validation Diagnostic: ${err.message}`;
+        }
+      }
+    }
+
+    async savePipeline() {
+      try {
+        if (this.steps.length === 0) {
+          throw new Error('Pipeline must contain at least one step');
+        }
+
+        // Validate payload JSON string formatting for each step
+        this.steps.forEach((step, idx) => {
+          try {
+            const parsed = JSON.parse(step.rawPayload || '{}');
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+              throw new Error('Payload must be a non-null object');
+            }
+          } catch (e) {
+            throw new Error(`Step ${idx + 1} has invalid JSON payload: ${e.message}`);
+          }
+        });
+
+        const sanitizeResult = sanitizePipelineFilename(this.pipelineName);
+        const pipelineData = this.generatePipelineObject();
+
+        validatePipelineStructure(pipelineData);
+
+        const projectRoot = await this.router.pipelineUI.getProjectRoot();
+        if (!projectRoot) {
+          throw new Error('No project folder is currently open in Acode sidebar.');
+        }
+
+        const fsOperation = this.router.requireFs();
+        if (!fsOperation) throw new Error('File system API unavailable');
+
+        const pipelineFolderUrl = projectRoot.endsWith('/') ? `${projectRoot}pipeline` : `${projectRoot}/pipeline`;
+        const folder = fsOperation(pipelineFolderUrl);
+        const folderExists = await folder.exists();
+
+        if (!folderExists) {
+          const rootFolder = fsOperation(projectRoot);
+          if (typeof rootFolder.createDirectory === 'function') {
+            await rootFolder.createDirectory('pipeline');
+          }
+        }
+
+        const targetFileUrl = `${pipelineFolderUrl}/${sanitizeResult.fileName}`;
+        const fileHandle = fsOperation(targetFileUrl);
+        const fileExists = await fileHandle.exists();
+
+        if (fileExists) {
+          const confirmOverwrite = typeof window !== 'undefined' && window.confirm
+            ? window.confirm(`File "${sanitizeResult.fileName}" already exists. Do you want to overwrite it?`)
+            : true;
+
+          if (!confirmOverwrite) {
+            this.router.toast('Save cancelled: file already exists');
+            return;
+          }
+        }
+
+        const jsonString = JSON.stringify(pipelineData, null, 2);
+        await fsOperation(targetFileUrl).writeFile(jsonString);
+
+        this.router.toast(`Pipeline saved to pipeline/${sanitizeResult.fileName}`);
+
+        // Refresh PipelineUI and navigate back
+        await this.router.pipelineUI.loadPipelines();
+        await this.router.pipelineUI.render();
+
+      } catch (err) {
+        if (this.validationErrorElement) {
+          this.validationErrorElement.style.display = 'block';
+          this.validationErrorElement.textContent = `Save Error: ${err.message}`;
+        }
+        this.router.alert('Pipeline Save Failed', err.message);
+      }
+    }
+  }
 
   class PipelineUI {
     constructor(router, options = {}) {
@@ -302,6 +888,15 @@
 
       const pipelineFolderUrl = projectRoot.endsWith('/') ? projectRoot + 'pipeline' : projectRoot + '/pipeline';
 
+      const newPipelineBtn = document.createElement('button');
+      newPipelineBtn.textContent = '+ New Pipeline';
+      newPipelineBtn.style.padding = '8px 16px';
+      newPipelineBtn.style.background = '#4caf50';
+      newPipelineBtn.style.color = '#fff';
+      newPipelineBtn.style.border = 'none';
+      newPipelineBtn.style.borderRadius = '4px';
+      newPipelineBtn.onclick = () => this.router.pipelineBuilderUI.render();
+
       const refreshBtn = document.createElement('button');
       refreshBtn.textContent = 'Refresh Pipelines';
       refreshBtn.style.padding = '8px 16px';
@@ -309,8 +904,13 @@
       refreshBtn.style.color = '#fff';
       refreshBtn.style.border = 'none';
       refreshBtn.style.borderRadius = '4px';
-      refreshBtn.style.alignSelf = 'flex-end';
       refreshBtn.onclick = () => this.loadPipelines();
+
+      const headerButtons = document.createElement('div');
+      headerButtons.style.display = 'flex';
+      headerButtons.style.gap = '8px';
+      headerButtons.appendChild(newPipelineBtn);
+      headerButtons.appendChild(refreshBtn);
 
       const header = document.createElement('div');
       header.style.display = 'flex';
@@ -334,7 +934,7 @@
       headerLeft.appendChild(this.$counter);
 
       header.appendChild(headerLeft);
-      header.appendChild(refreshBtn);
+      header.appendChild(headerButtons);
 
       this.$cardsContainer = document.createElement('div');
       this.$cardsContainer.style.display = 'flex';
@@ -531,6 +1131,7 @@
       this.registeredAcodeCommands = [];
       this.pipelineRunner = new PipelineRunner(this);
       this.pipelineUI = new PipelineUI(this);
+      this.pipelineBuilderUI = new PipelineBuilderUI(this);
     }
 
     safeRequire(name) {
@@ -956,6 +1557,7 @@
       }
       const defs = [
         { name: 'leion.intentRouter.pipelines', description: 'Intent Router: Show Pipelines', exec: () => this.pipelineUI.render() },
+        { name: 'leion.intentRouter.newPipeline', description: 'Intent Router: New Pipeline', exec: () => this.pipelineBuilderUI.render() },
         { name: 'leion.intentRouter.test', description: 'Intent Router: Run smoke test', exec: () => this.runTest() },
         { name: 'leion.intentRouter.logs', description: 'Intent Router: View logs', exec: () => this.showLogs() },
         { name: 'leion.intentRouter.capabilities', description: 'Intent Router: Show capabilities', exec: () => this.showCapabilities() }
@@ -1045,8 +1647,14 @@
       MAX_PIPELINE_BYTES,
       DEFAULT_EDITOR_MAX_BYTES,
       DEFAULT_PIPELINE_BATCH_SIZE,
+      actionToIntent,
+      intentToAction,
+      filterRoutableActions,
+      sanitizePipelineFilename,
+      validatePipelineStructure,
       PipelineRunner,
       PipelineUI,
+      PipelineBuilderUI,
       IntentRouter,
       validateMaxBytes,
       validateOpenUrl,
