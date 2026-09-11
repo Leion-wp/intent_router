@@ -118,8 +118,20 @@ jobs:
 
           labels="$(jq '[.labels[].name]' /tmp/issue.json)"
           if jq -e --arg marker "$delivered_marker" '.[] | select((.body // "") | contains($marker))' /tmp/comments.json >/dev/null; then
-            echo 'send=false' >> "$GITHUB_OUTPUT"
-            echo 'finalize=true' >> "$GITHUB_OUTPUT"
+            # A delivery receipt comment is only a human-readable projection. Before
+            # reactivating the slot, prove the exact token through authenticated Jules
+            # activity so a forged/stale comment cannot manufacture delivery authority.
+            if curl --fail-with-body --silent --show-error \
+              -H "X-Goog-Api-Key: $JULES_API_KEY" \
+              "https://jules.googleapis.com/v1alpha/${session}/activities?pageSize=100" > /tmp/activities.json \
+              && grep -Fq "$token" /tmp/activities.json; then
+              echo 'send=false' >> "$GITHUB_OUTPUT"
+              echo 'finalize=true' >> "$GITHUB_OUTPUT"
+              echo 'HUMAN_REWORK_RECOVERY: delivery receipt corroborated by Jules activity; finalizing durable GitHub state.'
+            else
+              echo 'HUMAN_REWORK_UNPROVEN_RECEIPT: delivery receipt exists but authenticated Jules activity does not prove the token. Refusing state reactivation.' >&2
+              exit 1
+            fi
           elif jq -e --arg marker "$auth_marker" '.[] | select((.body // "") | contains($marker))' /tmp/comments.json >/dev/null; then
             # A prior run persisted delivery intent but not completion. Do not blindly resend.
             # Reconcile against Jules activity; if the token is visible, finalize GitHub state.
