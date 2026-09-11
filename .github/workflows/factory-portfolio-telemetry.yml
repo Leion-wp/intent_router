@@ -181,7 +181,7 @@ jobs:
             --argjson brain_needed "$brain_needed_total" \
             --argjson human_required "$human_total" \
             --argjson idle_without_next "$idle_without_next" \
-            '{version:2,generated_at:$generated_at,owner:$owner,worker_capacity:{provider:"jules",max_concurrency:$jules_max,active_slots:$jules_active,available_slots:$jules_available,escalated_identities:$jules_escalated},chatgpt_capacity:{provider:"chatgpt",max_concurrency:$chatgpt_max,active_slots:$chatgpt_active,available_slots:$chatgpt_available,escalated_identities:$chatgpt_escalated},repositories:$repositories[0],summary:{managed_repositories:$managed,active_products:$active_products,queued:$queued,blocked:$blocked,brain_needed:$brain_needed,human_required:$human_total,idle_without_next_transition:$idle_without_next}}' \
+            '{version:2,generated_at:$generated_at,owner:$owner,worker_capacity:{provider:"jules",max_concurrency:$jules_max,active_slots:$jules_active,available_slots:$jules_available,escalated_identities:$jules_escalated},chatgpt_capacity:{provider:"chatgpt",max_concurrency:$chatgpt_max,active_slots:$chatgpt_active,available_slots:$chatgpt_available,escalated_identities:$chatgpt_escalated},repositories:$repositories[0],summary:{managed_repositories:$managed,active_products:$active_products,queued:$queued,blocked:$blocked,brain_needed:$brain_needed,human_required:$human_required,idle_without_next_transition:$idle_without_next}}' \
             > /tmp/portfolio.json
 
           python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
