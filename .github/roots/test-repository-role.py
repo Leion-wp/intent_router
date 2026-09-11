@@ -65,6 +65,18 @@ class RepositoryRoleContractTests(unittest.TestCase):
             "repository": self.repo,
             "repository_role": role,
             "precondition": {"expected_last_decision_id": None, "expected_phase": None},
+            "program": {
+                "transition": "PAUSE",
+                "program_id": "role-aware-program",
+                "title": "Role-aware strategic program",
+                "strategic_objective": objective,
+                "success_metric": metric,
+                "candidate_next_milestones": [],
+                "workstreams": [
+                    {"id": "role-contract", "title": "Role Contract", "objective": "Keep repository strategy aligned with the deterministic repository role."}
+                ],
+                "learnings": [],
+            },
             "action": "PAUSE",
             "objective": objective,
             "hypothesis": hypothesis,
