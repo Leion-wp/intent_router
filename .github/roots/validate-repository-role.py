@@ -48,9 +48,22 @@ def load_schema(name):
     return load_json(ROOT / name)
 
 
+def schema_store():
+    names = (
+        "factory-repository-profile.schema.json",
+        "factory-product-state.schema.json",
+        "factory-product-decision.schema.json",
+        "factory-issue-plan.schema.json",
+    )
+    schemas = {name: load_schema(name) for name in names}
+    return schemas, {schema["$id"]: schema for schema in schemas.values()}
+
+
 def validate_schema(document, schema_name):
-    schema = load_schema(schema_name)
-    jsonschema.Draft202012Validator(schema).validate(document)
+    schemas, store = schema_store()
+    schema = schemas[schema_name]
+    resolver = jsonschema.RefResolver.from_schema(schema, store=store)
+    jsonschema.Draft202012Validator(schema, resolver=resolver).validate(document)
 
 
 def validate_profile(profile_path, expected_repo=None):
