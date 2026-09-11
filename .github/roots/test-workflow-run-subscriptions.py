@@ -5,7 +5,7 @@ import unittest
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[1] / 'workflows'
+WORKFLOWS = Path(__file__).resolve().parents[1] / 'workflows'
 
 
 class WorkflowRunSubscriptionTests(unittest.TestCase):
@@ -13,14 +13,14 @@ class WorkflowRunSubscriptionTests(unittest.TestCase):
     def setUpClass(cls):
         cls.workflows = {}
         cls.names = defaultdict(list)
-        for path in sorted(ROOT.glob('factory-*.yml')):
+        for path in sorted(WORKFLOWS.glob('*.yml')):
             data = yaml.safe_load(path.read_text()) or {}
             cls.workflows[path.name] = data
             name = data.get('name')
             if name:
                 cls.names[name].append(path.name)
 
-    def test_factory_workflow_display_names_are_unique(self):
+    def test_workflow_display_names_are_unique(self):
         duplicates = {name: paths for name, paths in self.names.items() if len(paths) > 1}
         self.assertEqual(duplicates, {}, f'duplicate workflow display names: {duplicates}')
 
@@ -43,6 +43,22 @@ class WorkflowRunSubscriptionTests(unittest.TestCase):
         subscriptions = consumer['on']['workflow_run']['workflows']
         self.assertEqual(subscriptions, [producer])
         self.assertIn('workflow_dispatch', consumer['on'])
+
+    def test_portfolio_handoff_tracks_current_producer_names_and_explicit_repository(self):
+        producer_files = [
+            'factory-fleet-watchdog.yml',
+            'factory-fleet-scheduler.yml',
+            'factory-cross-repo-dispatch.yml',
+            'factory-fleet-completion-reconciler.yml',
+            'factory-managed-automerge.yml',
+            'factory-autonomous-planning.yml',
+            'factory-product-brain.yml',
+        ]
+        expected = [self.workflows[path]['name'] for path in producer_files]
+        consumer = self.workflows['factory-portfolio-telemetry-handoff.yml']
+        self.assertEqual(consumer['on']['workflow_run']['workflows'], expected)
+        run = consumer['jobs']['refresh']['steps'][0]['run']
+        self.assertIn('--repo "$GITHUB_REPOSITORY"', run)
 
 
 if __name__ == '__main__':
