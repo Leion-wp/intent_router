@@ -1,4 +1,4 @@
-name: factory-quality-block-reconciler-v1
+name: factory-quality-block-reconciler-v2
 
 "on":
   workflow_dispatch:
@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Materialize exact-head Quality BLOCK as HUMAN_REQUIRED
+      - name: Converge exact-head Quality BLOCK to HUMAN_REQUIRED
         shell: bash
         run: |
           set -euo pipefail
@@ -41,7 +41,8 @@ jobs:
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
 
-          escalated=0
+          converged=0
+          audited=0
           deferred=0
           anomalies=0
 
@@ -63,11 +64,13 @@ jobs:
             gh label create 'factory:human-required' --repo "$repo" --color FBCA04 \
               --description 'A human decision is required before factory execution can continue' --force >/dev/null 2>&1 || true
 
+            gh pr list --repo "$repo" --state open --limit 100 \
+              --json number,headRefOid,headRefName,baseRefName,isDraft > /tmp/prs.json
+
             while IFS= read -r issue; do
               [ -n "$issue" ] || continue
+              audited=$((audited + 1))
               gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/comments.json
-              gh pr list --repo "$repo" --state open --limit 100 \
-                --json number,headRefOid,headRefName,baseRefName,isDraft > /tmp/prs.json
 
               matches=0
               matched_pr=''
@@ -111,37 +114,50 @@ jobs:
                 continue
               fi
 
-              dedupe="<!-- roots-quality-block-escalation head=${matched_sha} -->"
-              if jq -e --arg marker "$dedupe" '.[] | select((.body // "") | contains($marker))' /tmp/comments.json >/dev/null; then
-                continue
+              # State is authoritative; receipts are audit evidence only. Always converge
+              # labels first so a prior partial failure cannot be hidden by a durable marker.
+              labels="$(gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
+              desired=false
+              if jq -e 'index("factory:dispatched") == null and index("factory:blocked") != null and index("factory:escalated") != null and index("factory:human-required") != null' \
+                <<< "$labels" >/dev/null; then
+                desired=true
               fi
 
-              gh api --method POST "repos/${repo}/issues/${issue}/comments" \
-                -f body="${dedupe}\nCONTROL_PLANE QUALITY BLOCK: PR #${matched_pr} head ${matched_sha} is exact-head BLOCK. Worker identity is preserved, automatic execution is suspended, and human resolution is required before same-session continuation." >/dev/null
+              if [ "$desired" != true ]; then
+                gh issue edit "$issue" --repo "$repo" \
+                  --remove-label 'factory:dispatched' \
+                  --add-label 'factory:blocked' \
+                  --add-label 'factory:escalated' \
+                  --add-label 'factory:human-required' >/dev/null
 
-              gh issue edit "$issue" --repo "$repo" \
-                --remove-label 'factory:dispatched' \
-                --add-label 'factory:blocked' \
-                --add-label 'factory:escalated' \
-                --add-label 'factory:human-required' >/dev/null
+                labels="$(gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
+                jq -e 'index("factory:dispatched") == null and index("factory:blocked") != null and index("factory:escalated") != null and index("factory:human-required") != null' \
+                  <<< "$labels" >/dev/null || {
+                    echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} Quality BLOCK state did not converge." >&2
+                    exit 1
+                  }
+                converged=$((converged + 1))
+              fi
 
-              labels="$(gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
-              jq -e 'index("factory:dispatched") == null and index("factory:blocked") != null and index("factory:escalated") != null and index("factory:human-required") != null' \
-                <<< "$labels" >/dev/null || {
-                  echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} Quality BLOCK state did not persist." >&2
-                  exit 1
-                }
+              dedupe="<!-- roots-quality-block-escalation head=${matched_sha} -->"
+              if ! jq -e --arg marker "$dedupe" '.[] | select((.body // "") | contains($marker))' /tmp/comments.json >/dev/null; then
+                if ! gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                  -f body="${dedupe}\nCONTROL_PLANE QUALITY BLOCK: PR #${matched_pr} head ${matched_sha} is exact-head BLOCK. Worker identity is preserved, automatic execution is suspended, and human resolution is required before same-session continuation." >/dev/null; then
+                  echo "AUDIT_WARNING: ${repo}#${issue} reached canonical BLOCK state but audit receipt could not be written." >&2
+                fi
+              fi
 
-              escalated=$((escalated + 1))
-              echo "QUALITY_BLOCK_ESCALATED: ${repo}#${issue} PR #${matched_pr} head ${matched_sha}."
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
+              echo "QUALITY_BLOCK_CANONICAL: ${repo}#${issue} PR #${matched_pr} head ${matched_sha}."
+            done < <(gh issue list --repo "$repo" --state open --limit 200 --json number --jq '.[].number')
           done < /tmp/repos.txt
 
           {
-            echo '### Quality BLOCK reconciler v1'
-            echo "- Newly escalated exact-head BLOCK identities: ${escalated}"
+            echo '### Quality BLOCK reconciler v2'
+            echo "- Issues audited: ${audited}"
+            echo "- BLOCK states converged this run: ${converged}"
             echo "- Deferred identities: ${deferred}"
             echo "- Control-plane anomalies: ${anomalies}"
-            echo '- BLOCK preserves the canonical worker identity but removes factory:dispatched so it no longer consumes active worker capacity.'
+            echo '- Exact-head BLOCK state is convergent and independent from the audit receipt.'
+            echo '- BLOCK preserves the canonical worker identity while removing factory:dispatched from active capacity.'
             echo '- Human resolution is required before any same-session resume.'
           } >> "$GITHUB_STEP_SUMMARY"
