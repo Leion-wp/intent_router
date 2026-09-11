@@ -46,9 +46,30 @@ jobs:
               "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
               continue
             fi
-            jq -e --arg repo "$repo" \
-              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
-              /tmp/profile.json >/dev/null || continue
+            jq -e --arg repo "$repo" '
+              .managed == true and
+              .repository == $repo and
+              .blueprint == "roots-micro-saas-v1" and
+              (.repository_role | IN("factory_control_plane", "factory_substrate", "generated_product", "internal_tool"))
+            ' /tmp/profile.json >/dev/null || {
+              echo "CONTROL_PLANE_ANOMALY: ${repo} has missing or invalid repository_role; dynamic handoff fails closed for this repository." >&2
+              continue
+            }
+            repository_role="$(jq -r '.repository_role' /tmp/profile.json)"
+            case "$repository_role" in
+              generated_product)
+                role_guidance='Optimize the generated commercial product using product-market evidence, activation, conversion, retention and revenue signals.'
+                ;;
+              factory_substrate)
+                role_guidance='Optimize the reusable manufacturing substrate for Roots: reduce idea-to-deploy time, bespoke code, manual intervention, failure rate and worker effort; promote repeated generated-product patterns into reusable or declarative capabilities.'
+                ;;
+              factory_control_plane)
+                role_guidance='Optimize deterministic orchestration safety, throughput, convergence and bounded worker utilization; never treat the control-plane as an external commercial product.'
+                ;;
+              internal_tool)
+                role_guidance='Optimize the internal tool for its declared internal consumer and operational outcome; do not invent an external product market without human authorization.'
+                ;;
+            esac
 
             if gh api -H 'Accept: application/vnd.github.raw+json' \
               "repos/${repo}/contents/.factory/product-state.json" >/tmp/product-state.json 2>/dev/null; then
@@ -81,12 +102,13 @@ jobs:
               continue
             fi
 
-            body="$(printf '%s\n\n%s\n\n%s\n%s\n\n%s' \
-              '<!-- roots-product-decision-needed:v1 source=deterministic-roadmap-complete -->' \
-              'The fixed roots-micro-saas-v1 roadmap is complete and no dynamic product-state exists. The factory now requires its first Product Brain decision.' \
+            body="$(printf '%s\n\n%s\n\n%s\n%s\n\n%s\n\n%s' \
+              "<!-- roots-product-decision-needed:v1 source=deterministic-roadmap-complete repository_role=${repository_role} -->" \
+              "The fixed roots-micro-saas-v1 roadmap is complete and no dynamic product-state exists. Repository role is ${repository_role}." \
               'Initial optimistic precondition:' \
               'expected_last_decision_id=null, expected_phase=null' \
-              'Factory Product Manager must inspect the completed product, portfolio/product telemetry and available market evidence, then publish exactly one factory:brain-proposal matching the current decision schema. This issue is planning state, never executable worker backlog.')"
+              "$role_guidance" \
+              "Factory Product Manager must inspect completed work, role-appropriate telemetry/evidence, then publish exactly one factory:brain-proposal matching the current decision schema with repository_role=${repository_role}. This issue is planning state, never executable worker backlog.")"
             gh issue create --repo "$repo" --title '[FACTORY] Product decision needed' \
               --label 'factory:brain-needed' --body "$body" >/dev/null
             created="$((created + 1))"
