@@ -65,14 +65,14 @@ class StrategicProgramContractTests(unittest.TestCase):
     def decision(self, transition="START", milestone_id="program-m1"):
         milestone = None
         if transition in {"START", "CONTINUE", "ADAPT"}:
-            tasks = self.flat_tasks(milestone_id)
             milestone = {
                 "id": milestone_id,
                 "title": f"Deliver {milestone_id}",
                 "description": "Deliver a bounded strategic milestone across coordinated engineering workstreams.",
                 "planning": {"expected_ready_width": [23], "narrowing_rationale": ""},
-                "tasks": tasks,
+                "tasks": self.flat_tasks(milestone_id),
             }
+        candidate_id = "program-m3" if milestone_id == "program-m2" else "program-m2"
         return {
             "version": 1,
             "decision_id": f"decision-{transition.lower()}-{milestone_id}",
@@ -87,7 +87,7 @@ class StrategicProgramContractTests(unittest.TestCase):
                 "success_metric": "The strategic transformation reaches its measurable outcome without losing deterministic execution or worker governance.",
                 "candidate_next_milestones": [] if transition in {"COMPLETE", "PAUSE"} else [
                     {
-                        "id": "program-m2",
+                        "id": candidate_id,
                         "title": "Validate the next strategic capability",
                         "objective": "Use evidence from the current milestone to validate the next bounded strategic capability."
                     }
@@ -111,6 +111,52 @@ class StrategicProgramContractTests(unittest.TestCase):
             "human_gate": {"required": False, "reason": ""},
             "extensions": {},
         }
+
+    def width_collapse_decision(self, rationale=""):
+        decision = self.decision("START", "program-m1")
+        tasks = []
+        streams = ["architecture", "runtime", "validation"]
+        for index in range(1, 16):
+            tasks.append({
+                "id": f"root-{index:02d}",
+                "title": f"Root task {index:02d}",
+                "workstream": streams[(index - 1) % len(streams)],
+                "scope": ["Implement one independent root slice."],
+                "acceptance_criteria": ["The root slice has deterministic evidence."],
+                "done": ["The root slice is complete and tested."],
+                "priority": index,
+                "blocked_by": [],
+            })
+        root_ids = [task["id"] for task in tasks]
+        bridge_dependencies = [root_ids[:8], root_ids[7:15]]
+        for index, dependencies in enumerate(bridge_dependencies, start=1):
+            tasks.append({
+                "id": f"bridge-{index}",
+                "title": f"Bridge task {index}",
+                "workstream": "runtime",
+                "scope": ["Integrate the completed root slices through one bounded bridge."],
+                "acceptance_criteria": ["The bridge integrates the required roots deterministically."],
+                "done": ["The bridge integration is tested."],
+                "priority": 30 + index,
+                "blocked_by": dependencies,
+            })
+        for index in range(1, 7):
+            tasks.append({
+                "id": f"tail-{index}",
+                "title": f"Tail task {index}",
+                "workstream": "validation",
+                "scope": ["Validate one independent downstream slice."],
+                "acceptance_criteria": ["The downstream slice has deterministic evidence."],
+                "done": ["The downstream slice is complete and tested."],
+                "priority": 40 + index,
+                "blocked_by": ["bridge-1", "bridge-2"],
+            })
+        decision["milestone"]["tasks"] = tasks
+        decision["milestone"]["planning"] = {
+            "expected_ready_width": [15, 2, 6],
+            "narrowing_rationale": rationale,
+        }
+        return decision
 
     def write(self, directory, name, value):
         path = pathlib.Path(directory) / name
@@ -139,12 +185,7 @@ class StrategicProgramContractTests(unittest.TestCase):
             first = self.create_state(directory, self.decision("START", "program-m1"))
             existing = pathlib.Path(directory) / "existing.json"
             existing.write_text(first.read_text(encoding="utf-8"), encoding="utf-8")
-            second = self.create_state(
-                directory,
-                self.decision("CONTINUE", "program-m2"),
-                str(existing),
-                "2026-09-11T17:00:00Z",
-            )
+            second = self.create_state(directory, self.decision("CONTINUE", "program-m2"), str(existing), "2026-09-11T17:00:00Z")
             state = json.loads(second.read_text(encoding="utf-8"))
             self.assertEqual(state["current_milestone"]["id"], "program-m2")
             self.assertEqual(state["completed_milestones"][0]["id"], "program-m1")
@@ -156,13 +197,11 @@ class StrategicProgramContractTests(unittest.TestCase):
             existing.write_text(first.read_text(encoding="utf-8"), encoding="utf-8")
             adapted = self.decision("ADAPT", "program-m2")
             adapted["program"]["learnings"] = ["The first milestone showed that runtime composition is the next highest-leverage constraint."]
-            adapted["program"]["candidate_next_milestones"] = [
-                {
-                    "id": "program-m3",
-                    "title": "Deepen runtime composition",
-                    "objective": "Use evidence from the first milestone to deepen the runtime composition boundary."
-                }
-            ]
+            adapted["program"]["candidate_next_milestones"] = [{
+                "id": "program-m3",
+                "title": "Deepen runtime composition",
+                "objective": "Use evidence from the first milestone to deepen the runtime composition boundary."
+            }]
             output = self.create_state(directory, adapted, str(existing), "2026-09-11T17:15:00Z")
             state = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(state["candidate_next_milestones"][0]["id"], "program-m3")
@@ -182,96 +221,28 @@ class StrategicProgramContractTests(unittest.TestCase):
 
     def test_pause_requires_active_program(self):
         with tempfile.TemporaryDirectory() as directory:
-            decision = self.decision("PAUSE", "program-pause")
-            decision_path = self.write(directory, "decision.json", decision)
+            decision_path = self.write(directory, "decision.json", self.decision("PAUSE", "program-pause"))
             profile_path = self.write(directory, "profile.json", self.profile())
             with self.assertRaisesRegex(ValueError, "requires an existing program"):
                 program_manager.validate_decision(str(decision_path), "-", str(profile_path))
 
     def test_program_role_mismatch_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
-            decision = self.decision("START", "program-m1")
-            decision_path = self.write(directory, "decision.json", decision)
-            profile = self.profile("factory_substrate")
-            profile_path = self.write(directory, "profile.json", profile)
+            decision_path = self.write(directory, "decision.json", self.decision("START", "program-m1"))
+            profile_path = self.write(directory, "profile.json", self.profile("factory_substrate"))
             with self.assertRaisesRegex(ValueError, "repository role mismatch"):
                 program_manager.validate_decision(str(decision_path), "-", str(profile_path))
 
     def test_severe_mid_program_width_collapse_requires_rationale(self):
-        decision = self.decision("START", "program-m1")
-        tasks = []
-        for index in range(1, 16):
-            tasks.append({
-                "id": f"root-{index:02d}", "title": f"Root task {index:02d}",
-                "workstream": "architecture" if index % 3 == 1 else ("runtime" if index % 3 == 2 else "validation"),
-                "scope": ["Implement one independent root slice."],
-                "acceptance_criteria": ["The root slice has deterministic evidence."],
-                "done": ["The root slice is complete and tested."],
-                "priority": index, "blocked_by": []
-            })
-        root_ids = [task["id"] for task in tasks]
-        for index in range(1, 3):
-            tasks.append({
-                "id": f"bridge-{index}", "title": f"Bridge task {index}", "workstream": "runtime",
-                "scope": ["Integrate the completed root slices through one bounded bridge."],
-                "acceptance_criteria": ["The bridge integrates the required roots deterministically."],
-                "done": ["The bridge integration is tested."],
-                "priority": 30 + index, "blocked_by": root_ids
-            })
-        for index in range(1, 7):
-            tasks.append({
-                "id": f"tail-{index}", "title": f"Tail task {index}", "workstream": "validation",
-                "scope": ["Validate one independent downstream slice."],
-                "acceptance_criteria": ["The downstream slice has deterministic evidence."],
-                "done": ["The downstream slice is complete and tested."],
-                "priority": 40 + index, "blocked_by": ["bridge-1", "bridge-2"]
-            })
-        decision["milestone"]["tasks"] = tasks
-        decision["milestone"]["planning"] = {
-            "expected_ready_width": [15, 2, 6],
-            "narrowing_rationale": ""
-        }
         with tempfile.TemporaryDirectory() as directory:
-            path = self.write(directory, "decision.json", decision)
+            path = self.write(directory, "decision.json", self.width_collapse_decision())
             with self.assertRaisesRegex(ValueError, "severe sustained ready-width collapse"):
                 planning.validate_decision(path, self.repo)
 
     def test_severe_width_collapse_can_be_explicitly_justified(self):
-        decision = self.decision("START", "program-m1")
-        tasks = []
-        for index in range(1, 16):
-            tasks.append({
-                "id": f"root-{index:02d}", "title": f"Root task {index:02d}",
-                "workstream": "architecture" if index % 3 == 1 else ("runtime" if index % 3 == 2 else "validation"),
-                "scope": ["Implement one independent root slice."],
-                "acceptance_criteria": ["The root slice has deterministic evidence."],
-                "done": ["The root slice is complete and tested."],
-                "priority": index, "blocked_by": []
-            })
-        root_ids = [task["id"] for task in tasks]
-        for index in range(1, 3):
-            tasks.append({
-                "id": f"bridge-{index}", "title": f"Bridge task {index}", "workstream": "runtime",
-                "scope": ["Integrate the completed root slices through one bounded bridge."],
-                "acceptance_criteria": ["The bridge integrates the required roots deterministically."],
-                "done": ["The bridge integration is tested."],
-                "priority": 30 + index, "blocked_by": root_ids
-            })
-        for index in range(1, 7):
-            tasks.append({
-                "id": f"tail-{index}", "title": f"Tail task {index}", "workstream": "validation",
-                "scope": ["Validate one independent downstream slice."],
-                "acceptance_criteria": ["The downstream slice has deterministic evidence."],
-                "done": ["The downstream slice is complete and tested."],
-                "priority": 40 + index, "blocked_by": ["bridge-1", "bridge-2"]
-            })
-        decision["milestone"]["tasks"] = tasks
-        decision["milestone"]["planning"] = {
-            "expected_ready_width": [15, 2, 6],
-            "narrowing_rationale": "The two integration bridges encode a real semantic convergence boundary that downstream validation cannot begin before both contracts are integrated."
-        }
+        rationale = "The two integration bridges encode a real semantic convergence boundary that downstream validation cannot begin before both contracts are integrated."
         with tempfile.TemporaryDirectory() as directory:
-            path = self.write(directory, "decision.json", decision)
+            path = self.write(directory, "decision.json", self.width_collapse_decision(rationale))
             planning.validate_decision(path, self.repo)
 
 
