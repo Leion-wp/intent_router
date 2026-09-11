@@ -102,13 +102,14 @@ jobs:
               continue
             fi
 
-            body="$(printf '%s\n\n%s\n\n%s\n%s\n\n%s\n\n%s' \
+            body="$(printf '%s\n\n%s\n\n%s\n%s\n\n%s\n\n%s\n\n%s' \
               "<!-- roots-product-decision-needed:v1 source=deterministic-roadmap-complete repository_role=${repository_role} -->" \
               "The fixed roots-micro-saas-v1 roadmap is complete and no dynamic product-state exists. Repository role is ${repository_role}." \
               'Initial optimistic precondition:' \
               'expected_last_decision_id=null, expected_phase=null' \
               "$role_guidance" \
-              "Factory Product Manager must inspect completed work, role-appropriate telemetry/evidence, then publish exactly one factory:brain-proposal matching the current decision schema with repository_role=${repository_role}. This issue is planning state, never executable worker backlog.")"
+              'No strategic program exists yet. The first dynamic decision MUST use program.transition=START, define one measurable multi-milestone strategic objective, bounded workstreams, revisable candidate next milestones, and a milestone whose expected_ready_width matches its dependency layers.' \
+              "Factory Product Manager must inspect completed work and role-appropriate telemetry/evidence, then publish exactly one factory:brain-proposal matching the current decision schema with repository_role=${repository_role}. This issue is planning state, never executable worker backlog.")"
             gh issue create --repo "$repo" --title '[FACTORY] Product decision needed' \
               --label 'factory:brain-needed' --body "$body" >/dev/null
             created="$((created + 1))"
