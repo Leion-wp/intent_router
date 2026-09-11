@@ -8,9 +8,8 @@ name: factory-jules-session-restart-v1
         required: true
         type: number
       repository:
-        description: 'Managed repository owner/name; leave empty to resolve the unique active Jules issue number'
-        required: false
-        default: ''
+        description: 'Canonical managed repository owner/name for the Jules task identity'
+        required: true
         type: string
       mode:
         description: 'Manual bypasses inactivity age only; automatic enforces no-progress policy'
@@ -33,7 +32,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: factory-jules-restart-${{ inputs.repository || 'auto-resolve' }}-${{ inputs.issue_number }}
+  group: factory-jules-restart-jules-${{ inputs.repository }}-${{ inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
@@ -59,6 +58,7 @@ jobs:
           set -euo pipefail
           test -n "$FLEET_TOKEN"
           test -n "$JULES_API_KEY"
+          test -n "$REQUESTED_REPO"
           echo "::add-mask::$FLEET_TOKEN"
           echo "::add-mask::$JULES_API_KEY"
           python3 .github/roots/factory_jules_restart.py validate-policy

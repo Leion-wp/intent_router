@@ -86,19 +86,36 @@ class JulesRestartWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.restart_path = WORKFLOWS / "factory-jules-session-restart.yml"
+        cls.frontdoor_path = WORKFLOWS / "factory-jules-session-restart-by-issue.yml"
         cls.watchdog_path = WORKFLOWS / "factory-jules-restart-watchdog.yml"
         cls.restart_text = cls.restart_path.read_text(encoding="utf-8")
+        cls.frontdoor_text = cls.frontdoor_path.read_text(encoding="utf-8")
         cls.watchdog_text = cls.watchdog_path.read_text(encoding="utf-8")
         cls.restart_yaml = yaml.safe_load(cls.restart_text)
+        cls.frontdoor_yaml = yaml.safe_load(cls.frontdoor_text)
         cls.watchdog_yaml = yaml.safe_load(cls.watchdog_text)
 
-    def test_manual_dispatch_requires_issue_and_repository_is_optional(self):
+    def test_core_restart_requires_canonical_repository(self):
         inputs = self.restart_yaml["on"]["workflow_dispatch"]["inputs"]
         self.assertTrue(inputs["issue_number"]["required"])
         self.assertEqual(inputs["issue_number"]["type"], "number")
-        self.assertFalse(inputs["repository"]["required"])
-        self.assertEqual(inputs["repository"]["default"], "")
+        self.assertTrue(inputs["repository"]["required"])
+        self.assertNotIn("default", inputs["repository"])
+        self.assertIn("Canonical managed repository", inputs["repository"]["description"])
         self.assertEqual(inputs["mode"]["default"], "manual")
+        self.assertIn('test -n "$REQUESTED_REPO"', self.restart_text)
+
+    def test_issue_only_manual_frontdoor_delegates_to_canonical_core(self):
+        inputs = self.frontdoor_yaml["on"]["workflow_dispatch"]["inputs"]
+        self.assertTrue(inputs["issue_number"]["required"])
+        self.assertEqual(inputs["issue_number"]["type"], "number")
+        self.assertNotIn("repository", inputs)
+        self.assertIn("factory-jules-session-restart.yml", self.frontdoor_text)
+        self.assertIn('-f issue_number="$ISSUE_NUMBER"', self.frontdoor_text)
+        self.assertIn('-f repository="$target_repo"', self.frontdoor_text)
+        self.assertIn('-f mode=manual', self.frontdoor_text)
+        self.assertIn('--ref Android', self.frontdoor_text)
+        self.assertIn('actions: write', self.frontdoor_text)
 
     def test_kill_is_confirmed_before_replacement_create(self):
         delete_at = self.restart_text.index("-X DELETE")
@@ -127,12 +144,28 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         self.assertIn("factory-jules-session-restart.yml", self.watchdog_text)
         self.assertIn("-f mode=automatic", self.watchdog_text)
         self.assertIn("-f issue_number=\"$issue\"", self.watchdog_text)
+        self.assertIn("-f repository=\"$repo\"", self.watchdog_text)
         self.assertIn("actions: write", self.watchdog_text)
 
-    def test_restart_workflow_serializes_issue_identity(self):
+    def test_core_restart_serializes_canonical_jules_identity(self):
         concurrency = self.restart_yaml["concurrency"]
         self.assertFalse(concurrency["cancel-in-progress"])
+        self.assertEqual(
+            concurrency["group"],
+            "factory-jules-restart-jules-${{ inputs.repository }}-${{ inputs.issue_number }}",
+        )
+        self.assertNotIn("auto-resolve", concurrency["group"])
+        self.assertIn("inputs.repository", concurrency["group"])
         self.assertIn("inputs.issue_number", concurrency["group"])
+
+    def test_frontdoor_is_not_the_worker_mutation_lock(self):
+        concurrency = self.frontdoor_yaml["concurrency"]
+        self.assertFalse(concurrency["cancel-in-progress"])
+        self.assertEqual(
+            concurrency["group"],
+            "factory-jules-restart-frontdoor-${{ inputs.issue_number }}",
+        )
+        self.assertNotIn("repository", concurrency["group"])
 
 
 if __name__ == "__main__":
