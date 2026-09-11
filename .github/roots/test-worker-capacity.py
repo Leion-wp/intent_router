@@ -30,8 +30,10 @@ def main() -> None:
     dispatcher = (WORKFLOWS / "factory-cross-repo-dispatch.yml").read_text()
     ci_rework = (WORKFLOWS / "factory-fleet-jules-rework.yml").read_text()
     quality_rework = (WORKFLOWS / "factory-fleet-jules-quality-rework.yml").read_text()
+    telemetry = (WORKFLOWS / "factory-portfolio-telemetry.yml").read_text()
     product_schema = json.loads((ROOT / "factory-product-decision.schema.json").read_text())
     plan_schema = json.loads((ROOT / "factory-milestone-plan.schema.json").read_text())
+    portfolio_schema = json.loads((ROOT / "factory-portfolio-telemetry.schema.json").read_text())
 
     assert "factory-fleet-scheduler-v4" in scheduler
     assert "active_slots" in scheduler
@@ -53,6 +55,15 @@ def main() -> None:
     assert "factory:agent:chatgpt" in dispatcher
     assert proves_chatgpt_exclusion(ci_rework)
     assert proves_chatgpt_exclusion(quality_rework)
+
+    assert portfolio_schema["properties"]["version"]["const"] == 2
+    assert "worker_lock" not in portfolio_schema["required"]
+    assert "worker_lock" not in portfolio_schema["properties"]
+    assert "worker_lock" not in telemetry
+    assert "roots-portfolio-telemetry:v2" in telemetry
+    assert "Operational telemetry reports independent bounded provider pools" in telemetry
+    assert 'worker_capacity:{provider:"jules"' in telemetry
+    assert 'chatgpt_capacity:{provider:"chatgpt"' in telemetry
 
     decision_max = product_schema["properties"]["milestone"]["oneOf"][1]["properties"]["tasks"]["maxItems"]
     plan_max = plan_schema["properties"]["tasks"]["maxItems"]
