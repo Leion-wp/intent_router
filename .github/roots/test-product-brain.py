@@ -20,6 +20,7 @@ class ProductBrainContractTests(unittest.TestCase):
             {
                 "id": "value-flow",
                 "title": "Implement the bounded value flow",
+                "workstream": "product-flow",
                 "scope": ["Implement one end-to-end user workflow."],
                 "acceptance_criteria": ["The workflow has a deterministic successful completion state."],
                 "done": ["Relevant tests pass and the flow is documented."],
@@ -29,6 +30,7 @@ class ProductBrainContractTests(unittest.TestCase):
             {
                 "id": "value-signal",
                 "title": "Instrument the value success signal",
+                "workstream": "product-flow",
                 "scope": ["Record the successful workflow completion through the existing analytics boundary."],
                 "acceptance_criteria": ["The signal is emitted only after successful completion."],
                 "done": ["A test proves success emits the signal and failure does not."],
@@ -41,6 +43,7 @@ class ProductBrainContractTests(unittest.TestCase):
                 {
                     "id": f"parallel-{index:02d}",
                     "title": f"Implement independent product slice {index:02d}",
+                    "workstream": "parallel-a" if index <= 11 else "parallel-b",
                     "scope": [f"Implement bounded independent slice {index:02d}."],
                     "acceptance_criteria": [f"Slice {index:02d} has deterministic tests."],
                     "done": [f"Slice {index:02d} tests pass and behavior is documented."],
@@ -56,6 +59,26 @@ class ProductBrainContractTests(unittest.TestCase):
             "precondition": {
                 "expected_last_decision_id": None,
                 "expected_phase": None,
+            },
+            "program": {
+                "transition": "START",
+                "program_id": "example-value-program",
+                "title": "Deliver repeatable product value",
+                "strategic_objective": "Build a repeatable user-value system across several adaptive engineering milestones.",
+                "success_metric": "Users complete the bounded workflow reliably and later milestones can optimize repeated successful usage.",
+                "candidate_next_milestones": [
+                    {
+                        "id": "measure-repeat-usage",
+                        "title": "Measure repeated successful usage",
+                        "objective": "Measure whether the delivered product slices create repeated successful use before deeper investment."
+                    }
+                ],
+                "workstreams": [
+                    {"id": "product-flow", "title": "Product Flow", "objective": "Own the primary end-to-end value flow and its success signal."},
+                    {"id": "parallel-a", "title": "Parallel Value A", "objective": "Deliver one bounded independent half of the parallel product slices."},
+                    {"id": "parallel-b", "title": "Parallel Value B", "objective": "Deliver the remaining bounded independent parallel product slices."}
+                ],
+                "learnings": [],
             },
             "action": "BUILD",
             "objective": "Deliver a capacity-sized set of testable user value slices without privileged side effects.",
@@ -73,6 +96,10 @@ class ProductBrainContractTests(unittest.TestCase):
                 "id": "value-slice-v1",
                 "title": "Deliver capacity-sized value slices",
                 "description": "Implement a bounded milestone with enough independent work to feed the configured Jules pool.",
+                "planning": {
+                    "expected_ready_width": [22, 1],
+                    "narrowing_rationale": ""
+                },
                 "tasks": tasks,
             },
             "human_gate": {"required": False, "reason": ""},
@@ -100,6 +127,8 @@ class ProductBrainContractTests(unittest.TestCase):
             self.assertEqual(len(plan["tasks"]), 23)
             self.assertEqual(set(order), {task["id"] for task in plan["tasks"]})
             self.assertEqual(plan["extensions"]["worker_capacity"], 15)
+            self.assertEqual(plan["extensions"]["program_id"], "example-value-program")
+            self.assertEqual(plan["extensions"]["expected_ready_width"], [22, 1])
 
     def test_too_narrow_dynamic_milestone_is_rejected(self):
         decision = self.decision()
@@ -117,6 +146,14 @@ class ProductBrainContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = self.write_json(directory, "decision.json", decision)
             with self.assertRaisesRegex(ValueError, "parallel frontier requires at least 15"):
+                planning.validate_decision(path, self.repo)
+
+    def test_ready_width_profile_must_match_dag(self):
+        decision = self.decision()
+        decision["milestone"]["planning"]["expected_ready_width"] = [15, 8, 1]
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_json(directory, "decision.json", decision)
+            with self.assertRaisesRegex(ValueError, "does not match dependency layers"):
                 planning.validate_decision(path, self.repo)
 
     def test_repository_mismatch_is_rejected(self):
@@ -160,6 +197,7 @@ class ProductBrainContractTests(unittest.TestCase):
     def test_pause_cannot_smuggle_a_milestone(self):
         decision = self.decision()
         decision["action"] = "PAUSE"
+        decision["program"]["transition"] = "PAUSE"
         with tempfile.TemporaryDirectory() as directory:
             path = self.write_json(directory, "decision.json", decision)
             with self.assertRaises(Exception):

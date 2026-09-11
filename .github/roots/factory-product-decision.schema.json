@@ -4,7 +4,7 @@
   "title": "FactoryProductDecision",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "decision_id", "repository", "repository_role", "precondition", "action", "objective", "hypothesis", "success_metric", "product_context", "confidence", "risk", "evidence", "milestone", "human_gate"],
+  "required": ["version", "decision_id", "repository", "repository_role", "precondition", "program", "action", "objective", "hypothesis", "success_metric", "product_context", "confidence", "risk", "evidence", "milestone", "human_gate"],
   "properties": {
     "version": {"type": "integer", "const": 1},
     "decision_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,80}$"},
@@ -22,6 +22,53 @@
         "expected_phase": {"type": ["string", "null"], "enum": ["FOUNDATION", "VALUE", "HARDENING", "LAUNCH_READY", "MEASURING", "ITERATING", "PAUSED", null]}
       }
     },
+    "program": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transition", "program_id", "title", "strategic_objective", "success_metric", "candidate_next_milestones", "workstreams", "learnings"],
+      "properties": {
+        "transition": {"type": "string", "enum": ["START", "CONTINUE", "ADAPT", "COMPLETE", "PAUSE"]},
+        "program_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,80}$"},
+        "title": {"type": "string", "minLength": 5, "maxLength": 160},
+        "strategic_objective": {"type": "string", "minLength": 10, "maxLength": 1800},
+        "success_metric": {"type": "string", "minLength": 5, "maxLength": 900},
+        "candidate_next_milestones": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "objective"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+              "title": {"type": "string", "minLength": 5, "maxLength": 120},
+              "objective": {"type": "string", "minLength": 10, "maxLength": 700}
+            }
+          }
+        },
+        "workstreams": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "objective"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,31}$"},
+              "title": {"type": "string", "minLength": 3, "maxLength": 100},
+              "objective": {"type": "string", "minLength": 10, "maxLength": 700}
+            }
+          }
+        },
+        "learnings": {
+          "type": "array",
+          "maxItems": 12,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 5, "maxLength": 700}
+        }
+      }
+    },
     "action": {"type": "string", "enum": ["BUILD", "HARDEN", "MEASURE", "PIVOT", "PAUSE", "LAUNCH_READY"]},
     "objective": {"type": "string", "minLength": 10, "maxLength": 1500},
     "hypothesis": {"type": "string", "minLength": 10, "maxLength": 1500},
@@ -36,11 +83,25 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["id", "title", "description", "tasks"],
+          "required": ["id", "title", "description", "planning", "tasks"],
           "properties": {
             "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
             "title": {"type": "string", "minLength": 5, "maxLength": 120},
             "description": {"type": "string", "minLength": 10, "maxLength": 1500},
+            "planning": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["expected_ready_width", "narrowing_rationale"],
+              "properties": {
+                "expected_ready_width": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 32,
+                  "items": {"type": "integer", "minimum": 1, "maximum": 32}
+                },
+                "narrowing_rationale": {"type": "string", "maxLength": 1200}
+              }
+            },
             "tasks": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "https://roots.local/schemas/factory-issue-plan.schema.json"}}
           }
         }
@@ -100,7 +161,23 @@
         }
       }
     },
-    {"if": {"properties": {"action": {"const": "PAUSE"}}}, "then": {"properties": {"milestone": {"type": "null"}}}},
-    {"if": {"properties": {"action": {"enum": ["BUILD", "HARDEN", "MEASURE", "PIVOT", "LAUNCH_READY"]}}}, "then": {"properties": {"milestone": {"type": "object"}}}}
+    {
+      "if": {
+        "properties": {"program": {"properties": {"transition": {"enum": ["START", "CONTINUE", "ADAPT"]}}, "required": ["transition"]}},
+        "required": ["program"]
+      },
+      "then": {"properties": {"milestone": {"type": "object"}}}
+    },
+    {
+      "if": {
+        "properties": {"program": {"properties": {"transition": {"enum": ["COMPLETE", "PAUSE"]}}, "required": ["transition"]}},
+        "required": ["program"]
+      },
+      "then": {"properties": {"milestone": {"type": "null"}}}
+    },
+    {
+      "if": {"properties": {"action": {"const": "PAUSE"}}, "required": ["action"]},
+      "then": {"properties": {"program": {"properties": {"transition": {"const": "PAUSE"}}}}}
+    }
   ]
 }

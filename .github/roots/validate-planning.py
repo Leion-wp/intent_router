@@ -74,6 +74,23 @@ def dynamic_minimum_task_count(contract=None):
     return max(floor, math.ceil(max_concurrency * planning["issue_multiplier"]))
 
 
+def dependency_layer_widths(tasks):
+    by_id = {task["id"]: task for task in tasks}
+    done = set()
+    widths = []
+    while len(done) < len(by_id):
+        ready = sorted(
+            task["id"]
+            for task in by_id.values()
+            if task["id"] not in done and set(task["blocked_by"]) <= done
+        )
+        if not ready:
+            raise ValueError(f"circular dependency among: {sorted(set(by_id) - done)}")
+        widths.append(len(ready))
+        done.update(ready)
+    return widths
+
+
 def validate_dynamic_parallelism(tasks):
     contract = worker_capacity_contract()
     max_concurrency = contract["workers"]["jules"]["max_concurrency"]
@@ -93,6 +110,56 @@ def validate_dynamic_parallelism(tasks):
         )
 
 
+def validate_program_milestone(decision):
+    milestone = decision.get("milestone")
+    transition = decision["program"]["transition"]
+    if milestone is None:
+        if transition not in {"COMPLETE", "PAUSE"}:
+            raise ValueError(f"program transition {transition} requires a milestone")
+        return
+
+    if transition not in {"START", "CONTINUE", "ADAPT"}:
+        raise ValueError(f"program transition {transition} must not materialize a milestone")
+
+    declared_workstreams = [item["id"] for item in decision["program"]["workstreams"]]
+    if len(declared_workstreams) != len(set(declared_workstreams)):
+        raise ValueError("duplicate program workstream identities")
+    used_workstreams = []
+    for task in milestone["tasks"]:
+        workstream = task.get("workstream")
+        if not workstream:
+            raise ValueError(f"dynamic program task {task['id']} is missing workstream")
+        if workstream not in declared_workstreams:
+            raise ValueError(f"task {task['id']} references undeclared workstream {workstream}")
+        used_workstreams.append(workstream)
+    unused = sorted(set(declared_workstreams) - set(used_workstreams))
+    if unused:
+        raise ValueError(f"program workstreams without milestone work: {unused}")
+
+    actual_width = dependency_layer_widths(milestone["tasks"])
+    expected_width = milestone["planning"]["expected_ready_width"]
+    if expected_width != actual_width:
+        raise ValueError(
+            f"expected ready-width profile {expected_width} does not match dependency layers {actual_width}"
+        )
+
+    max_concurrency = worker_capacity_contract()["workers"]["jules"]["max_concurrency"]
+    sustained_floor = min(5, max_concurrency)
+    severe_layers = []
+    for index, width in enumerate(actual_width[:-1]):
+        if width >= sustained_floor:
+            continue
+        remaining = sum(actual_width[index + 1 :])
+        if index < len(actual_width) - 2 or remaining >= sustained_floor:
+            severe_layers.append((index + 1, width))
+    rationale = milestone["planning"]["narrowing_rationale"].strip()
+    if severe_layers and len(rationale) < 20:
+        raise ValueError(
+            "severe sustained ready-width collapse requires a bounded narrowing rationale: "
+            f"{severe_layers}"
+        )
+
+
 def schema_store():
     names = (
         "factory-roadmap.schema.json",
@@ -102,6 +169,7 @@ def schema_store():
         "factory-product-state.schema.json",
         "factory-product-decision.schema.json",
         "factory-product-telemetry.schema.json",
+        "factory-program-state.schema.json",
     )
     schemas = {name: load(name) for name in names}
     return schemas, {schema["$id"]: schema for schema in schemas.values()}
@@ -187,6 +255,13 @@ def validate_state(path: pathlib.Path, expected_repo: str | None = None):
         raise ValueError(f"product state repository mismatch: {state['repository']} != {expected_repo}")
 
 
+def validate_program_state(path: pathlib.Path, expected_repo: str | None = None):
+    state = load_path(path)
+    validate_schema(state, "factory-program-state.schema.json")
+    if expected_repo and state["repository"] != expected_repo:
+        raise ValueError(f"program state repository mismatch: {state['repository']} != {expected_repo}")
+
+
 def validate_telemetry(path: pathlib.Path, expected_repo: str | None = None):
     telemetry = load_path(path)
     validate_schema(telemetry, "factory-product-telemetry.schema.json")
@@ -201,6 +276,17 @@ def validate_decision(path: pathlib.Path, expected_repo: str | None = None):
         raise ValueError(f"decision repository mismatch: {decision['repository']} != {expected_repo}")
     product_context = decision["product_context"]
     context_values = [value for value in product_context.values() if isinstance(value, str)]
+    program = decision["program"]
+    program_text = [
+        program["title"],
+        program["strategic_objective"],
+        program["success_metric"],
+        *program["learnings"],
+    ]
+    program_text.extend(item["title"] + " " + item["objective"] for item in program["workstreams"])
+    program_text.extend(
+        item["title"] + " " + item["objective"] for item in program["candidate_next_milestones"]
+    )
     reject_forbidden_text(
         " ".join(
             [
@@ -208,6 +294,7 @@ def validate_decision(path: pathlib.Path, expected_repo: str | None = None):
                 decision["hypothesis"],
                 decision["success_metric"],
                 *context_values,
+                *program_text,
                 decision["human_gate"]["reason"],
             ]
             + decision["evidence"]
@@ -219,6 +306,7 @@ def validate_decision(path: pathlib.Path, expected_repo: str | None = None):
         reject_forbidden_text(milestone["title"] + " " + milestone["description"], f"decision {decision['decision_id']} milestone")
         semantic_validate_tasks(milestone["tasks"])
         validate_dynamic_parallelism(milestone["tasks"])
+    validate_program_milestone(decision)
     if decision["action"] == "PAUSE" and decision["human_gate"]["required"]:
         raise ValueError("PAUSE must remain a reversible product-state decision and cannot request privileged side effects")
 
@@ -238,20 +326,26 @@ def decision_to_plan(decision_path: pathlib.Path, out_path: pathlib.Path):
     decision = load_path(decision_path)
     if decision.get("milestone") is None:
         raise ValueError("decision has no milestone")
+    milestone = decision["milestone"]
     plan = {
         "version": 1,
         "repository": decision["repository"],
-        "roadmap_id": f"product-brain:{decision['decision_id']}",
+        "roadmap_id": f"program:{decision['program']['program_id']}",
         "milestone": {
-            "id": decision["milestone"]["id"],
-            "title": decision["milestone"]["title"],
-            "description": decision["milestone"]["description"],
+            "id": milestone["id"],
+            "title": milestone["title"],
+            "description": milestone["description"],
         },
-        "tasks": decision["milestone"]["tasks"],
+        "tasks": milestone["tasks"],
         "extensions": {
             "planner": "product-brain-v1",
             "decision_id": decision["decision_id"],
             "repository_role": decision["repository_role"],
+            "program_id": decision["program"]["program_id"],
+            "program_transition": decision["program"]["transition"],
+            "workstreams": [item["id"] for item in decision["program"]["workstreams"]],
+            "expected_ready_width": milestone["planning"]["expected_ready_width"],
+            "narrowing_rationale": milestone["planning"]["narrowing_rationale"],
             "action": decision["action"],
             "success_metric": decision["success_metric"],
             "confidence": decision["confidence"],
@@ -285,7 +379,7 @@ def task_order(plan_path: pathlib.Path):
 def main():
     if len(sys.argv) < 3:
         raise SystemExit(
-            "usage: validate-planning.py <roadmap|plan|state|telemetry|decision|extract-decision|decision-plan|next-index|task-order> ..."
+            "usage: validate-planning.py <roadmap|plan|state|program-state|telemetry|decision|extract-decision|decision-plan|next-index|task-order> ..."
         )
     command = sys.argv[1]
     if command == "roadmap" and len(sys.argv) == 3:
@@ -298,10 +392,15 @@ def main():
         validate_plan(target)
         print(f"planning validation passed: {target}")
         return
-    if command in {"state", "telemetry", "decision"} and len(sys.argv) in {3, 4}:
+    if command in {"state", "program-state", "telemetry", "decision"} and len(sys.argv) in {3, 4}:
         target = pathlib.Path(sys.argv[2])
         expected = sys.argv[3] if len(sys.argv) == 4 else None
-        {"state": validate_state, "telemetry": validate_telemetry, "decision": validate_decision}[command](target, expected)
+        {
+            "state": validate_state,
+            "program-state": validate_program_state,
+            "telemetry": validate_telemetry,
+            "decision": validate_decision,
+        }[command](target, expected)
         print(f"{command} validation passed: {target}")
         return
     if command == "extract-decision" and len(sys.argv) == 4:
