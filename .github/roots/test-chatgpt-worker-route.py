@@ -46,9 +46,12 @@ for workflow in (risk, automerge, completion):
     assert 'roots-chatgpt-worker' in workflow
     assert 'conflicting' in workflow.lower()
 
-# Shared gates are not weakened for the second provider.
-assert 'roots-quality-verdict head=${sha} verdict=${verdict}' in risk
+# Shared gates are not weakened for the second provider. Quality authority is centralized
+# in the exact-head resolver rather than reimplemented independently per provider.
+assert 'factory_quality_verdict.py' in risk
+assert 'latest canonical exact-head Quality verdict' in risk
 assert 'factory:risk-low' in risk
+assert 'factory_quality_verdict.py' in automerge
 assert 'forbidden_path_prefixes' in automerge
 assert 'reviewDecision' in automerge
 assert 'require_head_specific_verdict' in automerge

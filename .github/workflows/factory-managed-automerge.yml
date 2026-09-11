@@ -1,4 +1,4 @@
-name: factory-managed-automerge-v2
+name: factory-managed-automerge-v3
 
 "on":
   workflow_dispatch:
@@ -41,7 +41,9 @@ jobs:
           test "$(gh api user --jq '.login')" = "$OWNER"
           jq -e '.version == 1 and .enabled == true and .scope.managed_only == true and .scope.exclude_control_plane_repository == true and .source_issue.require_persisted_worker_session == true and .risk.required_low_risk_label == "factory:risk-low" and .risk.fail_closed_when_unclassified == true and .pull_request.require_single_correlated_pr == true and .quality.require_head_specific_verdict == true' "$POLICY" >/dev/null
           identity_helper="$GITHUB_WORKSPACE/.github/roots/factory_worker_identity.py"
+          quality_helper="$GITHUB_WORKSPACE/.github/roots/factory_quality_verdict.py"
           test -f "$identity_helper"
+          test -f "$quality_helper"
 
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
@@ -98,8 +100,7 @@ jobs:
                 continue
               fi
 
-              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
-              printf '%s\n' "$comments" > /tmp/identity-comments.json
+              gh api --paginate "repos/${repo}/issues/${issue}/comments" --jq '.[]' | jq -s '.' > /tmp/issue-comments.json
 
               # Canonical correlation is owned by roots-jules-session / roots-chatgpt-worker.
               # PR body text is never identity authority; conflicting worker identities fail closed.
@@ -110,7 +111,7 @@ jobs:
               python "$identity_helper" select \
                 --repo "$repo" \
                 --issue "$issue" \
-                --comments-json /tmp/identity-comments.json \
+                --comments-json /tmp/issue-comments.json \
                 --prs-json /tmp/prs.json \
                 --base "$default_branch" \
                 > /tmp/identity.json 2>/tmp/identity.err
@@ -142,7 +143,7 @@ jobs:
               python "$identity_helper" validate \
                 --repo "$repo" \
                 --issue "$issue" \
-                --comments-json /tmp/identity-comments.json \
+                --comments-json /tmp/issue-comments.json \
                 --pr-json /tmp/pr.json \
                 --base "$default_branch" \
                 >/tmp/identity-initial.json 2>/tmp/identity-initial.err
@@ -195,27 +196,29 @@ jobs:
               done < <(jq -r '.ci.required_jobs[]?' /tmp/profile.json)
               [ "$required_ok" = true ] || { deferred=$((deferred + 1)); continue; }
 
-              negative_quality=false
-              for verdict in REWORK BLOCK; do
-                marker="<!-- roots-quality-verdict head=${sha} verdict=${verdict} -->"
-                if jq -e --arg marker "$marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
-                  negative_quality=true
-                  break
-                fi
-              done
-              [ "$negative_quality" = false ] || { blocked=$((blocked + 1)); continue; }
+              set +e
+              python "$quality_helper" --head "$sha" --comments-json /tmp/issue-comments.json > /tmp/quality.json 2>/tmp/quality.err
+              quality_rc=$?
+              set -e
+              if [ "$quality_rc" -eq 2 ]; then
+                deferred=$((deferred + 1))
+                continue
+              fi
+              if [ "$quality_rc" -ne 0 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} exact-head Quality authority is ambiguous: $(cat /tmp/quality.err)" >&2
+                blocked=$((blocked + 1))
+                continue
+              fi
 
-              quality_ok=false
-              accepted_verdict=''
-              while IFS= read -r verdict; do
-                marker="<!-- roots-quality-verdict head=${sha} verdict=${verdict} -->"
-                if jq -e --arg marker "$marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
-                  quality_ok=true
-                  accepted_verdict="$verdict"
-                  break
-                fi
-              done < <(jq -r '.quality.accepted_verdicts[]' "$POLICY")
-              [ "$quality_ok" = true ] || { deferred=$((deferred + 1)); continue; }
+              accepted_verdict="$(jq -r '.verdict' /tmp/quality.json)"
+              if [ "$accepted_verdict" = REWORK ] || [ "$accepted_verdict" = BLOCK ]; then
+                blocked=$((blocked + 1))
+                continue
+              fi
+              jq -e --arg verdict "$accepted_verdict" '.quality.accepted_verdicts | index($verdict) != null' "$POLICY" >/dev/null || {
+                deferred=$((deferred + 1))
+                continue
+              }
 
               [ "$(jq -r '.mergeable' /tmp/pr.json)" = true ] || { deferred=$((deferred + 1)); continue; }
               mergeable_state="$(jq -r '.mergeable_state // "unknown"' /tmp/pr.json)"
@@ -242,12 +245,34 @@ jobs:
               done < <(jq -r '.source_issue.blocking_labels[], .risk.denied_risk_labels[]' "$POLICY")
               [ "$current_block" = false ] || { blocked=$((blocked + 1)); continue; }
 
-              current_comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
-              marker="<!-- roots-quality-verdict head=${sha} verdict=${accepted_verdict} -->"
-              jq -e --arg marker "$marker" '.[] | select((.body // "") | contains($marker))' <<< "$current_comments" >/dev/null || { deferred=$((deferred + 1)); continue; }
+              gh api --paginate "repos/${repo}/issues/${issue}/comments" --jq '.[]' | jq -s '.' > /tmp/current-comments.json
+              current_comments="$(cat /tmp/current-comments.json)"
+
+              set +e
+              python "$quality_helper" --head "$sha" --comments-json /tmp/current-comments.json > /tmp/current-quality.json 2>/tmp/current-quality.err
+              current_quality_rc=$?
+              set -e
+              if [ "$current_quality_rc" -eq 2 ]; then
+                deferred=$((deferred + 1))
+                continue
+              fi
+              if [ "$current_quality_rc" -ne 0 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} Quality authority changed ambiguously before merge: $(cat /tmp/current-quality.err)" >&2
+                blocked=$((blocked + 1))
+                continue
+              fi
+              current_verdict="$(jq -r '.verdict' /tmp/current-quality.json)"
+              [ "$current_verdict" = "$accepted_verdict" ] || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo}#${issue} latest exact-head Quality changed ${accepted_verdict} -> ${current_verdict}."
+                blocked=$((blocked + 1))
+                continue
+              }
+              jq -e --arg verdict "$current_verdict" '.quality.accepted_verdicts | index($verdict) != null' "$POLICY" >/dev/null || {
+                blocked=$((blocked + 1))
+                continue
+              }
 
               # Final TOCTOU guard: identity must still map this exact issue to this exact PR.
-              printf '%s\n' "$current_comments" > /tmp/current-comments.json
               printf '%s\n' "$current_pr" > /tmp/current-pr.json
               set +e
               python "$identity_helper" validate \
@@ -267,14 +292,14 @@ jobs:
 
               ready_marker="<!-- roots-managed-automerge-ready head=${sha} -->"
               if ! jq -e --arg marker "$ready_marker" '.[] | select((.body // "") | contains($marker))' <<< "$current_comments" >/dev/null; then
-                gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="${ready_marker}\nAUTO_MERGE_READY: LOW_RISK PR #${pr} from worker=${worker_provider} passed exact-head CI, protected-path, review, canonical worker identity and Quality ${accepted_verdict} gates at ${sha}." >/dev/null
+                gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="${ready_marker}\nAUTO_MERGE_READY: LOW_RISK PR #${pr} from worker=${worker_provider} passed exact-head CI, protected-path, review, canonical worker identity and latest Quality ${accepted_verdict} gates at ${sha}." >/dev/null
               fi
 
               [ "$EXECUTE" = true ] || continue
               merge_method="$(jq -r '.pull_request.merge_method' "$POLICY")"
               if gh api --method PUT "repos/${repo}/pulls/${pr}/merge" -f sha="$sha" -f merge_method="$merge_method" > /tmp/merge.json 2>/tmp/merge.err; then
                 if [ "$(jq -r '.merged // false' /tmp/merge.json)" = true ]; then
-                  gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="<!-- roots-managed-automerge-done head=${sha} -->\nAUTO_MERGE_DONE: LOW_RISK managed PR #${pr} from worker=${worker_provider} merged automatically after exact-head CI, policy, review, canonical worker identity and quality gates. Completion reconciliation owns the next transition." >/dev/null
+                  gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="<!-- roots-managed-automerge-done head=${sha} -->\nAUTO_MERGE_DONE: LOW_RISK managed PR #${pr} from worker=${worker_provider} merged automatically after exact-head CI, policy, review, canonical worker identity and latest quality gates. Completion reconciliation owns the next transition." >/dev/null
                   merged=$((merged + 1))
                 else
                   deferred=$((deferred + 1))

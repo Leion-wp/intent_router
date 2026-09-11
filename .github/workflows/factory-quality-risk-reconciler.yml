@@ -1,4 +1,4 @@
-name: factory-quality-risk-reconciler-v2
+name: factory-quality-risk-reconciler-v3
 
 "on":
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Materialize exact-head Quality LOW risk
+      - name: Materialize latest exact-head Quality LOW risk
         shell: bash
         run: |
           set -euo pipefail
@@ -31,11 +31,14 @@ jobs:
           export GH_TOKEN="$FLEET_TOKEN"
           test "$(gh api user --jq '.login')" = "$OWNER"
           jq -e '.version == 1 and .risk.required_low_risk_label == "factory:risk-low" and .risk.fail_closed_when_unclassified == true and .quality.require_head_specific_verdict == true' "$POLICY" >/dev/null
+          quality_helper="$GITHUB_WORKSPACE/.github/roots/factory_quality_verdict.py"
+          test -f "$quality_helper"
 
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
 
           reconciled=0
+          revoked=0
           deferred=0
           blocked=0
 
@@ -68,7 +71,8 @@ jobs:
                 continue
               fi
 
-              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              gh api --paginate "repos/${repo}/issues/${issue}/comments" --jq '.[]' | jq -s '.' > /tmp/comments.json
+              comments="$(cat /tmp/comments.json)"
               jules_marker="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
               chatgpt_marker="$(jq -r --arg prefix "<!-- roots-chatgpt-worker task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
               if [ -n "$jules_marker" ] && [ -n "$chatgpt_marker" ]; then
@@ -106,28 +110,41 @@ jobs:
               sha="$(jq -r '.[0].headRefOid' /tmp/candidates.json)"
               [ "$(jq -r '.[0].isDraft' /tmp/candidates.json)" = false ] || { deferred=$((deferred + 1)); continue; }
 
-              negative=false
-              for verdict in REWORK BLOCK; do
-                marker="<!-- roots-quality-verdict head=${sha} verdict=${verdict} -->"
-                if jq -e --arg marker "$marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
-                  negative=true
-                  break
-                fi
-              done
-              [ "$negative" = false ] || { blocked=$((blocked + 1)); continue; }
+              set +e
+              python "$quality_helper" --head "$sha" --comments-json /tmp/comments.json > /tmp/quality.json 2>/tmp/quality.err
+              quality_rc=$?
+              set -e
+              if [ "$quality_rc" -eq 2 ]; then
+                deferred=$((deferred + 1))
+                continue
+              fi
+              if [ "$quality_rc" -ne 0 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} exact-head Quality authority is ambiguous: $(cat /tmp/quality.err)" >&2
+                blocked=$((blocked + 1))
+                continue
+              fi
 
-              accepted=''
-              quality_body=''
-              while IFS= read -r verdict; do
-                marker="<!-- roots-quality-verdict head=${sha} verdict=${verdict} -->"
-                body="$(jq -r --arg marker "$marker" '[.[] | select((.body // "") | contains($marker))] | last | .body // empty' <<< "$comments")"
-                if [ -n "$body" ]; then
-                  accepted="$verdict"
-                  quality_body="$body"
-                  break
+              verdict="$(jq -r '.verdict' /tmp/quality.json)"
+              quality_body="$(jq -r '.body' /tmp/quality.json)"
+              if [ "$verdict" = REWORK ] || [ "$verdict" = BLOCK ]; then
+                if jq -e --arg label "$low_label" 'index($label) != null' <<< "$labels" >/dev/null; then
+                  gh issue edit "$issue" --repo "$repo" --remove-label "$low_label" >/dev/null
+                  revoked=$((revoked + 1))
+                  current_labels="$(gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
+                  if jq -e --arg label "$low_label" 'index($label) != null' <<< "$current_labels" >/dev/null; then
+                    echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} superseded LOW_RISK label did not revoke." >&2
+                    exit 1
+                  fi
+                  echo "QUALITY_RISK_REVOKED: ${repo}#${issue} PR #${pr} head ${sha} latest verdict=${verdict}."
                 fi
-              done < <(jq -r '.quality.accepted_verdicts[]' "$POLICY")
-              [ -n "$accepted" ] || { deferred=$((deferred + 1)); continue; }
+                blocked=$((blocked + 1))
+                continue
+              fi
+
+              jq -e --arg verdict "$verdict" '.quality.accepted_verdicts | index($verdict) != null' "$POLICY" >/dev/null || {
+                deferred=$((deferred + 1))
+                continue
+              }
 
               if ! grep -Eiq '(^|[^[:alnum:]_])risk:[[:space:]]*low([^[:alnum:]_]|$)' <<< "$quality_body"; then
                 echo "QUALITY_RISK_UNCLASSIFIED: ${repo}#${issue} PR #${pr} head ${sha}."
@@ -154,7 +171,7 @@ jobs:
             done < <(gh issue list --repo "$repo" --state open --label "$required_label" --limit 100 --json number --jq '.[].number')
           done < /tmp/repos.txt
 
-          echo "Quality risk reconciliation: reconciled=${reconciled}, deferred=${deferred}, blocked=${blocked}."
+          echo "Quality risk reconciliation: reconciled=${reconciled}, revoked=${revoked}, deferred=${deferred}, blocked=${blocked}."
 
       - name: Trigger managed auto-merge after risk reconciliation
         shell: bash
@@ -172,10 +189,11 @@ jobs:
         shell: bash
         run: |
           {
-            echo '### Quality risk reconciliation v2'
+            echo '### Quality risk reconciliation v3'
             echo '- Persisted worker identity may be Jules or ChatGPT; conflicting identities fail closed.'
-            echo '- Exact-head Quality PASS is necessary but does not imply LOW_RISK.'
-            echo '- Explicit Risk: low on that exact-head Quality report materializes factory:risk-low.'
-            echo '- REWORK, BLOCK, denied risk labels, ambiguity, stale heads and unclassified risk remain fail-closed.'
-            echo '- Managed auto-merge is dispatched immediately after reconciliation; its own gates revalidate everything.'
+            echo '- Only the latest canonical exact-head Quality verdict is effective; wake-up event order is never authority.'
+            echo '- Latest REWORK/BLOCK revokes stale factory:risk-low before managed merge can act.'
+            echo '- Latest accepted PASS still requires explicit Risk: low before factory:risk-low is materialized.'
+            echo '- Ambiguity, stale heads, denied risk labels and unclassified risk remain fail-closed.'
+            echo '- Managed auto-merge is dispatched immediately after reconciliation; its own gates independently revalidate the latest verdict.'
           } >> "$GITHUB_STEP_SUMMARY"
