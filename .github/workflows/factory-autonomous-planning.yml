@@ -200,10 +200,15 @@ jobs:
               rc=$?
               set -e
               if [ "$rc" -eq 0 ]; then
-                if ! GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${number}" \
-                  --jq --argjson milestone "$milestone_number" \
-                  'select(.pull_request == null and (.milestone.number // -1) == $milestone) | .number' | grep -qx "$number"; then
-                  block_repo "$repo" "canonical task binding '${milestone_id}/${task_id}' points to missing/wrong-milestone issue #${number}"
+                if ! bound_json="$(GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${number}")"; then
+                  block_repo "$repo" "canonical task binding '${milestone_id}/${task_id}' points to missing issue #${number}"
+                  duplicate_plan=true
+                  break
+                fi
+                bound_is_pr="$(jq -r 'has("pull_request")' <<< "$bound_json")"
+                bound_milestone="$(jq -r '.milestone.number // -1' <<< "$bound_json")"
+                if [ "$bound_is_pr" = 'true' ] || [ "$bound_milestone" != "$milestone_number" ]; then
+                  block_repo "$repo" "canonical task binding '${milestone_id}/${task_id}' points to wrong-milestone/non-issue #${number}"
                   duplicate_plan=true
                   break
                 fi
