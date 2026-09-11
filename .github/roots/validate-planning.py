@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import importlib.util
 import json
 import math
 import pathlib
@@ -11,6 +12,10 @@ except ImportError as exc:
     raise SystemExit("jsonschema dependency is required") from exc
 
 ROOT = pathlib.Path(__file__).resolve().parent
+WIDTH_SPEC = importlib.util.spec_from_file_location("factory_planning_width", ROOT / "factory_planning_width.py")
+planning_width = importlib.util.module_from_spec(WIDTH_SPEC)
+assert WIDTH_SPEC.loader is not None
+WIDTH_SPEC.loader.exec_module(planning_width)
 FORBIDDEN = (
     ".github/workflows",
     "workflow permission",
@@ -72,6 +77,12 @@ def dynamic_minimum_task_count(contract=None):
     if max_concurrency <= planning["parallel_threshold"]:
         return floor
     return max(floor, math.ceil(max_concurrency * planning["issue_multiplier"]))
+
+
+def deterministic_planning_width(tasks, contract=None):
+    contract = contract or worker_capacity_contract()
+    capacity = contract["workers"]["jules"]["max_concurrency"]
+    return planning_width.width_profile(tasks, capacity)
 
 
 def validate_dynamic_parallelism(tasks):
@@ -178,6 +189,11 @@ def validate_plan(path: pathlib.Path):
     plan = load_path(path)
     validate_schema(plan, "factory-milestone-plan.schema.json")
     semantic_validate_tasks(plan["tasks"])
+    persisted_width = (plan.get("extensions") or {}).get("planning_width")
+    if persisted_width is not None:
+        expected_width = deterministic_planning_width(plan["tasks"])
+        if persisted_width != expected_width:
+            raise ValueError("planning width profile does not match deterministic task DAG")
 
 
 def validate_state(path: pathlib.Path, expected_repo: str | None = None):
@@ -238,6 +254,9 @@ def decision_to_plan(decision_path: pathlib.Path, out_path: pathlib.Path):
     decision = load_path(decision_path)
     if decision.get("milestone") is None:
         raise ValueError("decision has no milestone")
+    contract = worker_capacity_contract()
+    worker_capacity = contract["workers"]["jules"]["max_concurrency"]
+    width_profile = deterministic_planning_width(decision["milestone"]["tasks"], contract)
     plan = {
         "version": 1,
         "repository": decision["repository"],
@@ -256,7 +275,8 @@ def decision_to_plan(decision_path: pathlib.Path, out_path: pathlib.Path):
             "success_metric": decision["success_metric"],
             "confidence": decision["confidence"],
             "risk": decision["risk"],
-            "worker_capacity": worker_capacity_contract()["workers"]["jules"]["max_concurrency"],
+            "worker_capacity": worker_capacity,
+            "planning_width": width_profile,
         },
     }
     validate_schema(plan, "factory-milestone-plan.schema.json")

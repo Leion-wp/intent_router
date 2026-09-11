@@ -26,8 +26,11 @@ permissions:
   actions: write
   contents: read
 
+# Ingress liveness is isolated by managed repository. GitHub concurrency keeps at
+# most one running + one pending run per group, so a global group lets traffic for
+# one product replace another product's pending wake-up.
 concurrency:
-  group: factory-fleet-events
+  group: factory-fleet-events-${{ github.event.client_payload.repository || inputs.repository || github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -170,6 +173,7 @@ jobs:
             echo "- Repository: ${TARGET_REPO}"
             echo "- Persisted event: ${EVENT_TYPE}"
             echo '- Events route directly to the transition owner; the receiver does not restart the full reconciliation loop.'
+            echo '- Ingress concurrency is isolated by managed repository so one product cannot replace another product wake-up.'
             echo '- CI -> CI rework + native Quality; Quality verdict -> same-session Quality rework + risk; merge -> completion; queue -> dispatch_only; product proposal -> Product Brain.'
             echo '- Event payloads are wake-up hints only. Every successor re-reads canonical GitHub state and remains fail-closed.'
             echo '- Cron/manual scans remain recovery paths, not nominal dependencies.'
