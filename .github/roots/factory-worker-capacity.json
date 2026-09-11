@@ -2,11 +2,13 @@
   "version": 1,
   "workers": {
     "jules": {
-      "max_concurrency": 15
+      "max_concurrency": 15,
+      "ownership_label": "factory:worker:jules"
     },
     "chatgpt": {
       "max_concurrency": 1,
-      "selection_label": "factory:agent:chatgpt"
+      "selection_label": "factory:agent:chatgpt",
+      "ownership_label": "factory:worker:chatgpt"
     }
   },
   "planning": {

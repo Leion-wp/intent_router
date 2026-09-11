@@ -1,4 +1,4 @@
-name: factory-worker-route-bootstrap-v1
+name: factory-worker-route-bootstrap-v2
 
 "on":
   workflow_dispatch:
@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Reconcile provider route labels from profile authorization
+      - name: Reconcile provider route and ownership labels from profile authorization
         shell: bash
         run: |
           set -euo pipefail
@@ -46,16 +46,24 @@ jobs:
             | [.key, .value.selection_label]
             | @tsv
           ' "$CAPACITY_FILE" > /tmp/routes.tsv
+          jq -r '
+            .workers
+            | to_entries[]
+            | select(.value.ownership_label? != null)
+            | [.key, .value.ownership_label]
+            | @tsv
+          ' "$CAPACITY_FILE" > /tmp/ownership.tsv
 
-          if [ ! -s /tmp/routes.tsv ]; then
-            echo 'WORKER_ROUTE_BOOTSTRAP: no routed providers declared; nothing to reconcile.'
+          if [ ! -s /tmp/routes.tsv ] && [ ! -s /tmp/ownership.tsv ]; then
+            echo 'WORKER_LABEL_BOOTSTRAP: no provider labels declared; nothing to reconcile.'
             exit 0
           fi
 
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
 
-          reconciled=0
+          route_reconciled=0
+          ownership_reconciled=0
           managed=0
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
@@ -79,17 +87,32 @@ jobs:
                   --color 1D76DB \
                   --description "Factory task routed to the ${provider} worker adapter" \
                   --force >/dev/null
-                reconciled="$((reconciled + 1))"
+                route_reconciled="$((route_reconciled + 1))"
                 echo "WORKER_ROUTE_LABEL_READY: ${repo} provider=${provider} label=${label}"
               fi
             done < /tmp/routes.tsv
+
+            while IFS=$'\t' read -r provider label; do
+              [ -n "$provider" ] || continue
+              [ -n "$label" ] || continue
+              if jq -e --arg provider "$provider" '.worker_policy.enabled | index($provider) != null' /tmp/profile.json >/dev/null; then
+                gh label create "$label" --repo "$repo" \
+                  --color C5DEF5 \
+                  --description "Factory active task ownership reserved to ${provider}" \
+                  --force >/dev/null
+                ownership_reconciled="$((ownership_reconciled + 1))"
+                echo "WORKER_OWNERSHIP_LABEL_READY: ${repo} provider=${provider} label=${label}"
+              fi
+            done < /tmp/ownership.tsv
           done < /tmp/repos.txt
 
           {
-            echo '### Worker route bootstrap v1'
+            echo '### Worker label bootstrap v2'
             echo "- Managed repositories inspected: ${managed}"
-            echo "- Authorized route labels reconciled: ${reconciled}"
+            echo "- Authorized route labels reconciled: ${route_reconciled}"
+            echo "- Authorized ownership labels reconciled: ${ownership_reconciled}"
             echo '- Authority: repository .factory/profile.json worker_policy.enabled.'
-            echo '- Route definitions: factory-worker-capacity.json selection_label entries.'
-            echo '- Labels select an already-authorized provider; they never enable a provider by themselves.'
+            echo '- Definitions: factory-worker-capacity.json selection_label / ownership_label entries.'
+            echo '- Route labels select an already-authorized provider while queued; ownership labels reserve active provider capacity after claim.'
+            echo '- Labels never enable a provider by themselves.'
           } >> "$GITHUB_STEP_SUMMARY"

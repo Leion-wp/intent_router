@@ -50,6 +50,15 @@ jobs:
           escalated_now=0
           anomalies=0
 
+          resolve_provider() {
+            local repo="$1" issue="$2" lifecycle="$3" comments="$4"
+            printf '%s\n' "$comments" > /tmp/provider-comments.json
+            GH_TOKEN="$FLEET_TOKEN" gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]' > /tmp/provider-labels.json
+            python3 .github/roots/factory_worker_provider.py \
+              --repo "$repo" --issue "$issue" --lifecycle "$lifecycle" \
+              --labels-json /tmp/provider-labels.json --comments-json /tmp/provider-comments.json
+          }
+
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
             if ! gh api -H 'Accept: application/vnd.github.raw+json' \
@@ -67,23 +76,59 @@ jobs:
             gh label create 'factory:human-required' --repo "$repo" --color FBCA04 \
               --description 'A human decision is required before factory execution can continue' --force >/dev/null 2>&1 || true
 
-            dispatching_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json labels \
-              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
-            dispatched_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json labels \
-              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
-            escalated_count="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json labels \
-              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
-            active_slots="$((active_slots + dispatching_count + dispatched_count))"
-            escalated_identities="$((escalated_identities + escalated_count))"
+            for lifecycle in factory:dispatching factory:dispatched; do
+              while IFS= read -r issue; do
+                [ -z "$issue" ] && continue
+                comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+                if ! provider_json="$(resolve_provider "$repo" "$issue" "$lifecycle" "$comments")"; then
+                  anomalies="$((anomalies + 1))"
+                  echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} ${lifecycle} provider ownership is missing or conflicting." >&2
+                  continue
+                fi
+                provider="$(jq -r '.provider' <<< "$provider_json")"
+                if [ "$(jq -r '.route_mismatch' <<< "$provider_json")" = 'true' ]; then
+                  anomalies="$((anomalies + 1))"
+                  echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} route label disagrees with canonical ${provider} ownership; provider slot remains unchanged." >&2
+                fi
+                [ "$provider" = 'jules' ] && active_slots="$((active_slots + 1))"
+              done < <(gh issue list --repo "$repo" --state open --label "$lifecycle" --limit 100 --json number --jq '.[].number')
+            done
+
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              if ! provider_json="$(resolve_provider "$repo" "$issue" 'factory:escalated' "$comments")"; then
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} escalated provider ownership is missing or conflicting." >&2
+                continue
+              fi
+              provider="$(jq -r '.provider' <<< "$provider_json")"
+              if [ "$(jq -r '.route_mismatch' <<< "$provider_json")" = 'true' ]; then
+                anomalies="$((anomalies + 1))"
+              fi
+              [ "$provider" = 'jules' ] && escalated_identities="$((escalated_identities + 1))"
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number --jq '.[].number')
 
             while IFS= read -r issue; do
               [ -z "$issue" ] && continue
               task_id="${repo}#${issue}"
               comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              if ! provider_json="$(resolve_provider "$repo" "$issue" 'factory:dispatched' "$comments")"; then
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${task_id} has no unambiguous active provider identity." >&2
+                continue
+              fi
+              provider="$(jq -r '.provider' <<< "$provider_json")"
+              if [ "$(jq -r '.route_mismatch' <<< "$provider_json")" = 'true' ]; then
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${task_id} route drift detected; watchdog follows canonical ${provider} ownership." >&2
+              fi
+              [ "$provider" = 'jules' ] || continue
+
               session_body="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-jules-session task_id='"${task_id}"' "))] | last | .body // empty' <<< "$comments")"
               if [ -z "$session_body" ]; then
                 anomalies="$((anomalies + 1))"
-                echo "CONTROL_PLANE_ANOMALY: ${task_id} is Jules-routed dispatched work without persisted Jules session." >&2
+                echo "CONTROL_PLANE_ANOMALY: ${task_id} is Jules-owned dispatched work without persisted Jules session." >&2
                 continue
               fi
               session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_body" | head -n 1)"
@@ -206,8 +251,7 @@ jobs:
               fi
 
               echo "JULES_STATE_NORMAL: ${task_id} state=${state} updateTime=${update_time} output_pr=${output_pr_state}; no watchdog mutation."
-            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number,labels \
-              --jq '.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null) | .number')
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq '.[].number')
           done < repos.txt
 
           if [ "$active_slots" -gt "$max_concurrency" ]; then
@@ -216,7 +260,7 @@ jobs:
           fi
 
           {
-            echo '### Fleet watchdog v4 — routed Jules pool'
+            echo '### Fleet watchdog v4 — identity-owned Jules pool'
             echo "- Jules capacity: ${max_concurrency}"
             echo "- Active Jules slots: ${active_slots}"
             echo "- Available Jules slots: $(( max_concurrency > active_slots ? max_concurrency - active_slots : 0 ))"
@@ -224,7 +268,7 @@ jobs:
             echo "- AWAITING_USER_FEEDBACK same-session recoveries: ${feedback_recoveries}"
             echo "- Explicit-state human escalations this run: ${escalated_now}"
             echo "- Control-plane anomalies: ${anomalies}"
-            echo '- factory:agent:chatgpt identities are excluded from Jules capacity and Jules watchdog logic.'
+            echo '- Active provider ownership comes from persisted reservation/worker identity; route-label drift is reported but never transfers the slot.'
             echo '- Decision source: live Jules SessionState + durable PR/output evidence; elapsed time never proves a stall.'
             echo '- Recovery never creates a replacement Jules session, branch or PR.'
           } >> "$GITHUB_STEP_SUMMARY"
