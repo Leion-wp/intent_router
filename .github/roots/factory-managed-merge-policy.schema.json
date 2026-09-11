@@ -52,7 +52,13 @@
         "require_non_draft": {"const": true},
         "require_single_correlated_pr": {"const": true},
         "merge_method": {"enum": ["merge", "squash", "rebase"]},
-        "forbidden_path_prefixes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        "forbidden_path_prefixes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1},
+          "contains": {"const": ".factory/product-state.json"}
+        }
       }
     },
     "ci": {
