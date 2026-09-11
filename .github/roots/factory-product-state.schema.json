@@ -4,21 +4,16 @@
   "title": "FactoryProductState",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "repository", "planner_mode", "product", "phase", "strategy", "last_decision", "governance"],
+  "required": ["version", "repository", "repository_role", "planner_mode", "subject", "phase", "strategy", "last_decision", "governance"],
   "properties": {
     "version": {"type": "integer", "const": 1},
     "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
-    "planner_mode": {"type": "string", "enum": ["DYNAMIC", "FALLBACK"]},
-    "product": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "value_proposition", "target_user"],
-      "properties": {
-        "name": {"type": "string", "minLength": 1, "maxLength": 120},
-        "value_proposition": {"type": "string", "minLength": 1, "maxLength": 1200},
-        "target_user": {"type": "string", "minLength": 1, "maxLength": 700}
-      }
+    "repository_role": {
+      "type": "string",
+      "enum": ["factory_control_plane", "factory_substrate", "generated_product", "internal_tool"]
     },
+    "planner_mode": {"type": "string", "enum": ["DYNAMIC", "FALLBACK"]},
+    "subject": {"type": "object"},
     "phase": {
       "type": "string",
       "enum": ["FOUNDATION", "VALUE", "HARDENING", "LAUNCH_READY", "MEASURING", "ITERATING", "PAUSED"]
@@ -55,5 +50,49 @@
     },
     "updated_at": {"type": ["string", "null"], "format": "date-time"},
     "extensions": {"type": "object"}
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"repository_role": {"const": "generated_product"}},
+        "required": ["repository_role"]
+      },
+      "then": {
+        "properties": {
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value_proposition", "target_user"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1, "maxLength": 120},
+              "value_proposition": {"type": "string", "minLength": 1, "maxLength": 1200},
+              "target_user": {"type": "string", "minLength": 1, "maxLength": 700}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "repository_role": {"enum": ["factory_control_plane", "factory_substrate", "internal_tool"]}
+        },
+        "required": ["repository_role"]
+      },
+      "then": {
+        "properties": {
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "consumer", "purpose"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1, "maxLength": 120},
+              "consumer": {"type": "string", "minLength": 3, "maxLength": 700},
+              "purpose": {"type": "string", "minLength": 5, "maxLength": 1200}
+            }
+          }
+        }
+      }
+    }
+  ]
 }
