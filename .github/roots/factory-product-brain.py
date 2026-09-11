@@ -25,23 +25,43 @@ def write(path: str, value):
 def update_state(decision_path: str, repo: str, timestamp: str, existing_path: str, out_path: str):
     decision = read(decision_path)
     existing = None if existing_path == "-" else read(existing_path)
+    role = decision["repository_role"]
+    if existing:
+        existing_role = existing.get("repository_role")
+        if existing_role and existing_role != role:
+            raise ValueError(
+                f"repository role mismatch while updating state: {existing_role} != {role}"
+            )
+
     name = repo.split("/", 1)[1]
     if existing:
-        name = existing.get("product", {}).get("name") or name
+        name = existing.get("subject", {}).get("name") or name
+
+    context = decision["product_context"]
+    if role == "generated_product":
+        subject = {
+            "name": name,
+            "value_proposition": context["value_proposition"],
+            "target_user": context["target_user"],
+        }
+    else:
+        subject = {
+            "name": name,
+            "consumer": context["consumer"],
+            "purpose": context["purpose"],
+        }
+
     state = {
         "version": 1,
         "repository": repo,
+        "repository_role": role,
         "planner_mode": "DYNAMIC",
-        "product": {
-            "name": name,
-            "value_proposition": decision["product_context"]["value_proposition"],
-            "target_user": decision["product_context"]["target_user"],
-        },
+        "subject": subject,
         "phase": PHASE_BY_ACTION[decision["action"]],
         "strategy": {
             "current_hypothesis": decision["hypothesis"],
             "success_metric": decision["success_metric"],
-            "next_question": decision["product_context"]["next_question"],
+            "next_question": context["next_question"],
         },
         "last_decision": {
             "decision_id": decision["decision_id"],
