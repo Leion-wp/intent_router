@@ -88,9 +88,13 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         cls.restart_path = WORKFLOWS / "factory-jules-session-restart.yml"
         cls.frontdoor_path = WORKFLOWS / "factory-jules-session-restart-by-issue.yml"
         cls.watchdog_path = WORKFLOWS / "factory-jules-restart-watchdog.yml"
+        cls.ci_rework_path = WORKFLOWS / "factory-jules-ci-rework.yml"
+        cls.resume_path = WORKFLOWS / "factory-jules-resume.yml"
         cls.restart_text = cls.restart_path.read_text(encoding="utf-8")
         cls.frontdoor_text = cls.frontdoor_path.read_text(encoding="utf-8")
         cls.watchdog_text = cls.watchdog_path.read_text(encoding="utf-8")
+        cls.ci_rework_text = cls.ci_rework_path.read_text(encoding="utf-8")
+        cls.resume_text = cls.resume_path.read_text(encoding="utf-8")
         cls.restart_yaml = yaml.safe_load(cls.restart_text)
         cls.frontdoor_yaml = yaml.safe_load(cls.frontdoor_text)
         cls.watchdog_yaml = yaml.safe_load(cls.watchdog_text)
@@ -166,6 +170,21 @@ class JulesRestartWorkflowTests(unittest.TestCase):
             "factory-jules-restart-frontdoor-${{ inputs.issue_number }}",
         )
         self.assertNotIn("repository", concurrency["group"])
+
+    def test_rework_and_resume_use_canonical_worker_identity(self):
+        for workflow_text in (self.ci_rework_text, self.resume_text):
+            self.assertIn("factory_worker_identity", workflow_text)
+            self.assertIn("issue_identity", workflow_text)
+            self.assertIn("factory_worker_identity.py validate", workflow_text)
+            self.assertNotIn('capture("<!-- roots-jules-session', workflow_text)
+
+        self.assertIn("Resolve canonical Jules identity", self.ci_rework_text)
+        self.assertIn("--pr-json pr.json", self.ci_rework_text)
+        self.assertIn("--base Android", self.ci_rework_text)
+        self.assertIn("Revalidate canonical worker identity before follow-up", self.resume_text)
+        self.assertIn("identity_rc", self.resume_text)
+        self.assertIn("api_discovery", self.resume_text)
+        self.assertIn("Discovered Jules session ${session} does not match active PR branch", self.resume_text)
 
 
 if __name__ == "__main__":
