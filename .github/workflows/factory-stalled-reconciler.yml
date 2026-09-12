@@ -65,24 +65,24 @@ jobs:
               identity_rc=0
               set +e
               identity_json="$(PYTHONPATH=.github/roots python3 - "$repo" "$issue" /tmp/stalled-comments.json <<'PY'
-import json
-import sys
-from pathlib import Path
+          import json
+          import sys
+          from pathlib import Path
 
-from factory_worker_identity import IdentityConflict, IdentityNoMatch, issue_identity
+          from factory_worker_identity import IdentityConflict, IdentityNoMatch, issue_identity
 
-repo = sys.argv[1]
-issue = int(sys.argv[2])
-comments = json.loads(Path(sys.argv[3]).read_text())
-try:
-    identity = issue_identity(repo, issue, comments)
-except IdentityNoMatch:
-    raise SystemExit(2)
-except IdentityConflict as exc:
-    print(f"IDENTITY_CONFLICT: {exc}", file=sys.stderr)
-    raise SystemExit(3)
-print(json.dumps(identity, sort_keys=True))
-PY
+          repo = sys.argv[1]
+          issue = int(sys.argv[2])
+          comments = json.loads(Path(sys.argv[3]).read_text())
+          try:
+              identity = issue_identity(repo, issue, comments)
+          except IdentityNoMatch:
+              raise SystemExit(2)
+          except IdentityConflict as exc:
+              print(f"IDENTITY_CONFLICT: {exc}", file=sys.stderr)
+              raise SystemExit(3)
+          print(json.dumps(identity, sort_keys=True))
+          PY
               )"
               identity_rc=$?
               set -e
@@ -159,7 +159,7 @@ PY
           RECONCILED: ${{ steps.reconcile.outputs.reconciled }}
         run: |
           {
-            echo '### Factory stalled reconciler'
+            echo '### Fleet stalled reconciler'
             echo "- Stalled tasks inspected: ${INSPECTED:-0}"
             echo "- Stalled labels removed: ${RECONCILED:-0}"
             echo '- Invariant: factory:stalled represents current lack of worker progress, not historical state.'
