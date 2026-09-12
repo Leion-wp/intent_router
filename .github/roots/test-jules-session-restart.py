@@ -90,11 +90,13 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         cls.watchdog_path = WORKFLOWS / "factory-jules-restart-watchdog.yml"
         cls.ci_rework_path = WORKFLOWS / "factory-jules-ci-rework.yml"
         cls.resume_path = WORKFLOWS / "factory-jules-resume.yml"
+        cls.stalled_reconciler_path = WORKFLOWS / "factory-stalled-reconciler.yml"
         cls.restart_text = cls.restart_path.read_text(encoding="utf-8")
         cls.frontdoor_text = cls.frontdoor_path.read_text(encoding="utf-8")
         cls.watchdog_text = cls.watchdog_path.read_text(encoding="utf-8")
         cls.ci_rework_text = cls.ci_rework_path.read_text(encoding="utf-8")
         cls.resume_text = cls.resume_path.read_text(encoding="utf-8")
+        cls.stalled_reconciler_text = cls.stalled_reconciler_path.read_text(encoding="utf-8")
         cls.restart_yaml = yaml.safe_load(cls.restart_text)
         cls.frontdoor_yaml = yaml.safe_load(cls.frontdoor_text)
         cls.watchdog_yaml = yaml.safe_load(cls.watchdog_text)
@@ -185,6 +187,14 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         self.assertIn("identity_rc", self.resume_text)
         self.assertIn("api_discovery", self.resume_text)
         self.assertIn("Discovered Jules session ${session} does not match active PR branch", self.resume_text)
+
+    def test_stalled_reconciler_uses_canonical_versioned_identity(self):
+        self.assertIn("actions/checkout@v4", self.stalled_reconciler_text)
+        self.assertIn("factory_worker_identity", self.stalled_reconciler_text)
+        self.assertIn("issue_identity", self.stalled_reconciler_text)
+        self.assertIn("IDENTITY_CONFLICT", self.stalled_reconciler_text)
+        self.assertIn("canonical persisted Jules session ID", self.stalled_reconciler_text)
+        self.assertNotIn("sed -n 's/.* session=", self.stalled_reconciler_text)
 
 
 if __name__ == "__main__":
