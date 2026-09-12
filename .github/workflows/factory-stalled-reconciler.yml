@@ -23,6 +23,8 @@ jobs:
       FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
       OWNER: ${{ github.repository_owner }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Reconcile stale factory:stalled labels
         id: reconcile
         shell: bash
@@ -58,11 +60,45 @@ jobs:
               inspected="$((inspected + 1))"
 
               comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
-              marker="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-jules-session task_id='"${repo}#${issue}"' "))] | last | .body // empty' <<< "$comments")"
-              session=""
-              session_id=""
-              if [ -n "$marker" ]; then
-                session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$marker" | head -n 1)"
+              printf '%s' "$comments" > /tmp/stalled-comments.json
+              identity_json=''
+              identity_rc=0
+              set +e
+              identity_json="$(PYTHONPATH=.github/roots python3 - "$repo" "$issue" /tmp/stalled-comments.json <<'PY'
+import json
+import sys
+from pathlib import Path
+
+from factory_worker_identity import IdentityConflict, IdentityNoMatch, issue_identity
+
+repo = sys.argv[1]
+issue = int(sys.argv[2])
+comments = json.loads(Path(sys.argv[3]).read_text())
+try:
+    identity = issue_identity(repo, issue, comments)
+except IdentityNoMatch:
+    raise SystemExit(2)
+except IdentityConflict as exc:
+    print(f"IDENTITY_CONFLICT: {exc}", file=sys.stderr)
+    raise SystemExit(3)
+print(json.dumps(identity, sort_keys=True))
+PY
+              )"
+              identity_rc=$?
+              set -e
+
+              if [ "$identity_rc" -eq 3 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has conflicting or malformed persisted worker identity; leaving factory:stalled fail-closed." >&2
+                continue
+              fi
+              if [ "$identity_rc" -ne 0 ] && [ "$identity_rc" -ne 2 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} canonical worker identity resolver failed with rc=${identity_rc}; leaving factory:stalled fail-closed." >&2
+                continue
+              fi
+
+              session_id=''
+              if [ "$identity_rc" -eq 0 ] && [ "$(jq -r '.provider // ""' <<< "$identity_json")" = 'jules' ]; then
+                session="$(jq -r '.session // ""' <<< "$identity_json")"
                 [ -n "$session" ] && session_id="${session##*/}"
               fi
 
@@ -129,7 +165,8 @@ jobs:
             echo '- Invariant: factory:stalled represents current lack of worker progress, not historical state.'
             echo '- Rule: stalled + exactly one correlated open PR -> remove factory:stalled.'
             echo '- Otherwise: leave factory:stalled unchanged.'
-            echo '- Correlation: explicit issue reference first, persisted Jules session ID in PR branch as fallback.'
+            echo '- Correlation: explicit issue reference first, canonical persisted Jules session ID in PR branch as fallback.'
+            echo '- Malformed or conflicting canonical worker identity is fail-closed.'
             echo '- Multiple correlated open PRs are treated as a control-plane anomaly and remain fail-closed.'
             echo '- Successful recovery hands off immediately to Quality Risk; cron remains recovery-only.'
           } >> "$GITHUB_STEP_SUMMARY"
