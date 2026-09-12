@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from factory_quality_verdict import latest_exact_head_verdict
-from factory_worker_identity import IdentityConflict, IdentityNoMatch, select_pr, validate_pr
+from factory_worker_identity import IdentityConflict, IdentityNoMatch, issue_identity, select_pr, validate_pr
 
 policy = json.loads(Path('.github/roots/factory-managed-merge-policy.json').read_text())
 schema = json.loads(Path('.github/roots/factory-managed-merge-policy.schema.json').read_text())
@@ -71,6 +71,61 @@ assert selected['pr'] == 21
 selected = select_pr(repo, 18, chatgpt_comments, [jules_pr, chatgpt_pr], 'main')
 assert selected['provider'] == 'chatgpt'
 assert selected['pr'] == 22
+
+# Restart persistence appends a generated Jules marker while retaining the historical
+# legacy marker. The highest valid generation is the canonical active identity.
+restart_comments = jules_comments + [{
+    'body': (
+        '<!-- roots-jules-session task_id=Leion-wp/product#17 '
+        'session=sessions/22222222222 generation=1 -->\n'
+        '<!-- roots-jules-restart-complete task_id=Leion-wp/product#17 attempt=1 '
+        'from=sessions/11111111111 to=sessions/22222222222 mode=manual -->'
+    )
+}]
+restart_pr = {
+    'number': 23,
+    'body': 'Fixes #17',
+    'headRefOid': 'd' * 40,
+    'headRefName': 'feature-22222222222',
+    'baseRefName': 'main',
+    'isDraft': False,
+}
+canonical = issue_identity(repo, 17, restart_comments)
+assert canonical['session'] == 'sessions/22222222222'
+assert canonical['generation'] == 1
+selected = select_pr(repo, 17, restart_comments, [jules_pr, restart_pr], 'main')
+assert selected['provider'] == 'jules'
+assert selected['pr'] == 23
+assert selected['session'] == 'sessions/22222222222'
+
+# Later restart generations supersede earlier generations deterministically.
+second_restart_comments = restart_comments + [{
+    'body': '<!-- roots-jules-session task_id=Leion-wp/product#17 session=sessions/33333333333 generation=2 -->'
+}]
+assert issue_identity(repo, 17, second_restart_comments)['session'] == 'sessions/33333333333'
+
+# Two distinct sessions claiming the same restart generation are ambiguous.
+duplicate_generation = restart_comments + [{
+    'body': '<!-- roots-jules-session task_id=Leion-wp/product#17 session=sessions/99999999999 generation=1 -->'
+}]
+try:
+    issue_identity(repo, 17, duplicate_generation)
+except IdentityConflict:
+    pass
+else:
+    raise AssertionError('duplicate Jules restart generation must fail closed')
+
+# A marker-like record with an invalid generation must not silently fall back to a stale
+# legacy identity.
+malformed_generation = jules_comments + [{
+    'body': '<!-- roots-jules-session task_id=Leion-wp/product#17 session=sessions/22222222222 generation=zero -->'
+}]
+try:
+    issue_identity(repo, 17, malformed_generation)
+except IdentityConflict:
+    pass
+else:
+    raise AssertionError('malformed Jules restart generation must fail closed')
 
 # A PR may not substitute another task via its body.
 bad_body = dict(jules_pr, body='Fixes #18')
