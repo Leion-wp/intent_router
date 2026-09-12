@@ -297,6 +297,82 @@ jobs:
 
               [ "$EXECUTE" = true ] || continue
               merge_method="$(jq -r '.pull_request.merge_method' "$POLICY")"
+
+              # Final irreversible-side-effect admission. Review state and CI can change while the
+              # head stays constant, and an advancing base invalidates the integration evidence.
+              # Re-read each mutable prerequisite immediately before the merge request.
+              final_pr="$(gh api "repos/${repo}/pulls/${pr}")"
+              [ "$(jq -r '.head.sha' <<< "$final_pr")" = "$sha" ] || { echo "AUTO_MERGE_REVALIDATE: ${repo} PR #${pr} head moved at final admission."; deferred=$((deferred + 1)); continue; }
+              [ "$(jq -r '.base.ref' <<< "$final_pr")" = "$default_branch" ] || { blocked=$((blocked + 1)); continue; }
+              [ "$(jq -r '.state' <<< "$final_pr")" = open ] || continue
+              [ "$(jq -r '.draft' <<< "$final_pr")" = false ] || continue
+              [ "$(jq -r '.mergeable' <<< "$final_pr")" = true ] || { deferred=$((deferred + 1)); continue; }
+              final_mergeable_state="$(jq -r '.mergeable_state // "unknown"' <<< "$final_pr")"
+              if [ "$final_mergeable_state" = dirty ] || [ "$final_mergeable_state" = blocked ]; then
+                deferred=$((deferred + 1))
+                continue
+              fi
+
+              final_review_decision="$(gh pr view "$pr" --repo "$repo" --json reviewDecision --jq '.reviewDecision // ""')"
+              [ "$final_review_decision" != CHANGES_REQUESTED ] || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo} PR #${pr} gained a blocking review before merge."
+                blocked=$((blocked + 1))
+                continue
+              }
+
+              # Standard merge API pins only the head SHA, so require the worker head to contain
+              # the current default-base tip. A base advance makes the PR behind and invalidates
+              # the prior pull_request CI evidence until the branch is synchronized and retested.
+              if ! behind_by="$(gh api "repos/${repo}/compare/${default_branch}...${sha}" --jq '.behind_by')"; then
+                echo "AUTO_MERGE_REVALIDATE: ${repo} PR #${pr} base freshness could not be proven." >&2
+                blocked=$((blocked + 1))
+                continue
+              fi
+              [ "$behind_by" -eq 0 ] || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo} PR #${pr} is behind ${default_branch}; current integration CI is stale."
+                deferred=$((deferred + 1))
+                continue
+              }
+
+              gh api "repos/${repo}/actions/runs?head_sha=${sha}&event=pull_request&per_page=100" > /tmp/final-runs.json
+              [ "$(jq '.workflow_runs | length' /tmp/final-runs.json)" -gt 0 ] || { deferred=$((deferred + 1)); continue; }
+              jq -e '[.workflow_runs[] | select(.status != "completed")] | length == 0' /tmp/final-runs.json >/dev/null || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo} PR #${pr} has current exact-head CI still running."
+                deferred=$((deferred + 1))
+                continue
+              }
+              final_bad_runs="$(jq --slurpfile policy "$POLICY" '[.workflow_runs[] | select((.conclusion as $c | $policy[0].ci.allowed_run_conclusions | index($c)) == null)] | length' /tmp/final-runs.json)"
+              [ "$final_bad_runs" -eq 0 ] || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo} PR #${pr} current exact-head CI is no longer acceptable."
+                deferred=$((deferred + 1))
+                continue
+              }
+
+              : > /tmp/final-jobs.ndjson
+              while IFS= read -r run_id; do
+                gh api "repos/${repo}/actions/runs/${run_id}/jobs?per_page=100" --jq '.jobs[] | {name,status,conclusion,started_at}' >> /tmp/final-jobs.ndjson
+              done < <(jq -r '.workflow_runs[].id' /tmp/final-runs.json)
+              if [ -s /tmp/final-jobs.ndjson ]; then
+                jq -s '.' /tmp/final-jobs.ndjson > /tmp/final-jobs.json
+              else
+                echo '[]' > /tmp/final-jobs.json
+              fi
+
+              final_required_ok=true
+              while IFS= read -r required_job; do
+                [ -n "$required_job" ] || continue
+                latest="$(jq -c --arg name "$required_job" '[.[] | select(.name == $name)] | sort_by(.started_at // "") | last // null' /tmp/final-jobs.json)"
+                if [ "$latest" = null ] || [ "$(jq -r '.status' <<< "$latest")" != completed ] || [ "$(jq -r '.conclusion' <<< "$latest")" != success ]; then
+                  final_required_ok=false
+                  break
+                fi
+              done < <(jq -r '.ci.required_jobs[]?' /tmp/profile.json)
+              [ "$final_required_ok" = true ] || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo} PR #${pr} required exact-head CI job changed before merge."
+                deferred=$((deferred + 1))
+                continue
+              }
+
               if gh api --method PUT "repos/${repo}/pulls/${pr}/merge" -f sha="$sha" -f merge_method="$merge_method" > /tmp/merge.json 2>/tmp/merge.err; then
                 if [ "$(jq -r '.merged // false' /tmp/merge.json)" = true ]; then
                   gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="<!-- roots-managed-automerge-done head=${sha} -->\nAUTO_MERGE_DONE: LOW_RISK managed PR #${pr} from worker=${worker_provider} merged automatically after exact-head CI, policy, review, canonical worker identity and latest quality gates. Completion reconciliation owns the next transition." >/dev/null

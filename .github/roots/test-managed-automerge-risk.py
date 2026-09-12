@@ -36,6 +36,30 @@ assert 'LOW_RISK managed PR' in workflow
 assert 'forbidden_path_prefixes' in workflow
 assert 'require_head_specific_verdict' in workflow
 
+# Irreversible merge admission must re-read mutable gates after the advisory
+# ready marker and immediately before the merge request.
+final_guard_marker = '# Final irreversible-side-effect admission.'
+assert final_guard_marker in workflow
+final_guard = workflow.split(final_guard_marker, 1)[1]
+merge_call = 'gh api --method PUT "repos/${repo}/pulls/${pr}/merge"'
+assert merge_call in final_guard
+assert 'final_review_decision=' in final_guard
+assert 'final_review_decision" != CHANGES_REQUESTED' in final_guard
+assert 'compare/${default_branch}...${sha}' in final_guard
+assert 'behind_by" -eq 0' in final_guard
+assert '/tmp/final-runs.json' in final_guard
+assert 'event=pull_request' in final_guard
+assert 'status != "completed"' in final_guard
+assert 'allowed_run_conclusions' in final_guard
+assert '/tmp/final-jobs.json' in final_guard
+assert 'final_required_ok' in final_guard
+assert final_guard.index('final_review_decision=') < final_guard.index(merge_call)
+assert final_guard.index('compare/${default_branch}...${sha}') < final_guard.index(merge_call)
+assert final_guard.index('/tmp/final-runs.json') < final_guard.index(merge_call)
+assert final_guard.index('/tmp/final-jobs.json') < final_guard.index(merge_call)
+assert workflow.count('actions/runs?head_sha=${sha}&event=pull_request&per_page=100') >= 2
+assert workflow.count('--json reviewDecision') >= 2
+
 # The PR body is no longer allowed to select an issue before persisted worker identity.
 assert 'select((.body // "") | test(' not in workflow
 assert 'canonical worker identity' in workflow
@@ -112,4 +136,4 @@ assert latest_exact_head_verdict(quality, sha)['verdict'] == 'REWORK'
 quality.append({'body': f'<!-- roots-quality-verdict head={sha} verdict=PASS -->\nRisk: low'})
 assert latest_exact_head_verdict(quality, sha)['verdict'] == 'PASS'
 
-print('provider-neutral managed auto-merge + latest exact-head Quality contract: PASS')
+print('provider-neutral managed auto-merge + latest exact-head Quality + final admission contract: PASS')
