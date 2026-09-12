@@ -138,6 +138,36 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         self.assertIn("factory:restarting", self.restart_text)
         self.assertIn("generation=${ATTEMPT}", self.restart_text)
 
+    def test_restart_reason_is_audit_only_not_worker_authority(self):
+        self.assertIn("JULES_RESTART_INTENT: mode=${MODE}; reason=${reason_text}", self.restart_text)
+        self.assertNotIn("Restart reason:", self.restart_text)
+        prompt_at = self.restart_text.index("CONTROL-PLANE POLICY (authoritative):")
+        prompt_end = self.restart_text.index("/tmp/replacement-request.json", prompt_at)
+        self.assertNotIn("REASON", self.restart_text[prompt_at:prompt_end])
+        self.assertNotIn("reason_text", self.restart_text[prompt_at:prompt_end])
+
+    def test_live_governance_is_revalidated_before_provider_side_effects_and_restore(self):
+        before_delete = self.restart_text.index("RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_DELETE")
+        delete_at = self.restart_text.index("-X DELETE")
+        before_create = self.restart_text.index("RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_CREATE")
+        create_at = self.restart_text.index("'https://jules.googleapis.com/v1alpha/sessions' > /tmp/replacement-session.json")
+        persisted_at = self.restart_text.index("gh api --method POST \"repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments\" -f body=\"$body\"")
+        before_restore = self.restart_text.index("RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_RESTORE")
+        restore_at = self.restart_text.index("--add-label 'factory:dispatched'", before_restore)
+        self.assertLess(before_delete, delete_at)
+        self.assertLess(delete_at, before_create)
+        self.assertLess(before_create, create_at)
+        self.assertLess(create_at, persisted_at)
+        self.assertLess(persisted_at, before_restore)
+        self.assertLess(before_restore, restore_at)
+        for marker in (
+            "factory:agent:chatgpt",
+            "factory:blocked",
+            "factory:escalated",
+            "factory:human-required",
+        ):
+            self.assertGreaterEqual(self.restart_text.count(marker), 4)
+
     def test_automatic_watchdog_only_delegates_after_progress_check(self):
         self.assertIn("progress-minutes", self.watchdog_text)
         self.assertIn(".automatic.eligible_states", self.watchdog_text)
