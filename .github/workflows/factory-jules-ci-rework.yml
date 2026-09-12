@@ -30,6 +30,11 @@ jobs:
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
 
     steps:
+      - name: Checkout control-plane
+        uses: actions/checkout@v4
+        with:
+          ref: Android
+
       - name: Validate trusted CI event and PR identity
         id: pr
         shell: bash
@@ -72,7 +77,7 @@ jobs:
           test "$(jq -r '.state' issue.json)" = 'open'
           echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve durable Jules session mapping
+      - name: Resolve canonical Jules identity
         id: session
         shell: bash
         run: |
@@ -80,20 +85,36 @@ jobs:
           issue='${{ steps.issue.outputs.issue_number }}'
           task_id="${GITHUB_REPOSITORY}#${issue}"
 
-          gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments?per_page=100" > comments.json
-          jq -r --arg task "$task_id" '
-            [.[].body
-              | try capture("<!-- roots-jules-session task_id=" + $task + " session=(?<session>sessions/[^ ]+) -->").session catch empty]
-            | unique[]
-          ' comments.json > sessions.txt
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments?per_page=100" \
+            | jq 'add' > comments.json
 
-          session_count="$(wc -l < sessions.txt | tr -d ' ')"
-          if [ "$session_count" -ne 1 ]; then
-            echo "Expected exactly one Jules session mapping for ${task_id}; found ${session_count}." >&2
-            exit 1
-          fi
+          python - "$GITHUB_REPOSITORY" "$issue" <<'PY' > worker-identity.json
+          import json
+          import sys
+          sys.path.insert(0, '.github/roots')
+          from factory_worker_identity import issue_identity
 
-          session="$(cat sessions.txt)"
+          repo = sys.argv[1]
+          issue = int(sys.argv[2])
+          with open('comments.json', encoding='utf-8') as handle:
+              comments = json.load(handle)
+          print(json.dumps(issue_identity(repo, issue, comments), sort_keys=True))
+          PY
+
+          test "$(jq -r '.provider' worker-identity.json)" = 'jules'
+          session="$(jq -r '.session' worker-identity.json)"
+          test -n "$session"
+
+          python .github/roots/factory_worker_identity.py validate \
+            --repo "$GITHUB_REPOSITORY" \
+            --issue "$issue" \
+            --comments-json comments.json \
+            --pr-json pr.json \
+            --base Android > pr-identity.json
+          test "$(jq -r '.provider' pr-identity.json)" = 'jules'
+          test "$(jq -r '.session' pr-identity.json)" = "$session"
+
           echo "session=$session" >> "$GITHUB_OUTPUT"
           echo "task_id=$task_id" >> "$GITHUB_OUTPUT"
 
