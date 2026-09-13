@@ -98,11 +98,11 @@ jobs:
 
               pr="$(jq -r '.pr' /tmp/worker-pr.json)"
               sha="$(jq -r '.head_sha' /tmp/worker-pr.json)"
-              [ -n "$pr" ] && [ "$pr" != null ] && [ -n "$sha" ] && [ "$sha" != null ] || {
+              if [ -z "$pr" ] || [ "$pr" = null ] || [ -z "$sha" ] || [ "$sha" = null ]; then
                 echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} canonical worker resolver returned incomplete PR identity." >&2
                 blocked=$((blocked + 1))
                 continue
-              }
+              fi
 
               set +e
               python "$quality_helper" --head "$sha" --comments-json /tmp/comments.json > /tmp/quality.json 2>/tmp/quality.err
@@ -184,7 +184,7 @@ jobs:
         run: |
           {
             echo '### Quality risk reconciliation v3'
-            echo '- Persisted worker identity may be Jules or ChatGPT; conflicting identities fail closed.'
+            echo '- Shared resolver supports roots-jules-session and roots-chatgpt-worker identities; conflicting identities fail closed.'
             echo '- Worker/PR correlation is resolved by the shared canonical identity resolver, including versioned Jules restart generations.'
             echo '- Only the latest canonical exact-head Quality verdict is effective; wake-up event order is never authority.'
             echo '- Latest REWORK/BLOCK revokes stale factory:risk-low before managed merge can act.'
