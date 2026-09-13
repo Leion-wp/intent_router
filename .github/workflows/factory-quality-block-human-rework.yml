@@ -95,10 +95,10 @@ jobs:
           session="$(jq -r '.session // empty' /tmp/identity.json)"
           pr="$(jq -r '.pr // empty' /tmp/identity.json)"
           sha="$(jq -r '.head_sha // empty' /tmp/identity.json)"
-          [ -n "$session" ] && [ -n "$pr" ] && [ -n "$sha" ] || {
+          if [ -z "$session" ] || [ -z "$pr" ] || [ -z "$sha" ]; then
             echo 'HUMAN_GATE_DENIED: canonical Jules worker/PR identity is incomplete.' >&2
             exit 1
-          }
+          fi
 
           gh api "repos/${TARGET_REPO}/pulls/${pr}" > /tmp/pr.json
           [ "$(jq -r '.state' /tmp/pr.json)" = open ]
