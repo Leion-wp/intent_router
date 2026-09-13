@@ -1,5 +1,8 @@
+import json
 import pathlib
+import subprocess
 import sys
+import tempfile
 
 
 ROOTS = pathlib.Path(__file__).resolve().parent
@@ -36,6 +39,40 @@ def test_unknown_state_and_repeated_escalation_fail_closed() -> None:
     assert decide("FAILED", 0, False, False, True) == "none"
 
 
+def test_canonical_issue_identity_cli_selects_latest_restart_generation() -> None:
+    comments = [
+        {
+            "body": "<!-- roots-jules-session task_id=Leion-wp/example#7 session=sessions/S1 -->"
+        },
+        {
+            "body": "<!-- roots-jules-session task_id=Leion-wp/example#7 session=sessions/S2 generation=1 -->"
+        },
+    ]
+    with tempfile.TemporaryDirectory() as directory:
+        comments_path = pathlib.Path(directory) / "comments.json"
+        comments_path.write_text(json.dumps(comments))
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOTS / "factory_worker_identity.py"),
+                "issue",
+                "--repo",
+                "Leion-wp/example",
+                "--issue",
+                "7",
+                "--comments-json",
+                str(comments_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    identity = json.loads(completed.stdout)
+    assert identity["provider"] == "jules"
+    assert identity["session"] == "sessions/S2"
+    assert identity["generation"] == 1
+
+
 def test_human_quality_rework_receipt_requires_authenticated_jules_activity() -> None:
     workflow = (ROOTS.parent / "workflows" / "factory-quality-block-human-rework.yml").read_text()
     delivered_branch_start = workflow.index(
@@ -58,6 +95,15 @@ def test_human_quality_rework_receipt_requires_authenticated_jules_activity() ->
     assert "sed -n 's/.* session=" not in workflow
 
 
+def test_escalated_diagnostics_uses_canonical_issue_identity() -> None:
+    workflow = (ROOTS.parent / "workflows" / "factory-escalated-worker-diagnostics.yml").read_text()
+    assert "factory_worker_identity.py" in workflow
+    assert 'python "$identity_helper" issue' in workflow
+    assert "--comments-json /tmp/comments.json" in workflow
+    assert "no unambiguous canonical worker identity" in workflow
+    assert "sed -n 's/.* session=" not in workflow
+
+
 def test_legacy_jules_generation_parsers_are_only_collision_deferred() -> None:
     workflows = ROOTS.parent / "workflows"
     legacy_parser = r"session=\([^ ]*\) -->"
@@ -71,7 +117,7 @@ def test_legacy_jules_generation_parsers_are_only_collision_deferred() -> None:
         "factory-fleet-jules-quality-rework.yml",  # blocked by PR #305
         "factory-fleet-jules-rework.yml",  # blocked by PR #305
         "factory-fleet-watchdog.yml",  # blocked by PR #305
-    }
+    }, remaining
 
 
 def test_control_plane_wiring_contracts() -> None:
@@ -100,7 +146,9 @@ if __name__ == "__main__":
     test_terminal_or_unexpected_human_states_escalate_without_replacement()
     test_pr_or_session_output_is_progress_and_prevents_escalation()
     test_unknown_state_and_repeated_escalation_fail_closed()
+    test_canonical_issue_identity_cli_selects_latest_restart_generation()
     test_human_quality_rework_receipt_requires_authenticated_jules_activity()
+    test_escalated_diagnostics_uses_canonical_issue_identity()
     test_legacy_jules_generation_parsers_are_only_collision_deferred()
     test_control_plane_wiring_contracts()
     print("worker escalation tests passed")
