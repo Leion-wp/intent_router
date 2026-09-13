@@ -58,6 +58,22 @@ def test_human_quality_rework_receipt_requires_authenticated_jules_activity() ->
     assert "sed -n 's/.* session=" not in workflow
 
 
+def test_legacy_jules_generation_parsers_are_only_collision_deferred() -> None:
+    workflows = ROOTS.parent / "workflows"
+    legacy_parser = r"session=\([^ ]*\) -->"
+    remaining = {
+        path.name
+        for path in workflows.glob("*.yml")
+        if legacy_parser in path.read_text()
+    }
+    assert remaining == {
+        "factory-fleet-completion-reconciler.yml",  # blocked by PR #312
+        "factory-fleet-jules-quality-rework.yml",  # blocked by PR #305
+        "factory-fleet-jules-rework.yml",  # blocked by PR #305
+        "factory-fleet-watchdog.yml",  # blocked by PR #305
+    }
+
+
 def test_control_plane_wiring_contracts() -> None:
     watchdog = (ROOTS.parent / "workflows" / "factory-fleet-watchdog.yml").read_text()
     scheduler = (ROOTS.parent / "workflows" / "factory-fleet-scheduler.yml").read_text()
@@ -85,5 +101,6 @@ if __name__ == "__main__":
     test_pr_or_session_output_is_progress_and_prevents_escalation()
     test_unknown_state_and_repeated_escalation_fail_closed()
     test_human_quality_rework_receipt_requires_authenticated_jules_activity()
+    test_legacy_jules_generation_parsers_are_only_collision_deferred()
     test_control_plane_wiring_contracts()
     print("worker escalation tests passed")
