@@ -49,8 +49,10 @@ jobs:
             gh label create 'factory:telemetry' --repo "$repo" --color 5319E7 \
               --description 'Factory-generated product and flow telemetry' --force >/dev/null 2>&1 || true
 
-            gh api --paginate "repos/${repo}/issues?state=all&per_page=100" > /tmp/issues.json
-            gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+            bash .github/roots/factory-gh-array-collection.sh \
+              "repos/${repo}/issues?state=all&per_page=100" > /tmp/issues.json
+            bash .github/roots/factory-gh-array-collection.sh \
+              "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
             gh pr list --repo "$repo" --state open --limit 100 --json number > /tmp/open-prs.json
             gh pr list --repo "$repo" --state merged --limit 100 --json number > /tmp/merged-prs.json
 
@@ -71,7 +73,8 @@ jobs:
             blocked_events=0
             while IFS= read -r issue; do
               [ -z "$issue" ] && continue
-              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              comments="$(bash .github/roots/factory-gh-array-collection.sh \
+                "repos/${repo}/issues/${issue}/comments?per_page=100")"
               count="$(jq '[.[] | select((.body // "") | contains("<!-- roots-fleet-ci-rework fingerprint="))] | length' <<< "$comments")"
               blocked_count="$(jq '[.[] | select((.body // "") | contains("CONTROL_PLANE_BLOCKED"))] | length' <<< "$comments")"
               rework_events="$((rework_events + count))"
