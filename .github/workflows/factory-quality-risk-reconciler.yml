@@ -184,7 +184,7 @@ jobs:
         run: |
           {
             echo '### Quality risk reconciliation v3'
-            echo '- Shared resolver supports roots-jules-session and roots-chatgpt-worker identities; conflicting identities fail closed.'
+            echo '- Shared resolver supports roots-jules-session and roots-chatgpt-worker identities; conflicting Jules and ChatGPT worker identities fail closed.'
             echo '- Worker/PR correlation is resolved by the shared canonical identity resolver, including versioned Jules restart generations.'
             echo '- Only the latest canonical exact-head Quality verdict is effective; wake-up event order is never authority.'
             echo '- Latest REWORK/BLOCK revokes stale factory:risk-low before managed merge can act.'
