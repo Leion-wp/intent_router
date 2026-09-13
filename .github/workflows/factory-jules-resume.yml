@@ -34,6 +34,8 @@ jobs:
     steps:
       - name: Checkout control-plane
         uses: actions/checkout@v4
+        with:
+          ref: Android
 
       - name: Validate human resume request
         shell: bash
@@ -77,6 +79,9 @@ jobs:
 
           pr_number="$(jq -r '.[0].number' linked-prs.json)"
           pr_url="$(jq -r '.[0].url' linked-prs.json)"
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}" > pr.json
+          test "$(jq -r '.base.ref' pr.json)" = 'Android'
+          test "$(jq -r '.head.repo.full_name' pr.json)" = "$GITHUB_REPOSITORY"
           echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
           echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
 
@@ -87,23 +92,47 @@ jobs:
           set -euo pipefail
           task_id="${GITHUB_REPOSITORY}#${ISSUE_NUMBER}"
 
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments?per_page=100" > comments.json
-          jq -r --arg task "$task_id" '
-            [.[].body
-              | try capture("<!-- roots-jules-session task_id=" + $task + " session=(?<session>sessions/[^ ]+) -->").session catch empty]
-            | unique[]
-          ' comments.json > mapped-sessions.txt
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments?per_page=100" \
+            | jq 'add' > comments.json
 
-          mapped_count="$(wc -l < mapped-sessions.txt | tr -d ' ')"
-          if [ "$mapped_count" -gt 1 ]; then
-            echo "CONTROL_PLANE_ANOMALY: multiple durable Jules mappings found for ${task_id}." >&2
-            exit 1
-          fi
+          set +e
+          python - "$GITHUB_REPOSITORY" "$ISSUE_NUMBER" <<'PY' > worker-identity.json
+          import json
+          import sys
+          sys.path.insert(0, '.github/roots')
+          from factory_worker_identity import IdentityConflict, IdentityNoMatch, issue_identity
 
-          if [ "$mapped_count" -eq 1 ]; then
-            session="$(cat mapped-sessions.txt)"
+          repo = sys.argv[1]
+          issue = int(sys.argv[2])
+          with open('comments.json', encoding='utf-8') as handle:
+              comments = json.load(handle)
+          try:
+              identity = issue_identity(repo, issue, comments)
+          except IdentityNoMatch as exc:
+              print(f'IDENTITY_NO_MATCH: {exc}', file=sys.stderr)
+              raise SystemExit(2)
+          except IdentityConflict as exc:
+              print(f'IDENTITY_CONFLICT: {exc}', file=sys.stderr)
+              raise SystemExit(3)
+          print(json.dumps(identity, sort_keys=True))
+          PY
+          identity_rc=$?
+          set -e
+
+          if [ "$identity_rc" -eq 0 ]; then
+            test "$(jq -r '.provider' worker-identity.json)" = 'jules'
+            session="$(jq -r '.session' worker-identity.json)"
+            python .github/roots/factory_worker_identity.py validate \
+              --repo "$GITHUB_REPOSITORY" \
+              --issue "$ISSUE_NUMBER" \
+              --comments-json comments.json \
+              --pr-json pr.json \
+              --base Android > pr-identity.json
+            test "$(jq -r '.provider' pr-identity.json)" = 'jules'
+            test "$(jq -r '.session' pr-identity.json)" = "$session"
             resolution="durable_mapping"
-          else
+          elif [ "$identity_rc" -eq 2 ]; then
             curl --fail-with-body --silent --show-error \
               -H "X-Goog-Api-Key: $JULES_API_KEY" \
               'https://jules.googleapis.com/v1alpha/sessions?pageSize=100' > sessions.json
@@ -119,7 +148,18 @@ jobs:
             fi
 
             session="$(cat discovered-sessions.txt)"
+            token="${session##*/}"
+            head_ref="$(jq -r '.head.ref' pr.json)"
+            case "$head_ref" in
+              *"$token"*) ;;
+              *)
+                echo "Discovered Jules session ${session} does not match active PR branch ${head_ref}." >&2
+                exit 1
+                ;;
+            esac
             resolution="api_discovery"
+          else
+            exit "$identity_rc"
           fi
 
           curl --fail-with-body --silent --show-error \
@@ -145,6 +185,24 @@ jobs:
             --method POST \
             "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
             -f body="$body" >/dev/null
+
+      - name: Revalidate canonical worker identity before follow-up
+        shell: bash
+        env:
+          SESSION: ${{ steps.session.outputs.session }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments?per_page=100" \
+            | jq 'add' > comments-final.json
+          python .github/roots/factory_worker_identity.py validate \
+            --repo "$GITHUB_REPOSITORY" \
+            --issue "$ISSUE_NUMBER" \
+            --comments-json comments-final.json \
+            --pr-json pr.json \
+            --base Android > final-identity.json
+          test "$(jq -r '.provider' final-identity.json)" = 'jules'
+          test "$(jq -r '.session' final-identity.json)" = "$SESSION"
 
       - name: Send follow-up to the same Jules session
         shell: bash

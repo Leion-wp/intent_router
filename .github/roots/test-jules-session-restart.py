@@ -14,6 +14,12 @@ SPEC = importlib.util.spec_from_file_location("jules_restart", ROOT / "factory_j
 restart = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(restart)
+IDENTITY_SPEC = importlib.util.spec_from_file_location(
+    "factory_worker_identity", ROOT / "factory_worker_identity.py"
+)
+worker_identity = importlib.util.module_from_spec(IDENTITY_SPEC)
+assert IDENTITY_SPEC.loader is not None
+IDENTITY_SPEC.loader.exec_module(worker_identity)
 
 
 class JulesRestartPolicyTests(unittest.TestCase):
@@ -82,15 +88,47 @@ class JulesRestartPolicyTests(unittest.TestCase):
         )
 
 
+class WorkerIdentityGenerationTests(unittest.TestCase):
+    def test_valid_generation_with_malformed_same_task_sibling_fails_closed(self):
+        repo = "Leion-wp/example"
+        issue = 7
+        comments = [
+            {
+                "body": (
+                    "<!-- roots-jules-session task_id=Leion-wp/example#7 "
+                    "session=sessions/S2 generation=1 -->\n"
+                    "<!-- roots-jules-session task_id=Leion-wp/example#7 "
+                    "session=sessions/S3 generation=bogus -->"
+                )
+            }
+        ]
+        with self.assertRaises(worker_identity.IdentityConflict):
+            worker_identity.issue_identity(repo, issue, comments)
+
+
 class JulesRestartWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.restart_path = WORKFLOWS / "factory-jules-session-restart.yml"
         cls.frontdoor_path = WORKFLOWS / "factory-jules-session-restart-by-issue.yml"
         cls.watchdog_path = WORKFLOWS / "factory-jules-restart-watchdog.yml"
+        cls.ci_rework_path = WORKFLOWS / "factory-jules-ci-rework.yml"
+        cls.resume_path = WORKFLOWS / "factory-jules-resume.yml"
+        cls.stalled_reconciler_path = WORKFLOWS / "factory-stalled-reconciler.yml"
+        cls.quality_risk_path = WORKFLOWS / "factory-quality-risk-reconciler.yml"
+        cls.quality_gate_path = WORKFLOWS / "factory-copilot-quality-gate.yml"
+        cls.quality_block_path = WORKFLOWS / "factory-quality-block-reconciler.yml"
+        cls.quality_block_human_rework_path = WORKFLOWS / "factory-quality-block-human-rework.yml"
         cls.restart_text = cls.restart_path.read_text(encoding="utf-8")
         cls.frontdoor_text = cls.frontdoor_path.read_text(encoding="utf-8")
         cls.watchdog_text = cls.watchdog_path.read_text(encoding="utf-8")
+        cls.ci_rework_text = cls.ci_rework_path.read_text(encoding="utf-8")
+        cls.resume_text = cls.resume_path.read_text(encoding="utf-8")
+        cls.stalled_reconciler_text = cls.stalled_reconciler_path.read_text(encoding="utf-8")
+        cls.quality_risk_text = cls.quality_risk_path.read_text(encoding="utf-8")
+        cls.quality_gate_text = cls.quality_gate_path.read_text(encoding="utf-8")
+        cls.quality_block_text = cls.quality_block_path.read_text(encoding="utf-8")
+        cls.quality_block_human_rework_text = cls.quality_block_human_rework_path.read_text(encoding="utf-8")
         cls.restart_yaml = yaml.safe_load(cls.restart_text)
         cls.frontdoor_yaml = yaml.safe_load(cls.frontdoor_text)
         cls.watchdog_yaml = yaml.safe_load(cls.watchdog_text)
@@ -166,6 +204,72 @@ class JulesRestartWorkflowTests(unittest.TestCase):
             "factory-jules-restart-frontdoor-${{ inputs.issue_number }}",
         )
         self.assertNotIn("repository", concurrency["group"])
+
+    def test_rework_and_resume_use_canonical_worker_identity(self):
+        for workflow_text in (self.ci_rework_text, self.resume_text):
+            self.assertIn("factory_worker_identity", workflow_text)
+            self.assertIn("issue_identity", workflow_text)
+            self.assertIn("factory_worker_identity.py validate", workflow_text)
+            self.assertNotIn('capture("<!-- roots-jules-session', workflow_text)
+
+        self.assertIn("Resolve canonical Jules identity", self.ci_rework_text)
+        self.assertIn("--pr-json pr.json", self.ci_rework_text)
+        self.assertIn("--base Android", self.ci_rework_text)
+        self.assertIn("Revalidate canonical worker identity before follow-up", self.resume_text)
+        self.assertIn("identity_rc", self.resume_text)
+        self.assertIn("api_discovery", self.resume_text)
+        self.assertIn("Discovered Jules session ${session} does not match active PR branch", self.resume_text)
+
+    def test_stalled_reconciler_uses_canonical_versioned_identity(self):
+        self.assertIn("actions/checkout@v4", self.stalled_reconciler_text)
+        self.assertIn("factory_worker_identity", self.stalled_reconciler_text)
+        self.assertIn("issue_identity", self.stalled_reconciler_text)
+        self.assertIn("IDENTITY_CONFLICT", self.stalled_reconciler_text)
+        self.assertIn("canonical persisted Jules session ID", self.stalled_reconciler_text)
+        self.assertIn(
+            'gh api --paginate --slurp "repos/${repo}/issues/${issue}/comments"',
+            self.stalled_reconciler_text,
+        )
+        self.assertIn("| jq 'add // []'", self.stalled_reconciler_text)
+        self.assertNotIn("sed -n 's/.* session=", self.stalled_reconciler_text)
+
+    def test_quality_risk_reconciler_uses_canonical_versioned_identity(self):
+        self.assertIn("factory_worker_identity.py", self.quality_risk_text)
+        self.assertIn('python "$worker_helper" select', self.quality_risk_text)
+        self.assertIn("--comments-json /tmp/comments.json", self.quality_risk_text)
+        self.assertIn("--prs-json /tmp/prs.json", self.quality_risk_text)
+        self.assertIn('--base "$default_branch"', self.quality_risk_text)
+        self.assertIn("canonical worker identity/PR correlation failed", self.quality_risk_text)
+        self.assertNotIn("jules_marker=", self.quality_risk_text)
+        self.assertNotIn("chatgpt_marker=", self.quality_risk_text)
+        self.assertNotIn("sed -n 's/.* session=", self.quality_risk_text)
+
+    def test_identity_consumers_normalize_paginated_comment_history(self):
+        for workflow_text in (
+            self.stalled_reconciler_text,
+            self.quality_gate_text,
+            self.quality_block_text,
+            self.quality_block_human_rework_text,
+        ):
+            self.assertIn("gh api --paginate --slurp", workflow_text)
+            self.assertIn("| jq 'add // []'", workflow_text)
+
+        self.assertNotIn(
+            'gh api --paginate "repos/${TARGET_REPO}/issues/${issue}/comments" > /tmp/identity-comments.json',
+            self.quality_gate_text,
+        )
+        self.assertNotIn(
+            'gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/current-comments.json',
+            self.quality_gate_text,
+        )
+        self.assertNotIn(
+            'gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/comments.json',
+            self.quality_block_text,
+        )
+        self.assertNotIn(
+            'gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments"',
+            self.quality_block_human_rework_text,
+        )
 
 
 if __name__ == "__main__":

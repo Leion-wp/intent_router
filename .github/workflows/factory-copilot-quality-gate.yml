@@ -118,7 +118,7 @@ jobs:
               continue
             fi
 
-            comments="$(gh api --paginate "repos/${TARGET_REPO}/issues/${issue}/comments")"
+            comments="$(gh api --paginate --slurp "repos/${TARGET_REPO}/issues/${issue}/comments" | jq 'add // []')"
             if jq -e --arg sha "$sha" '.[] | select((.body // "") | contains("<!-- roots-quality-verdict head=" + $sha + " verdict="))' <<< "$comments" >/dev/null; then
               echo "QUALITY_GATE_SKIP: exact-head verdict already exists for PR #${pr} head ${sha}."
               continue
@@ -145,7 +145,8 @@ jobs:
           [ "$(jq -r '.state' /tmp/pr.json)" = open ] || exit 0
           [ "$(jq -r '.draft' /tmp/pr.json)" = false ] || exit 0
 
-          gh api --paginate "repos/${TARGET_REPO}/issues/${issue}/comments" > /tmp/identity-comments.json
+          gh api --paginate --slurp "repos/${TARGET_REPO}/issues/${issue}/comments" \
+            | jq 'add // []' > /tmp/identity-comments.json
           set +e
           python "$identity_helper" validate \
             --repo "$TARGET_REPO" \
@@ -233,7 +234,8 @@ jobs:
           [ "$current_sha" = "$sha" ] || { echo 'QUALITY_GATE_DEFERRED: PR head changed during review.'; exit 0; }
           [ "$(jq -r '.base.ref' /tmp/current-pr.json)" = "$default_branch" ] || { echo 'QUALITY_GATE_DEFERRED: PR base changed during review.'; exit 0; }
 
-          gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/current-comments.json
+          gh api --paginate --slurp "repos/${repo}/issues/${issue}/comments" \
+            | jq 'add // []' > /tmp/current-comments.json
           set +e
           python "$identity_helper" validate \
             --repo "$repo" \

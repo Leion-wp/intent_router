@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 JULES_RE = re.compile(
-    r"<!-- roots-jules-session task_id=(?P<task>\S+) session=(?P<session>sessions/[^ ]+) -->"
+    r"<!-- roots-jules-session task_id=(?P<task>\S+) session=(?P<session>sessions/[^ ]+)(?: generation=(?P<generation>[1-9]\d*))? -->"
 )
 CHATGPT_RE = re.compile(
     r"<!-- roots-chatgpt-worker task_id=(?P<task>\S+) branch=(?P<branch>[^ ]+) pr=(?P<pr>\d+) -->"
@@ -40,12 +40,15 @@ def _bodies(comments: list[dict[str, Any]]) -> list[str]:
 def _extract_identities(repo: str, issue: int, comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     task_id = f"{repo}#{issue}"
     identities: list[dict[str, Any]] = []
+    jules_prefix = f"<!-- roots-jules-session task_id={task_id} "
     for body in _bodies(comments):
-        for match in JULES_RE.finditer(body):
-            if match.group("task") != task_id:
-                continue
+        jules_matches = [match for match in JULES_RE.finditer(body) if match.group("task") == task_id]
+        if body.count(jules_prefix) != len(jules_matches):
+            raise IdentityConflict(f"{task_id} has a malformed Jules worker identity marker")
+        for match in jules_matches:
             session = match.group("session")
             token = session.rsplit("/", 1)[-1]
+            generation_text = match.group("generation")
             if token:
                 identities.append(
                     {
@@ -53,6 +56,7 @@ def _extract_identities(repo: str, issue: int, comments: list[dict[str, Any]]) -
                         "session": session,
                         "token": token,
                         "issue": issue,
+                        "generation": int(generation_text) if generation_text is not None else None,
                     }
                 )
         for match in CHATGPT_RE.finditer(body):
@@ -70,11 +74,28 @@ def _extract_identities(repo: str, issue: int, comments: list[dict[str, Any]]) -
     unique: dict[tuple[Any, ...], dict[str, Any]] = {}
     for identity in identities:
         if identity["provider"] == "jules":
-            key = ("jules", identity["session"])
+            key = ("jules", identity["session"], identity.get("generation"))
         else:
             key = ("chatgpt", identity["branch"], identity["pr"])
         unique[key] = identity
-    return list(unique.values())
+
+    deduped = list(unique.values())
+    jules = [identity for identity in deduped if identity["provider"] == "jules"]
+    chatgpt = [identity for identity in deduped if identity["provider"] == "chatgpt"]
+    generated = [identity for identity in jules if identity.get("generation") is not None]
+    if generated:
+        by_generation: dict[int, dict[str, Any]] = {}
+        for identity in generated:
+            generation = int(identity["generation"])
+            existing = by_generation.get(generation)
+            if existing is not None and existing["session"] != identity["session"]:
+                raise IdentityConflict(
+                    f"{task_id} has multiple Jules sessions for restart generation {generation}"
+                )
+            by_generation[generation] = identity
+        canonical = by_generation[max(by_generation)]
+        return [canonical, *chatgpt]
+    return deduped
 
 
 def issue_identity(repo: str, issue: int, comments: list[dict[str, Any]]) -> dict[str, Any]:
@@ -308,6 +329,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    issue = subparsers.add_parser("issue")
+    issue.add_argument("--repo", required=True)
+    issue.add_argument("--issue", required=True, type=int)
+    issue.add_argument("--comments-json", required=True)
+
     resolve = subparsers.add_parser("resolve")
     resolve.add_argument("--repo", required=True)
     resolve.add_argument("--pr-json", required=True)
@@ -334,7 +360,15 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.command == "resolve":
+        if args.command == "issue":
+            identity = issue_identity(args.repo, args.issue, _load(args.comments_json))
+            result = {
+                "status": "ok",
+                "repo": args.repo,
+                "issue": args.issue,
+                **identity,
+            }
+        elif args.command == "resolve":
             result = resolve_pr(args.repo, _load(args.pr_json), _load(args.issues_json), args.base)
         elif args.command == "select":
             result = select_pr(
