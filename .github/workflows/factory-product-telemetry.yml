@@ -53,8 +53,10 @@ jobs:
               "repos/${repo}/issues?state=all&per_page=100" > /tmp/issues.json
             bash .github/roots/factory-gh-array-collection.sh \
               "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
-            gh pr list --repo "$repo" --state open --limit 100 --json number > /tmp/open-prs.json
-            gh pr list --repo "$repo" --state merged --limit 100 --json number > /tmp/merged-prs.json
+            bash .github/roots/factory-gh-array-collection.sh \
+              "repos/${repo}/pulls?state=open&per_page=100" > /tmp/open-prs.json
+            bash .github/roots/factory-gh-array-collection.sh \
+              "repos/${repo}/pulls?state=closed&per_page=100" > /tmp/closed-prs.json
 
             open_issues="$(jq '[.[] | select(.pull_request == null and .state == "open")] | length' /tmp/issues.json)"
             queued="$(jq '[.[] | select(.pull_request == null and .state == "open") | select(any(.labels[]?; .name == "factory:queued"))] | length' /tmp/issues.json)"
@@ -65,7 +67,7 @@ jobs:
             open_milestones="$(jq '[.[] | select(.state == "open")] | length' /tmp/milestones.json)"
             closed_milestones="$(jq '[.[] | select(.state == "closed")] | length' /tmp/milestones.json)"
             open_prs="$(jq 'length' /tmp/open-prs.json)"
-            merged_prs="$(jq 'length' /tmp/merged-prs.json)"
+            merged_prs="$(jq '[.[] | select(.merged_at != null)] | length' /tmp/closed-prs.json)"
             jq '[.[] | select(.pull_request == null and .state == "closed" and .created_at != null and .closed_at != null) | (((.closed_at | fromdateiso8601) - (.created_at | fromdateiso8601)) / 3600)]' /tmp/issues.json > /tmp/cycles.json
 
             rework_events=0
