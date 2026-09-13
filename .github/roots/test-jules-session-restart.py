@@ -116,6 +116,8 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         cls.resume_path = WORKFLOWS / "factory-jules-resume.yml"
         cls.stalled_reconciler_path = WORKFLOWS / "factory-stalled-reconciler.yml"
         cls.quality_risk_path = WORKFLOWS / "factory-quality-risk-reconciler.yml"
+        cls.quality_gate_path = WORKFLOWS / "factory-copilot-quality-gate.yml"
+        cls.quality_block_path = WORKFLOWS / "factory-quality-block-reconciler.yml"
         cls.restart_text = cls.restart_path.read_text(encoding="utf-8")
         cls.frontdoor_text = cls.frontdoor_path.read_text(encoding="utf-8")
         cls.watchdog_text = cls.watchdog_path.read_text(encoding="utf-8")
@@ -123,6 +125,8 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         cls.resume_text = cls.resume_path.read_text(encoding="utf-8")
         cls.stalled_reconciler_text = cls.stalled_reconciler_path.read_text(encoding="utf-8")
         cls.quality_risk_text = cls.quality_risk_path.read_text(encoding="utf-8")
+        cls.quality_gate_text = cls.quality_gate_path.read_text(encoding="utf-8")
+        cls.quality_block_text = cls.quality_block_path.read_text(encoding="utf-8")
         cls.restart_yaml = yaml.safe_load(cls.restart_text)
         cls.frontdoor_yaml = yaml.safe_load(cls.frontdoor_text)
         cls.watchdog_yaml = yaml.safe_load(cls.watchdog_text)
@@ -237,6 +241,28 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         self.assertNotIn("jules_marker=", self.quality_risk_text)
         self.assertNotIn("chatgpt_marker=", self.quality_risk_text)
         self.assertNotIn("sed -n 's/.* session=", self.quality_risk_text)
+
+    def test_identity_consumers_normalize_paginated_comment_history(self):
+        for workflow_text in (
+            self.stalled_reconciler_text,
+            self.quality_gate_text,
+            self.quality_block_text,
+        ):
+            self.assertIn("gh api --paginate --slurp", workflow_text)
+            self.assertIn("| jq 'add // []'", workflow_text)
+
+        self.assertNotIn(
+            'gh api --paginate "repos/${TARGET_REPO}/issues/${issue}/comments" > /tmp/identity-comments.json',
+            self.quality_gate_text,
+        )
+        self.assertNotIn(
+            'gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/current-comments.json',
+            self.quality_gate_text,
+        )
+        self.assertNotIn(
+            'gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/comments.json',
+            self.quality_block_text,
+        )
 
 
 if __name__ == "__main__":
