@@ -118,6 +118,7 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         cls.quality_risk_path = WORKFLOWS / "factory-quality-risk-reconciler.yml"
         cls.quality_gate_path = WORKFLOWS / "factory-copilot-quality-gate.yml"
         cls.quality_block_path = WORKFLOWS / "factory-quality-block-reconciler.yml"
+        cls.quality_block_human_rework_path = WORKFLOWS / "factory-quality-block-human-rework.yml"
         cls.restart_text = cls.restart_path.read_text(encoding="utf-8")
         cls.frontdoor_text = cls.frontdoor_path.read_text(encoding="utf-8")
         cls.watchdog_text = cls.watchdog_path.read_text(encoding="utf-8")
@@ -127,6 +128,7 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         cls.quality_risk_text = cls.quality_risk_path.read_text(encoding="utf-8")
         cls.quality_gate_text = cls.quality_gate_path.read_text(encoding="utf-8")
         cls.quality_block_text = cls.quality_block_path.read_text(encoding="utf-8")
+        cls.quality_block_human_rework_text = cls.quality_block_human_rework_path.read_text(encoding="utf-8")
         cls.restart_yaml = yaml.safe_load(cls.restart_text)
         cls.frontdoor_yaml = yaml.safe_load(cls.frontdoor_text)
         cls.watchdog_yaml = yaml.safe_load(cls.watchdog_text)
@@ -247,6 +249,7 @@ class JulesRestartWorkflowTests(unittest.TestCase):
             self.stalled_reconciler_text,
             self.quality_gate_text,
             self.quality_block_text,
+            self.quality_block_human_rework_text,
         ):
             self.assertIn("gh api --paginate --slurp", workflow_text)
             self.assertIn("| jq 'add // []'", workflow_text)
@@ -262,6 +265,10 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         self.assertNotIn(
             'gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/comments.json',
             self.quality_block_text,
+        )
+        self.assertNotIn(
+            'gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments"',
+            self.quality_block_human_rework_text,
         )
 
 
