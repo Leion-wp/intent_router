@@ -43,7 +43,7 @@ def _extract_identities(repo: str, issue: int, comments: list[dict[str, Any]]) -
     jules_prefix = f"<!-- roots-jules-session task_id={task_id} "
     for body in _bodies(comments):
         jules_matches = [match for match in JULES_RE.finditer(body) if match.group("task") == task_id]
-        if jules_prefix in body and not jules_matches:
+        if body.count(jules_prefix) != len(jules_matches):
             raise IdentityConflict(f"{task_id} has a malformed Jules worker identity marker")
         for match in jules_matches:
             session = match.group("session")
