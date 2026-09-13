@@ -28,6 +28,9 @@ def expect_rejected(text: str) -> None:
 
 def assert_paginated_array_helper_contract() -> None:
     assert COLLECTION_HELPER.is_file(), "shared GitHub array pagination helper is missing"
+    page_one = [{"id": item} for item in range(1, 61)]
+    page_two = [{"id": item} for item in range(61, 121)]
+    slurped_pages = json.dumps([page_one, page_two], separators=(",", ":"))
     with tempfile.TemporaryDirectory() as tmp:
         fake_gh = pathlib.Path(tmp) / "gh"
         fake_gh.write_text(
@@ -37,7 +40,7 @@ def assert_paginated_array_helper_contract() -> None:
             "test \"$2\" = --paginate\n"
             "test \"$3\" = --slurp\n"
             "test \"$4\" = 'repos/example/issues?per_page=100'\n"
-            "printf '%s\\n' '[[{\"id\":1}],[{\"id\":2}]]'\n",
+            f"printf '%s\\n' '{slurped_pages}'\n",
             encoding="utf-8",
         )
         fake_gh.chmod(fake_gh.stat().st_mode | stat.S_IXUSR)
@@ -50,7 +53,10 @@ def assert_paginated_array_helper_contract() -> None:
             text=True,
             env=env,
         )
-        assert json.loads(completed.stdout) == [{"id": 1}, {"id": 2}]
+        normalized = json.loads(completed.stdout)
+        assert len(normalized) == 120, "shared helper truncated a logical collection above 100 items"
+        assert normalized[0] == {"id": 1}
+        assert normalized[-1] == {"id": 120}
 
 
 def assert_whole_set_consumers_use_shared_helper() -> None:
@@ -63,11 +69,13 @@ def assert_whole_set_consumers_use_shared_helper() -> None:
             ],
         },
         "factory-product-telemetry.yml": {
-            "min_helper_calls": 3,
+            "min_helper_calls": 5,
             "unsafe": [
                 'gh api --paginate "repos/${repo}/issues?state=all&per_page=100" > /tmp/issues.json',
                 'gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json',
                 'comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"',
+                'gh pr list --repo "$repo" --state open --limit 100 --json number > /tmp/open-prs.json',
+                'gh pr list --repo "$repo" --state merged --limit 100 --json number > /tmp/merged-prs.json',
             ],
         },
         "factory-dynamic-planning-handoff.yml": {
@@ -97,6 +105,17 @@ def assert_whole_set_consumers_use_shared_helper() -> None:
         )
         for unsafe in contract["unsafe"]:
             assert unsafe not in text, f"{filename} restored raw paginated whole-set parsing: {unsafe}"
+
+    telemetry = (WORKFLOWS / "factory-product-telemetry.yml").read_text(encoding="utf-8")
+    assert 'repos/${repo}/pulls?state=open&per_page=100' in telemetry, (
+        "product telemetry must collect the complete open PR set through the shared helper"
+    )
+    assert 'repos/${repo}/pulls?state=closed&per_page=100' in telemetry, (
+        "product telemetry must collect the complete closed PR set before merged filtering"
+    )
+    assert "select(.merged_at != null)" in telemetry, (
+        "product telemetry must distinguish merged PRs from closed-unmerged PRs"
+    )
 
 
 # Positive control-plane mutation language must remain rejected.
