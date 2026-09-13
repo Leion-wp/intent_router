@@ -50,8 +50,12 @@ def test_human_quality_rework_receipt_requires_authenticated_jules_activity() ->
     assert 'grep -Fq "$token" /tmp/activities.json' in delivered_branch
     assert "HUMAN_REWORK_UNPROVEN_RECEIPT" in delivered_branch
     assert delivered_branch.index("activities?pageSize=100") < delivered_branch.index("finalize=true")
-    assert "roots-chatgpt-worker" in workflow
-    assert "conflicting cross-provider worker identity" in workflow
+    assert "factory_worker_identity.py" in workflow
+    assert 'python "$identity_helper" select' in workflow
+    assert "--comments-json /tmp/comments.json" in workflow
+    assert "--prs-json /tmp/prs.json" in workflow
+    assert "canonical Jules ownership" in workflow
+    assert "sed -n 's/.* session=" not in workflow
 
 
 def test_control_plane_wiring_contracts() -> None:
