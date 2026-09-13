@@ -59,7 +59,7 @@ jobs:
               [ -z "$issue" ] && continue
               inspected="$((inspected + 1))"
 
-              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              comments="$(gh api --paginate --slurp "repos/${repo}/issues/${issue}/comments" | jq 'add // []')"
               printf '%s' "$comments" > /tmp/stalled-comments.json
               identity_json=''
               identity_rc=0
