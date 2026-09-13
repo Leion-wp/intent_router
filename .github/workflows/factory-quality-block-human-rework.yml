@@ -68,45 +68,45 @@ jobs:
           [ "$(jq -r '.state' /tmp/issue.json)" = open ]
           gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments" > /tmp/comments.json
 
-          session_marker="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${TARGET_REPO}#${ISSUE} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' /tmp/comments.json)"
-          [ -n "$session_marker" ] || { echo 'HUMAN_GATE_DENIED: no persisted Jules identity.' >&2; exit 1; }
-          if jq -e --arg prefix "<!-- roots-chatgpt-worker task_id=${TARGET_REPO}#${ISSUE} " '.[] | select((.body // "") | contains($prefix))' /tmp/comments.json >/dev/null; then
-            echo 'HUMAN_GATE_DENIED: conflicting cross-provider worker identity.' >&2
-            exit 1
-          fi
-          session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_marker" | head -n1)"
-          [ -n "$session" ] || { echo 'HUMAN_GATE_DENIED: invalid Jules session marker.' >&2; exit 1; }
-
           identity_helper="$GITHUB_WORKSPACE/.github/roots/factory_worker_identity.py"
           test -f "$identity_helper"
-          matches=0
-          pr=''
-          sha=''
-          pr_url=''
-          while IFS= read -r pr_number; do
-            [ -n "$pr_number" ] || continue
-            gh api "repos/${TARGET_REPO}/pulls/${pr_number}" > /tmp/pr.json
-            [ "$(jq -r '.base.ref' /tmp/pr.json)" = "$branch" ] || continue
-            [ "$(jq -r '.state' /tmp/pr.json)" = open ] || continue
-            [ "$(jq -r '.draft' /tmp/pr.json)" = false ] || continue
-            set +e
-            python "$identity_helper" validate \
-              --repo "$TARGET_REPO" \
-              --issue "$ISSUE" \
-              --comments-json /tmp/comments.json \
-              --pr-json /tmp/pr.json \
-              --base "$branch" \
-              >/tmp/identity.json 2>/tmp/identity.err
-            rc=$?
-            set -e
-            [ "$rc" -eq 0 ] || continue
-            matches=$((matches + 1))
-            pr="$pr_number"
-            sha="$(jq -r '.head.sha' /tmp/pr.json)"
-            pr_url="$(jq -r '.html_url' /tmp/pr.json)"
-          done < <(gh pr list --repo "$TARGET_REPO" --state open --limit 100 --json number --jq '.[].number')
+          gh pr list --repo "$TARGET_REPO" --state open --limit 100 \
+            --json number,body,headRefOid,headRefName,baseRefName,isDraft,url > /tmp/prs.json
 
-          [ "$matches" -eq 1 ] || { echo "HUMAN_GATE_DENIED: expected exactly one canonical open PR, found ${matches}." >&2; exit 1; }
+          set +e
+          python "$identity_helper" select \
+            --repo "$TARGET_REPO" \
+            --issue "$ISSUE" \
+            --comments-json /tmp/comments.json \
+            --prs-json /tmp/prs.json \
+            --base "$branch" \
+            >/tmp/identity.json 2>/tmp/identity.err
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            cat /tmp/identity.err >&2 || true
+            echo 'HUMAN_GATE_DENIED: canonical worker identity/PR resolution failed.' >&2
+            exit 1
+          fi
+          [ "$(jq -r '.provider' /tmp/identity.json)" = jules ] || {
+            echo 'HUMAN_GATE_DENIED: Quality BLOCK rework requires canonical Jules ownership.' >&2
+            exit 1
+          }
+          session="$(jq -r '.session // empty' /tmp/identity.json)"
+          pr="$(jq -r '.pr // empty' /tmp/identity.json)"
+          sha="$(jq -r '.head_sha // empty' /tmp/identity.json)"
+          [ -n "$session" ] && [ -n "$pr" ] && [ -n "$sha" ] || {
+            echo 'HUMAN_GATE_DENIED: canonical Jules worker/PR identity is incomplete.' >&2
+            exit 1
+          }
+
+          gh api "repos/${TARGET_REPO}/pulls/${pr}" > /tmp/pr.json
+          [ "$(jq -r '.state' /tmp/pr.json)" = open ]
+          [ "$(jq -r '.draft' /tmp/pr.json)" = false ]
+          [ "$(jq -r '.base.ref' /tmp/pr.json)" = "$branch" ]
+          [ "$(jq -r '.head.sha' /tmp/pr.json)" = "$sha" ]
+          pr_url="$(jq -r '.html_url' /tmp/pr.json)"
+
           block_marker="<!-- roots-quality-verdict head=${sha} verdict=BLOCK -->"
           block_body="$(jq -r --arg marker "$block_marker" '[.[] | select((.body // "") | contains($marker))] | last | .body // empty' /tmp/comments.json)"
           [ -n "$block_body" ] || { echo 'HUMAN_GATE_DENIED: current PR head has no exact-head BLOCK verdict.' >&2; exit 1; }
