@@ -163,7 +163,8 @@ jobs:
               gh api --method POST "repos/${full_repo}/labels" -f name="$label" -f color='ededed' >/dev/null
             fi
           done
-          gh api --paginate "repos/${full_repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+          bash .github/roots/factory-gh-array-collection.sh \
+            "repos/${full_repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
           milestone="$(jq -r '[.[] | select(.title == "MVP Boilerplate")] | .[0].number // empty' /tmp/milestones.json)"
           if [ -z "$milestone" ]; then
             milestone="$(gh api --method POST "repos/${full_repo}/milestones" -f title='MVP Boilerplate' -f description='Fixed reusable micro-SaaS baseline: app, auth, DB/RLS, billing, email, observability, tests and docs.' --jq '.number')"
