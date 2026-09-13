@@ -14,6 +14,12 @@ SPEC = importlib.util.spec_from_file_location("jules_restart", ROOT / "factory_j
 restart = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(restart)
+IDENTITY_SPEC = importlib.util.spec_from_file_location(
+    "factory_worker_identity", ROOT / "factory_worker_identity.py"
+)
+worker_identity = importlib.util.module_from_spec(IDENTITY_SPEC)
+assert IDENTITY_SPEC.loader is not None
+IDENTITY_SPEC.loader.exec_module(worker_identity)
 
 
 class JulesRestartPolicyTests(unittest.TestCase):
@@ -80,6 +86,24 @@ class JulesRestartPolicyTests(unittest.TestCase):
             self.decision(restart_count=policy["max_restarts_per_issue"]),
             "escalate_restart_limit",
         )
+
+
+class WorkerIdentityGenerationTests(unittest.TestCase):
+    def test_valid_generation_with_malformed_same_task_sibling_fails_closed(self):
+        repo = "Leion-wp/example"
+        issue = 7
+        comments = [
+            {
+                "body": (
+                    "<!-- roots-jules-session task_id=Leion-wp/example#7 "
+                    "session=sessions/S2 generation=1 -->\n"
+                    "<!-- roots-jules-session task_id=Leion-wp/example#7 "
+                    "session=sessions/S3 generation=bogus -->"
+                )
+            }
+        ]
+        with self.assertRaises(worker_identity.IdentityConflict):
+            worker_identity.issue_identity(repo, issue, comments)
 
 
 class JulesRestartWorkflowTests(unittest.TestCase):
@@ -196,6 +220,11 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         self.assertIn("issue_identity", self.stalled_reconciler_text)
         self.assertIn("IDENTITY_CONFLICT", self.stalled_reconciler_text)
         self.assertIn("canonical persisted Jules session ID", self.stalled_reconciler_text)
+        self.assertIn(
+            'gh api --paginate --slurp "repos/${repo}/issues/${issue}/comments"',
+            self.stalled_reconciler_text,
+        )
+        self.assertIn("| jq 'add // []'", self.stalled_reconciler_text)
         self.assertNotIn("sed -n 's/.* session=", self.stalled_reconciler_text)
 
     def test_quality_risk_reconciler_uses_canonical_versioned_identity(self):
