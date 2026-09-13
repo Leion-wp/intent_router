@@ -34,6 +34,8 @@ def value(flag, default=None):
     return vals[0] if vals else default
 
 def emit(data):
+    if '--slurp' in args:
+        data = [data]
     expression = value('--jq')
     if expression:
         result = subprocess.run(['jq', '-r', expression], input=json.dumps(data), text=True, capture_output=True)
