@@ -77,7 +77,8 @@ jobs:
               continue
             fi
 
-            gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+            bash .github/roots/factory-gh-array-collection.sh \
+              "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
             open_milestones="$(jq '[.[] | select(.state == "open")] | length' /tmp/milestones.json)"
             if [ "$open_milestones" -gt 0 ]; then
               waiting="$((waiting + 1))"
