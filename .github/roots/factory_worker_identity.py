@@ -329,6 +329,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    issue = subparsers.add_parser("issue")
+    issue.add_argument("--repo", required=True)
+    issue.add_argument("--issue", required=True, type=int)
+    issue.add_argument("--comments-json", required=True)
+
     resolve = subparsers.add_parser("resolve")
     resolve.add_argument("--repo", required=True)
     resolve.add_argument("--pr-json", required=True)
@@ -355,7 +360,15 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.command == "resolve":
+        if args.command == "issue":
+            identity = issue_identity(args.repo, args.issue, _load(args.comments_json))
+            result = {
+                "status": "ok",
+                "repo": args.repo,
+                "issue": args.issue,
+                **identity,
+            }
+        elif args.command == "resolve":
             result = resolve_pr(args.repo, _load(args.pr_json), _load(args.issues_json), args.base)
         elif args.command == "select":
             result = select_pr(
