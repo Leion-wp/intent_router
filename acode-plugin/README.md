@@ -39,7 +39,9 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 intentRouter.registerAiProvider('openrouter', {
   baseUrl: 'https://openrouter.ai/api/v1',
   model: 'meta-llama/llama-3-70b-instruct',
-  token: 'sk-or-v1-secret'
+  token: 'sk-or-v1-secret',
+  // Model override is opt-in. Omit/false => payload.model cannot replace this profile model.
+  allowModelOverride: false
 });
 
 // Or a local/LAN AI endpoint (e.g., Ollama or LM Studio)
@@ -48,7 +50,8 @@ intentRouter.registerAiProvider('local-llm', {
   model: 'llama3'
 });
 
-// List registered AI providers (non-sensitive metadata only)
+// List registered AI providers (non-sensitive metadata only).
+// baseUrl must be absolute HTTP(S) and cannot contain userinfo, query parameters, or fragments.
 intentRouter.execute({ action: 'router:ai_providers' });
 
 // Invoke ai:chat intent from JS or mobile pipeline
@@ -60,7 +63,9 @@ intentRouter.execute({
       { role: 'system', content: 'You are a code reviewer.' },
       { role: 'user', content: 'Review function foo() in main.js' }
     ],
-    temperature: 0.2
+    temperature: 0.2,
+    // Deterministically bounded on mobile: integer 1..32768.
+    maxTokens: 2048
   }
 });
 ```
