@@ -1,0 +1,104 @@
+# Event-driven fleet pipeline
+
+Control plane: `Leion-wp/intent_router`, branch `Android`.
+
+## Invariants
+
+GitHub is the deterministic control plane. Events are wake-up hints, never authority. Every successor re-reads canonical repository state, profile, session, PR, exact HEAD, labels and gates before mutating anything.
+
+Worker execution is capacity-bounded rather than globally sequential. `.github/roots/factory-worker-capacity.json` defines the fleet-wide Jules maximum. At all times:
+
+`dispatching + dispatched <= workers.jules.max_concurrency`
+
+while every individual task still obeys:
+
+`one issue -> one Jules session -> one branch -> one PR`
+
+An escalated/HUMAN_REQUIRED identity remains blocked against replacement but does not consume an active Jules slot. Replays remain idempotent and protected transitions remain fail-closed.
+
+## Primary event path — v3 direct routing + bounded worker pool
+
+`factory-fleet-events.yml` validates the managed repository profile and routes each persisted transition directly to its owner. It does not restart the full scheduler reconciliation loop for every event.
+
+| Persisted event | Direct successor(s) | Purpose |
+| --- | --- | --- |
+| `factory-pr-active` | `factory-stalled-reconciler.yml` | Reconcile active-PR/stalled state |
+| `factory-ci-completed` | `factory-fleet-jules-rework.yml` + `factory-copilot-quality-gate.yml` | Same-session CI repair when needed and immediate native exact-head Quality review |
+| `factory-quality-verdict` | `factory-fleet-jules-quality-rework.yml` + `factory-quality-risk-reconciler.yml` | REWORK returns to the same Jules session; accepted explicit low risk can advance to managed merge |
+| `factory-pr-merged` | `factory-fleet-completion-reconciler.yml` | Persist completion, release that task identity and advance planning |
+| `factory-queue-updated` | `factory-fleet-scheduler.yml` with `dispatch_only=true` | Fill currently available Jules slots with eligible queued identities |
+| `factory-product-proposal` | `factory-product-brain.yml` | Validate and apply a persisted Product Brain proposal immediately |
+
+The scheduler itself remains serialized so capacity reservation is atomic relative to other scheduler runs. It may reserve multiple independent `repo#issue` identities in one pass, then starts their cross-repo dispatch workflows concurrently. The cross-repo dispatcher concurrency group is scoped per repository + issue.
+
+The two branches of `factory-quality-verdict` are intentionally idempotent. The Quality REWORK reconciler acts only on an exact-head `REWORK`; the risk reconciler fails closed on REWORK/BLOCK/unclassified/stale verdicts and materializes `factory:risk-low` only from an accepted exact-head verdict containing explicit `Risk: low`.
+
+## Execution and product-learning chains
+
+For a successful managed product change, each task follows:
+
+`queued -> dispatching -> Jules session -> dispatched -> PR -> CI -> native Quality -> Quality Risk -> managed auto-merge -> completion`
+
+Multiple independent task identities may occupy that chain concurrently, up to configured Jules capacity. Completion releases only the completed task identity; it does not disturb other active sessions.
+
+Planning then chooses one of two deterministic continuations:
+
+- fixed roadmap still has work: `planning -> queued -> dispatch_only`
+- fixed roadmap is complete: `planning -> dynamic planning handoff -> factory:brain-needed -> Product Strategist proposal -> factory-product-proposal -> Product Brain -> queued -> dispatch_only`
+
+Product Brain dynamic milestones are capacity-aware. At the current Jules maximum of 15, new dynamic milestones require at least 23 tasks and at least 15 initially unblocked tasks. Historical fixed-roadmap milestones remain compatible until completed or explicitly regenerated.
+
+The Product Strategist may be cognitive, but it writes only a schema-bound `factory:brain-proposal`. Product Brain owns validation, optimistic preconditions, product-state mutation, milestone/task materialization and handoff to `dispatch_only`.
+
+Important boundaries:
+
+1. A dispatch request is not proof that its workflow completed.
+2. A reserved `factory:dispatching` identity consumes a slot until acknowledged or safely recovered.
+3. A Quality PASS does not imply LOW_RISK.
+4. LOW_RISK does not bypass CI, protected paths, review, mergeability or human gates.
+5. Completion owns release of its own task identity only.
+6. Product proposals are untrusted candidates until Product Brain validates current state, capacity and schema.
+7. Cron schedules are recovery scans only; they are not the dependency mechanism of the nominal chain.
+
+## Fixed-roadmap to dynamic-planning handoff
+
+`factory-autonomous-planning.yml` detects `ROADMAP_DONE` from the canonical fixed roadmap and dispatches `factory-dynamic-planning-handoff.yml` immediately. The latter remains idempotent and may create/reconcile the single `[FACTORY] Product decision needed` signal.
+
+Its cron remains enabled only as recovery for missed dispatches. Completion does not directly invoke Product Brain and does not bypass planning ownership.
+
+## Recovery path
+
+The full `factory-fleet-scheduler.yml` execution remains available on cron/manual dispatch as a recovery scan. It may reconcile missed Quality REWORK / Quality Risk handoffs and then fill free worker slots, but product events should invoke the specific successor whenever one is known.
+
+A failed cross-repo dispatch returns only its reserved task to `factory:queued`. A stale `factory:dispatching` identity with no persisted Jules session is reconciled after 20 minutes. Other active identities continue independently.
+
+Specialized reconciler crons remain fallback for missed events. Their concurrency groups serialize each stage and all mutations remain idempotent.
+
+## Cross-repository relay contract
+
+Install the reviewed template `.github/roots/fleet/product-event-relay.yml` as `.github/workflows/factory-product-event-relay.yml` on each managed product default branch. It observes only persisted GitHub transitions and dispatches `factory-fleet-events.yml` on `intent_router@Android`.
+
+The relay never checks out PR code, downloads artifacts or executes product code. `FACTORY_EVENT_TOKEN` is human-provisioned and limited to the authority required to dispatch the control-plane workflow. Never copy the broad fleet token into a product repository.
+
+The receiver accepts only:
+
+- `factory-quality-verdict`
+- `factory-ci-completed`
+- `factory-pr-active`
+- `factory-pr-merged`
+- `factory-queue-updated`
+- `factory-product-proposal`
+
+The payload contains only repository identity and event type. It cannot supply a verdict, risk classification, HEAD, execution permission, workflow path, Product Brain decision or bypass flag.
+
+`factory-product-proposal` is emitted only after an issue persists the `factory:brain-proposal` label. The receiver still treats that event as a wake-up hint: Product Brain re-lists proposals, validates the JSON schema, checks optimistic preconditions, validates capacity-aware milestone width and enforces uniqueness before applying anything.
+
+## Quality ownership
+
+The GitHub-native `factory-copilot-quality-gate.yml` is the machine producer of exact-head `roots-quality-verdict` comments for managed products. Downstream automation reacts only after that verdict is persisted. External/ChatGPT reviewers may audit it, but must not create a competing machine verdict producer.
+
+The Quality gate remains bounded by exact-head evidence and the managed profile, including every declared required CI job. Any inability to establish required evidence must defer or block rather than invent success.
+
+## Loop termination
+
+There is no event -> full scheduler -> Quality Risk -> auto-merge -> completion -> full scheduler cycle in the nominal path. Event routing targets the known owner, planning hands new queue directly to `dispatch_only`, and Product Brain does the same after a validated decision. The scheduler fills available capacity but never duplicates an active task identity. This keeps retries local, makes fingerprints meaningful and prevents duplicated fan-out from becoming an implicit scheduler.

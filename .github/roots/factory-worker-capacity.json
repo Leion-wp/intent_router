@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "workers": {
+    "jules": {
+      "max_concurrency": 15
+    },
+    "chatgpt": {
+      "max_concurrency": 1,
+      "selection_label": "factory:agent:chatgpt"
+    }
+  },
+  "planning": {
+    "parallel_threshold": 3,
+    "issue_multiplier": 1.5,
+    "minimum_issues_floor": 5,
+    "max_issues_per_milestone": 32
+  }
+}

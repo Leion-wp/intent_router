@@ -1,0 +1,26 @@
+name: factory-ci-debug-contract-v1
+
+on:
+  pull_request:
+    branches: [Android]
+    paths:
+      - '.github/roots/ci-debugger/**'
+      - '.github/workflows/factory-ci-debug-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run CI debugger contract tests
+        run: node --test .github/roots/ci-debugger/ci-debugger.test.mjs
+      - name: Assert protected boundary remains explicit
+        run: |
+          grep -q 'HUMAN_REQUIRED' .github/roots/ci-debugger/orchestrate.mjs
+          grep -q 'MAX_REPAIR_ATTEMPTS = 4' .github/roots/ci-debugger/orchestrate.mjs
+          grep -q 'NO_RETRY' .github/roots/ci-debugger/orchestrate.mjs

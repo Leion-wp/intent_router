@@ -1,0 +1,106 @@
+name: factory-scheduler-v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: 'Dispatch one eligible issue to the existing factory dispatcher'
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    - cron: '17,47 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: factory-scheduler-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  schedule-next:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXECUTE_REQUESTED: ${{ github.event_name == 'schedule' || inputs.execute }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure scheduler labels
+        shell: bash
+        run: |
+          set -euo pipefail
+          for label in 'factory:queued' 'factory:dispatched'; do
+            encoded="$(jq -rn --arg value "$label" '$value|@uri')"
+            if ! gh api "repos/${GITHUB_REPOSITORY}/labels/${encoded}" >/dev/null 2>&1; then
+              gh api --method POST "repos/${GITHUB_REPOSITORY}/labels" -f name="$label" -f color='ededed' >/dev/null
+            fi
+          done
+
+      - name: Find one eligible queued issue
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue list --repo "$GITHUB_REPOSITORY" --state open --label 'factory:queued' --limit 100 --json number,body,createdAt > queued.json
+          jq -c 'sort_by(.createdAt)[]' queued.json | while IFS= read -r row; do
+            issue="$(jq -r '.number' <<< "$row")"
+            body="$(jq -r '.body // ""' <<< "$row")"
+
+            gh pr list --repo "$GITHUB_REPOSITORY" --state open --search "#${issue}" --json number,body,baseRefName > prs.json
+            linked="$(jq --argjson issue "$issue" '[.[] | select(.baseRefName == "Android") | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))] | length' prs.json)"
+            if [ "$linked" -gt 0 ]; then
+              continue
+            fi
+
+            blockers="$(printf '%s\n' "$body" | grep -Eio 'Blocked-By:[[:space:]]*#[0-9]+' | grep -Eo '[0-9]+' || true)"
+            blocked=false
+            while IFS= read -r blocker; do
+              [ -z "$blocker" ] && continue
+              state="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${blocker}" --jq '.state')"
+              if [ "$state" != "closed" ]; then
+                blocked=true
+                break
+              fi
+            done <<< "$blockers"
+            if [ "$blocked" = "true" ]; then
+              continue
+            fi
+
+            echo "issue_number=$issue" >> "$GITHUB_OUTPUT"
+            exit 0
+          done
+          echo 'issue_number=' >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch candidate through factory-dispatch-v1
+        if: steps.candidate.outputs.issue_number != '' && env.EXECUTE_REQUESTED == 'true'
+        shell: bash
+        env:
+          ISSUE_NUMBER: ${{ steps.candidate.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-dispatch.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref Android \
+            -f issue_number="$ISSUE_NUMBER" \
+            -f preferred_worker=auto \
+            -f execute=true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label 'factory:queued' --add-label 'factory:dispatched'
+
+      - name: Summary
+        shell: bash
+        env:
+          ISSUE_NUMBER: ${{ steps.candidate.outputs.issue_number }}
+        run: |
+          {
+            echo '### Factory scheduler'
+            echo "- Candidate: ${ISSUE_NUMBER:-none}"
+            echo "- Execute: ${EXECUTE_REQUESTED}"
+            echo "- Dependency syntax: \`Blocked-By: #123\` in issue body"
+            echo '- Scheduling policy: oldest eligible queued issue first'
+          } >> "$GITHUB_STEP_SUMMARY"

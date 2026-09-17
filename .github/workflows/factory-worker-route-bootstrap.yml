@@ -1,0 +1,95 @@
+name: factory-worker-route-bootstrap-v1
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: [Android]
+    paths:
+      - '.github/workflows/factory-worker-route-bootstrap.yml'
+      - '.github/roots/factory-worker-capacity.json'
+      - '.github/roots/factory-repository-profile.schema.json'
+  schedule:
+    - cron: '7 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-worker-route-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      CAPACITY_FILE: .github/roots/factory-worker-capacity.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconcile provider route labels from profile authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          test -f "$CAPACITY_FILE"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+
+          jq -r '
+            .workers
+            | to_entries[]
+            | select(.value.selection_label? != null)
+            | [.key, .value.selection_label]
+            | @tsv
+          ' "$CAPACITY_FILE" > /tmp/routes.tsv
+
+          if [ ! -s /tmp/routes.tsv ]; then
+            echo 'WORKER_ROUTE_BOOTSTRAP: no routed providers declared; nothing to reconcile.'
+            exit 0
+          fi
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+
+          reconciled=0
+          managed=0
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '
+              .version == 1 and
+              .managed == true and
+              .repository == $repo and
+              .blueprint == "roots-micro-saas-v1"
+            ' /tmp/profile.json >/dev/null || continue
+            managed="$((managed + 1))"
+
+            while IFS=$'\t' read -r provider label; do
+              [ -n "$provider" ] || continue
+              [ -n "$label" ] || continue
+              if jq -e --arg provider "$provider" '.worker_policy.enabled | index($provider) != null' /tmp/profile.json >/dev/null; then
+                gh label create "$label" --repo "$repo" \
+                  --color 1D76DB \
+                  --description "Factory task routed to the ${provider} worker adapter" \
+                  --force >/dev/null
+                reconciled="$((reconciled + 1))"
+                echo "WORKER_ROUTE_LABEL_READY: ${repo} provider=${provider} label=${label}"
+              fi
+            done < /tmp/routes.tsv
+          done < /tmp/repos.txt
+
+          {
+            echo '### Worker route bootstrap v1'
+            echo "- Managed repositories inspected: ${managed}"
+            echo "- Authorized route labels reconciled: ${reconciled}"
+            echo '- Authority: repository .factory/profile.json worker_policy.enabled.'
+            echo '- Route definitions: factory-worker-capacity.json selection_label entries.'
+            echo '- Labels select an already-authorized provider; they never enable a provider by themselves.'
+          } >> "$GITHUB_STEP_SUMMARY"

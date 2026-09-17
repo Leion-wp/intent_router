@@ -1,0 +1,42 @@
+name: factory-ci-debug-classify-v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: Exact managed-product head SHA
+        required: true
+        type: string
+      log_excerpt:
+        description: Bounded failing log excerpt
+        required: true
+        type: string
+      culprit:
+        description: Suspected file or zone
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Classify bounded failure evidence
+        env:
+          HEAD_SHA: ${{ inputs.head_sha }}
+          LOG_EXCERPT: ${{ inputs.log_excerpt }}
+          CULPRIT: ${{ inputs.culprit }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { makeDiagnosis } from './.github/roots/ci-debugger/classify.mjs';
+          const diagnosis = makeDiagnosis({
+            head: process.env.HEAD_SHA,
+            log: process.env.LOG_EXCERPT,
+            culprit: process.env.CULPRIT || null,
+          });
+          console.log('ROOTS_CI_DIAGNOSIS=' + JSON.stringify(diagnosis));
+          NODE

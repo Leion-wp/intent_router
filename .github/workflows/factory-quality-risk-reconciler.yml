@@ -1,0 +1,199 @@
+name: factory-quality-risk-reconciler-v3
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-quality-risk-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      POLICY: .github/roots/factory-managed-merge-policy.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Materialize latest exact-head Quality LOW risk
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          jq -e '.version == 1 and .risk.required_low_risk_label == "factory:risk-low" and .risk.fail_closed_when_unclassified == true and .quality.require_head_specific_verdict == true' "$POLICY" >/dev/null
+          quality_helper="$GITHUB_WORKSPACE/.github/roots/factory_quality_verdict.py"
+          test -f "$quality_helper"
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+
+          reconciled=0
+          revoked=0
+          deferred=0
+          blocked=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo' /tmp/profile.json >/dev/null || continue
+            blueprint="$(jq -r '.blueprint // ""' /tmp/profile.json)"
+            jq -e --arg blueprint "$blueprint" '.scope.allowed_blueprints | index($blueprint) != null' "$POLICY" >/dev/null || continue
+            default_branch="$(jq -r '.default_branch' /tmp/profile.json)"
+            required_label="$(jq -r '.source_issue.required_label' "$POLICY")"
+            low_label="$(jq -r '.risk.required_low_risk_label' "$POLICY")"
+
+            while IFS= read -r issue; do
+              [ -n "$issue" ] || continue
+              issue_json="$(gh api "repos/${repo}/issues/${issue}")"
+              labels="$(jq '[.labels[].name]' <<< "$issue_json")"
+
+              blocked_state=false
+              while IFS= read -r label; do
+                if jq -e --arg label "$label" 'index($label) != null' <<< "$labels" >/dev/null; then
+                  blocked_state=true
+                  break
+                fi
+              done < <(jq -r '.source_issue.blocking_labels[], .risk.denied_risk_labels[]' "$POLICY")
+              if [ "$blocked_state" = true ]; then
+                blocked=$((blocked + 1))
+                continue
+              fi
+
+              gh api --paginate "repos/${repo}/issues/${issue}/comments" --jq '.[]' | jq -s '.' > /tmp/comments.json
+              comments="$(cat /tmp/comments.json)"
+              jules_marker="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
+              chatgpt_marker="$(jq -r --arg prefix "<!-- roots-chatgpt-worker task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
+              if [ -n "$jules_marker" ] && [ -n "$chatgpt_marker" ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has conflicting Jules and ChatGPT worker identities." >&2
+                blocked=$((blocked + 1))
+                continue
+              fi
+              worker_token=''
+              if [ -n "$jules_marker" ]; then
+                session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$jules_marker" | head -n1)"
+                worker_token="${session##*/}"
+              elif [ -n "$chatgpt_marker" ]; then
+                worker_token="$(sed -n 's/.* branch=\([^ ]*\) pr=.*/\1/p' <<< "$chatgpt_marker" | head -n1)"
+              else
+                deferred=$((deferred + 1))
+                continue
+              fi
+              [ -n "$worker_token" ] || { deferred=$((deferred + 1)); continue; }
+
+              gh pr list --repo "$repo" --state open --limit 100 --json number,body,headRefOid,headRefName,baseRefName,isDraft > /tmp/prs.json
+              jq --argjson issue "$issue" --arg branch "$default_branch" '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]' /tmp/prs.json > /tmp/candidates.json
+              count="$(jq 'length' /tmp/candidates.json)"
+              if [ "$count" -eq 0 ]; then
+                jq --arg branch "$default_branch" --arg token "$worker_token" '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($token))]' /tmp/prs.json > /tmp/candidates.json
+                count="$(jq 'length' /tmp/candidates.json)"
+              fi
+              if [ "$count" -gt 1 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has ${count} active PR candidates." >&2
+                blocked=$((blocked + 1))
+                continue
+              fi
+              [ "$count" -eq 1 ] || { deferred=$((deferred + 1)); continue; }
+
+              pr="$(jq -r '.[0].number' /tmp/candidates.json)"
+              sha="$(jq -r '.[0].headRefOid' /tmp/candidates.json)"
+              [ "$(jq -r '.[0].isDraft' /tmp/candidates.json)" = false ] || { deferred=$((deferred + 1)); continue; }
+
+              set +e
+              python "$quality_helper" --head "$sha" --comments-json /tmp/comments.json > /tmp/quality.json 2>/tmp/quality.err
+              quality_rc=$?
+              set -e
+              if [ "$quality_rc" -eq 2 ]; then
+                deferred=$((deferred + 1))
+                continue
+              fi
+              if [ "$quality_rc" -ne 0 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} exact-head Quality authority is ambiguous: $(cat /tmp/quality.err)" >&2
+                blocked=$((blocked + 1))
+                continue
+              fi
+
+              verdict="$(jq -r '.verdict' /tmp/quality.json)"
+              quality_body="$(jq -r '.body' /tmp/quality.json)"
+              if [ "$verdict" = REWORK ] || [ "$verdict" = BLOCK ]; then
+                if jq -e --arg label "$low_label" 'index($label) != null' <<< "$labels" >/dev/null; then
+                  gh issue edit "$issue" --repo "$repo" --remove-label "$low_label" >/dev/null
+                  revoked=$((revoked + 1))
+                  current_labels="$(gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
+                  if jq -e --arg label "$low_label" 'index($label) != null' <<< "$current_labels" >/dev/null; then
+                    echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} superseded LOW_RISK label did not revoke." >&2
+                    exit 1
+                  fi
+                  echo "QUALITY_RISK_REVOKED: ${repo}#${issue} PR #${pr} head ${sha} latest verdict=${verdict}."
+                fi
+                blocked=$((blocked + 1))
+                continue
+              fi
+
+              jq -e --arg verdict "$verdict" '.quality.accepted_verdicts | index($verdict) != null' "$POLICY" >/dev/null || {
+                deferred=$((deferred + 1))
+                continue
+              }
+
+              if ! grep -Eiq '(^|[^[:alnum:]_])risk:[[:space:]]*low([^[:alnum:]_]|$)' <<< "$quality_body"; then
+                echo "QUALITY_RISK_UNCLASSIFIED: ${repo}#${issue} PR #${pr} head ${sha}."
+                deferred=$((deferred + 1))
+                continue
+              fi
+
+              current_pr="$(gh api "repos/${repo}/pulls/${pr}")"
+              [ "$(jq -r '.head.sha' <<< "$current_pr")" = "$sha" ] || { deferred=$((deferred + 1)); continue; }
+              [ "$(jq -r '.base.ref' <<< "$current_pr")" = "$default_branch" ] || { blocked=$((blocked + 1)); continue; }
+              [ "$(jq -r '.state' <<< "$current_pr")" = open ] || continue
+              [ "$(jq -r '.draft' <<< "$current_pr")" = false ] || continue
+
+              if ! jq -e --arg label "$low_label" 'index($label) != null' <<< "$labels" >/dev/null; then
+                gh issue edit "$issue" --repo "$repo" --add-label "$low_label" >/dev/null
+                reconciled=$((reconciled + 1))
+              fi
+
+              current_labels="$(gh api "repos/${repo}/issues/${issue}" --jq '[.labels[].name]')"
+              jq -e --arg label "$low_label" 'index($label) != null' <<< "$current_labels" >/dev/null || {
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} LOW_RISK label did not persist." >&2
+                exit 1
+              }
+            done < <(gh issue list --repo "$repo" --state open --label "$required_label" --limit 100 --json number --jq '.[].number')
+          done < /tmp/repos.txt
+
+          echo "Quality risk reconciliation: reconciled=${reconciled}, revoked=${revoked}, deferred=${deferred}, blocked=${blocked}."
+
+      - name: Trigger managed auto-merge after risk reconciliation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run factory-managed-automerge.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref Android \
+            -f execute=true
+          echo 'QUALITY_RISK_HANDOFF: managed auto-merge dispatched.'
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo '### Quality risk reconciliation v3'
+            echo '- Persisted worker identity may be Jules or ChatGPT; conflicting identities fail closed.'
+            echo '- Only the latest canonical exact-head Quality verdict is effective; wake-up event order is never authority.'
+            echo '- Latest REWORK/BLOCK revokes stale factory:risk-low before managed merge can act.'
+            echo '- Latest accepted PASS still requires explicit Risk: low before factory:risk-low is materialized.'
+            echo '- Ambiguity, stale heads, denied risk labels and unclassified risk remain fail-closed.'
+            echo '- Managed auto-merge is dispatched immediately after reconciliation; its own gates independently revalidate the latest verdict.'
+          } >> "$GITHUB_STEP_SUMMARY"

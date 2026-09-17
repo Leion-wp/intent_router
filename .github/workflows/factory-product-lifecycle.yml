@@ -1,0 +1,139 @@
+name: factory-product-lifecycle-v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Lifecycle operation'
+        required: true
+        type: choice
+        options: [inspect, ensure-milestone, assign-issues, close-milestone]
+      milestone_title:
+        description: 'Milestone title'
+        required: true
+        default: MVP
+        type: string
+      issue_numbers:
+        description: 'Comma-separated issue numbers for assign-issues'
+        required: false
+        default: ''
+        type: string
+      apply:
+        description: 'Apply mutations; false is dry-run'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: factory-product-lifecycle-${{ github.repository }}-${{ inputs.milestone_title }}
+  cancel-in-progress: false
+
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OPERATION: ${{ inputs.operation }}
+      MILESTONE_TITLE: ${{ inputs.milestone_title }}
+      ISSUE_NUMBERS: ${{ inputs.issue_numbers }}
+      APPLY: ${{ inputs.apply }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate control-plane scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "Android" || test "${GITHUB_REF_NAME}" = "${GITHUB_HEAD_REF:-}"
+          test -f .github/roots/factory-product.schema.json
+
+      - name: Resolve milestone
+        id: milestone
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/milestones?state=all&per_page=100" > milestones.json
+          jq --arg title "$MILESTONE_TITLE" '[.[] | select(.title == $title)]' milestones.json > matches.json
+          count="$(jq 'length' matches.json)"
+          if [ "$count" -gt 1 ]; then
+            echo "CONTROL_PLANE_ANOMALY: duplicate milestone title: ${MILESTONE_TITLE}" >&2
+            exit 1
+          fi
+          if [ "$count" -eq 1 ]; then
+            number="$(jq -r '.[0].number' matches.json)"
+            state="$(jq -r '.[0].state' matches.json)"
+            echo "number=$number" >> "$GITHUB_OUTPUT"
+            echo "state=$state" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$OPERATION" != "ensure-milestone" ]; then
+            echo "Milestone '${MILESTONE_TITLE}' does not exist." >&2
+            exit 1
+          fi
+          if [ "$APPLY" != "true" ]; then
+            echo "number=" >> "$GITHUB_OUTPUT"
+            echo "state=missing" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/milestones" -f title="$MILESTONE_TITLE" > created.json
+          echo "number=$(jq -r '.number' created.json)" >> "$GITHUB_OUTPUT"
+          echo "state=$(jq -r '.state' created.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Assign issues to milestone
+        if: inputs.operation == 'assign-issues'
+        shell: bash
+        env:
+          MILESTONE_NUMBER: ${{ steps.milestone.outputs.number }}
+        run: |
+          set -euo pipefail
+          test -n "$MILESTONE_NUMBER"
+          IFS=',' read -r -a issues <<< "$ISSUE_NUMBERS"
+          test "${#issues[@]}" -gt 0
+          for raw in "${issues[@]}"; do
+            issue="$(printf '%s' "$raw" | tr -d '[:space:]')"
+            [[ "$issue" =~ ^[0-9]+$ ]]
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" > issue.json
+            test "$(jq -r '.pull_request // empty' issue.json)" = ""
+            if [ "$APPLY" = "true" ]; then
+              gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/${issue}" -F milestone="$MILESTONE_NUMBER" >/dev/null
+            fi
+            echo "issue #${issue} -> milestone #${MILESTONE_NUMBER} apply=${APPLY}"
+          done
+
+      - name: Close milestone only when all issues are closed
+        if: inputs.operation == 'close-milestone'
+        shell: bash
+        env:
+          MILESTONE_NUMBER: ${{ steps.milestone.outputs.number }}
+        run: |
+          set -euo pipefail
+          test -n "$MILESTONE_NUMBER"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?milestone=${MILESTONE_NUMBER}&state=open&per_page=100" > open.json
+          open_count="$(jq '[.[] | select(.pull_request == null)] | length' open.json)"
+          if [ "$open_count" -ne 0 ]; then
+            echo "Milestone still has ${open_count} open issues; refusing close." >&2
+            exit 1
+          fi
+          if [ "$APPLY" = "true" ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/milestones/${MILESTONE_NUMBER}" -f state=closed >/dev/null
+          fi
+
+      - name: Summary
+        shell: bash
+        env:
+          MILESTONE_NUMBER: ${{ steps.milestone.outputs.number }}
+          MILESTONE_STATE: ${{ steps.milestone.outputs.state }}
+        run: |
+          {
+            echo '### Factory product lifecycle'
+            echo "- Operation: ${OPERATION}"
+            echo "- Milestone: ${MILESTONE_TITLE}"
+            echo "- Number: ${MILESTONE_NUMBER:-not-created}"
+            echo "- State: ${MILESTONE_STATE}"
+            echo "- Apply: ${APPLY}"
+          } >> "$GITHUB_STEP_SUMMARY"
