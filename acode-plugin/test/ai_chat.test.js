@@ -1,6 +1,7 @@
 const assert = require('assert');
 const {
   IntentRouter,
+  MAX_AI_CHAT_TOKENS,
   buildOpenAiCompatibleUrl,
   buildOpenAiCompatibleRequest,
   normalizeOpenAiCompatibleResponse,
@@ -77,20 +78,45 @@ describe('Acode AI OpenAI-compatible Bridge', () => {
       assert.strictEqual(req.body.model, 'custom-model');
     });
 
-    it('buildOpenAiCompatibleRequest ignores model override when allowModelOverride is false', () => {
-      const config = {
-        id: 'test-provider',
-        baseUrl: 'https://api.example.com/v1',
-        model: 'default-model',
-        allowModelOverride: false
-      };
+    it('buildOpenAiCompatibleRequest ignores model override unless explicitly opted in', () => {
       const payload = {
         model: 'custom-model',
         messages: [{ role: 'user', content: 'Hi' }]
       };
 
-      const req = buildOpenAiCompatibleRequest(config, payload);
-      assert.strictEqual(req.body.model, 'default-model');
+      const explicitFalse = buildOpenAiCompatibleRequest({
+        id: 'test-provider',
+        baseUrl: 'https://api.example.com/v1',
+        model: 'default-model',
+        allowModelOverride: false
+      }, payload);
+      assert.strictEqual(explicitFalse.body.model, 'default-model');
+
+      const omitted = buildOpenAiCompatibleRequest({
+        id: 'test-provider',
+        baseUrl: 'https://api.example.com/v1',
+        model: 'default-model'
+      }, payload);
+      assert.strictEqual(omitted.body.model, 'default-model');
+    });
+
+    it('enforces a deterministic upper bound for maxTokens', () => {
+      const config = {
+        id: 'test-provider',
+        baseUrl: 'https://api.example.com/v1',
+        model: 'default-model'
+      };
+      const messages = [{ role: 'user', content: 'Hi' }];
+
+      const atLimit = buildOpenAiCompatibleRequest(config, { messages, maxTokens: MAX_AI_CHAT_TOKENS });
+      assert.strictEqual(atLimit.body.max_tokens, MAX_AI_CHAT_TOKENS);
+
+      for (const invalid of [0, -1, MAX_AI_CHAT_TOKENS + 1, Infinity, NaN, 'not-a-number', 1.5]) {
+        assert.throws(
+          () => buildOpenAiCompatibleRequest(config, { messages, maxTokens: invalid }),
+          err => err && err.code === 'invalid_ai_payload'
+        );
+      }
     });
 
     it('normalizeOpenAiCompatibleResponse extracts content, model, usage, finishReason', () => {
@@ -141,6 +167,24 @@ describe('Acode AI OpenAI-compatible Bridge', () => {
       assert.strictEqual(list[0].enabled, true);
       assert.strictEqual(list[0].hasToken, true);
       assert.strictEqual(list[0].token, undefined, 'Secret token must not be exposed in list');
+      assert.strictEqual(list[0].headers, undefined, 'Custom headers must not be exposed in list');
+      assert.strictEqual(router.aiProviders, undefined, 'Internal provider store must not be exposed on window.intentRouter');
+      const publicProfile = router.getAiProvider('openrouter');
+      assert.strictEqual(publicProfile.token, undefined, 'Public provider getter must not expose token');
+      assert.strictEqual(publicProfile.headers, undefined, 'Public provider getter must not expose custom headers');
+    });
+
+    it('rejects provider baseUrl values that can embed credentials', () => {
+      for (const baseUrl of [
+        'https://user:sentinel@example.invalid/v1',
+        'https://example.invalid/v1?api_key=sentinel',
+        'https://example.invalid/v1#sentinel'
+      ]) {
+        assert.throws(
+          () => router.registerAiProvider('unsafe', { baseUrl, model: 'm1' }),
+          err => err && err.code === 'invalid_ai_provider_config'
+        );
+      }
     });
 
     it('allows unregistering AI providers', () => {
@@ -276,16 +320,20 @@ describe('Acode AI OpenAI-compatible Bridge', () => {
       assert.strictEqual(routedNetworkReq.headers.Authorization, undefined);
     });
 
-    it('handles 401/403 auth errors and redacts token from error logs and output', async () => {
-      const secretToken = 'sk-proj-secret-token-to-hide-12345';
+    it('canonicalizes credentials once and redacts canonical token/header values from failures', async () => {
+      const canonicalToken = 'sk-proj-secret-token-to-hide-12345';
+      const canonicalHeaderSecret = 'header-secret-to-hide';
       router.registerAiProvider('auth-fail-provider', {
         baseUrl: 'https://api.openai.com/v1',
         model: 'gpt-4o',
-        token: secretToken
+        token: `  ${canonicalToken}\t`,
+        headers: { 'X-Provider-Secret': `  ${canonicalHeaderSecret}  ` }
       });
 
-      router.register('network:request', async () => {
-        throw new Error(`HTTP 401 Unauthorized with token ${secretToken}`);
+      let routedNetworkReq = null;
+      router.register('network:request', async (data) => {
+        routedNetworkReq = data;
+        throw new Error(`HTTP 401 Unauthorized token=${canonicalToken} header=${canonicalHeaderSecret}`);
       });
 
       const res = await router.route({
@@ -298,11 +346,15 @@ describe('Acode AI OpenAI-compatible Bridge', () => {
 
       assert.strictEqual(res.success, false);
       assert.strictEqual(res.metadata.code, 'ai_auth_failed');
-      assert.ok(!res.error.includes(secretToken), 'Token must be redacted from error message');
+      assert.strictEqual(routedNetworkReq.headers.Authorization, `Bearer ${canonicalToken}`);
+      assert.strictEqual(routedNetworkReq.headers['X-Provider-Secret'], canonicalHeaderSecret);
+      assert.ok(!res.error.includes(canonicalToken), 'Canonical token must be redacted from error message');
+      assert.ok(!res.error.includes(canonicalHeaderSecret), 'Canonical header secret must be redacted from error message');
       assert.ok(res.error.includes('[REDACTED]'), 'Redacted marker should be present');
 
       const logsText = router.logs.join('\n');
-      assert.ok(!logsText.includes(secretToken), 'Token must never appear in router logs');
+      assert.ok(!logsText.includes(canonicalToken), 'Canonical token must never appear in router logs');
+      assert.ok(!logsText.includes(canonicalHeaderSecret), 'Canonical header secret must never appear in router logs');
     });
 
     it('handles malformed JSON / missing choices with ai_invalid_response error code', async () => {
