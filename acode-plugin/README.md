@@ -27,48 +27,10 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 - **Terminal Integration**: Execute commands directly (requires Terminal plugin).
 - **GitHub API**: Fetch repos and files.
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
-- **OpenAI-Compatible AI Bridge**: Execute AI completion tasks via `ai:chat` / `ai.chat` intent across registered local/LAN or remote OpenAI-style endpoints without hardcoding secrets in pipelines.
-- **Extensible**: Register custom providers and runtime AI provider profiles using `intentRouter.registerAiProvider()`.
+- **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
 - **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
 - **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
 - **System URL Scheme Validation**: `system:open_url` strictly enforces web capability safety by permitting only explicit `https:` and `http:` URL schemes (case-insensitive). Non-HTTP(S) schemes (such as `javascript:`, `data:`, `file:`, `content:`, `intent:`, `tel:`, `sms:`, or custom deep link schemes) and relative URLs are rejected prior to calling `window.open` with a structured `url_scheme_not_allowed` error.
-
-## AI Bridge Setup & API Example
-```javascript
-// Register an OpenAI-compatible runtime AI profile (secrets stay in memory)
-intentRouter.registerAiProvider('openrouter', {
-  baseUrl: 'https://openrouter.ai/api/v1',
-  model: 'meta-llama/llama-3-70b-instruct',
-  token: 'sk-or-v1-secret',
-  // Model override is opt-in. Omit/false => payload.model cannot replace this profile model.
-  allowModelOverride: false
-});
-
-// Or a local/LAN AI endpoint (e.g., Ollama or LM Studio)
-intentRouter.registerAiProvider('local-llm', {
-  baseUrl: 'http://192.168.1.50:11434/v1',
-  model: 'llama3'
-});
-
-// List registered AI providers (non-sensitive metadata only).
-// baseUrl must be absolute HTTP(S) and cannot contain userinfo, query parameters, or fragments.
-intentRouter.execute({ action: 'router:ai_providers' });
-
-// Invoke ai:chat intent from JS or mobile pipeline
-intentRouter.execute({
-  action: 'ai:chat',
-  data: {
-    provider: 'openrouter',
-    messages: [
-      { role: 'system', content: 'You are a code reviewer.' },
-      { role: 'user', content: 'Review function foo() in main.js' }
-    ],
-    temperature: 0.2,
-    // Deterministically bounded on mobile: integer 1..32768.
-    maxTokens: 2048
-  }
-});
-```
 
 ## API Example
 ```javascript
