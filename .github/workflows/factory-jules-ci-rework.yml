@@ -24,7 +24,6 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
       RUN_ID: ${{ github.event.workflow_run.id }}
       RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -40,16 +39,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$JULES_API_KEY"
-          echo "::add-mask::$JULES_API_KEY"
 
-          pull_requests='${{ toJSON(github.event.workflow_run.pull_requests) }}'
-          pr_count="$(printf '%s' "$pull_requests" | jq 'length')"
+          # workflow_run / PR metadata is untrusted data. Read the event payload as JSON;
+          # never interpolate it into shell source.
+          pull_requests="$(jq -c '.workflow_run.pull_requests // []' "$GITHUB_EVENT_PATH")"
+          test "$(jq -r 'type' <<< "$pull_requests")" = 'array'
+          pr_count="$(jq 'length' <<< "$pull_requests")"
           test "$pr_count" -eq 1
 
-          pr_number="$(printf '%s' "$pull_requests" | jq -r '.[0].number')"
+          pr_number="$(jq -r '.[0].number // empty' <<< "$pull_requests")"
+          [[ "$pr_number" =~ ^[0-9]+$ ]]
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}" > pr.json
 
+          test "$(jq -r '.state' pr.json)" = 'open'
+          test "$(jq -r '.draft' pr.json)" = 'false'
           test "$(jq -r '.base.ref' pr.json)" = 'Android'
           test "$(jq -r '.head.repo.full_name' pr.json)" = "$GITHUB_REPOSITORY"
           test "$(jq -r '.head.sha' pr.json)" = "$HEAD_SHA"
@@ -75,6 +78,7 @@ jobs:
           issue_number="$(cat linked-issues.txt)"
           gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" > issue.json
           test "$(jq -r '.state' issue.json)" = 'open'
+          test "$(jq -r 'has("pull_request")' issue.json)" = 'false'
           echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
 
       - name: Resolve canonical Jules identity
@@ -87,7 +91,7 @@ jobs:
 
           gh api --paginate --slurp \
             "repos/${GITHUB_REPOSITORY}/issues/${issue}/comments?per_page=100" \
-            | jq 'add' > comments.json
+            | jq 'add // []' > comments.json
 
           python - "$GITHUB_REPOSITORY" "$issue" <<'PY' > worker-identity.json
           import json
@@ -146,12 +150,42 @@ jobs:
 
       - name: Send REWORK to the same Jules session
         env:
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
           SESSION: ${{ steps.session.outputs.session }}
           TASK_ID: ${{ steps.session.outputs.task_id }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
           PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$JULES_API_KEY"
+          echo "::add-mask::$JULES_API_KEY"
+
+          # Provider admission is re-read immediately before the remote side effect.
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" > current-pr.json
+          test "$(jq -r '.state' current-pr.json)" = 'open'
+          test "$(jq -r '.draft' current-pr.json)" = 'false'
+          test "$(jq -r '.base.ref' current-pr.json)" = 'Android'
+          test "$(jq -r '.head.repo.full_name' current-pr.json)" = "$GITHUB_REPOSITORY"
+          test "$(jq -r '.head.sha' current-pr.json)" = "$HEAD_SHA"
+
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" > current-issue.json
+          test "$(jq -r '.state' current-issue.json)" = 'open'
+          test "$(jq -r 'has("pull_request")' current-issue.json)" = 'false'
+          jq -e '[.labels[].name] | index("factory:dispatched") != null' current-issue.json >/dev/null
+          jq -e '[.labels[].name] | any(. == "factory:blocked" or . == "factory:escalated" or . == "factory:human-required" or . == "factory:agent:chatgpt") | not' current-issue.json >/dev/null
+
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments?per_page=100" \
+            | jq 'add // []' > current-comments.json
+          python .github/roots/factory_worker_identity.py validate \
+            --repo "$GITHUB_REPOSITORY" \
+            --issue "$ISSUE_NUMBER" \
+            --comments-json current-comments.json \
+            --pr-json current-pr.json \
+            --base Android > current-identity.json
+          test "$(jq -r '.provider' current-identity.json)" = 'jules'
+          test "$(jq -r '.session' current-identity.json)" = "$SESSION"
 
           curl --fail-with-body --silent --show-error \
             -H "X-Goog-Api-Key: $JULES_API_KEY" \
