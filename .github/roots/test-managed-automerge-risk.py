@@ -59,12 +59,20 @@ assert 'required_label' in final_guard
 assert 'low_risk_label' in final_guard
 assert 'final_block=' in final_guard
 assert '.source_issue.blocking_labels[], .risk.denied_risk_labels[]' in final_guard
+assert '/tmp/final-comments.json' in final_guard
+assert '/tmp/final-quality.json' in final_guard
+assert 'final_verdict=' in final_guard
+assert '/tmp/final-identity.json' in final_guard
+assert 'final_identity_rc=' in final_guard
 assert final_guard.index('final_review_decision=') < final_guard.index(merge_call)
 assert final_guard.index('compare/${default_branch}...${sha}') < final_guard.index(merge_call)
 assert final_guard.index('/tmp/final-runs.json') < final_guard.index(merge_call)
 assert final_guard.index('/tmp/final-jobs.json') < final_guard.index(merge_call)
 assert final_guard.index('final_required_ok') < final_guard.index('final_issue=') < final_guard.index(merge_call)
-assert final_guard.index('final_labels=') < final_guard.index(merge_call)
+assert final_guard.index('final_labels=') < final_guard.index('/tmp/final-comments.json')
+assert final_guard.index('/tmp/final-comments.json') < final_guard.index('/tmp/final-quality.json')
+assert final_guard.index('/tmp/final-quality.json') < final_guard.index('/tmp/final-identity.json')
+assert final_guard.index('/tmp/final-identity.json') < final_guard.index(merge_call)
 assert workflow.count('actions/runs?head_sha=${sha}&event=pull_request&per_page=100') >= 2
 assert workflow.count('--json reviewDecision') >= 2
 
@@ -171,5 +179,23 @@ quality = [
 assert latest_exact_head_verdict(quality, sha)['verdict'] == 'REWORK'
 quality.append({'body': f'<!-- roots-quality-verdict head={sha} verdict=PASS -->\nRisk: low'})
 assert latest_exact_head_verdict(quality, sha)['verdict'] == 'PASS'
+
+# A late exact-head downgrade at constant SHA must invalidate the previously accepted PASS.
+late_quality = [
+    {'body': f'<!-- roots-quality-verdict head={sha} verdict=PASS -->\nRisk: low'},
+    {'body': f'<!-- roots-quality-verdict head={sha} verdict=REWORK -->'},
+]
+assert latest_exact_head_verdict(late_quality, sha)['verdict'] == 'REWORK'
+
+# A late conflicting worker marker at constant SHA must invalidate canonical identity.
+late_identity_conflict = jules_comments + [{
+    'body': '<!-- roots-chatgpt-worker task_id=Leion-wp/product#17 branch=feature-11111111111 pr=21 -->'
+}]
+try:
+    validate_pr(repo, 17, late_identity_conflict, jules_pr, 'main')
+except IdentityConflict:
+    pass
+else:
+    raise AssertionError('late worker identity conflict must fail final admission')
 
 print('provider-neutral managed auto-merge + latest exact-head Quality + final admission contract: PASS')
