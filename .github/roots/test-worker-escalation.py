@@ -73,6 +73,40 @@ def test_canonical_issue_identity_cli_selects_latest_restart_generation() -> Non
     assert identity["generation"] == 1
 
 
+def test_chatgpt_identity_malformed_sibling_fails_closed() -> None:
+    comments = [
+        {
+            "body": (
+                "<!-- roots-chatgpt-worker task_id=Leion-wp/example#9 "
+                "branch=factory/chatgpt/issue-9 pr=42 -->\n"
+                "<!-- roots-chatgpt-worker task_id=Leion-wp/example#9 "
+                "branch=factory/chatgpt/issue-9-other pr=bogus -->"
+            )
+        }
+    ]
+    with tempfile.TemporaryDirectory() as directory:
+        comments_path = pathlib.Path(directory) / "comments.json"
+        comments_path.write_text(json.dumps(comments))
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOTS / "factory_worker_identity.py"),
+                "issue",
+                "--repo",
+                "Leion-wp/example",
+                "--issue",
+                "9",
+                "--comments-json",
+                str(comments_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    assert completed.returncode == 3
+    assert "malformed ChatGPT worker identity marker" in completed.stderr
+
+
 def test_human_quality_rework_receipt_requires_authenticated_jules_activity() -> None:
     workflow = (ROOTS.parent / "workflows" / "factory-quality-block-human-rework.yml").read_text()
     delivered_branch_start = workflow.index(
@@ -147,6 +181,7 @@ if __name__ == "__main__":
     test_pr_or_session_output_is_progress_and_prevents_escalation()
     test_unknown_state_and_repeated_escalation_fail_closed()
     test_canonical_issue_identity_cli_selects_latest_restart_generation()
+    test_chatgpt_identity_malformed_sibling_fails_closed()
     test_human_quality_rework_receipt_requires_authenticated_jules_activity()
     test_escalated_diagnostics_uses_canonical_issue_identity()
     test_legacy_jules_generation_parsers_are_only_collision_deferred()
