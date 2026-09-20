@@ -117,6 +117,13 @@ def assert_whole_set_consumers_use_shared_helper() -> None:
                 'gh api --paginate "repos/${full_repo}/milestones?state=all&per_page=100" > /tmp/milestones.json',
             ],
         },
+        "factory-quality-block-reconciler.yml": {
+            "min_helper_calls": 2,
+            "unsafe": [
+                'gh pr list --repo "$repo" --state open --limit 100',
+                'gh issue list --repo "$repo" --state open --limit 200',
+            ],
+        },
     }
     helper = ".github/roots/factory-gh-array-collection.sh"
     for filename, contract in contracts.items():
@@ -125,7 +132,7 @@ def assert_whole_set_consumers_use_shared_helper() -> None:
             f"{filename} does not route every owned whole-set collection through {helper}"
         )
         for unsafe in contract["unsafe"]:
-            assert unsafe not in text, f"{filename} restored raw paginated whole-set parsing: {unsafe}"
+            assert unsafe not in text, f"{filename} restored raw/capped whole-set parsing: {unsafe}"
 
     telemetry = (WORKFLOWS / "factory-product-telemetry.yml").read_text(encoding="utf-8")
     assert 'repos/${repo}/pulls?state=open&per_page=100' in telemetry, (
@@ -136,6 +143,20 @@ def assert_whole_set_consumers_use_shared_helper() -> None:
     )
     assert "select(.merged_at != null)" in telemetry, (
         "product telemetry must distinguish merged PRs from closed-unmerged PRs"
+    )
+
+    quality_block = (WORKFLOWS / "factory-quality-block-reconciler.yml").read_text(encoding="utf-8")
+    assert 'repos/${repo}/pulls?state=open&per_page=100' in quality_block, (
+        "Quality BLOCK reconciliation must inspect the complete open PR set"
+    )
+    assert 'repos/${repo}/issues?state=open&per_page=100' in quality_block, (
+        "Quality BLOCK reconciliation must inspect the complete open issue set"
+    )
+    assert "select(.pull_request == null)" in quality_block, (
+        "Quality BLOCK reconciliation must exclude PR-shaped entries from the REST issues collection"
+    )
+    assert 'gh api --paginate --slurp "repos/${repo}/issues/${issue}/comments"' in quality_block, (
+        "Quality BLOCK reconciliation must preserve complete paginated identity/verdict comment history"
     )
 
 
