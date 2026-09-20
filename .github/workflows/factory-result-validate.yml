@@ -21,6 +21,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Checkout canonical FactoryResult contract
+        uses: actions/checkout@v4
+        with:
+          repository: Leion-wp/intent_router
+          ref: Android
+          sparse-checkout: |
+            .github/roots/factory-result.schema.json
+            .github/roots/factory_result_validate.py
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned schema validator
+        run: python -m pip install --disable-pip-version-check 'jsonschema==4.23.0'
+
       - name: Parse FactoryResult
         env:
           RESULT_JSON: ${{ inputs.result_json }}
@@ -29,23 +46,11 @@ jobs:
           set -euo pipefail
           printf '%s' "$RESULT_JSON" | jq -e . > factory-result.json
 
-      - name: Validate strict core envelope
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq -e '
-            .version == 1 and
-            (.task_id | type == "string" and test("^[^#]+/[^#]+#[1-9][0-9]*$")) and
-            (.status | IN("SUCCEEDED", "REWORK", "BLOCKED", "FAILED")) and
-            (.worker | type == "string" and test("^[a-z0-9][a-z0-9_-]*$")) and
-            (.summary | type == "string" and length > 0) and
-            (.outputs | type == "object") and
-            (.evidence | type == "object") and
-            (.evidence.tests | type == "array") and
-            (.risks | type == "array") and
-            (.next_action | IN("REVIEW", "REWORK", "WAIT", "HUMAN_REQUIRED", "CLOSE", "NONE")) and
-            ((keys - ["version","task_id","status","worker","summary","outputs","evidence","risks","next_action","extensions"]) | length == 0)
-          ' factory-result.json >/dev/null
+      - name: Validate canonical FactoryResult schema
+        run: >-
+          python .github/roots/factory_result_validate.py
+          --schema .github/roots/factory-result.schema.json
+          --result factory-result.json
 
       - name: Validate status transition semantics
         shell: bash
