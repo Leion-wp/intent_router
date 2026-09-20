@@ -266,16 +266,10 @@ jobs:
           task_id="${TARGET_REPO}#${ISSUE_NUMBER}"
 
           gh api "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}" > /tmp/live-issue-before-intent.json
-          jq -e '
-            .state == "open" and .pull_request == null and
-            ([.labels[].name] | index("factory:agent:chatgpt") == null) and
-            ([.labels[].name] | index("factory:blocked") == null) and
-            ([.labels[].name] | index("factory:escalated") == null) and
-            ([.labels[].name] | index("factory:human-required") == null)
-          ' /tmp/live-issue-before-intent.json >/dev/null || {
+          if ! python3 .github/roots/factory_jules_restart.py admit-governance /tmp/live-issue-before-intent.json false; then
             echo "RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_INTENT: ${task_id} changed governance after eligibility evaluation." >&2
             exit 1
-          }
+          fi
 
           intent_marker="<!-- roots-jules-restart-intent task_id=${task_id} attempt=${ATTEMPT} from=${OLD_SESSION} mode=${MODE} -->"
           comments="$(gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments")"
@@ -289,16 +283,10 @@ jobs:
           gh issue edit "$ISSUE_NUMBER" --repo "$TARGET_REPO" --add-label 'factory:restarting' >/dev/null
 
           gh api "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}" > /tmp/live-issue-before-delete.json
-          jq -e '
-            .state == "open" and .pull_request == null and
-            ([.labels[].name] | index("factory:agent:chatgpt") == null) and
-            ([.labels[].name] | index("factory:blocked") == null) and
-            ([.labels[].name] | index("factory:escalated") == null) and
-            ([.labels[].name] | index("factory:human-required") == null)
-          ' /tmp/live-issue-before-delete.json >/dev/null || {
+          if ! python3 .github/roots/factory_jules_restart.py admit-governance /tmp/live-issue-before-delete.json false; then
             echo "RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_DELETE: ${task_id} became human-locked before provider termination." >&2
             exit 1
-          }
+          fi
 
           if [ "$SESSION_EXISTS" = true ]; then
             curl --fail-with-body --silent --show-error -X DELETE \
@@ -366,17 +354,10 @@ jobs:
             '{prompt:$prompt,title:$title,sourceContext:{source:$source,githubRepoContext:{startingBranch:$branch}},requirePlanApproval:false,automationMode:"AUTO_CREATE_PR"}' > /tmp/replacement-request.json
 
           gh api "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}" > /tmp/live-issue-before-create.json
-          jq -e '
-            .state == "open" and .pull_request == null and
-            ([.labels[].name] | index("factory:agent:chatgpt") == null) and
-            ([.labels[].name] | index("factory:blocked") == null) and
-            ([.labels[].name] | index("factory:escalated") == null) and
-            ([.labels[].name] | index("factory:human-required") == null) and
-            ([.labels[].name] | index("factory:restarting") != null)
-          ' /tmp/live-issue-before-create.json >/dev/null || {
+          if ! python3 .github/roots/factory_jules_restart.py admit-governance /tmp/live-issue-before-create.json true; then
             echo "RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_CREATE: ${TARGET_REPO}#${ISSUE_NUMBER} changed governance before replacement creation." >&2
             exit 1
-          }
+          fi
 
           if ! curl --fail-with-body --silent --show-error -X POST \
             -H 'Content-Type: application/json' -H "X-Goog-Api-Key: $JULES_API_KEY" \
@@ -412,13 +393,7 @@ jobs:
           gh api --method POST "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments" -f body="$body" >/dev/null
 
           gh api "repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}" > /tmp/live-issue-before-restore.json
-          if ! jq -e '
-            .state == "open" and .pull_request == null and
-            ([.labels[].name] | index("factory:agent:chatgpt") == null) and
-            ([.labels[].name] | index("factory:blocked") == null) and
-            ([.labels[].name] | index("factory:escalated") == null) and
-            ([.labels[].name] | index("factory:human-required") == null)
-          ' /tmp/live-issue-before-restore.json >/dev/null; then
+          if ! python3 .github/roots/factory_jules_restart.py admit-governance /tmp/live-issue-before-restore.json false; then
             gh issue edit "$ISSUE_NUMBER" --repo "$TARGET_REPO" \
               --remove-label 'factory:restarting' --add-label 'factory:stalled' >/dev/null 2>&1 || true
             echo "RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_RESTORE: ${task_id} became human-locked after provider creation; replacement identity was persisted but normal dispatched state was not restored." >&2
