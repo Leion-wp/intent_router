@@ -53,12 +53,48 @@ assert 'status != "completed"' in final_guard
 assert 'allowed_run_conclusions' in final_guard
 assert '/tmp/final-jobs.json' in final_guard
 assert 'final_required_ok' in final_guard
+assert 'final_issue=' in final_guard
+assert 'final_labels=' in final_guard
+assert 'required_label' in final_guard
+assert 'low_risk_label' in final_guard
+assert 'final_block=' in final_guard
+assert '.source_issue.blocking_labels[], .risk.denied_risk_labels[]' in final_guard
 assert final_guard.index('final_review_decision=') < final_guard.index(merge_call)
 assert final_guard.index('compare/${default_branch}...${sha}') < final_guard.index(merge_call)
 assert final_guard.index('/tmp/final-runs.json') < final_guard.index(merge_call)
 assert final_guard.index('/tmp/final-jobs.json') < final_guard.index(merge_call)
+assert final_guard.index('final_required_ok') < final_guard.index('final_issue=') < final_guard.index(merge_call)
+assert final_guard.index('final_labels=') < final_guard.index(merge_call)
 assert workflow.count('actions/runs?head_sha=${sha}&event=pull_request&per_page=100') >= 2
 assert workflow.count('--json reviewDecision') >= 2
+
+# The final issue read must fail closed when lifecycle/risk changes while HEAD
+# stays constant. This mirrors the policy consumed by the workflow and locks
+# the clear -> blocking cases required by final irreversible admission.
+required_lifecycle = policy['source_issue']['required_label']
+low_risk = policy['risk']['required_low_risk_label']
+blocking_labels = set(policy['source_issue']['blocking_labels'])
+denied_risk_labels = set(policy['risk']['denied_risk_labels'])
+
+
+def final_lifecycle_allowed(labels):
+    labels = set(labels)
+    return (
+        required_lifecycle in labels
+        and low_risk in labels
+        and not labels.intersection(blocking_labels)
+        and not labels.intersection(denied_risk_labels)
+    )
+
+
+eligible_labels = {required_lifecycle, low_risk}
+assert final_lifecycle_allowed(eligible_labels)
+for blocker in blocking_labels:
+    assert not final_lifecycle_allowed(eligible_labels | {blocker})
+for denied in denied_risk_labels:
+    assert not final_lifecycle_allowed(eligible_labels | {denied})
+assert not final_lifecycle_allowed({required_lifecycle})
+assert not final_lifecycle_allowed({low_risk})
 
 # The PR body is no longer allowed to select an issue before persisted worker identity.
 assert 'select((.body // "") | test(' not in workflow
