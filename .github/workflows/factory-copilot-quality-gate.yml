@@ -54,8 +54,22 @@ jobs:
           fi
 
           # PR bodies are untrusted hints. Canonical source identity comes only from persisted
-          # roots-jules-session / roots-chatgpt-worker markers.
-          gh issue list --repo "$TARGET_REPO" --state open --limit 200 --json number,comments > /tmp/issues.json
+          # roots-jules-session / roots-chatgpt-worker markers. Candidate selection must see the
+          # complete comment history before identity resolution, not the bounded gh issue snapshot.
+          gh issue list --repo "$TARGET_REPO" --state open --limit 200 --json number > /tmp/issue-index.json
+          : > /tmp/issues.ndjson
+          while IFS= read -r issue_number; do
+            [ -n "$issue_number" ] || continue
+            gh api --paginate --slurp "repos/${TARGET_REPO}/issues/${issue_number}/comments" \
+              | jq 'add // []' > /tmp/issue-comments.json
+            jq -n --argjson number "$issue_number" --slurpfile comments /tmp/issue-comments.json \
+              '{number:$number,comments:$comments[0]}' >> /tmp/issues.ndjson
+          done < <(jq -r '.[].number' /tmp/issue-index.json)
+          if [ -s /tmp/issues.ndjson ]; then
+            jq -s '.' /tmp/issues.ndjson > /tmp/issues.json
+          else
+            echo '[]' > /tmp/issues.json
+          fi
 
           selected_pr=''
           selected_issue=''
