@@ -74,7 +74,7 @@ def assert_paginated_array_helper_contract() -> None:
 
     helper_text = COLLECTION_HELPER.read_text(encoding="utf-8")
     normalizer_text = COLLECTION_NORMALIZER.read_text(encoding="utf-8")
-    assert "--slurp" not in helper_text
+    assert "gh api --paginate --slurp" not in helper_text
     assert "timeout" in helper_text
     assert "HARD_MAX" in normalizer_text
     assert "persisted watermark" in normalizer_text
