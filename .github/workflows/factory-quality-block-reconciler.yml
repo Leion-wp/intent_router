@@ -38,7 +38,7 @@ jobs:
           identity_helper="$GITHUB_WORKSPACE/.github/roots/factory_worker_identity.py"
           collection_helper="$GITHUB_WORKSPACE/.github/roots/factory-gh-array-collection.sh"
           test -f "$identity_helper"
-          test -x "$collection_helper"
+          test -f "$collection_helper"
 
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
@@ -66,8 +66,8 @@ jobs:
             gh label create 'factory:human-required' --repo "$repo" --color FBCA04 \
               --description 'A human decision is required before factory execution can continue' --force >/dev/null 2>&1 || true
 
-            "$collection_helper" "repos/${repo}/pulls?state=open&per_page=100" > /tmp/prs.json
-            "$collection_helper" "repos/${repo}/issues?state=open&per_page=100" > /tmp/issues.json
+            bash "$collection_helper" "repos/${repo}/pulls?state=open&per_page=100" > /tmp/prs.json
+            bash "$collection_helper" "repos/${repo}/issues?state=open&per_page=100" > /tmp/issues.json
 
             while IFS= read -r issue; do
               [ -n "$issue" ] || continue
