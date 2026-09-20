@@ -44,22 +44,82 @@ class RelayTests(unittest.TestCase):
             self.assertEqual(self.classify('workflow_run', {'workflow_run': {**run, **change}}), '')
 
     def test_only_merged_pr_not_abandoned_pr(self):
-        pr = dict(merged=True, base={'repo': {'full_name': REPO}})
+        pr = dict(merged=True, base={'repo': {'full_name': REPO}},
+                  head={'repo': {'full_name': REPO}})
         self.assertEqual(self.classify('pull_request_target', {'action': 'closed', 'pull_request': pr}),
                          'factory-pr-merged')
         pr['merged'] = False
         self.assertEqual(self.classify('pull_request_target', {'action': 'closed', 'pull_request': pr}), '')
 
-    def test_all_quality_verdicts_on_source_issue_only(self):
+
+    def test_fork_pull_request_target_never_wakes_privileged_receiver(self):
+        trusted = {
+            'base': {'repo': {'full_name': REPO}},
+            'head': {'repo': {'full_name': REPO}},
+            'merged': False,
+        }
+        for action in ['opened', 'reopened', 'synchronize', 'ready_for_review']:
+            self.assertEqual(
+                self.classify('pull_request_target', {'action': action, 'pull_request': trusted}),
+                'factory-pr-active',
+            )
+
+        forked = {
+            **trusted,
+            'head': {'repo': {'full_name': 'external/fork'}},
+        }
+        for action in ['opened', 'reopened', 'synchronize', 'ready_for_review']:
+            self.assertEqual(
+                self.classify('pull_request_target', {'action': action, 'pull_request': forked}),
+                '',
+            )
+
+        forked_merged = {**forked, 'merged': True}
+        self.assertEqual(
+            self.classify('pull_request_target', {'action': 'closed', 'pull_request': forked_merged}),
+            '',
+        )
+
+    def test_only_owner_created_quality_verdicts_on_source_issue_wake_receiver(self):
+        self.assertEqual(WORKFLOW['on']['issue_comment']['types'], ['created'])
         for verdict in ['PASS', 'PASS_WITH_FOLLOW_UP', 'REWORK', 'BLOCK']:
             body = f"Report\n<!-- roots-quality-verdict head={'a' * 40} verdict={verdict} -->\nRisk: low"
-            event = {'issue': {}, 'comment': {'body': body}}
-            self.assertEqual(self.classify('issue_comment', event), 'factory-quality-verdict')
-            event['issue']['pull_request'] = {'url': 'https://example.com/pr'}
-            self.assertEqual(self.classify('issue_comment', event), '')
+            trusted = {
+                'action': 'created',
+                'issue': {},
+                'comment': {'body': body, 'author_association': 'OWNER'},
+            }
+            self.assertEqual(self.classify('issue_comment', trusted), 'factory-quality-verdict')
+
+            edited = {
+                'action': 'edited',
+                'issue': {},
+                'comment': {'body': body, 'author_association': 'OWNER'},
+            }
+            self.assertEqual(self.classify('issue_comment', edited), '')
+
+            untrusted = {
+                'action': 'created',
+                'issue': {},
+                'comment': {'body': body, 'author_association': 'NONE'},
+            }
+            self.assertEqual(self.classify('issue_comment', untrusted), '')
+
+            pr_comment = {
+                'action': 'created',
+                'issue': {'pull_request': {'url': 'https://example.com/pr'}},
+                'comment': {'body': body, 'author_association': 'OWNER'},
+            }
+            self.assertEqual(self.classify('issue_comment', pr_comment), '')
+
         for body in ['ordinary discussion', '<!-- roots-quality-verdict head=short verdict=PASS -->',
                      '$(touch /tmp/should-not-run)', None]:
-            self.assertEqual(self.classify('issue_comment', {'issue': {}, 'comment': {'body': body}}), '')
+            event = {
+                'action': 'created',
+                'issue': {},
+                'comment': {'body': body, 'author_association': 'OWNER'},
+            }
+            self.assertEqual(self.classify('issue_comment', event), '')
 
     def test_product_brain_proposal_label_has_dedicated_event(self):
         payload = {
