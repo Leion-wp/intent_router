@@ -11,6 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parent
 VALIDATOR = ROOT / "validate-planning.py"
 WORKFLOWS = ROOT.parent / "workflows"
 COLLECTION_HELPER = ROOT / "factory-gh-array-collection.sh"
+COLLECTION_NORMALIZER = ROOT / "factory_gh_array_collection.py"
 
 spec = importlib.util.spec_from_file_location("validate_planning", VALIDATOR)
 module = importlib.util.module_from_spec(spec)
@@ -28,19 +29,17 @@ def expect_rejected(text: str) -> None:
 
 def assert_paginated_array_helper_contract() -> None:
     assert COLLECTION_HELPER.is_file(), "shared GitHub array pagination helper is missing"
+    assert COLLECTION_NORMALIZER.is_file(), "bounded GitHub pagination normalizer is missing"
     page_one = [{"id": item} for item in range(1, 61)]
     page_two = [{"id": item} for item in range(61, 121)]
-    slurped_pages = json.dumps([page_one, page_two], separators=(",", ":"))
     with tempfile.TemporaryDirectory() as tmp:
         fake_gh = pathlib.Path(tmp) / "gh"
         fake_gh.write_text(
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            "test \"$1\" = api\n"
-            "test \"$2\" = --paginate\n"
-            "test \"$3\" = --slurp\n"
-            "test \"$4\" = 'repos/example/issues?per_page=100'\n"
-            f"printf '%s\\n' '{slurped_pages}'\n",
+            "#!/usr/bin/env python3\n"
+            "import json,sys\n"
+            "assert sys.argv[1:4] == ['api', '--paginate', 'repos/example/issues?per_page=100']\n"
+            f"print(json.dumps({page_one!r}, separators=(',', ':')))\n"
+            f"print(json.dumps({page_two!r}, separators=(',', ':')))\n",
             encoding="utf-8",
         )
         fake_gh.chmod(fake_gh.stat().st_mode | stat.S_IXUSR)
@@ -57,6 +56,28 @@ def assert_paginated_array_helper_contract() -> None:
         assert len(normalized) == 120, "shared helper truncated a logical collection above 100 items"
         assert normalized[0] == {"id": 1}
         assert normalized[-1] == {"id": 120}
+
+        for key, value, needle in (
+            ("ROOTS_GH_COLLECTION_MAX_PAGES", "1", "page budget exceeded"),
+            ("ROOTS_GH_COLLECTION_MAX_ITEMS", "100", "item budget exceeded"),
+            ("ROOTS_GH_COLLECTION_MAX_BYTES", "128", "byte budget exceeded"),
+        ):
+            limited = {**env, key: value}
+            failed = subprocess.run(
+                ["bash", str(COLLECTION_HELPER), "repos/example/issues?per_page=100"],
+                capture_output=True,
+                text=True,
+                env=limited,
+            )
+            assert failed.returncode != 0, f"{key} did not fail closed"
+            assert needle in failed.stderr, (key, failed.stderr)
+
+    helper_text = COLLECTION_HELPER.read_text(encoding="utf-8")
+    normalizer_text = COLLECTION_NORMALIZER.read_text(encoding="utf-8")
+    assert "--slurp" not in helper_text
+    assert "timeout" in helper_text
+    assert "HARD_MAX" in normalizer_text
+    assert "persisted watermark" in normalizer_text
 
 
 def assert_whole_set_consumers_use_shared_helper() -> None:
