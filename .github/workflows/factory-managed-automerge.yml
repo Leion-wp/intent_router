@@ -406,6 +406,52 @@ jobs:
                 continue
               }
 
+              # Quality and worker identity are mutable without a head change too. Re-read both
+              # after lifecycle/risk and immediately before the irreversible merge request.
+              gh api --paginate "repos/${repo}/issues/${issue}/comments" --jq '.[]' | jq -s '.' > /tmp/final-comments.json
+
+              set +e
+              python "$quality_helper" --head "$sha" --comments-json /tmp/final-comments.json > /tmp/final-quality.json 2>/tmp/final-quality.err
+              final_quality_rc=$?
+              set -e
+              if [ "$final_quality_rc" -eq 2 ]; then
+                echo "AUTO_MERGE_REVALIDATE: ${repo}#${issue} lost exact-head Quality before merge."
+                deferred=$((deferred + 1))
+                continue
+              fi
+              if [ "$final_quality_rc" -ne 0 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} final Quality authority is ambiguous: $(cat /tmp/final-quality.err)" >&2
+                blocked=$((blocked + 1))
+                continue
+              fi
+              final_verdict="$(jq -r '.verdict' /tmp/final-quality.json)"
+              [ "$final_verdict" = "$accepted_verdict" ] || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo}#${issue} latest exact-head Quality changed ${accepted_verdict} -> ${final_verdict} at final admission."
+                blocked=$((blocked + 1))
+                continue
+              }
+              jq -e --arg verdict "$final_verdict" '.quality.accepted_verdicts | index($verdict) != null' "$POLICY" >/dev/null || {
+                blocked=$((blocked + 1))
+                continue
+              }
+
+              printf '%s\n' "$final_pr" > /tmp/final-pr.json
+              set +e
+              python "$identity_helper" validate \
+                --repo "$repo" \
+                --issue "$issue" \
+                --comments-json /tmp/final-comments.json \
+                --pr-json /tmp/final-pr.json \
+                --base "$default_branch" \
+                >/tmp/final-identity.json 2>/tmp/final-identity.err
+              final_identity_rc=$?
+              set -e
+              if [ "$final_identity_rc" -ne 0 ]; then
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} worker identity changed at final admission: $(cat /tmp/final-identity.err)" >&2
+                blocked=$((blocked + 1))
+                continue
+              fi
+
               if gh api --method PUT "repos/${repo}/pulls/${pr}/merge" -f sha="$sha" -f merge_method="$merge_method" > /tmp/merge.json 2>/tmp/merge.err; then
                 if [ "$(jq -r '.merged // false' /tmp/merge.json)" = true ]; then
                   gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="<!-- roots-managed-automerge-done head=${sha} -->\nAUTO_MERGE_DONE: LOW_RISK managed PR #${pr} from worker=${worker_provider} merged automatically after exact-head CI, policy, review, canonical worker identity and latest quality gates. Completion reconciliation owns the next transition." >/dev/null
