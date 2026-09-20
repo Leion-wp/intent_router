@@ -160,13 +160,15 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         self.assertLess(create_at, persisted_at)
         self.assertLess(persisted_at, before_restore)
         self.assertLess(before_restore, restore_at)
+        helper_text = (ROOT / "factory_jules_restart.py").read_text(encoding="utf-8")
         for marker in (
             "factory:agent:chatgpt",
             "factory:blocked",
             "factory:escalated",
             "factory:human-required",
         ):
-            self.assertGreaterEqual(self.restart_text.count(marker), 4)
+            self.assertIn(marker, helper_text)
+        self.assertEqual(self.restart_text.count("admit-governance /tmp/live-issue-"), 4)
 
 
     def test_governance_admission_is_fail_closed(self):
@@ -248,7 +250,7 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         delete_at = self.restart_text.index("-X DELETE")
         create_guard = self.restart_text.index("admit-governance /tmp/live-issue-before-create.json true")
         create_at = self.restart_text.index("'https://jules.googleapis.com/v1alpha/sessions' > /tmp/replacement-session.json")
-        persist_at = self.restart_text.index("roots-jules-restart-complete")
+        persist_at = self.restart_text.index("complete_marker=", create_at)
         restore_guard = self.restart_text.index("admit-governance /tmp/live-issue-before-restore.json false")
         restore_at = self.restart_text.index("--add-label 'factory:dispatched'", restore_guard)
 
