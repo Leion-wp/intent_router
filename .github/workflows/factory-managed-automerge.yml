@@ -373,6 +373,39 @@ jobs:
                 continue
               }
 
+              # Lifecycle and risk can change without moving the PR head. Make them the final
+              # governance read before the irreversible merge API call.
+              final_issue="$(gh api "repos/${repo}/issues/${issue}")"
+              [ "$(jq -r '.state' <<< "$final_issue")" = open ] || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo}#${issue} closed before merge."
+                blocked=$((blocked + 1))
+                continue
+              }
+              final_labels="$(jq '[.labels[].name]' <<< "$final_issue")"
+              jq -e --arg label "$required_label" 'index($label) != null' <<< "$final_labels" >/dev/null || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo}#${issue} left required lifecycle before merge."
+                blocked=$((blocked + 1))
+                continue
+              }
+              jq -e --arg label "$low_risk_label" 'index($label) != null' <<< "$final_labels" >/dev/null || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo}#${issue} lost LOW_RISK before merge."
+                blocked=$((blocked + 1))
+                continue
+              }
+              final_block=false
+              while IFS= read -r label; do
+                [ -n "$label" ] || continue
+                if jq -e --arg label "$label" 'index($label) != null' <<< "$final_labels" >/dev/null; then
+                  final_block=true
+                  break
+                fi
+              done < <(jq -r '.source_issue.blocking_labels[], .risk.denied_risk_labels[]' "$POLICY")
+              [ "$final_block" = false ] || {
+                echo "AUTO_MERGE_REVALIDATE: ${repo}#${issue} gained a blocking lifecycle/risk label before merge."
+                blocked=$((blocked + 1))
+                continue
+              }
+
               if gh api --method PUT "repos/${repo}/pulls/${pr}/merge" -f sha="$sha" -f merge_method="$merge_method" > /tmp/merge.json 2>/tmp/merge.err; then
                 if [ "$(jq -r '.merged // false' /tmp/merge.json)" = true ]; then
                   gh api --method POST "repos/${repo}/issues/${issue}/comments" -f body="<!-- roots-managed-automerge-done head=${sha} -->\nAUTO_MERGE_DONE: LOW_RISK managed PR #${pr} from worker=${worker_provider} merged automatically after exact-head CI, policy, review, canonical worker identity and latest quality gates. Completion reconciliation owns the next transition." >/dev/null
