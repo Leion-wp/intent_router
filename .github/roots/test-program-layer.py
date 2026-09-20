@@ -17,6 +17,11 @@ program_manager = importlib.util.module_from_spec(PROGRAM_SPEC)
 assert PROGRAM_SPEC.loader is not None
 PROGRAM_SPEC.loader.exec_module(program_manager)
 
+RESULT_SPEC = importlib.util.spec_from_file_location("factory_result_validate", ROOT / "factory_result_validate.py")
+factory_result_validate = importlib.util.module_from_spec(RESULT_SPEC)
+assert RESULT_SPEC.loader is not None
+RESULT_SPEC.loader.exec_module(factory_result_validate)
+
 
 class StrategicProgramContractTests(unittest.TestCase):
     repo = "Leion-wp/example-product"
@@ -244,6 +249,78 @@ class StrategicProgramContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = self.write(directory, "decision.json", self.width_collapse_decision(rationale))
             planning.validate_decision(path, self.repo)
+
+
+class FactoryResultSchemaAuthorityTests(unittest.TestCase):
+    schema_path = ROOT / "factory-result.schema.json"
+    workflow_path = ROOT.parent / "workflows" / "factory-result-validate.yml"
+
+    def valid_result(self):
+        return {
+            "version": 1,
+            "task_id": "Leion-wp/example#7",
+            "status": "SUCCEEDED",
+            "worker": "jules",
+            "summary": "Validated result",
+            "outputs": {
+                "branch": "task/example",
+                "commit": "abc1234",
+                "pull_request": 9,
+                "worker_execution_id": "sessions/123",
+                "worker_url": None,
+            },
+            "evidence": {
+                "tests": [{"name": "unit", "status": "PASS", "details": "ok"}],
+                "checks": ["factory-ci"],
+            },
+            "risks": ["none observed"],
+            "next_action": "REVIEW",
+            "extensions": {"provider": {"attempt": 1}},
+        }
+
+    def validate(self, payload):
+        with tempfile.TemporaryDirectory() as directory:
+            result_path = pathlib.Path(directory) / "result.json"
+            result_path.write_text(json.dumps(payload), encoding="utf-8")
+            return factory_result_validate.validate_result(str(self.schema_path), str(result_path))
+
+    def test_valid_factory_result_satisfies_canonical_schema(self):
+        self.assertEqual(self.validate(self.valid_result())["outputs"]["pull_request"], 9)
+
+    def test_schema_invalid_shapes_fail_closed(self):
+        invalid_cases = []
+
+        payload = self.valid_result()
+        payload["outputs"]["pull_request"] = "9"
+        invalid_cases.append(payload)
+
+        payload = self.valid_result()
+        payload["outputs"]["unexpected"] = "x"
+        invalid_cases.append(payload)
+
+        payload = self.valid_result()
+        payload["evidence"]["tests"] = ["not-a-test-object"]
+        invalid_cases.append(payload)
+
+        payload = self.valid_result()
+        payload["risks"] = [123]
+        invalid_cases.append(payload)
+
+        payload = self.valid_result()
+        payload["extensions"] = []
+        invalid_cases.append(payload)
+
+        for payload in invalid_cases:
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                self.validate(payload)
+
+    def test_workflow_uses_schema_as_structural_authority(self):
+        text = self.workflow_path.read_text(encoding="utf-8")
+        self.assertIn("factory-result.schema.json", text)
+        self.assertIn("factory_result_validate.py", text)
+        self.assertIn("jsonschema==4.23.0", text)
+        self.assertIn("Validate canonical FactoryResult schema", text)
+        self.assertNotIn("Validate strict core envelope", text)
 
 
 if __name__ == "__main__":
