@@ -34,6 +34,8 @@ def value(flag, default=None):
     return vals[0] if vals else default
 
 def emit(data):
+    if '--slurp' in args:
+        data = [data]
     expression = value('--jq')
     if expression:
         result = subprocess.run(['jq', '-r', expression], input=json.dumps(data), text=True, capture_output=True)
@@ -58,7 +60,8 @@ def api_endpoint():
 mismatch_first = os.environ.get('MISMATCH_FIRST', 'false') == 'true'
 chatgpt_bad_pr = os.environ.get('CHATGPT_BAD_PR', 'false') == 'true'
 conflict_first = os.environ.get('CONFLICT_FIRST', 'false') == 'true'
-first_branch = 'chatgpt-17' if chatgpt_bad_pr else 'jules-a-11111111111'
+paged_generation = os.environ.get('PAGED_GENERATION', 'false') == 'true'
+first_branch = 'chatgpt-17' if chatgpt_bad_pr else ('jules-a-33333333333' if paged_generation else 'jules-a-11111111111')
 first_body = 'Fixes #18' if mismatch_first else 'Fixes #17'
 
 issue17_comments = []
@@ -73,6 +76,13 @@ else:
 if conflict_first:
     issue17_comments.append({
         'body': '<!-- roots-chatgpt-worker task_id=Leion-wp/product#17 branch=' + first_branch + ' pr=21 -->'
+    })
+
+issue17_api_comments = list(issue17_comments)
+if paged_generation and not chatgpt_bad_pr:
+    issue17_api_comments.extend({'body': 'historical filler %03d' % i} for i in range(105))
+    issue17_api_comments.append({
+        'body': '<!-- roots-jules-session task_id=Leion-wp/product#17 session=sessions/33333333333 generation=1 -->'
     })
 
 issue18_comments = [{
@@ -136,7 +146,7 @@ if args and args[0] == 'api':
             'started_at': '2026-09-10T00:02:00Z',
         }]})
     if endpoint.endswith('/issues/17/comments'):
-        comments = list(issue17_comments)
+        comments = list(issue17_api_comments)
         if os.environ.get('FIRST_REVIEWED', 'true') == 'true':
             comments.append({'body': '<!-- roots-quality-verdict head=' + ('a' * 40) + ' verdict=PASS -->\nRisk: low'})
         emit(comments)
@@ -212,6 +222,7 @@ class CopilotQualityGateTests(unittest.TestCase):
         mismatch_first=False,
         chatgpt_bad_pr=False,
         conflict_first=False,
+        paged_generation=False,
     ):
         workflow = self.workflow('factory-copilot-quality-gate.yml')
         step = next(item for item in workflow['jobs']['review']['steps'] if item.get('id') == 'target')
@@ -238,6 +249,7 @@ class CopilotQualityGateTests(unittest.TestCase):
                 'MISMATCH_FIRST': 'true' if mismatch_first else 'false',
                 'CHATGPT_BAD_PR': 'true' if chatgpt_bad_pr else 'false',
                 'CONFLICT_FIRST': 'true' if conflict_first else 'false',
+                'PAGED_GENERATION': 'true' if paged_generation else 'false',
             }
             script = step['run'].replace('/tmp/', f'{scratch}/')
             result = subprocess.run(
@@ -281,6 +293,11 @@ class CopilotQualityGateTests(unittest.TestCase):
         self.assertEqual(selected, {'pr': '22', 'issue': '18', 'sha': SHA_B})
         self.assertIn('IDENTITY_CONFLICT', result.stdout)
         self.assertIn('persisted pr=999', result.stdout)
+
+    def test_initial_candidate_selection_uses_complete_comment_history(self):
+        result, selected = self.run_resolver(first_reviewed=False, paged_generation=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(selected, {'pr': '21', 'issue': '17', 'sha': SHA_A})
 
     def test_conflicting_worker_markers_do_not_claim_pr(self):
         result, selected = self.run_resolver(first_reviewed=False, conflict_first=True)
