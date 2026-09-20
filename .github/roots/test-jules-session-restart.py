@@ -15,6 +15,12 @@ restart = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(restart)
 
+IDENTITY_SPEC = importlib.util.spec_from_file_location(
+    "factory_worker_identity", ROOT / "factory_worker_identity.py"
+)
+worker_identity = importlib.util.module_from_spec(IDENTITY_SPEC)
+assert IDENTITY_SPEC.loader is not None
+IDENTITY_SPEC.loader.exec_module(worker_identity)
 
 class JulesRestartPolicyTests(unittest.TestCase):
     def test_policy_is_bounded_and_pr_safe(self):
@@ -82,15 +88,47 @@ class JulesRestartPolicyTests(unittest.TestCase):
         )
 
 
+class WorkerIdentityGenerationTests(unittest.TestCase):
+    def test_valid_generation_with_malformed_same_task_sibling_fails_closed(self):
+        repo = "Leion-wp/example"
+        issue = 7
+        comments = [
+            {
+                "body": (
+                    "<!-- roots-jules-session task_id=Leion-wp/example#7 "
+                    "session=sessions/S2 generation=1 -->\n"
+                    "<!-- roots-jules-session task_id=Leion-wp/example#7 "
+                    "session=sessions/S3 generation=bogus -->"
+                )
+            }
+        ]
+        with self.assertRaises(worker_identity.IdentityConflict):
+            worker_identity.issue_identity(repo, issue, comments)
+
+
 class JulesRestartWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.restart_path = WORKFLOWS / "factory-jules-session-restart.yml"
         cls.frontdoor_path = WORKFLOWS / "factory-jules-session-restart-by-issue.yml"
         cls.watchdog_path = WORKFLOWS / "factory-jules-restart-watchdog.yml"
+        cls.ci_rework_path = WORKFLOWS / "factory-jules-ci-rework.yml"
+        cls.resume_path = WORKFLOWS / "factory-jules-resume.yml"
+        cls.stalled_reconciler_path = WORKFLOWS / "factory-stalled-reconciler.yml"
+        cls.quality_risk_path = WORKFLOWS / "factory-quality-risk-reconciler.yml"
+        cls.quality_gate_path = WORKFLOWS / "factory-copilot-quality-gate.yml"
+        cls.quality_block_path = WORKFLOWS / "factory-quality-block-reconciler.yml"
+        cls.quality_block_human_rework_path = WORKFLOWS / "factory-quality-block-human-rework.yml"
         cls.restart_text = cls.restart_path.read_text(encoding="utf-8")
         cls.frontdoor_text = cls.frontdoor_path.read_text(encoding="utf-8")
         cls.watchdog_text = cls.watchdog_path.read_text(encoding="utf-8")
+        cls.ci_rework_text = cls.ci_rework_path.read_text(encoding="utf-8")
+        cls.resume_text = cls.resume_path.read_text(encoding="utf-8")
+        cls.stalled_reconciler_text = cls.stalled_reconciler_path.read_text(encoding="utf-8")
+        cls.quality_risk_text = cls.quality_risk_path.read_text(encoding="utf-8")
+        cls.quality_gate_text = cls.quality_gate_path.read_text(encoding="utf-8")
+        cls.quality_block_text = cls.quality_block_path.read_text(encoding="utf-8")
+        cls.quality_block_human_rework_text = cls.quality_block_human_rework_path.read_text(encoding="utf-8")
         cls.restart_yaml = yaml.safe_load(cls.restart_text)
         cls.frontdoor_yaml = yaml.safe_load(cls.frontdoor_text)
         cls.watchdog_yaml = yaml.safe_load(cls.watchdog_text)
@@ -138,6 +176,130 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         self.assertIn("factory:restarting", self.restart_text)
         self.assertIn("generation=${ATTEMPT}", self.restart_text)
 
+    def test_restart_reason_is_audit_only_not_worker_authority(self):
+        self.assertIn("JULES_RESTART_INTENT: mode=${MODE}; reason=${reason_text}", self.restart_text)
+        self.assertNotIn("Restart reason:", self.restart_text)
+        prompt_at = self.restart_text.index("CONTROL-PLANE POLICY (authoritative):")
+        prompt_end = self.restart_text.index("/tmp/replacement-request.json", prompt_at)
+        self.assertNotIn("REASON", self.restart_text[prompt_at:prompt_end])
+        self.assertNotIn("reason_text", self.restart_text[prompt_at:prompt_end])
+
+    def test_live_governance_is_revalidated_before_provider_side_effects_and_restore(self):
+        before_delete = self.restart_text.index("RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_DELETE")
+        delete_at = self.restart_text.index("-X DELETE")
+        before_create = self.restart_text.index("RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_CREATE")
+        create_at = self.restart_text.index("'https://jules.googleapis.com/v1alpha/sessions' > /tmp/replacement-session.json")
+        persisted_at = self.restart_text.index("gh api --method POST \"repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments\" -f body=\"$body\"")
+        before_restore = self.restart_text.index("RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_RESTORE")
+        restore_at = self.restart_text.index("--add-label 'factory:dispatched'", before_restore)
+        self.assertLess(before_delete, delete_at)
+        self.assertLess(delete_at, before_create)
+        self.assertLess(before_create, create_at)
+        self.assertLess(create_at, persisted_at)
+        self.assertLess(persisted_at, before_restore)
+        self.assertLess(before_restore, restore_at)
+        helper_text = (ROOT / "factory_jules_restart.py").read_text(encoding="utf-8")
+        for marker in (
+            "factory:agent:chatgpt",
+            "factory:blocked",
+            "factory:escalated",
+            "factory:human-required",
+        ):
+            self.assertIn(marker, helper_text)
+        self.assertEqual(self.restart_text.count("admit-governance /tmp/live-issue-"), 4)
+
+
+    def test_governance_admission_is_fail_closed(self):
+        base = {
+            "state": "open",
+            "pull_request": None,
+            "labels": [{"name": "factory:dispatched"}],
+        }
+        self.assertTrue(restart.governance_admission(base))
+        for label in (
+            "factory:blocked",
+            "factory:escalated",
+            "factory:human-required",
+            "factory:agent:chatgpt",
+        ):
+            candidate = json.loads(json.dumps(base))
+            candidate["labels"].append({"name": label})
+            self.assertFalse(restart.governance_admission(candidate), label)
+
+        closed = json.loads(json.dumps(base))
+        closed["state"] = "closed"
+        self.assertFalse(restart.governance_admission(closed))
+
+        pull_request = json.loads(json.dumps(base))
+        pull_request["pull_request"] = {"url": "https://example.invalid/pr"}
+        self.assertFalse(restart.governance_admission(pull_request))
+
+        self.assertFalse(restart.governance_admission(base, require_restarting=True))
+        restarting = json.loads(json.dumps(base))
+        restarting["labels"].append({"name": "factory:restarting"})
+        self.assertTrue(restart.governance_admission(restarting, require_restarting=True))
+
+    def test_late_human_gate_stops_delete_create_and_restore(self):
+        def issue(*labels):
+            return {
+                "state": "open",
+                "pull_request": None,
+                "labels": [{"name": label} for label in labels],
+            }
+
+        def simulate(before_delete, before_create, before_restore):
+            effects = []
+            if not restart.governance_admission(before_delete):
+                return effects
+            effects.append("DELETE")
+            if not restart.governance_admission(before_create, require_restarting=True):
+                return effects
+            effects.append("POST")
+            effects.append("PERSIST_IDENTITY")
+            if not restart.governance_admission(before_restore):
+                return effects
+            effects.append("RESTORE_DISPATCHED")
+            return effects
+
+        normal = issue("factory:restarting")
+        human_locked = issue("factory:restarting", "factory:human-required")
+
+        self.assertEqual(simulate(human_locked, normal, normal), [])
+        self.assertEqual(simulate(normal, human_locked, normal), ["DELETE"])
+        self.assertEqual(
+            simulate(normal, normal, human_locked),
+            ["DELETE", "POST", "PERSIST_IDENTITY"],
+        )
+
+    def test_workflow_calls_shared_admission_at_each_irreversible_boundary(self):
+        checks = (
+            ("before-intent", "false"),
+            ("before-delete", "false"),
+            ("before-create", "true"),
+            ("before-restore", "false"),
+        )
+        for phase, require_restarting in checks:
+            self.assertIn(
+                f"factory_jules_restart.py admit-governance /tmp/live-issue-{phase}.json {require_restarting}",
+                self.restart_text,
+            )
+
+        delete_guard = self.restart_text.index("admit-governance /tmp/live-issue-before-delete.json false")
+        delete_at = self.restart_text.index("-X DELETE")
+        create_guard = self.restart_text.index("admit-governance /tmp/live-issue-before-create.json true")
+        create_at = self.restart_text.index("'https://jules.googleapis.com/v1alpha/sessions' > /tmp/replacement-session.json")
+        persist_at = self.restart_text.index("complete_marker=", create_at)
+        restore_guard = self.restart_text.index("admit-governance /tmp/live-issue-before-restore.json false")
+        restore_at = self.restart_text.index("--add-label 'factory:dispatched'", restore_guard)
+
+        self.assertLess(delete_guard, delete_at)
+        self.assertLess(delete_at, create_guard)
+        self.assertLess(create_guard, create_at)
+        self.assertLess(create_at, persist_at)
+        self.assertLess(persist_at, restore_guard)
+        self.assertLess(restore_guard, restore_at)
+
+
     def test_automatic_watchdog_only_delegates_after_progress_check(self):
         self.assertIn("progress-minutes", self.watchdog_text)
         self.assertIn(".automatic.eligible_states", self.watchdog_text)
@@ -166,6 +328,73 @@ class JulesRestartWorkflowTests(unittest.TestCase):
             "factory-jules-restart-frontdoor-${{ inputs.issue_number }}",
         )
         self.assertNotIn("repository", concurrency["group"])
+
+
+    def test_rework_and_resume_use_canonical_worker_identity(self):
+        for workflow_text in (self.ci_rework_text, self.resume_text):
+            self.assertIn("factory_worker_identity", workflow_text)
+            self.assertIn("issue_identity", workflow_text)
+            self.assertIn("factory_worker_identity.py validate", workflow_text)
+            self.assertNotIn('capture("<!-- roots-jules-session', workflow_text)
+
+        self.assertIn("Resolve canonical Jules identity", self.ci_rework_text)
+        self.assertIn("--pr-json pr.json", self.ci_rework_text)
+        self.assertIn("--base Android", self.ci_rework_text)
+        self.assertIn("Revalidate canonical worker identity before follow-up", self.resume_text)
+        self.assertIn("identity_rc", self.resume_text)
+        self.assertIn("api_discovery", self.resume_text)
+        self.assertIn("Discovered Jules session ${session} does not match active PR branch", self.resume_text)
+
+    def test_stalled_reconciler_uses_canonical_versioned_identity(self):
+        self.assertIn("actions/checkout@v4", self.stalled_reconciler_text)
+        self.assertIn("factory_worker_identity", self.stalled_reconciler_text)
+        self.assertIn("issue_identity", self.stalled_reconciler_text)
+        self.assertIn("IDENTITY_CONFLICT", self.stalled_reconciler_text)
+        self.assertIn("canonical persisted Jules session ID", self.stalled_reconciler_text)
+        self.assertIn(
+            'gh api --paginate --slurp "repos/${repo}/issues/${issue}/comments"',
+            self.stalled_reconciler_text,
+        )
+        self.assertIn("| jq 'add // []'", self.stalled_reconciler_text)
+        self.assertNotIn("sed -n 's/.* session=", self.stalled_reconciler_text)
+
+    def test_quality_risk_reconciler_uses_canonical_versioned_identity(self):
+        self.assertIn("factory_worker_identity.py", self.quality_risk_text)
+        self.assertIn('python "$worker_helper" select', self.quality_risk_text)
+        self.assertIn("--comments-json /tmp/comments.json", self.quality_risk_text)
+        self.assertIn("--prs-json /tmp/prs.json", self.quality_risk_text)
+        self.assertIn('--base "$default_branch"', self.quality_risk_text)
+        self.assertIn("canonical worker identity/PR correlation failed", self.quality_risk_text)
+        self.assertNotIn("jules_marker=", self.quality_risk_text)
+        self.assertNotIn("chatgpt_marker=", self.quality_risk_text)
+        self.assertNotIn("sed -n 's/.* session=", self.quality_risk_text)
+
+    def test_identity_consumers_normalize_paginated_comment_history(self):
+        for workflow_text in (
+            self.stalled_reconciler_text,
+            self.quality_gate_text,
+            self.quality_block_text,
+            self.quality_block_human_rework_text,
+        ):
+            self.assertIn("gh api --paginate --slurp", workflow_text)
+            self.assertIn("| jq 'add // []'", workflow_text)
+
+        self.assertNotIn(
+            'gh api --paginate "repos/${TARGET_REPO}/issues/${issue}/comments" > /tmp/identity-comments.json',
+            self.quality_gate_text,
+        )
+        self.assertNotIn(
+            'gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/current-comments.json',
+            self.quality_gate_text,
+        )
+        self.assertNotIn(
+            'gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/comments.json',
+            self.quality_block_text,
+        )
+        self.assertNotIn(
+            'gh api --paginate "repos/${TARGET_REPO}/issues/${ISSUE}/comments"',
+            self.quality_block_human_rework_text,
+        )
 
 
 if __name__ == "__main__":

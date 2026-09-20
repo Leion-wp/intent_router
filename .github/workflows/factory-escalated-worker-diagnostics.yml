@@ -43,6 +43,8 @@ jobs:
           diagnosed=0
           unavailable=0
           anomalies=0
+          identity_helper="$GITHUB_WORKSPACE/.github/roots/factory_worker_identity.py"
+          test -f "$identity_helper"
 
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
@@ -54,15 +56,33 @@ jobs:
 
             while IFS= read -r issue; do
               [ -z "$issue" ] && continue
-              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
-              session_body="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${repo}#${issue} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
-              if [ -z "$session_body" ]; then
+              gh api --paginate "repos/${repo}/issues/${issue}/comments" --jq '.[]' | jq -s '.' > /tmp/comments.json
+              comments="$(cat /tmp/comments.json)"
+              set +e
+              python "$identity_helper" issue \
+                --repo "$repo" \
+                --issue "$issue" \
+                --comments-json /tmp/comments.json \
+                >/tmp/identity.json 2>/tmp/identity.err
+              rc=$?
+              set -e
+              if [ "$rc" -ne 0 ]; then
                 anomalies="$((anomalies + 1))"
-                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} is escalated without a persisted Jules session." >&2
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has no unambiguous canonical worker identity." >&2
+                cat /tmp/identity.err >&2 || true
                 continue
               fi
-              session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_body" | head -n 1)"
-              [ -n "$session" ] || continue
+              if [ "$(jq -r '.provider' /tmp/identity.json)" != jules ]; then
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} is escalated but canonically owned by a non-Jules provider." >&2
+                continue
+              fi
+              session="$(jq -r '.session // empty' /tmp/identity.json)"
+              [ -n "$session" ] || {
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${repo}#${issue} has incomplete canonical Jules identity." >&2
+                continue
+              }
               marker="<!-- roots-worker-diagnostic session=${session} -->"
               if jq -e --arg marker "$marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
                 continue

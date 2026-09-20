@@ -117,6 +117,24 @@ class RepositoryRoleContractTests(unittest.TestCase):
             with self.assertRaises(jsonschema.ValidationError):
                 role_guard.validate_profile(profile, self.repo)
 
+
+    def test_missing_governance_fails_closed(self):
+        profile_value = self.profile()
+        del profile_value["governance"]
+        with tempfile.TemporaryDirectory() as directory:
+            profile = self.write(directory, "profile.json", profile_value)
+            with self.assertRaises(jsonschema.ValidationError):
+                role_guard.validate_profile(profile, self.repo)
+
+    def test_incomplete_governance_fails_closed(self):
+        for field in ("production_gate", "workflow_changes", "credential_changes"):
+            profile_value = self.profile()
+            del profile_value["governance"][field]
+            with tempfile.TemporaryDirectory() as directory:
+                profile = self.write(directory, "profile.json", profile_value)
+                with self.assertRaises(jsonschema.ValidationError, msg=field):
+                    role_guard.validate_profile(profile, self.repo)
+
     def test_generated_product_keeps_product_market_context(self):
         with tempfile.TemporaryDirectory() as directory:
             profile = self.write(directory, "profile.json", self.profile("generated_product"))

@@ -70,7 +70,8 @@ jobs:
             while IFS= read -r issue; do
               [ -n "$issue" ] || continue
               audited=$((audited + 1))
-              gh api --paginate "repos/${repo}/issues/${issue}/comments" > /tmp/comments.json
+              gh api --paginate --slurp "repos/${repo}/issues/${issue}/comments" \
+                | jq 'add // []' > /tmp/comments.json
 
               matches=0
               matched_pr=''

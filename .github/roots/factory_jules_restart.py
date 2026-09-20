@@ -95,9 +95,35 @@ def restart_decision(
     return "restart"
 
 
+
+BLOCKING_GOVERNANCE_LABELS = {
+    "factory:blocked",
+    "factory:escalated",
+    "factory:human-required",
+}
+
+
+def governance_admission(issue, *, require_restarting=False):
+    """Validate a live issue snapshot immediately before a Jules restart side effect."""
+    if issue.get("state") != "open" or issue.get("pull_request") is not None:
+        return False
+    labels = {
+        label.get("name")
+        for label in issue.get("labels", [])
+        if isinstance(label, dict) and isinstance(label.get("name"), str)
+    }
+    if "factory:agent:chatgpt" in labels:
+        return False
+    if labels & BLOCKING_GOVERNANCE_LABELS:
+        return False
+    if require_restarting and "factory:restarting" not in labels:
+        return False
+    return True
+
+
 def main():
     if len(sys.argv) < 2:
-        raise SystemExit("usage: factory_jules_restart.py <progress-minutes|decision|validate-policy> ...")
+        raise SystemExit("usage: factory_jules_restart.py <progress-minutes|decision|validate-policy|admit-governance> ...")
     command = sys.argv[1]
     if command == "validate-policy" and len(sys.argv) == 2:
         load_policy()
@@ -126,6 +152,13 @@ def main():
             )
         )
         return
+    if command == "admit-governance" and len(sys.argv) == 4:
+        issue = read_json(sys.argv[2])
+        require_restarting = sys.argv[3].lower() == "true"
+        if governance_admission(issue, require_restarting=require_restarting):
+            print("Jules restart governance admission passed")
+            return
+        raise SystemExit("Jules restart governance admission refused")
     raise SystemExit("invalid Jules restart helper command")
 
 
