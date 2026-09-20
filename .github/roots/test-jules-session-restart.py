@@ -138,6 +138,130 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         self.assertIn("factory:restarting", self.restart_text)
         self.assertIn("generation=${ATTEMPT}", self.restart_text)
 
+    def test_restart_reason_is_audit_only_not_worker_authority(self):
+        self.assertIn("JULES_RESTART_INTENT: mode=${MODE}; reason=${reason_text}", self.restart_text)
+        self.assertNotIn("Restart reason:", self.restart_text)
+        prompt_at = self.restart_text.index("CONTROL-PLANE POLICY (authoritative):")
+        prompt_end = self.restart_text.index("/tmp/replacement-request.json", prompt_at)
+        self.assertNotIn("REASON", self.restart_text[prompt_at:prompt_end])
+        self.assertNotIn("reason_text", self.restart_text[prompt_at:prompt_end])
+
+    def test_live_governance_is_revalidated_before_provider_side_effects_and_restore(self):
+        before_delete = self.restart_text.index("RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_DELETE")
+        delete_at = self.restart_text.index("-X DELETE")
+        before_create = self.restart_text.index("RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_CREATE")
+        create_at = self.restart_text.index("'https://jules.googleapis.com/v1alpha/sessions' > /tmp/replacement-session.json")
+        persisted_at = self.restart_text.index("gh api --method POST \"repos/${TARGET_REPO}/issues/${ISSUE_NUMBER}/comments\" -f body=\"$body\"")
+        before_restore = self.restart_text.index("RESTART_REFUSED_LIVE_GOVERNANCE_BEFORE_RESTORE")
+        restore_at = self.restart_text.index("--add-label 'factory:dispatched'", before_restore)
+        self.assertLess(before_delete, delete_at)
+        self.assertLess(delete_at, before_create)
+        self.assertLess(before_create, create_at)
+        self.assertLess(create_at, persisted_at)
+        self.assertLess(persisted_at, before_restore)
+        self.assertLess(before_restore, restore_at)
+        helper_text = (ROOT / "factory_jules_restart.py").read_text(encoding="utf-8")
+        for marker in (
+            "factory:agent:chatgpt",
+            "factory:blocked",
+            "factory:escalated",
+            "factory:human-required",
+        ):
+            self.assertIn(marker, helper_text)
+        self.assertEqual(self.restart_text.count("admit-governance /tmp/live-issue-"), 4)
+
+
+    def test_governance_admission_is_fail_closed(self):
+        base = {
+            "state": "open",
+            "pull_request": None,
+            "labels": [{"name": "factory:dispatched"}],
+        }
+        self.assertTrue(restart.governance_admission(base))
+        for label in (
+            "factory:blocked",
+            "factory:escalated",
+            "factory:human-required",
+            "factory:agent:chatgpt",
+        ):
+            candidate = json.loads(json.dumps(base))
+            candidate["labels"].append({"name": label})
+            self.assertFalse(restart.governance_admission(candidate), label)
+
+        closed = json.loads(json.dumps(base))
+        closed["state"] = "closed"
+        self.assertFalse(restart.governance_admission(closed))
+
+        pull_request = json.loads(json.dumps(base))
+        pull_request["pull_request"] = {"url": "https://example.invalid/pr"}
+        self.assertFalse(restart.governance_admission(pull_request))
+
+        self.assertFalse(restart.governance_admission(base, require_restarting=True))
+        restarting = json.loads(json.dumps(base))
+        restarting["labels"].append({"name": "factory:restarting"})
+        self.assertTrue(restart.governance_admission(restarting, require_restarting=True))
+
+    def test_late_human_gate_stops_delete_create_and_restore(self):
+        def issue(*labels):
+            return {
+                "state": "open",
+                "pull_request": None,
+                "labels": [{"name": label} for label in labels],
+            }
+
+        def simulate(before_delete, before_create, before_restore):
+            effects = []
+            if not restart.governance_admission(before_delete):
+                return effects
+            effects.append("DELETE")
+            if not restart.governance_admission(before_create, require_restarting=True):
+                return effects
+            effects.append("POST")
+            effects.append("PERSIST_IDENTITY")
+            if not restart.governance_admission(before_restore):
+                return effects
+            effects.append("RESTORE_DISPATCHED")
+            return effects
+
+        normal = issue("factory:restarting")
+        human_locked = issue("factory:restarting", "factory:human-required")
+
+        self.assertEqual(simulate(human_locked, normal, normal), [])
+        self.assertEqual(simulate(normal, human_locked, normal), ["DELETE"])
+        self.assertEqual(
+            simulate(normal, normal, human_locked),
+            ["DELETE", "POST", "PERSIST_IDENTITY"],
+        )
+
+    def test_workflow_calls_shared_admission_at_each_irreversible_boundary(self):
+        checks = (
+            ("before-intent", "false"),
+            ("before-delete", "false"),
+            ("before-create", "true"),
+            ("before-restore", "false"),
+        )
+        for phase, require_restarting in checks:
+            self.assertIn(
+                f"factory_jules_restart.py admit-governance /tmp/live-issue-{phase}.json {require_restarting}",
+                self.restart_text,
+            )
+
+        delete_guard = self.restart_text.index("admit-governance /tmp/live-issue-before-delete.json false")
+        delete_at = self.restart_text.index("-X DELETE")
+        create_guard = self.restart_text.index("admit-governance /tmp/live-issue-before-create.json true")
+        create_at = self.restart_text.index("'https://jules.googleapis.com/v1alpha/sessions' > /tmp/replacement-session.json")
+        persist_at = self.restart_text.index("complete_marker=", create_at)
+        restore_guard = self.restart_text.index("admit-governance /tmp/live-issue-before-restore.json false")
+        restore_at = self.restart_text.index("--add-label 'factory:dispatched'", restore_guard)
+
+        self.assertLess(delete_guard, delete_at)
+        self.assertLess(delete_at, create_guard)
+        self.assertLess(create_guard, create_at)
+        self.assertLess(create_at, persist_at)
+        self.assertLess(persist_at, restore_guard)
+        self.assertLess(restore_guard, restore_at)
+
+
     def test_automatic_watchdog_only_delegates_after_progress_check(self):
         self.assertIn("progress-minutes", self.watchdog_text)
         self.assertIn(".automatic.eligible_states", self.watchdog_text)
