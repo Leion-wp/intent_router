@@ -41,6 +41,7 @@ def _extract_identities(repo: str, issue: int, comments: list[dict[str, Any]]) -
     task_id = f"{repo}#{issue}"
     identities: list[dict[str, Any]] = []
     jules_prefix = f"<!-- roots-jules-session task_id={task_id} "
+    chatgpt_prefix = f"<!-- roots-chatgpt-worker task_id={task_id} "
     for body in _bodies(comments):
         jules_matches = [match for match in JULES_RE.finditer(body) if match.group("task") == task_id]
         if body.count(jules_prefix) != len(jules_matches):
@@ -59,9 +60,10 @@ def _extract_identities(repo: str, issue: int, comments: list[dict[str, Any]]) -
                         "generation": int(generation_text) if generation_text is not None else None,
                     }
                 )
-        for match in CHATGPT_RE.finditer(body):
-            if match.group("task") != task_id:
-                continue
+        chatgpt_matches = [match for match in CHATGPT_RE.finditer(body) if match.group("task") == task_id]
+        if body.count(chatgpt_prefix) != len(chatgpt_matches):
+            raise IdentityConflict(f"{task_id} has a malformed ChatGPT worker identity marker")
+        for match in chatgpt_matches:
             identities.append(
                 {
                     "provider": "chatgpt",
