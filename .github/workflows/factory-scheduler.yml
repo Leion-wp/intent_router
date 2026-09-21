@@ -47,14 +47,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          helper='.github/roots/factory_active_linked_prs.py'
+          test -f "$helper"
+
           gh issue list --repo "$GITHUB_REPOSITORY" --state open --label 'factory:queued' --limit 100 --json number,body,createdAt > queued.json
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=Android&per_page=100" \
+            | jq 'add // []' > open-prs.json
+
           jq -c 'sort_by(.createdAt)[]' queued.json | while IFS= read -r row; do
             issue="$(jq -r '.number' <<< "$row")"
             body="$(jq -r '.body // ""' <<< "$row")"
 
-            gh pr list --repo "$GITHUB_REPOSITORY" --state open --search "#${issue}" --json number,body,baseRefName > prs.json
-            linked="$(jq --argjson issue "$issue" '[.[] | select(.baseRefName == "Android") | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))] | length' prs.json)"
-            if [ "$linked" -gt 0 ]; then
+            python "$helper" \
+              --issue "$issue" \
+              --prs-json open-prs.json \
+              --base Android \
+              --output linked-prs.json
+            linked="$(jq 'length' linked-prs.json)"
+            if [ "$linked" -gt 1 ]; then
+              echo "CONTROL_PLANE_ANOMALY: issue #${issue} has ${linked} active linked PRs." >&2
+              jq -r '.[] | "PR #\(.number): \(.html_url // .url)"' linked-prs.json >&2
+              exit 1
+            fi
+            if [ "$linked" -eq 1 ]; then
               continue
             fi
 
