@@ -73,11 +73,11 @@ assert release_profile_guard < release_state_guard < release_first_label
 # entering the per-repository loop.
 credential_loop = credential_workflow.index('while IFS= read -r repo; do')
 release_loop = workflow.index('while IFS= read -r repo; do')
-assert credential_workflow.index('micro-saas-credentials-v1.json'));  # syntax sentinel
+assert credential_workflow.index('micro-saas-credentials-v1.json') < credential_loop
 assert credential_workflow.index('jsonschema.Draft202012Validator(s).validate(d)') < credential_loop
 assert workflow.index('factory-release-policy.schema.json') < release_loop
-assert workflow.index('jq -e \' .enabled') if False else True
 assert workflow.index('jsonschema.Draft202012Validator(s).validate(d)') < release_loop
+assert workflow.index("jq -e '.enabled == true and .production_deploy == \"HUMAN_REQUIRED\"'") < release_loop
 
 # Helper behavior is independently exercised with a harmless local fixture:
 # valid documents pass; schema-invalid, identity-mismatched and malformed JSON
