@@ -82,7 +82,7 @@ assert credential_manifest_guard < credential_manifest_put
 assert credential_state_guard < credential_manifest_put
 
 # Only the explicit not-found state may mark the human-owned manifest missing;
-# ERROR branches continue before labels, manifest installation or gate writes.
+# ERROR branches return before labels, manifest installation or gate writes.
 missing_pos = credential_workflow.index('ABSENT_404)\n                manifest_missing=true')
 manifest_error_pos = credential_workflow.index('.factory/credential-requirements.json could not be read')
 state_error_pos = credential_workflow.index('.factory/product-state.json could not be read')
@@ -105,6 +105,70 @@ assert credential_workflow.index('jsonschema.Draft202012Validator(s).validate(d)
 assert workflow.index('factory-release-policy.schema.json') < release_loop
 assert workflow.index('jsonschema.Draft202012Validator(s).validate(d)') < release_loop
 assert workflow.index("jq -e '.enabled == true and .production_deploy == \"HUMAN_REQUIRED\"'") < release_loop
+
+# The complete repository iteration is now a fault boundary, not only the
+# initial document fetch. Unhandled repository-local read/write failures return
+# a bounded status and the outer fleet loop records an anomaly then continues.
+for text, failure_message in (
+    (credential_workflow, 'repository-local credential readiness operation failed; later repositories will continue.'),
+    (workflow, 'repository-local release readiness operation failed; later repositories will continue.'),
+):
+    assert 'reconcile_repo() {' in text
+    assert "trap 'return 97' ERR" in text
+    assert 'set +e\n            reconcile_repo "$repo"\n            repo_rc=$?\n            trap - ERR\n            set -e' in text
+    assert failure_message in text
+
+# Repo-local writes must no longer be hidden behind best-effort `|| true`; a
+# failed mutation is surfaced through the same repository boundary and retried
+# idempotently on the next reconciliation pass.
+assert "gh label create 'factory:credentials-ready'" in credential_workflow
+assert "gh label create 'factory:human-required'" in credential_workflow
+assert "--force >/dev/null 2>&1 || true" not in credential_workflow
+assert "--force >/dev/null 2>&1 || true" not in workflow
+assert 'gh issue close "$credential_gate" --repo "$repo" --reason completed >/dev/null 2>&1 || true' not in workflow
+
+# Exercise the Bash boundary semantics directly: a repository-A failure must
+# stop A locally, increment anomaly telemetry and still allow repository B to
+# reconcile. Global pre-loop failure remains fatal.
+boundary_script = r'''
+set -uo pipefail
+anomalies=0
+seen=''
+reconcile_repo() {
+  local repo="$1"
+  trap 'return 97' ERR
+  seen="${seen}${repo}:start;"
+  if [ "$repo" = 'A' ]; then
+    false
+  fi
+  seen="${seen}${repo}:done;"
+  trap - ERR
+  return 0
+}
+for repo in A B; do
+  set +e
+  reconcile_repo "$repo"
+  repo_rc=$?
+  trap - ERR
+  set -e
+  if [ "$repo_rc" -ne 0 ]; then
+    anomalies="$((anomalies + 1))"
+  fi
+done
+printf '%s|%s\n' "$seen" "$anomalies"
+'''
+boundary_result = subprocess.run(['bash', '-lc', boundary_script], capture_output=True, text=True, check=False)
+assert boundary_result.returncode == 0
+assert boundary_result.stdout.strip() == 'A:start;B:start;B:done;|1'
+
+global_failure = subprocess.run(
+    ['bash', '-lc', "set -euo pipefail; false; echo REPO_B_SHOULD_NOT_RUN"],
+    capture_output=True,
+    text=True,
+    check=False,
+)
+assert global_failure.returncode != 0
+assert 'REPO_B_SHOULD_NOT_RUN' not in global_failure.stdout
 
 # Helper validation behavior is independently exercised with harmless local
 # fixtures: valid documents pass; schema-invalid, identity-mismatched and
