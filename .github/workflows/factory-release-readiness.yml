@@ -40,15 +40,32 @@ jobs:
 
           ready=0
           waiting=0
+          anomalies=0
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
             if ! gh api -H 'Accept: application/vnd.github.raw+json' \
               "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
               continue
             fi
-            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null || continue
+            if ! python3 .github/roots/factory_repo_local_state.py \
+              --document /tmp/profile.json \
+              --schema .github/roots/factory-repository-profile.schema.json \
+              --expect-repository "$repo" \
+              --kind profile; then
+              echo "CONTROL_PLANE_ANOMALY: ${repo} has invalid .factory/profile.json; skipping repository." >&2
+              anomalies="$((anomalies + 1))"
+              continue
+            fi
             if ! gh api -H 'Accept: application/vnd.github.raw+json' \
               "repos/${repo}/contents/.factory/product-state.json" > /tmp/state.json 2>/dev/null; then
+              continue
+            fi
+            if ! python3 .github/roots/factory_repo_local_state.py \
+              --document /tmp/state.json \
+              --schema .github/roots/factory-product-state.schema.json \
+              --kind product-state; then
+              echo "CONTROL_PLANE_ANOMALY: ${repo} has invalid .factory/product-state.json; no release mutation applied." >&2
+              anomalies="$((anomalies + 1))"
               continue
             fi
             phase="$(jq -r '.phase // ""' /tmp/state.json)"
@@ -163,4 +180,4 @@ jobs:
             ready="$((ready + 1))"
           done < /tmp/repos.txt
 
-          echo "Release readiness scan: ready=${ready}, waiting=${waiting}. Production deployment remains HUMAN_REQUIRED."
+          echo "Release readiness scan: ready=${ready}, waiting=${waiting}, repository_anomalies=${anomalies}. Production deployment remains HUMAN_REQUIRED."
