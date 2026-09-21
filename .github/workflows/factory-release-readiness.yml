@@ -43,10 +43,25 @@ jobs:
           anomalies=0
           while IFS= read -r repo; do
             [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
-            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
-              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
-              continue
-            fi
+
+            profile_state="$(python3 .github/roots/factory_repo_local_state.py \
+              --fetch-endpoint "repos/${repo}/contents/.factory/profile.json" \
+              --output /tmp/profile.json \
+              --kind profile)"
+            case "$profile_state" in
+              PRESENT) ;;
+              ABSENT_404) continue ;;
+              ERROR)
+                echo "CONTROL_PLANE_ANOMALY: ${repo} .factory/profile.json could not be read; skipping repository." >&2
+                anomalies="$((anomalies + 1))"
+                continue
+                ;;
+              *)
+                echo "CONTROL_PLANE_ANOMALY: ${repo} profile fetch returned an unknown state; skipping repository." >&2
+                anomalies="$((anomalies + 1))"
+                continue
+                ;;
+            esac
             if ! python3 .github/roots/factory_repo_local_state.py \
               --document /tmp/profile.json \
               --schema .github/roots/factory-repository-profile.schema.json \
@@ -56,10 +71,25 @@ jobs:
               anomalies="$((anomalies + 1))"
               continue
             fi
-            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
-              "repos/${repo}/contents/.factory/product-state.json" > /tmp/state.json 2>/dev/null; then
-              continue
-            fi
+
+            state_fetch="$(python3 .github/roots/factory_repo_local_state.py \
+              --fetch-endpoint "repos/${repo}/contents/.factory/product-state.json" \
+              --output /tmp/state.json \
+              --kind product-state)"
+            case "$state_fetch" in
+              PRESENT) ;;
+              ABSENT_404) continue ;;
+              ERROR)
+                echo "CONTROL_PLANE_ANOMALY: ${repo} .factory/product-state.json could not be read; no release mutation applied." >&2
+                anomalies="$((anomalies + 1))"
+                continue
+                ;;
+              *)
+                echo "CONTROL_PLANE_ANOMALY: ${repo} product state fetch returned an unknown state; no release mutation applied." >&2
+                anomalies="$((anomalies + 1))"
+                continue
+                ;;
+            esac
             if ! python3 .github/roots/factory_repo_local_state.py \
               --document /tmp/state.json \
               --schema .github/roots/factory-product-state.schema.json \
