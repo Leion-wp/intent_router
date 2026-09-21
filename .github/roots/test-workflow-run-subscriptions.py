@@ -71,26 +71,28 @@ class WorkflowRunSubscriptionTests(unittest.TestCase):
 
         for marker in (
             'actions/runs/${RUN_ID}',
-            "'.head_sha' current-run.json",
+            "'.head_sha' final-run.json",
             '"$HEAD_SHA"',
-            "'.run_attempt' current-run.json",
+            "'.run_attempt' final-run.json",
             '"$RUN_ATTEMPT"',
-            "'.status' current-run.json",
+            "'.status' final-run.json",
             "= 'completed'",
-            "'.conclusion' current-run.json",
+            "'.conclusion' final-run.json",
             "= 'failure'",
             'factory_worker_identity.py validate',
             ':sendMessage',
         ):
             self.assertIn(marker, run)
 
+        pre_identity = run.index('> current-identity.json')
         session_get = run.index('> session-state.json')
-        run_refresh = run.index('> current-run.json')
-        pr_refresh = run.index('> current-pr.json')
-        issue_refresh = run.index('> current-issue.json')
-        identity_refresh = run.index('> current-identity.json')
+        run_refresh = run.index('> final-run.json')
+        pr_refresh = run.index('> final-pr.json')
+        issue_refresh = run.index('> final-issue.json')
+        identity_refresh = run.index('> final-identity.json')
         send_post = run.index(':sendMessage')
 
+        self.assertLess(pre_identity, session_get)
         self.assertLess(session_get, run_refresh)
         self.assertLess(run_refresh, pr_refresh)
         self.assertLess(pr_refresh, issue_refresh)
