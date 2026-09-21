@@ -60,6 +60,49 @@ class WorkflowRunSubscriptionTests(unittest.TestCase):
         run = consumer['jobs']['refresh']['steps'][0]['run']
         self.assertIn('--repo "$GITHUB_REPOSITORY"', run)
 
+    def test_ci_rework_revalidates_current_failed_attempt_at_final_provider_admission(self):
+        consumer = self.workflows['factory-jules-ci-rework.yml']
+        job = consumer['jobs']['feed-ci-failure']
+        send = next(
+            step for step in job['steps']
+            if step.get('name') == 'Send REWORK to the same Jules session'
+        )
+        run = send['run']
+
+        for marker in (
+            'actions/runs/${RUN_ID}',
+            "'.head_sha' current-run.json",
+            '"$HEAD_SHA"',
+            "'.run_attempt' current-run.json",
+            '"$RUN_ATTEMPT"',
+            "'.status' current-run.json",
+            "= 'completed'",
+            "'.conclusion' current-run.json",
+            "= 'failure'",
+            'factory_worker_identity.py validate',
+            ':sendMessage',
+        ):
+            self.assertIn(marker, run)
+
+        session_get = run.index('> session-state.json')
+        run_refresh = run.index('> current-run.json')
+        pr_refresh = run.index('> current-pr.json')
+        issue_refresh = run.index('> current-issue.json')
+        identity_refresh = run.index('> current-identity.json')
+        send_post = run.index(':sendMessage')
+
+        self.assertLess(session_get, run_refresh)
+        self.assertLess(run_refresh, pr_refresh)
+        self.assertLess(pr_refresh, issue_refresh)
+        self.assertLess(issue_refresh, identity_refresh)
+        self.assertLess(identity_refresh, send_post)
+
+        final_admission = run[run_refresh:send_post]
+        self.assertNotIn('session-state.json', final_admission)
+        self.assertIn('factory:human-required', final_admission)
+        self.assertIn('factory:agent:chatgpt', final_admission)
+        self.assertIn('factory_worker_identity.py validate', final_admission)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
