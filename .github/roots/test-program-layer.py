@@ -254,6 +254,10 @@ class StrategicProgramContractTests(unittest.TestCase):
 class FactoryResultSchemaAuthorityTests(unittest.TestCase):
     schema_path = ROOT / "factory-result.schema.json"
     workflow_path = ROOT.parent / "workflows" / "factory-result-validate.yml"
+    worker_paths = {
+        worker: ROOT.parent / "workflows" / f"factory-worker-{worker}.yml"
+        for worker in ("jules", "codex", "claude", "gemini")
+    }
 
     def valid_result(self):
         return {
@@ -278,14 +282,24 @@ class FactoryResultSchemaAuthorityTests(unittest.TestCase):
             "extensions": {"provider": {"attempt": 1}},
         }
 
-    def validate(self, payload):
+    def validate(self, payload, expected_task_id=None, expected_worker=None):
         with tempfile.TemporaryDirectory() as directory:
             result_path = pathlib.Path(directory) / "result.json"
             result_path.write_text(json.dumps(payload), encoding="utf-8")
-            return factory_result_validate.validate_result(str(self.schema_path), str(result_path))
+            return factory_result_validate.validate_result(
+                str(self.schema_path),
+                str(result_path),
+                expected_task_id=expected_task_id,
+                expected_worker=expected_worker,
+            )
 
-    def test_valid_factory_result_satisfies_canonical_schema(self):
-        self.assertEqual(self.validate(self.valid_result())["outputs"]["pull_request"], 9)
+    def test_valid_factory_result_satisfies_canonical_boundary(self):
+        result = self.validate(
+            self.valid_result(),
+            expected_task_id="Leion-wp/example#7",
+            expected_worker="jules",
+        )
+        self.assertEqual(result["outputs"]["pull_request"], 9)
 
     def test_schema_invalid_shapes_fail_closed(self):
         invalid_cases = []
@@ -314,13 +328,60 @@ class FactoryResultSchemaAuthorityTests(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaises(ValueError):
                 self.validate(payload)
 
-    def test_workflow_uses_schema_as_structural_authority(self):
+    def test_secret_shaped_values_fail_before_value_bearing_diagnostics(self):
+        sentinel = "github_pat_" + ("A" * 24)
+
+        schema_valid = self.valid_result()
+        schema_valid["summary"] = sentinel
+        with self.assertRaises(ValueError) as secret_error:
+            self.validate(schema_valid)
+        self.assertNotIn(sentinel, str(secret_error.exception))
+        self.assertIn("secret-shaped value", str(secret_error.exception))
+
+        schema_invalid = self.valid_result()
+        schema_invalid["outputs"]["pull_request"] = sentinel
+        with self.assertRaises(ValueError) as schema_error:
+            self.validate(schema_invalid)
+        self.assertNotIn(sentinel, str(schema_error.exception))
+        self.assertIn("secret-shaped value", str(schema_error.exception))
+
+    def test_semantic_and_dispatch_binding_fail_closed(self):
+        payload = self.valid_result()
+        payload["next_action"] = "HUMAN_REQUIRED"
+        with self.assertRaisesRegex(ValueError, "status/next_action"):
+            self.validate(payload)
+
+        with self.assertRaisesRegex(ValueError, "expected task"):
+            self.validate(self.valid_result(), expected_task_id="Leion-wp/example#8")
+
+        with self.assertRaisesRegex(ValueError, "expected worker"):
+            self.validate(self.valid_result(), expected_worker="codex")
+
+    def test_workflow_uses_one_immutable_shared_validation_boundary(self):
         text = self.workflow_path.read_text(encoding="utf-8")
         self.assertIn("factory-result.schema.json", text)
         self.assertIn("factory_result_validate.py", text)
         self.assertIn("jsonschema==4.23.0", text)
-        self.assertIn("Validate canonical FactoryResult schema", text)
+        self.assertIn("Validate canonical FactoryResult boundary", text)
+        self.assertIn("ref: ${{ github.sha }}", text)
+        self.assertNotIn("ref: Android", text)
+        self.assertNotIn("grep -Eiq", text)
         self.assertNotIn("Validate strict core envelope", text)
+
+    def test_every_provider_adapter_validates_before_publishing_result(self):
+        for worker, path in self.worker_paths.items():
+            with self.subTest(worker=worker):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("Validate FactoryResult before publication", text)
+                self.assertIn("factory_result_validate.py", text)
+                self.assertIn("--expected-task-id", text)
+                self.assertIn(f"--expected-worker {worker}", text)
+                self.assertIn(f"name: validated-factory-result-{worker}", text)
+                self.assertNotIn(f"name: factory-result-{worker}\n", text)
+                self.assertLess(
+                    text.index("Validate FactoryResult before publication"),
+                    text.index("Upload validated FactoryResult"),
+                )
 
 
 if __name__ == "__main__":
