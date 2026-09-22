@@ -31,7 +31,8 @@ class RepositoryDocumentError(Exception):
 PRESENT = "PRESENT"
 ABSENT_404 = "ABSENT_404"
 ERROR = "ERROR"
-_HTTP_STATUS_RE = re.compile(rb"HTTP(?:/[^\s]+)?\s+(\d{3})")
+_HTTP_STATUS_LINE_RE = re.compile(rb"(?m)^HTTP(?:/[^\s]+)?\s+(\d{3})(?:\s|$)")
+_CLI_STATUS_SUFFIX_RE = re.compile(rb"\(HTTP\s+(\d{3})\)\s*$")
 
 
 def _load_json(path: Path) -> Any:
@@ -54,21 +55,42 @@ def validate_document(document_path: Path, schema_path: Path, expect_repository:
             raise RepositoryDocumentError("document repository identity does not match target repository")
 
 
+def _split_included_response(stdout: bytes) -> tuple[bytes, bytes] | tuple[None, None]:
+    """Split one `gh api --include` response without treating body bytes as headers."""
+    for separator in (b"\r\n\r\n", b"\n\n"):
+        if separator in stdout:
+            header, body = stdout.split(separator, 1)
+            return header, body
+    return None, None
+
+
 def _http_status(stdout: bytes, stderr: bytes) -> int | None:
-    matches = _HTTP_STATUS_RE.findall(stdout + b"\n" + stderr)
-    if not matches:
+    """Read status only from transport metadata, never repository payload bytes."""
+    header, _body = _split_included_response(stdout)
+    if header is not None:
+        matches = _HTTP_STATUS_LINE_RE.findall(header)
+        if len(matches) != 1:
+            return None
+        try:
+            return int(matches[0])
+        except ValueError:
+            return None
+
+    # Some failed `gh api` calls expose only the CLI's terminal `(HTTP NNN)`
+    # metadata on stderr. Accept that exact suffix only when no included header
+    # block exists; successful raw repository payload bytes remain on stdout.
+    match = _CLI_STATUS_SUFFIX_RE.search(stderr.strip())
+    if match is None:
         return None
     try:
-        return int(matches[-1])
+        return int(match.group(1))
     except ValueError:
         return None
 
 
 def _included_body(stdout: bytes) -> bytes | None:
-    for separator in (b"\r\n\r\n", b"\n\n"):
-        if separator in stdout:
-            return stdout.split(separator, 1)[1]
-    return None
+    _header, body = _split_included_response(stdout)
+    return body
 
 
 def fetch_repository_content(
@@ -79,10 +101,13 @@ def fetch_repository_content(
     """Fetch one raw GitHub contents endpoint without conflating errors with 404.
 
     The GitHub CLI is asked to include response headers. HTTP status is parsed
-    from captured stdout/stderr but neither is emitted. Only a successful 2xx
-    response may materialize ``output_path``. A confirmed HTTP 404 is the sole
-    missing-file state. Every other failure, including an unparseable/transport
-    failure, is ERROR and leaves no output file behind.
+    only from the isolated header block (or the CLI's terminal error-status
+    suffix when no header block exists); repository body bytes never participate
+    in response classification. Neither stdout nor stderr is emitted. Only a
+    successful 2xx response may materialize ``output_path``. A confirmed HTTP
+    404 is the sole missing-file state. Every other failure, including
+    ambiguous/unparseable transport metadata, is ERROR and leaves no output file
+    behind.
     """
 
     output_path.unlink(missing_ok=True)
