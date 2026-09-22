@@ -225,6 +225,34 @@ with tempfile.TemporaryDirectory() as tmp:
     assert state == repo_local_state.PRESENT
     assert output.read_bytes() == payload
 
+    # Repository payload is untrusted data, including HTTP-looking text. It must
+    # never influence the response-status authority parsed from the header block.
+    for marker in ('HTTP/1.1 404', 'HTTP/2.0 503'):
+        body = json.dumps({'repository': 'Leion-wp/example', 'note': marker}).encode() + b'\n'
+        success_with_marker = b'HTTP/2.0 200 OK\r\ncontent-type: application/json\r\n\r\n' + body
+        state = repo_local_state.fetch_repository_content(
+            'repos/Leion-wp/example/contents/.factory/product-state.json',
+            output,
+            fake_runner(0, stdout=success_with_marker),
+        )
+        assert state == repo_local_state.PRESENT
+        assert output.read_bytes() == body
+
+    # Missing or ambiguous transport metadata fails closed, even if the body or
+    # a second header-looking line happens to contain a 404-looking token.
+    for stdout in (
+        b'{"repository":"Leion-wp/example","note":"HTTP/1.1 404"}\n',
+        b'HTTP/2.0 200 OK\r\nHTTP/2.0 404 Not Found\r\n\r\n{}\n',
+    ):
+        output.write_text('stale-data-must-not-survive', encoding='utf-8')
+        state = repo_local_state.fetch_repository_content(
+            'repos/Leion-wp/example/contents/.factory/product-state.json',
+            output,
+            fake_runner(0, stdout=stdout),
+        )
+        assert state == repo_local_state.ERROR
+        assert not output.exists()
+
     for returncode, stdout, stderr, expected in (
         (1, b'', b'gh: Not Found (HTTP 404)', repo_local_state.ABSENT_404),
         (1, b'HTTP/2.0 403 Forbidden\n\n', b'', repo_local_state.ERROR),
