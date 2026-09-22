@@ -124,6 +124,14 @@ def assert_whole_set_consumers_use_shared_helper() -> None:
                 'gh issue list --repo "$repo" --state open --limit 200',
             ],
         },
+        "factory-scheduler.yml": {
+            "min_helper_calls": 1,
+            "unsafe": ["gh api --paginate --slurp"],
+        },
+        "factory-dispatch.yml": {
+            "min_helper_calls": 1,
+            "unsafe": ["gh api --paginate --slurp"],
+        },
     }
     helper = ".github/roots/factory-gh-array-collection.sh"
     for filename, contract in contracts.items():
@@ -157,6 +165,19 @@ def assert_whole_set_consumers_use_shared_helper() -> None:
     )
     assert 'gh api --paginate --slurp "repos/${repo}/issues/${issue}/comments"' in quality_block, (
         "Quality BLOCK reconciliation must preserve complete paginated identity/verdict comment history"
+    )
+
+    scheduler = (WORKFLOWS / "factory-scheduler.yml").read_text(encoding="utf-8")
+    assert scheduler.index(helper) < scheduler.index("gh workflow run factory-dispatch.yml"), (
+        "scheduler must complete bounded whole-set admission before dispatch side effects"
+    )
+    assert scheduler.index(helper) < scheduler.index("gh issue edit"), (
+        "scheduler must complete bounded whole-set admission before lifecycle mutation"
+    )
+
+    dispatcher = (WORKFLOWS / "factory-dispatch.yml").read_text(encoding="utf-8")
+    assert dispatcher.index(helper) < dispatcher.index("- name: Compile FactoryTask"), (
+        "dispatcher must fail closed on bounded whole-set admission before task compilation/routing"
     )
 
 
