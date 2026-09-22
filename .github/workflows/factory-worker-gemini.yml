@@ -80,9 +80,26 @@ jobs:
             '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"gemini",summary:$summary,outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:null,worker_url:null},evidence:{tests:[],checks:["Gemini CLI action completed"]},risks:["Adapter does not yet infer commit or PR identity from provider output."],next_action:"REVIEW"}' \
             > factory-result.json
 
-      - name: Upload FactoryResult
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned FactoryResult validator
+        run: python -m pip install --disable-pip-version-check 'jsonschema==4.23.0'
+
+      - name: Validate FactoryResult before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/roots/factory_result_validate.py \
+            --schema .github/roots/factory-result.schema.json \
+            --result factory-result.json \
+            --expected-task-id "$(jq -r '.task_id' factory-task.json)" \
+            --expected-worker gemini
+
+      - name: Upload validated FactoryResult
         uses: actions/upload-artifact@v4
         with:
-          name: factory-result-gemini
+          name: validated-factory-result-gemini
           path: factory-result.json
           retention-days: 7
