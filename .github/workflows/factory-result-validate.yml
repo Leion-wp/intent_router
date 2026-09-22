@@ -6,12 +6,30 @@ on:
       result_json:
         required: true
         type: string
+      expected_task_id:
+        required: false
+        type: string
+        default: ''
+      expected_worker:
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       result_json:
         description: 'FactoryResult JSON to validate'
         required: true
         type: string
+      expected_task_id:
+        description: 'Optional exact FactoryTask identity'
+        required: false
+        type: string
+        default: ''
+      expected_worker:
+        description: 'Optional exact worker identity'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -21,11 +39,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout canonical FactoryResult contract
+      - name: Checkout immutable FactoryResult contract revision
         uses: actions/checkout@v4
         with:
           repository: Leion-wp/intent_router
-          ref: Android
+          ref: ${{ github.sha }}
           sparse-checkout: |
             .github/roots/factory-result.schema.json
             .github/roots/factory_result_validate.py
@@ -46,32 +64,23 @@ jobs:
           set -euo pipefail
           printf '%s' "$RESULT_JSON" | jq -e . > factory-result.json
 
-      - name: Validate canonical FactoryResult schema
-        run: >-
-          python .github/roots/factory_result_validate.py
-          --schema .github/roots/factory-result.schema.json
-          --result factory-result.json
-
-      - name: Validate status transition semantics
+      - name: Validate canonical FactoryResult boundary
+        env:
+          EXPECTED_TASK_ID: ${{ inputs.expected_task_id }}
+          EXPECTED_WORKER: ${{ inputs.expected_worker }}
         shell: bash
         run: |
           set -euo pipefail
-          jq -e '
-            if .status == "REWORK" then .next_action == "REWORK"
-            elif .status == "FAILED" then (.next_action | IN("CLOSE", "HUMAN_REQUIRED", "NONE"))
-            elif .status == "BLOCKED" then (.next_action | IN("WAIT", "HUMAN_REQUIRED", "CLOSE"))
-            elif .status == "SUCCEEDED" then (.next_action | IN("REVIEW", "WAIT", "NONE"))
-            else false end
-          ' factory-result.json >/dev/null
-
-      - name: Reject secret-shaped outputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          if jq -r '.. | strings' factory-result.json | grep -Eiq '(sk-[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)'; then
-            echo 'FactoryResult contains a value that looks like a secret or private key.' >&2
-            exit 1
+          set -- python .github/roots/factory_result_validate.py \
+            --schema .github/roots/factory-result.schema.json \
+            --result factory-result.json
+          if [ -n "$EXPECTED_TASK_ID" ]; then
+            set -- "$@" --expected-task-id "$EXPECTED_TASK_ID"
           fi
+          if [ -n "$EXPECTED_WORKER" ]; then
+            set -- "$@" --expected-worker "$EXPECTED_WORKER"
+          fi
+          "$@"
 
       - name: Upload validated result
         uses: actions/upload-artifact@v4
