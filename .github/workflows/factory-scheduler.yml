@@ -47,19 +47,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          helper='.github/roots/factory_active_linked_prs.py'
-          test -f "$helper"
+          linked_helper='.github/roots/factory_active_linked_prs.py'
+          collection_helper='.github/roots/factory-gh-array-collection.sh'
+          test -f "$linked_helper"
+          test -x "$collection_helper"
 
           gh issue list --repo "$GITHUB_REPOSITORY" --state open --label 'factory:queued' --limit 100 --json number,body,createdAt > queued.json
-          gh api --paginate --slurp \
+          bash "$collection_helper" \
             "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=Android&per_page=100" \
-            | jq 'add // []' > open-prs.json
+            > open-prs.json
 
           jq -c 'sort_by(.createdAt)[]' queued.json | while IFS= read -r row; do
             issue="$(jq -r '.number' <<< "$row")"
             body="$(jq -r '.body // ""' <<< "$row")"
 
-            python "$helper" \
+            python "$linked_helper" \
               --issue "$issue" \
               --prs-json open-prs.json \
               --base Android \
