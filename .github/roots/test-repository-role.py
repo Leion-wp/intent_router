@@ -223,11 +223,13 @@ class LocalActivePrAdmissionContractTests(unittest.TestCase):
         prs = [self.pr(1, "Fixes #1234")]
         self.assertEqual(active_prs.linked_prs(123, prs, "Android"), [])
 
-    def test_local_scheduler_and_dispatch_use_complete_paginated_pr_set(self):
+    def test_local_scheduler_and_dispatch_use_bounded_complete_pr_set(self):
         workflows = ROOT.parent / "workflows"
         for name in ("factory-scheduler.yml", "factory-dispatch.yml"):
             text = (workflows / name).read_text(encoding="utf-8")
-            self.assertIn("gh api --paginate --slurp", text, msg=name)
+            self.assertIn(".github/roots/factory-gh-array-collection.sh", text, msg=name)
+            self.assertIn("pulls?state=open&base=Android&per_page=100", text, msg=name)
+            self.assertNotIn("gh api --paginate --slurp", text, msg=name)
             self.assertIn("factory_active_linked_prs.py", text, msg=name)
             self.assertNotIn("gh pr list", text, msg=name)
             self.assertIn("CONTROL_PLANE_ANOMALY", text, msg=name)
