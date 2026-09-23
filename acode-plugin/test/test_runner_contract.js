@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { discoverTestFiles, resolveSuiteRunner } = require('./run-tests');
+const { discoverTestFiles, resolveSuiteRunner } = require('./runner-contract');
 
 module.exports = async function testRunnerContract() {
   const functionSuite = async () => {};
