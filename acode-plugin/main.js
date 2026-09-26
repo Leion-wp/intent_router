@@ -836,8 +836,14 @@
           throw new Error('Pipeline must contain at least one step');
         }
 
-        // Validate payload JSON string formatting for each step
+        const availableActions = new Set(filterRoutableActions(this.router.commands));
         this.steps.forEach((step, idx) => {
+          if (!availableActions.has(step.action)) {
+            const err = new Error(`Step ${idx + 1} uses unavailable or non-portable capability '${step.action || ''}'`);
+            err.code = 'pipeline_capability_unavailable';
+            throw err;
+          }
+
           try {
             const parsed = JSON.parse(step.rawPayload || '{}');
             if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -850,13 +856,20 @@
 
         const sanitizeResult = sanitizePipelineFilename(this.pipelineName);
         const pipelineData = this.generatePipelineObject();
-
         validatePipelineStructure(pipelineData);
 
-        const projectRoot = await this.router.pipelineUI.getProjectRoot();
-        if (!projectRoot) {
-          throw new Error('No project folder is currently open in Acode sidebar.');
+        const jsonString = JSON.stringify(pipelineData, null, 2);
+        const serializedBytes = getByteLength(jsonString);
+        if (serializedBytes > MAX_PIPELINE_BYTES) {
+          const err = new Error(`Pipeline size (${serializedBytes} bytes) exceeds limit (${MAX_PIPELINE_BYTES} bytes)`);
+          err.code = 'pipeline_too_large';
+          err.limit = MAX_PIPELINE_BYTES;
+          err.size = serializedBytes;
+          throw err;
         }
+
+        const projectRoot = await this.router.pipelineUI.getProjectRoot();
+        if (!projectRoot) throw new Error('No project folder is currently open in Acode sidebar.');
 
         const fsOperation = this.router.requireFs();
         if (!fsOperation) throw new Error('File system API unavailable');
@@ -864,38 +877,83 @@
         const pipelineFolderUrl = projectRoot.endsWith('/') ? `${projectRoot}pipeline` : `${projectRoot}/pipeline`;
         const folder = fsOperation(pipelineFolderUrl);
         const folderExists = await folder.exists();
-
         if (!folderExists) {
           const rootFolder = fsOperation(projectRoot);
-          if (typeof rootFolder.createDirectory === 'function') {
-            await rootFolder.createDirectory('pipeline');
+          if (typeof rootFolder.createDirectory !== 'function') {
+            const err = new Error('Cannot create workspace pipeline directory');
+            err.code = 'pipeline_directory_unavailable';
+            throw err;
           }
+          await rootFolder.createDirectory('pipeline');
         }
 
         const targetFileUrl = `${pipelineFolderUrl}/${sanitizeResult.fileName}`;
-        const fileHandle = fsOperation(targetFileUrl);
-        const fileExists = await fileHandle.exists();
 
-        if (fileExists) {
-          const confirmOverwrite = typeof window !== 'undefined' && window.confirm
-            ? window.confirm(`File "${sanitizeResult.fileName}" already exists. Do you want to overwrite it?`)
-            : true;
+        await withPipelineSaveLock(targetFileUrl, async () => {
+          const fileHandle = fsOperation(targetFileUrl);
+          const fileExists = await fileHandle.exists();
 
-          if (!confirmOverwrite) {
-            this.router.toast('Save cancelled: file already exists');
-            return;
+          if (fileExists) {
+            if (typeof fileHandle.readFile !== 'function') {
+              const err = new Error('Safe overwrite unavailable: target cannot be fingerprinted');
+              err.code = 'overwrite_atomicity_unavailable';
+              throw err;
+            }
+
+            const observedContent = await readBoundedFile(
+              fileHandle,
+              'utf-8',
+              MAX_PIPELINE_BYTES,
+              'existing_pipeline_too_large'
+            );
+
+            if (typeof window === 'undefined' || typeof window.confirm !== 'function') {
+              const err = new Error('Overwrite confirmation is unavailable');
+              err.code = 'overwrite_confirmation_unavailable';
+              throw err;
+            }
+
+            let confirmed = false;
+            try {
+              confirmed = window.confirm(`File "${sanitizeResult.fileName}" already exists. Do you want to overwrite it?`) === true;
+            } catch (_) {
+              const err = new Error('Overwrite confirmation failed');
+              err.code = 'overwrite_confirmation_failed';
+              throw err;
+            }
+
+            if (!confirmed) {
+              this.router.toast('Save cancelled: file already exists');
+              return;
+            }
+
+            // Bind the confirmation to the exact content the user confirmed.
+            const currentContent = await readBoundedFile(
+              fileHandle,
+              'utf-8',
+              MAX_PIPELINE_BYTES,
+              'existing_pipeline_too_large'
+            );
+            if (String(currentContent) !== String(observedContent)) {
+              const err = new Error('Target changed after overwrite confirmation');
+              err.code = 'pipeline_overwrite_conflict';
+              throw err;
+            }
+          } else {
+            // Fail closed if another writer created the target after our first observation.
+            if (await fileHandle.exists()) {
+              const err = new Error('Target appeared during save');
+              err.code = 'pipeline_create_conflict';
+              throw err;
+            }
           }
-        }
 
-        const jsonString = JSON.stringify(pipelineData, null, 2);
-        await fsOperation(targetFileUrl).writeFile(jsonString);
+          await fileHandle.writeFile(jsonString);
+        });
 
         this.router.toast(`Pipeline saved to pipeline/${sanitizeResult.fileName}`);
-
-        // Refresh PipelineUI and navigate back
         await this.router.pipelineUI.loadPipelines();
         await this.router.pipelineUI.render();
-
       } catch (err) {
         if (this.validationErrorElement) {
           this.validationErrorElement.style.display = 'block';
