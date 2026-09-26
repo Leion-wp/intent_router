@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Leion-wp/intent_router/.github/roots/factory-pr-forge-lease.schema.json",
+  "title": "Roots PR Forge lease",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "resource",
+    "state",
+    "generation",
+    "holder_task_id",
+    "lease_token",
+    "acquired_at",
+    "expires_at",
+    "released_at"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "resource": { "const": "roots-pr-forge" },
+    "state": { "enum": ["FREE", "HELD"] },
+    "generation": { "type": "integer", "minimum": 0 },
+    "holder_task_id": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 8, "maxLength": 128 }
+      ]
+    },
+    "lease_token": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 16, "maxLength": 256, "pattern": "^[A-Za-z0-9._:-]+$" }
+      ]
+    },
+    "acquired_at": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "format": "date-time" }
+      ]
+    },
+    "expires_at": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "format": "date-time" }
+      ]
+    },
+    "released_at": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "format": "date-time" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "HELD" } } },
+      "then": {
+        "properties": {
+          "holder_task_id": { "type": "string", "minLength": 8 },
+          "lease_token": { "type": "string", "minLength": 16 },
+          "acquired_at": { "type": "string", "format": "date-time" },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "state": { "const": "FREE" } } },
+      "then": {
+        "properties": {
+          "holder_task_id": { "type": "null" },
+          "lease_token": { "type": "null" },
+          "acquired_at": { "type": "null" },
+          "expires_at": { "type": "null" }
+        }
+      }
+    }
+  ]
+}
