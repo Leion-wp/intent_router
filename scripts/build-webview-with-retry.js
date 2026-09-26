@@ -13,7 +13,12 @@ function sleep(ms) {
 }
 
 function runBuildOnce() {
-  return spawnSync('cmd.exe', ['/d', '/s', '/c', 'npm run build:webview:raw'], {
+  if (process.platform === 'win32') {
+    return spawnSync('cmd.exe', ['/d', '/s', '/c', 'npm run build:webview:raw'], {
+      encoding: 'utf8'
+    });
+  }
+  return spawnSync('npm', ['run', 'build:webview:raw'], {
     encoding: 'utf8'
   });
 }

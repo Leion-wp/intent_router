@@ -3,170 +3,18 @@
 
   const PLUGIN_ID = 'com.leion.intentrouter';
   const PLUGIN_VERSION = '1.2.1';
-  const MAX_PIPELINE_BYTES = 5 * 1024 * 1024; // 5 MB default limit
-  const DEFAULT_EDITOR_MAX_BYTES = 5 * 1024 * 1024; // 5 MB default limit for editor open
-  const DEFAULT_PIPELINE_BATCH_SIZE = 25; // 25 cards per batch
-
-  const ALLOWED_OPEN_URL_SCHEMES = new Set(['https:', 'http:']);
-
-  function validateOpenUrl(rawUrl) {
-    if (rawUrl === undefined || rawUrl === null) {
-      throw new Error('url is required');
-    }
-    const trimmed = String(rawUrl).trim();
-    if (!trimmed) {
-      throw new Error('url is required');
-    }
-
-    let parsedUrl = null;
-    try {
-      parsedUrl = new URL(trimmed);
-    } catch (_) {
-      const schemeMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
-      const rejectedScheme = schemeMatch ? schemeMatch[1].toLowerCase() : 'none';
-      const err = new Error(`URL scheme '${rejectedScheme}' is not allowed`);
-      err.code = 'url_scheme_not_allowed';
-      err.scheme = rejectedScheme;
-      throw err;
-    }
-
-    const scheme = parsedUrl.protocol ? parsedUrl.protocol.slice(0, -1).toLowerCase() : 'none';
-    if (!ALLOWED_OPEN_URL_SCHEMES.has(parsedUrl.protocol.toLowerCase())) {
-      const err = new Error(`URL scheme '${scheme}' is not allowed`);
-      err.code = 'url_scheme_not_allowed';
-      err.scheme = scheme;
-      throw err;
-    }
-
-    return parsedUrl.href;
-  }
-
-  function validateMaxBytes(maxBytes) {
-    if (maxBytes === undefined) {
-      return null;
-    }
-    let num;
-    if (typeof maxBytes === 'number') {
-      num = maxBytes;
-    } else if (typeof maxBytes === 'string' && maxBytes.trim() !== '') {
-      num = Number(maxBytes);
-    } else {
-      const err = new Error('Invalid maxBytes: must be a positive finite number');
-      err.code = 'invalid_max_bytes';
-      throw err;
-    }
-
-    if (isNaN(num) || !Number.isFinite(num) || num <= 0) {
-      const err = new Error('Invalid maxBytes: must be a positive finite number');
-      err.code = 'invalid_max_bytes';
-      throw err;
-    }
-
-    return num;
-  }
-
-  function getByteLength(content) {
-    if (typeof content === 'string') {
-      if (typeof TextEncoder !== 'undefined') {
-        return new TextEncoder().encode(content).length;
-      }
-      if (typeof Buffer !== 'undefined') {
-        return Buffer.byteLength(content, 'utf-8');
-      }
-      let bytes = 0;
-      for (let i = 0; i < content.length; i++) {
-        const code = content.charCodeAt(i);
-        if (code <= 0x7f) {
-          bytes += 1;
-        } else if (code <= 0x7ff) {
-          bytes += 2;
-        } else if (code >= 0xd800 && code <= 0xdbff) {
-          if (i + 1 < content.length) {
-            const next = content.charCodeAt(i + 1);
-            if (next >= 0xdc00 && next <= 0xdfff) {
-              bytes += 4;
-              i++;
-              continue;
-            }
-          }
-          bytes += 3;
-        } else {
-          bytes += 3;
-        }
-      }
-      return bytes;
-    }
-    if (content && typeof content.byteLength === 'number') {
-      return content.byteLength;
-    }
-    if (content && typeof content.length === 'number') {
-      return content.length;
-    }
-    return 0;
-  }
-
-  async function readBoundedFile(fsHandle, encoding, limit, errorCode = 'file_too_large') {
-    if (limit !== null && limit !== undefined) {
-      if (typeof fsHandle.stat === 'function') {
-        try {
-          const stats = await fsHandle.stat();
-          if (stats && typeof stats === 'object') {
-            const rawSize = stats.size ?? stats.length ?? stats.bytes;
-            if (typeof rawSize === 'number' && Number.isFinite(rawSize) && rawSize >= 0) {
-              if (rawSize > limit) {
-                const err = new Error(`File size (${rawSize} bytes) exceeds limit (${limit} bytes) [${errorCode}]`);
-                err.code = errorCode;
-                err.limit = limit;
-                err.size = rawSize;
-                throw err;
-              }
-            }
-          }
-        } catch (err) {
-          if (err && err.code === errorCode) {
-            throw err;
-          }
-        }
-      }
-    }
-
-    const content = await fsHandle.readFile(encoding || 'utf-8');
-
-    if (limit !== null && limit !== undefined) {
-      const byteLength = getByteLength(content);
-      if (byteLength > limit) {
-        const err = new Error(`File content size (${byteLength} bytes) exceeds limit (${limit} bytes) [${errorCode}]`);
-        err.code = errorCode;
-        err.limit = limit;
-        err.size = byteLength;
-        throw err;
-      }
-    }
-
-    return content;
-  }
 
 
   class PipelineRunner {
-    constructor(router, options = {}) {
+    constructor(router) {
       this.router = router;
-      this.maxPipelineBytes = (options && typeof options.maxPipelineBytes === 'number')
-        ? options.maxPipelineBytes
-        : MAX_PIPELINE_BYTES;
     }
 
-    async runPipelineFromFile(fileUrl, onProgress, options = {}) {
+    async runPipelineFromFile(fileUrl, onProgress) {
       try {
         const fsOperation = this.router.requireFs();
         if (!fsOperation) throw new Error('File system API unavailable');
-
-        const limit = (options && typeof options.maxPipelineBytes === 'number')
-          ? options.maxPipelineBytes
-          : (this.maxPipelineBytes || MAX_PIPELINE_BYTES);
-
-        const fsHandle = fsOperation(fileUrl);
-        const fileContent = await readBoundedFile(fsHandle, 'utf-8', limit, 'pipeline_too_large');
-
+        const fileContent = await fsOperation(fileUrl).readFile('utf-8');
         const pipelineData = JSON.parse(fileContent);
         return await this.runPipelineFromData(pipelineData, onProgress);
       } catch (err) {
@@ -180,51 +28,70 @@
         throw new Error('Invalid pipeline format: steps array is missing');
       }
 
+      // Check for onFailure cycles before executing any steps
+      const checkOnFailureCycle = (startId) => {
+        const visited = new Set();
+        let currentId = startId;
+        while (currentId) {
+          if (visited.has(currentId)) return true;
+          visited.add(currentId);
+          const st = pipelineData.steps.find(s => s.id === currentId);
+          currentId = st ? st.onFailure : null;
+        }
+        return false;
+      };
+
+      for (const step of pipelineData.steps) {
+        if (step.id && step.onFailure && checkOnFailureCycle(step.id)) {
+          throw new Error(`onFailure cycle detected starting at step ${step.id}`);
+        }
+      }
+
       let stepIndex = 0;
       const totalSteps = pipelineData.steps.length;
       const logs = [];
 
-      for (const step of pipelineData.steps) {
-        stepIndex++;
+      while (stepIndex < pipelineData.steps.length) {
+        const step = pipelineData.steps[stepIndex];
+        const currentStepNum = stepIndex + 1;
         const intentName = step.intent;
         const payload = step.payload || {};
 
         if (onProgress) {
-          onProgress({ step: stepIndex, total: totalSteps, status: 'running', intent: intentName });
+          onProgress({ step: currentStepNum, total: totalSteps, status: 'running', intent: intentName });
         }
 
         // Roots compatibility: file.read -> action: file:read, data: payload
         const action = intentName.replace(/\./g, ':');
 
-        let stepSuccess = false;
-        let stepError = null;
-
         try {
           const result = await this.router.route({ action, data: payload });
-          if (result && result.success) {
-            stepSuccess = true;
-            logs.push({ step: stepIndex, intent: intentName, success: true, data: result.data, error: result.error || null });
-          } else {
-            stepSuccess = false;
-            stepError = (result && result.error) ? result.error : `Step ${stepIndex} failed`;
-            logs.push({ step: stepIndex, intent: intentName, success: false, data: result ? result.data : null, error: stepError });
+          if (!result.success) {
+             throw new Error(result.error || `Step ${currentStepNum} failed`);
           }
+          logs.push({ step: currentStepNum, id: step.id, intent: intentName, success: true, data: result.data });
+          stepIndex++;
         } catch (err) {
-          stepSuccess = false;
-          stepError = err && err.message ? err.message : String(err);
-          logs.push({ step: stepIndex, intent: intentName, success: false, data: null, error: stepError });
-        }
-
-        if (!stepSuccess && !step.continueOnError) {
-          if (onProgress) {
-            onProgress({ step: stepIndex, total: totalSteps, status: 'error', error: stepError });
+          logs.push({ step: currentStepNum, id: step.id, intent: intentName, success: false, error: err.message });
+          if (step.onFailure) {
+            const failureStepIndex = pipelineData.steps.findIndex(s => s.id === step.onFailure);
+            if (failureStepIndex !== -1) {
+              stepIndex = failureStepIndex;
+              continue;
+            }
           }
-          throw new Error(`Pipeline aborted at step ${stepIndex} (${intentName}): ${stepError}`);
+          if (!step.continueOnError) {
+            if (onProgress) {
+              onProgress({ step: currentStepNum, total: totalSteps, status: 'error', error: err.message });
+            }
+            throw new Error(`Pipeline aborted at step ${currentStepNum} (${intentName}): ${err.message}`);
+          }
+          stepIndex++;
         }
       }
 
       if (onProgress) {
-        onProgress({ step: stepIndex, total: totalSteps, status: 'success' });
+        onProgress({ step: pipelineData.steps.length, total: totalSteps, status: 'success' });
       }
 
       return { success: true, logs };
@@ -233,17 +100,9 @@
 
 
   class PipelineUI {
-    constructor(router, options = {}) {
+    constructor(router) {
       this.router = router;
-      this.batchSize = (options && typeof options.batchSize === 'number' && options.batchSize > 0)
-        ? options.batchSize
-        : DEFAULT_PIPELINE_BATCH_SIZE;
       this.$container = null;
-      this.$cardsContainer = null;
-      this.$counter = null;
-      this.$loadMoreBtn = null;
-      this.pipelineFiles = [];
-      this.renderedCount = 0;
     }
 
     async render() {
@@ -283,9 +142,6 @@
     }
 
     async loadPipelines() {
-      this.pipelineFiles = [];
-      this.renderedCount = 0;
-
       this.$container.innerHTML = '<div style="text-align: center; padding: 20px;">Loading pipelines...</div>';
 
       const projectRoot = await this.getProjectRoot();
@@ -317,45 +173,21 @@
       header.style.justifyContent = 'space-between';
       header.style.alignItems = 'center';
 
-      const headerLeft = document.createElement('div');
-      headerLeft.style.display = 'flex';
-      headerLeft.style.flexDirection = 'column';
-      headerLeft.style.gap = '4px';
-
       const title = document.createElement('h3');
       title.textContent = 'Project Pipelines';
       title.style.margin = '0';
 
-      this.$counter = document.createElement('span');
-      this.$counter.style.fontSize = '0.85em';
-      this.$counter.style.color = 'var(--text-color, #ccc)';
-
-      headerLeft.appendChild(title);
-      headerLeft.appendChild(this.$counter);
-
-      header.appendChild(headerLeft);
+      header.appendChild(title);
       header.appendChild(refreshBtn);
 
-      this.$cardsContainer = document.createElement('div');
-      this.$cardsContainer.style.display = 'flex';
-      this.$cardsContainer.style.flexDirection = 'column';
-      this.$cardsContainer.style.gap = '12px';
-
-      this.$loadMoreBtn = document.createElement('button');
-      this.$loadMoreBtn.textContent = 'Load More';
-      this.$loadMoreBtn.style.padding = '8px 16px';
-      this.$loadMoreBtn.style.background = 'transparent';
-      this.$loadMoreBtn.style.border = '1px solid var(--primary-color)';
-      this.$loadMoreBtn.style.color = 'var(--primary-color)';
-      this.$loadMoreBtn.style.borderRadius = '4px';
-      this.$loadMoreBtn.style.alignSelf = 'center';
-      this.$loadMoreBtn.style.display = 'none';
-      this.$loadMoreBtn.onclick = () => this.renderNextBatch();
+      const content = document.createElement('div');
+      content.style.display = 'flex';
+      content.style.flexDirection = 'column';
+      content.style.gap = '12px';
 
       this.$container.innerHTML = '';
       this.$container.appendChild(header);
-      this.$container.appendChild(this.$cardsContainer);
-      this.$container.appendChild(this.$loadMoreBtn);
+      this.$container.appendChild(content);
 
       try {
         const fsOperation = this.router.requireFs();
@@ -365,65 +197,28 @@
         const exists = await folder.exists();
 
         if (!exists) {
-          this.$cardsContainer.innerHTML = `<div style="padding: 16px; background: rgba(0,0,0,0.1); border-radius: 4px;">
+          content.innerHTML = `<div style="padding: 16px; background: rgba(0,0,0,0.1); border-radius: 4px;">
             No pipeline directory found (${pipelineFolderUrl}).
           </div>`;
           return;
         }
 
         const files = await folder.lsDir();
-        const pipelineFiles = files.filter(f => f.name && f.name.endsWith('.intent.json'))
-          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-        this.pipelineFiles = pipelineFiles;
+        const pipelineFiles = files.filter(f => f.name && f.name.endsWith('.intent.json'));
 
         if (pipelineFiles.length === 0) {
-          this.$cardsContainer.innerHTML = '<div style="padding: 16px; background: rgba(0,0,0,0.1); border-radius: 4px;">No *.intent.json files found in pipeline directory.</div>';
+          content.innerHTML = '<div style="padding: 16px; background: rgba(0,0,0,0.1); border-radius: 4px;">No *.intent.json files found in pipeline directory.</div>';
           return;
         }
 
-        this.renderNextBatch();
+        for (const file of pipelineFiles) {
+          content.appendChild(this.createPipelineCard(file));
+        }
 
       } catch (err) {
-        this.$cardsContainer.innerHTML = `<div style="padding: 16px; color: #f44336; background: rgba(244,67,54,0.1); border-radius: 4px;">
+        content.innerHTML = `<div style="padding: 16px; color: #f44336; background: rgba(244,67,54,0.1); border-radius: 4px;">
           Error loading pipelines: ${this.router.escapeHtml(err.message)}
         </div>`;
-      }
-    }
-
-    renderNextBatch() {
-      if (!this.$cardsContainer || this.renderedCount >= this.pipelineFiles.length) {
-        if (this.$loadMoreBtn) this.$loadMoreBtn.style.display = 'none';
-        return;
-      }
-
-      const start = this.renderedCount;
-      const end = Math.min(start + this.batchSize, this.pipelineFiles.length);
-      const batch = this.pipelineFiles.slice(start, end);
-
-      const fragment = document.createDocumentFragment();
-      for (const file of batch) {
-        fragment.appendChild(this.createPipelineCard(file));
-      }
-
-      this.$cardsContainer.appendChild(fragment);
-      this.renderedCount = end;
-
-      this.updatePaginationUI();
-    }
-
-    updatePaginationUI() {
-      const total = this.pipelineFiles.length;
-      if (this.$counter) {
-        this.$counter.textContent = total > 0 ? `Showing ${this.renderedCount} of ${total} pipelines` : '';
-      }
-      if (this.$loadMoreBtn) {
-        if (this.renderedCount < total) {
-          this.$loadMoreBtn.style.display = 'block';
-          this.$loadMoreBtn.textContent = `Load More (${total - this.renderedCount} remaining)`;
-        } else {
-          this.$loadMoreBtn.style.display = 'none';
-        }
       }
     }
 
@@ -675,14 +470,7 @@
       } catch (error) {
         const message = error && error.message ? error.message : String(error);
         this.log(`Error executing ${action}: ${message}`);
-        const meta = { action };
-        if (error && typeof error === 'object') {
-          if (error.code) meta.code = error.code;
-          if (error.limit !== undefined) meta.limit = error.limit;
-          if (error.size !== undefined) meta.size = error.size;
-          if (error.scheme !== undefined) meta.scheme = error.scheme;
-        }
-        return this.fail(message, meta);
+        return this.fail(message, { action });
       }
     }
 
@@ -750,17 +538,14 @@
       });
 
       this.register('system:open_url', (data) => {
-        if (!data || !data.url) throw new Error('url is required');
-        const validUrl = validateOpenUrl(data.url);
-        window.open(validUrl, '_system');
+        if (!data.url) throw new Error('url is required');
+        window.open(String(data.url), '_system');
         return { opened: true };
       });
 
       this.register('file:read', async (data) => {
         if (!data.path) throw new Error('path is required');
-        const limit = validateMaxBytes(data.maxBytes);
-        const fsHandle = this.requireFs()(data.path);
-        return await readBoundedFile(fsHandle, data.encoding || 'utf-8', limit, 'file_too_large');
+        return await this.requireFs()(data.path).readFile(data.encoding || 'utf-8');
       });
 
       this.register('file:write', async (data) => {
@@ -888,9 +673,7 @@
 
       this.register('editor:open_file', async (data) => {
         if (!data.path) throw new Error('path is required');
-        const limit = data.maxBytes !== undefined ? validateMaxBytes(data.maxBytes) : DEFAULT_EDITOR_MAX_BYTES;
-        const fsHandle = this.requireFs()(data.path);
-        const text = await readBoundedFile(fsHandle, data.encoding || 'utf-8', limit, 'editor_file_too_large');
+        const text = await this.requireFs()(data.path).readFile(data.encoding || 'utf-8');
         const filename = data.name || String(data.path).split('/').filter(Boolean).pop() || 'file';
         const file = await editorManager.addNewFile(filename, {
           text: String(text), uri: data.path, render: true, isUnsaved: false, readOnly: !!data.readOnly
@@ -945,6 +728,121 @@
         if (!instance) instance = await terminal.createServer({ name: data.name || 'Intent Router' });
         terminal.write(instance.id, `${data.command}\r`);
         return { submitted: true, terminalId: instance.id, command: data.command };
+      });
+
+      this.register('terminal:run', async (data) => {
+        const executor = globalThis.Executor || (typeof window !== 'undefined' ? window.Executor : undefined);
+        if (!executor || typeof executor.start !== 'function' || typeof executor.stop !== 'function') {
+          throw new Error('terminal.run unavailable: bounded Executor.start/stop required');
+        }
+        if (!data || !data.command) throw new Error('command is required');
+
+        let fullCommand = String(data.command);
+        if (data.cwd) {
+          const escapedCwd = "'" + String(data.cwd).replace(/'/g, "'\\''") + "'";
+          fullCommand = `cd ${escapedCwd} && ${data.command}`;
+        }
+
+        const alpine = data.alpine !== undefined ? Boolean(data.alpine) : undefined;
+        const timeoutMs = Number(data.timeoutMs || data.timeout) || 30000;
+        const maxBytes = Number(data.maxBytes || data.maxOutputBytes) || 5 * 1024 * 1024;
+
+        return new Promise((resolve, reject) => {
+          let stdout = '';
+          let stdoutBytes = 0;
+          let isSettled = false;
+          let timer = null;
+          let proc = null;
+
+          const cleanup = () => {
+            if (timer) {
+              clearTimeout(timer);
+              timer = null;
+            }
+          };
+
+          const stopProc = () => {
+            try {
+              if (proc && typeof proc.stop === 'function') proc.stop();
+            } catch (_) {}
+            try {
+              if (executor && typeof executor.stop === 'function') {
+                executor.stop(proc && proc.id !== undefined ? proc.id : proc);
+              }
+            } catch (_) {}
+          };
+
+          timer = setTimeout(() => {
+            if (isSettled) return;
+            isSettled = true;
+            cleanup();
+            stopProc();
+            reject(new Error(`terminal.run timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+
+          try {
+            proc = executor.start(fullCommand, alpine);
+          } catch (err) {
+            cleanup();
+            return reject(err);
+          }
+
+          if (!proc) {
+            cleanup();
+            return reject(new Error('Executor.start returned null process handle'));
+          }
+
+          const handleData = (chunk) => {
+            if (isSettled) return;
+            const str = String(chunk !== undefined && chunk !== null ? chunk : '');
+            stdout += str;
+            const bytes = typeof Buffer !== 'undefined' ? Buffer.byteLength(str) : str.length;
+            stdoutBytes += bytes;
+            if (stdoutBytes > maxBytes) {
+              isSettled = true;
+              cleanup();
+              stopProc();
+              reject(new Error(`terminal.run output budget exceeded (${maxBytes} bytes)`));
+            }
+          };
+
+          const handleExit = (code) => {
+            if (isSettled) return;
+            isSettled = true;
+            cleanup();
+            if (code !== undefined && code !== null && code !== 0) {
+              reject(new Error(`Command failed with exit code ${code}`));
+            } else {
+              resolve({ completed: true, stdout, output: stdout });
+            }
+          };
+
+          const handleError = (err) => {
+            if (isSettled) return;
+            isSettled = true;
+            cleanup();
+            reject(err instanceof Error ? err : new Error(String(err || 'Execution error')));
+          };
+
+          if (typeof proc.on === 'function') {
+            proc.on('stdout', handleData);
+            proc.on('data', handleData);
+            proc.on('stderr', handleData);
+            proc.on('exit', handleExit);
+            proc.on('close', handleExit);
+            proc.on('error', handleError);
+          } else if (typeof proc.addEventListener === 'function') {
+            proc.addEventListener('stdout', (e) => handleData(e.detail || e.data || e));
+            proc.addEventListener('data', (e) => handleData(e.detail || e.data || e));
+            proc.addEventListener('exit', (e) => handleExit(e.detail || e.code || 0));
+            proc.addEventListener('error', (e) => handleError(e.detail || e.error || e));
+          } else if (proc instanceof Promise || typeof proc.then === 'function') {
+            proc.then((res) => {
+              handleData(res);
+              handleExit(0);
+            }).catch(handleError);
+          }
+        });
       });
     }
 
@@ -1041,17 +939,6 @@
   }
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-      MAX_PIPELINE_BYTES,
-      DEFAULT_EDITOR_MAX_BYTES,
-      DEFAULT_PIPELINE_BATCH_SIZE,
-      PipelineRunner,
-      PipelineUI,
-      IntentRouter,
-      validateMaxBytes,
-      validateOpenUrl,
-      getByteLength,
-      readBoundedFile
-    };
+    module.exports = { IntentRouter, PipelineRunner, PipelineUI };
   }
 })();
