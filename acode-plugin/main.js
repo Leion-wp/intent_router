@@ -157,6 +157,13 @@
     return intent.trim().replace(/\./g, ':');
   }
 
+  function isPortableAction(action) {
+    if (typeof action !== 'string') return false;
+    const normalized = action.trim();
+    if (!normalized || normalized.startsWith('router:')) return false;
+    return intentToAction(actionToIntent(normalized)) === normalized;
+  }
+
   function filterRoutableActions(actions) {
     if (!actions) return [];
     const list = Array.isArray(actions)
@@ -164,8 +171,26 @@
       : (actions instanceof Map || actions instanceof Set ? Array.from(actions.keys()) : Object.keys(actions));
 
     return list
-      .filter(action => typeof action === 'string' && !action.startsWith('router:'))
+      .filter(isPortableAction)
       .sort((a, b) => a.localeCompare(b));
+  }
+
+  const pipelineSaveLocks = new Map();
+
+  async function withPipelineSaveLock(target, operation) {
+    while (pipelineSaveLocks.has(target)) {
+      await pipelineSaveLocks.get(target);
+    }
+
+    let release;
+    const lock = new Promise(resolve => { release = resolve; });
+    pipelineSaveLocks.set(target, lock);
+    try {
+      return await operation();
+    } finally {
+      if (pipelineSaveLocks.get(target) === lock) pipelineSaveLocks.delete(target);
+      release();
+    }
   }
 
   function sanitizePipelineFilename(rawName) {
@@ -210,72 +235,118 @@
     };
   }
 
-  function validatePipelineStructure(pipelineData) {
-    const errors = [];
+  const MAX_PIPELINE_VALIDATION_ERRORS = 32;
+  const MAX_PIPELINE_VALIDATION_MESSAGE_BYTES = 4096;
 
-    if (!pipelineData || typeof pipelineData !== 'object' || Array.isArray(pipelineData)) {
-      const err = new Error('Invalid pipeline structure: pipelineData must be a non-null object');
-      err.code = 'invalid_pipeline_structure';
-      err.errors = ['pipelineData must be a non-null object'];
-      throw err;
+  function makePipelineValidationError(collected, totalErrors) {
+    const truncated = totalErrors > collected.length;
+    const exposed = collected.slice(0, truncated ? MAX_PIPELINE_VALIDATION_ERRORS - 1 : MAX_PIPELINE_VALIDATION_ERRORS);
+    if (truncated) {
+      exposed.push({
+        index: null,
+        id: null,
+        message: `Validation diagnostics truncated; ${totalErrors - exposed.length} additional error(s) omitted`,
+        truncated: true
+      });
     }
 
+    const prefix = 'Invalid pipeline structure: ';
+    const suffix = truncated ? '; diagnostics truncated' : '';
+    let message = prefix;
+    for (const item of exposed) {
+      const piece = (message === prefix ? '' : '; ') + item.message;
+      if (getByteLength(message + piece + suffix) > MAX_PIPELINE_VALIDATION_MESSAGE_BYTES) break;
+      message += piece;
+    }
+    if (getByteLength(message + suffix) <= MAX_PIPELINE_VALIDATION_MESSAGE_BYTES) message += suffix;
+
+    const err = new Error(message);
+    err.code = 'invalid_pipeline_structure';
+    err.errors = exposed;
+    err.truncated = truncated;
+    err.totalErrors = totalErrors;
+    return err;
+  }
+
+  function validatePipelineStructure(pipelineData) {
+    if (!pipelineData || typeof pipelineData !== 'object' || Array.isArray(pipelineData)) {
+      throw makePipelineValidationError(
+        [{ index: null, id: null, message: 'pipelineData must be a non-null object' }],
+        1
+      );
+    }
     if (!Array.isArray(pipelineData.steps)) {
-      errors.push('pipelineData.steps must be an array');
-    } else {
-      const stepIds = new Set();
-      pipelineData.steps.forEach((step, idx) => {
-        if (!step || typeof step !== 'object' || Array.isArray(step)) {
-          errors.push(`step[${idx}] must be a non-null object`);
-          return;
-        }
+      throw makePipelineValidationError(
+        [{ index: null, id: null, message: 'steps array is missing or not an array' }],
+        1
+      );
+    }
 
-        if (typeof step.id !== 'string' || !step.id.trim()) {
-          step.id = `step_${idx + 1}`;
-        }
+    const errors = [];
+    let totalErrors = 0;
+    const seenIds = new Set();
+    const failureTargets = [];
+    const addError = entry => {
+      totalErrors += 1;
+      if (errors.length < MAX_PIPELINE_VALIDATION_ERRORS) errors.push(entry);
+    };
 
-        if (stepIds.has(step.id)) {
-          errors.push(`step[${idx}].id "${step.id}" is duplicate`);
+    for (let i = 0; i < pipelineData.steps.length; i++) {
+      const step = pipelineData.steps[i];
+      const stepIndex = i + 1;
+      if (!step || typeof step !== 'object' || Array.isArray(step)) {
+        addError({ index: stepIndex, id: null, message: `Step ${stepIndex} must be a non-null object` });
+        continue;
+      }
+
+      const stepId = typeof step.id === 'string' && step.id.trim() ? step.id.trim() : null;
+      if (typeof step.intent !== 'string' || step.intent.trim() === '') {
+        addError({ index: stepIndex, id: stepId, message: `Step ${stepIndex} intent must be a non-empty string` });
+      } else if (step.intent !== step.intent.trim()) {
+        addError({ index: stepIndex, id: stepId, message: `Step ${stepIndex} intent must not contain leading or trailing whitespace` });
+      }
+
+      if (step.payload !== undefined && (!step.payload || typeof step.payload !== 'object' || Array.isArray(step.payload))) {
+        addError({ index: stepIndex, id: stepId, message: `Step ${stepIndex} payload must be a non-null object when provided` });
+      }
+
+      if (step.id !== undefined) {
+        if (typeof step.id !== 'string' || step.id.trim() === '') {
+          addError({ index: stepIndex, id: null, message: `Step ${stepIndex} id must be a non-empty string when provided` });
         } else {
-          stepIds.add(step.id);
-        }
-
-        if (typeof step.intent !== 'string' || !step.intent.trim()) {
-          errors.push(`step[${idx}].intent must be a non-empty string`);
-        }
-
-        if (!step.payload || typeof step.payload !== 'object' || Array.isArray(step.payload)) {
-          errors.push(`step[${idx}].payload must be a non-null non-array object`);
-        }
-
-        if (step.continueOnError !== undefined && typeof step.continueOnError !== 'boolean') {
-          errors.push(`step[${idx}].continueOnError must be a boolean`);
-        }
-
-        if (step.onFailure !== undefined && step.onFailure !== null) {
-          if (typeof step.onFailure !== 'string') {
-            errors.push(`step[${idx}].onFailure must be a string step ID`);
+          const normalizedId = step.id.trim();
+          if (step.id !== normalizedId) {
+            addError({ index: stepIndex, id: normalizedId, message: `Step ${stepIndex} id must not contain leading or trailing whitespace` });
+          } else if (seenIds.has(normalizedId)) {
+            addError({ index: stepIndex, id: normalizedId, message: `Duplicate step id '${normalizedId}' at step ${stepIndex}` });
+          } else {
+            seenIds.add(normalizedId);
           }
         }
-      });
+      }
 
-      // Second pass for onFailure targets validation
-      if (errors.length === 0) {
-        pipelineData.steps.forEach((step, idx) => {
-          if (step && step.onFailure && !stepIds.has(step.onFailure)) {
-            errors.push(`step[${idx}].onFailure target ID "${step.onFailure}" does not exist in pipeline steps`);
-          }
-        });
+      if (step.continueOnError !== undefined && typeof step.continueOnError !== 'boolean') {
+        addError({ index: stepIndex, id: stepId, message: `Step ${stepIndex} continueOnError must be a boolean when provided` });
+      }
+
+      if (step.onFailure !== undefined) {
+        if (typeof step.onFailure !== 'string' || step.onFailure.trim() === '') {
+          addError({ index: stepIndex, id: stepId, message: `Step ${stepIndex} onFailure must be a non-empty string when provided` });
+        } else if (step.onFailure !== step.onFailure.trim()) {
+          addError({ index: stepIndex, id: stepId, message: `Step ${stepIndex} onFailure must not contain leading or trailing whitespace` });
+        } else {
+          failureTargets.push({ stepIndex, stepId, targetId: step.onFailure });
+        }
       }
     }
 
-    if (errors.length > 0) {
-      const err = new Error(`Invalid pipeline structure: ${errors.join('; ')}`);
-      err.code = 'invalid_pipeline_structure';
-      err.errors = errors;
-      throw err;
+    for (const item of failureTargets) {
+      if (!seenIds.has(item.targetId)) {
+        addError({ index: item.stepIndex, id: item.stepId, message: `Step ${item.stepIndex} onFailure targets unknown step id '${item.targetId}'` });
+      }
     }
 
+    if (totalErrors > 0) throw makePipelineValidationError(errors, totalErrors);
     return true;
   }
 
@@ -367,9 +438,10 @@
       this.router = router;
       this.$container = null;
       this.pipelineName = 'new-pipeline';
-      this.steps = [
-        { id: 'step_1', action: 'file:read', rawPayload: '{\n  "path": "package.json"\n}' }
-      ];
+      const availableActions = filterRoutableActions(router && router.commands);
+      this.steps = availableActions.length > 0
+        ? [{ id: 'step_1', action: availableActions[0], rawPayload: '{}' }]
+        : [];
       this.previewElement = null;
       this.validationErrorElement = null;
     }
@@ -474,10 +546,13 @@
       addStepBtn.style.borderRadius = '4px';
       addStepBtn.onclick = () => {
         const availableActions = filterRoutableActions(this.router.commands);
-        const defaultAction = availableActions.length > 0 ? availableActions[0] : 'file:read';
+        if (availableActions.length === 0) {
+          this.router.alert('No Capabilities', 'No portable runtime capability is currently registered.');
+          return;
+        }
         this.steps.push({
           id: `step_${this.steps.length + 1}`,
-          action: defaultAction,
+          action: availableActions[0],
           rawPayload: '{}'
         });
         this.buildUI();
@@ -642,11 +717,24 @@
       select.style.color = 'inherit';
       select.style.border = '1px solid var(--border-color, #444)';
 
-      const actionsList = availableActions.length > 0 ? availableActions : ['file:read', 'file:write', 'terminal:exec', 'network:request'];
+      const actionsList = [...availableActions];
 
-      // Ensure step.action is in actionsList or added
-      if (!actionsList.includes(step.action)) {
-        actionsList.unshift(step.action);
+      if (step.action && !actionsList.includes(step.action)) {
+        const unavailable = document.createElement('option');
+        unavailable.value = step.action;
+        unavailable.textContent = `[unavailable] ${step.action}`;
+        unavailable.selected = true;
+        unavailable.disabled = true;
+        select.appendChild(unavailable);
+      }
+
+      if (actionsList.length === 0 && !step.action) {
+        const none = document.createElement('option');
+        none.value = '';
+        none.textContent = '(no registered portable capabilities)';
+        none.selected = true;
+        none.disabled = true;
+        select.appendChild(none);
       }
 
       actionsList.forEach(act => {
