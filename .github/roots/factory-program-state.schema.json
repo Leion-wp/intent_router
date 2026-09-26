@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-program-state.schema.json",
+  "title": "FactoryProgramState",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "program_id",
+    "repository",
+    "repository_role",
+    "title",
+    "strategic_objective",
+    "success_metric",
+    "status",
+    "current_milestone",
+    "candidate_next_milestones",
+    "workstreams",
+    "learnings",
+    "completed_milestones",
+    "last_decision_id",
+    "last_updated"
+  ],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "program_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,80}$"},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "repository_role": {
+      "type": "string",
+      "enum": ["factory_control_plane", "factory_substrate", "generated_product", "internal_tool"]
+    },
+    "title": {"type": "string", "minLength": 5, "maxLength": 160},
+    "strategic_objective": {"type": "string", "minLength": 10, "maxLength": 1800},
+    "success_metric": {"type": "string", "minLength": 5, "maxLength": 900},
+    "status": {"type": "string", "enum": ["ACTIVE", "PAUSED", "COMPLETED"]},
+    "current_milestone": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "title", "status"],
+          "properties": {
+            "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+            "title": {"type": "string", "minLength": 5, "maxLength": 120},
+            "status": {"type": "string", "enum": ["ACTIVE"]}
+          }
+        }
+      ]
+    },
+    "candidate_next_milestones": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "objective"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+          "title": {"type": "string", "minLength": 5, "maxLength": 120},
+          "objective": {"type": "string", "minLength": 10, "maxLength": 700}
+        }
+      }
+    },
+    "workstreams": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "objective"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,31}$"},
+          "title": {"type": "string", "minLength": 3, "maxLength": 100},
+          "objective": {"type": "string", "minLength": 10, "maxLength": 700}
+        }
+      }
+    },
+    "learnings": {
+      "type": "array",
+      "maxItems": 30,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 5, "maxLength": 700}
+    },
+    "completed_milestones": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "completed_at"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"},
+          "title": {"type": "string", "minLength": 5, "maxLength": 120},
+          "completed_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "last_decision_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,80}$"},
+    "last_updated": {"type": "string", "format": "date-time"},
+    "extensions": {"type": "object"}
+  }
+}

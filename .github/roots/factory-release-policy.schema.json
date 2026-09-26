@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-release-policy.schema.json",
+  "title": "FactoryReleasePolicy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "enabled", "eligible_phase", "require_no_active_work", "require_credentials_attested", "require_default_branch_ci", "production_deploy"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "enabled": {"type": "boolean"},
+    "eligible_phase": {"const": "LAUNCH_READY"},
+    "require_no_active_work": {"const": true},
+    "require_credentials_attested": {"const": true},
+    "require_default_branch_ci": {"const": true},
+    "production_deploy": {"const": "HUMAN_REQUIRED"}
+  }
+}

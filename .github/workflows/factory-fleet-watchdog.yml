@@ -1,0 +1,230 @@
+name: factory-fleet-watchdog-v4
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '1,11,21,31,41,51 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-fleet-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+      OWNER: ${{ github.repository_owner }}
+      CAPACITY_FILE: .github/roots/factory-worker-capacity.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect stalled or inconsistent Jules state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          test -n "$JULES_API_KEY"
+          test -f "$CAPACITY_FILE"
+          echo "::add-mask::$FLEET_TOKEN"
+          echo "::add-mask::$JULES_API_KEY"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          max_concurrency="$(jq -r '.workers.jules.max_concurrency' "$CAPACITY_FILE")"
+          if ! [[ "$max_concurrency" =~ ^[0-9]+$ ]] || [ "$max_concurrency" -lt 1 ] || [ "$max_concurrency" -gt 15 ]; then
+            echo "CONTROL_PLANE_ANOMALY: invalid Jules capacity ${max_concurrency}." >&2
+            exit 1
+          fi
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
+
+          active_slots=0
+          escalated_identities=0
+          feedback_recoveries=0
+          escalated_now=0
+          anomalies=0
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
+            branch="$(jq -r '.default_branch' /tmp/profile.json)"
+            gh label create 'factory:stalled' --repo "$repo" --color D93F0B \
+              --description 'Factory worker/control state requires attention' --force >/dev/null 2>&1 || true
+            gh label create 'factory:blocked' --repo "$repo" --color B60205 \
+              --description 'Factory stopped fail-closed' --force >/dev/null 2>&1 || true
+            gh label create 'factory:escalated' --repo "$repo" --color 8B0000 \
+              --description 'Worker identity exhausted; human resolution required' --force >/dev/null 2>&1 || true
+            gh label create 'factory:human-required' --repo "$repo" --color FBCA04 \
+              --description 'A human decision is required before factory execution can continue' --force >/dev/null 2>&1 || true
+
+            dispatching_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json labels \
+              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
+            dispatched_count="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json labels \
+              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
+            escalated_count="$(gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json labels \
+              --jq '[.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null)] | length')"
+            active_slots="$((active_slots + dispatching_count + dispatched_count))"
+            escalated_identities="$((escalated_identities + escalated_count))"
+
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              task_id="${repo}#${issue}"
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              session_body="$(jq -r '[.[] | select((.body // "") | contains("<!-- roots-jules-session task_id='"${task_id}"' "))] | last | .body // empty' <<< "$comments")"
+              if [ -z "$session_body" ]; then
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${task_id} is Jules-routed dispatched work without persisted Jules session." >&2
+                continue
+              fi
+              session="$(sed -n 's/.* session=\([^ ]*\) -->.*/\1/p' <<< "$session_body" | head -n 1)"
+              if [ -z "$session" ]; then
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${task_id} has an invalid persisted Jules session marker." >&2
+                continue
+              fi
+              session_id="${session##*/}"
+
+              gh pr list --repo "$repo" --state open --limit 100 \
+                --json number,body,headRefName,baseRefName,url > /tmp/prs.json
+              jq --argjson issue "$issue" --arg branch "$branch" \
+                '[.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]' \
+                /tmp/prs.json > /tmp/linked.json
+              count="$(jq 'length' /tmp/linked.json)"
+              if [ "$count" -eq 0 ]; then
+                jq --arg branch "$branch" --arg session_id "$session_id" \
+                  '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' \
+                  /tmp/prs.json > /tmp/linked.json
+                count="$(jq 'length' /tmp/linked.json)"
+              fi
+
+              if [ "$count" -gt 1 ]; then
+                anomalies="$((anomalies + 1))"
+                gh issue edit "$issue" --repo "$repo" --add-label 'factory:blocked' --add-label 'factory:stalled' >/dev/null 2>&1 || true
+                echo "CONTROL_PLANE_ANOMALY: ${task_id} has ${count} active PR candidates for session ${session}." >&2
+                continue
+              fi
+              [ "$count" -eq 1 ] && continue
+
+              if ! curl --fail-with-body --silent --show-error \
+                -H "X-Goog-Api-Key: $JULES_API_KEY" \
+                "https://jules.googleapis.com/v1alpha/${session}" > /tmp/jules-session.json; then
+                anomalies="$((anomalies + 1))"
+                echo "JULES_STATE_UNAVAILABLE: ${task_id}; watchdog leaves the worker identity untouched." >&2
+                continue
+              fi
+
+              observed_name="$(jq -r '.name // ""' /tmp/jules-session.json)"
+              observed_title="$(jq -r '.title // ""' /tmp/jules-session.json)"
+              state="$(jq -r '.state // "STATE_UNSPECIFIED"' /tmp/jules-session.json)"
+              update_time="$(jq -r '.updateTime // "unknown"' /tmp/jules-session.json)"
+              if [ "$observed_name" != "$session" ] || [ "$observed_title" != "$task_id" ]; then
+                anomalies="$((anomalies + 1))"
+                gh issue edit "$issue" --repo "$repo" --add-label 'factory:blocked' --add-label 'factory:stalled' >/dev/null 2>&1 || true
+                echo "CONTROL_PLANE_ANOMALY: persisted Jules identity mismatch for ${task_id}; observed name='${observed_name}' title='${observed_title}'." >&2
+                continue
+              fi
+
+              output_pr_url="$(jq -r '[.outputs[]?.pullRequest.url // empty] | last // empty' /tmp/jules-session.json)"
+              has_output_pr=false
+              output_pr_state='none'
+              if [ -n "$output_pr_url" ]; then
+                expected_prefix="https://github.com/${repo}/pull/"
+                if [[ "$output_pr_url" == "$expected_prefix"* ]]; then
+                  output_pr_number="${output_pr_url##*/}"
+                  if [[ "$output_pr_number" =~ ^[0-9]+$ ]] && gh api "repos/${repo}/pulls/${output_pr_number}" > /tmp/output-pr.json 2>/dev/null; then
+                    if [ "$(jq -r '.merged // false' /tmp/output-pr.json)" = true ]; then
+                      has_output_pr=true
+                      output_pr_state='merged'
+                    elif [ "$(jq -r '.state // ""' /tmp/output-pr.json)" = open ]; then
+                      has_output_pr=true
+                      output_pr_state='open'
+                    else
+                      output_pr_state='closed-unmerged'
+                    fi
+                  else
+                    anomalies="$((anomalies + 1))"
+                    echo "CONTROL_PLANE_ANOMALY: Jules output PR could not be resolved for ${task_id}: ${output_pr_url}." >&2
+                  fi
+                else
+                  anomalies="$((anomalies + 1))"
+                  echo "CONTROL_PLANE_ANOMALY: Jules output PR escaped managed repository for ${task_id}: ${output_pr_url}." >&2
+                fi
+              fi
+
+              feedback_marker="<!-- roots-worker-watchdog-feedback-recovery session=${session} -->"
+              escalation_marker="<!-- roots-worker-watchdog-escalation session=${session} -->"
+              feedback_recovery_sent=false
+              escalated_before=false
+              if jq -e --arg marker "$feedback_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                feedback_recovery_sent=true
+              fi
+              if jq -e --arg marker "$escalation_marker" '.[] | select((.body // "") | contains($marker))' <<< "$comments" >/dev/null; then
+                escalated_before=true
+              fi
+
+              decision="$(python3 .github/roots/factory_worker_escalation.py \
+                "$state" "$count" "$has_output_pr" "$feedback_recovery_sent" "$escalated_before")"
+
+              if [ "$decision" = 'recover_feedback' ]; then
+                prompt="CONTROL-PLANE FEEDBACK RECOVERY: continue the SAME task ${task_id} in this SAME Jules session. The session is explicitly AWAITING_USER_FEEDBACK and no correlated PR/output exists. Re-read the existing issue/spec/repository evidence and proceed with the safest minimal implementation if the answer is already derivable without inventing product requirements or crossing a human gate. Do not create a replacement session or second PR. Do not modify workflows, secrets, permissions or production. If a genuine product/business/credential/permission/production decision is required, remain waiting and state the exact HUMAN_REQUIRED question instead of guessing."
+                curl --fail-with-body --silent --show-error -X POST \
+                  -H 'Content-Type: application/json' \
+                  -H "X-Goog-Api-Key: $JULES_API_KEY" \
+                  --data "$(jq -nc --arg prompt "$prompt" '{prompt:$prompt}')" \
+                  "https://jules.googleapis.com/v1alpha/${session}:sendMessage" >/dev/null
+                gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                  -f body="${feedback_marker}\nWorker watchdog sent one bounded same-session feedback recovery because Jules explicitly entered AWAITING_USER_FEEDBACK. No product decision, replacement session or second PR was created." >/dev/null
+                gh issue edit "$issue" --repo "$repo" --add-label 'factory:stalled' >/dev/null 2>&1 || true
+                feedback_recoveries="$((feedback_recoveries + 1))"
+                echo "JULES_FEEDBACK_RECOVERY: ${task_id} session=${session} state=${state}."
+                continue
+              fi
+
+              if [ "$decision" = 'escalate' ]; then
+                reason="Jules state=${state}, updateTime=${update_time}, output_pr=${output_pr_state}, feedback_recovery_sent=${feedback_recovery_sent}."
+                gh api --method POST "repos/${repo}/issues/${issue}/comments" \
+                  -f body="${escalation_marker}\nCONTROL_PLANE_ESCALATED: ${reason} The persisted Jules identity has no active/merged output PR and cannot safely continue through the bounded automatic recovery contract. Human resolution is required before abandonment or replacement. No replacement worker session was created." >/dev/null
+                gh issue edit "$issue" --repo "$repo" \
+                  --remove-label 'factory:dispatched' \
+                  --add-label 'factory:blocked' \
+                  --add-label 'factory:stalled' \
+                  --add-label 'factory:escalated' \
+                  --add-label 'factory:human-required' >/dev/null
+                escalated_now="$((escalated_now + 1))"
+                echo "JULES_STATE_ESCALATED: ${task_id} state=${state}."
+                continue
+              fi
+
+              echo "JULES_STATE_NORMAL: ${task_id} state=${state} updateTime=${update_time} output_pr=${output_pr_state}; no watchdog mutation."
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number,labels \
+              --jq '.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null) | .number')
+          done < repos.txt
+
+          if [ "$active_slots" -gt "$max_concurrency" ]; then
+            anomalies="$((anomalies + 1))"
+            echo "CONTROL_PLANE_ANOMALY: fleet has ${active_slots} active Jules slots; configured maximum is ${max_concurrency}." >&2
+          fi
+
+          {
+            echo '### Fleet watchdog v4 — routed Jules pool'
+            echo "- Jules capacity: ${max_concurrency}"
+            echo "- Active Jules slots: ${active_slots}"
+            echo "- Available Jules slots: $(( max_concurrency > active_slots ? max_concurrency - active_slots : 0 ))"
+            echo "- Escalated Jules identities: ${escalated_identities}"
+            echo "- AWAITING_USER_FEEDBACK same-session recoveries: ${feedback_recoveries}"
+            echo "- Explicit-state human escalations this run: ${escalated_now}"
+            echo "- Control-plane anomalies: ${anomalies}"
+            echo '- factory:agent:chatgpt identities are excluded from Jules capacity and Jules watchdog logic.'
+            echo '- Decision source: live Jules SessionState + durable PR/output evidence; elapsed time never proves a stall.'
+            echo '- Recovery never creates a replacement Jules session, branch or PR.'
+          } >> "$GITHUB_STEP_SUMMARY"

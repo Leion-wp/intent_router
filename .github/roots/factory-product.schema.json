@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-product.schema.json",
+  "title": "FactoryProduct",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["product_id", "repository", "state", "milestones", "policy"],
+  "properties": {
+    "product_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$"},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "project_number": {"type": ["integer", "null"], "minimum": 1},
+    "state": {
+      "type": "string",
+      "enum": ["IDEA", "PLANNED", "BUILDING_MVP", "MVP_READY", "STAGING", "RELEASE_READY", "RELEASED", "ITERATING", "PAUSED", "ARCHIVED"]
+    },
+    "milestones": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "target_state"],
+        "properties": {
+          "title": {"type": "string", "minLength": 1},
+          "description": {"type": "string"},
+          "due_on": {"type": ["string", "null"], "format": "date-time"},
+          "target_state": {"type": "string"}
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["human_gates", "max_parallel_tasks", "allowed_base_branch"],
+      "properties": {
+        "human_gates": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["PLAN", "STAGING", "PRODUCTION", "ARCHIVE"]},
+          "uniqueItems": true
+        },
+        "max_parallel_tasks": {"type": "integer", "minimum": 1, "maximum": 20},
+        "allowed_base_branch": {"type": "string", "const": "Android"},
+        "allowed_cwd": {"type": "string", "const": "/acode-plugin"}
+      }
+    },
+    "extensions": {"type": "object"}
+  }
+}

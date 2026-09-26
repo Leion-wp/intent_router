@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-planning-result.schema.json",
+  "title": "FactoryPlanningResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "repository", "state", "action"],
+  "properties": {
+    "version": {"const": 1},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "state": {"type": "string", "enum": ["IDLE", "ACTIVE_MILESTONE", "MILESTONE_DONE", "TASKS_READY", "ROADMAP_DONE", "BLOCKED", "ANOMALY"]},
+    "action": {"type": "string", "enum": ["NONE", "CLOSE_MILESTONE", "CREATE_MILESTONE", "CREATE_TASKS", "DISPATCH", "BLOCK"]},
+    "milestone_id": {"type": ["string", "null"]},
+    "milestone_number": {"type": ["integer", "null"], "minimum": 1},
+    "created_issue_numbers": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+    "reason": {"type": "string"},
+    "extensions": {"type": "object"}
+  }
+}

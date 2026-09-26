@@ -30,6 +30,11 @@ export type PipelineEvent =
         voteScoreByMember?: Array<{ member: string; role: 'writer' | 'reviewer'; weight: number; score: number }>;
         members: Array<{ name: string; role: 'writer' | 'reviewer'; path: string; files: number }>;
         totalFiles: number;
+        providerCallsStarted?: number;
+        maxProviderCalls?: number;
+        timeoutMs?: number;
+        budgetExceeded?: boolean;
+        budgetReason?: string;
     }
     | {
         type: 'githubPullRequestCreated';
@@ -65,7 +70,14 @@ class EventBus {
     }
 
     emit(event: PipelineEvent): void {
-        this.listeners.forEach(l => l(event));
+        const snapshot = [...this.listeners];
+        for (const listener of snapshot) {
+            try {
+                listener(event);
+            } catch (err) {
+                console.error('[EventBus] Exception caught in subscriber listener:', err);
+            }
+        }
     }
 }
 

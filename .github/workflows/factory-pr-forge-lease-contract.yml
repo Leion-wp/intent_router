@@ -1,0 +1,27 @@
+name: factory-pr-forge-lease-contract
+
+"on":
+  pull_request:
+    branches: [Android]
+    paths:
+      - '.github/roots/factory-pr-forge-lease-v1.md'
+      - '.github/roots/factory-pr-forge-lease.schema.json'
+      - '.github/roots/test-pr-forge-lease-contract.py'
+      - '.github/roots/factory-event-driven-pipeline-v1.md'
+      - '.github/workflows/factory-pr-forge-lease-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lease-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run PR Forge CAS lease contract tests
+        run: python .github/roots/test-pr-forge-lease-contract.py

@@ -1,0 +1,219 @@
+name: factory-portfolio-telemetry-v3
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '4,19,34,49 * * * *'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: factory-portfolio-telemetry
+  cancel-in-progress: false
+
+jobs:
+  portfolio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      CONTROL_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      ROADMAP: .github/roots/micro-saas-roadmap-v1.json
+      SCHEMA: .github/roots/factory-portfolio-telemetry.schema.json
+      CAPACITY_FILE: .github/roots/factory-worker-capacity.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build portfolio telemetry from canonical GitHub state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          test -f "$CAPACITY_FILE"
+          echo "::add-mask::$FLEET_TOKEN"
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+          jules_max="$(jq -r '.workers.jules.max_concurrency' "$CAPACITY_FILE")"
+          chatgpt_max="$(jq -r '.workers.chatgpt.max_concurrency' "$CAPACITY_FILE")"
+          if ! [[ "$jules_max" =~ ^[0-9]+$ ]] || [ "$jules_max" -lt 1 ] || [ "$jules_max" -gt 15 ]; then
+            echo "CONTROL_PLANE_ANOMALY: invalid Jules max_concurrency=${jules_max}." >&2
+            exit 1
+          fi
+          if ! [[ "$chatgpt_max" =~ ^[0-9]+$ ]] || [ "$chatgpt_max" -lt 1 ] || [ "$chatgpt_max" -gt 15 ]; then
+            echo "CONTROL_PLANE_ANOMALY: invalid ChatGPT max_concurrency=${chatgpt_max}." >&2
+            exit 1
+          fi
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+          jq -r '.milestones[].title' "$ROADMAP" | sort -u > /tmp/expected-roadmap.txt
+          : > /tmp/repositories.ndjson
+          : > /tmp/jules-active.tsv
+          : > /tmp/chatgpt-active.tsv
+          : > /tmp/jules-escalated.tsv
+          : > /tmp/chatgpt-escalated.tsv
+          : > /tmp/all-active.tsv
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" \
+              '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' \
+              /tmp/profile.json >/dev/null || continue
+
+            phase=''
+            planner_mode=''
+            if gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/product-state.json" > /tmp/state.json 2>/dev/null; then
+              phase="$(jq -r '.phase // ""' /tmp/state.json)"
+              planner_mode="$(jq -r '.planner_mode // ""' /tmp/state.json)"
+            fi
+
+            gh api --paginate "repos/${repo}/milestones?state=all&per_page=100" > /tmp/milestones.json
+            jq -r '.[] | select(.state == "closed") | .title' /tmp/milestones.json | sort -u > /tmp/closed-roadmap.txt
+            comm -23 /tmp/expected-roadmap.txt /tmp/closed-roadmap.txt > /tmp/missing-roadmap.txt
+            roadmap_complete=false
+            [ ! -s /tmp/missing-roadmap.txt ] && roadmap_complete=true
+
+            open_milestones="$(jq '[.[] | select(.state == "open")] | length' /tmp/milestones.json)"
+            queued="$(gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number --jq 'length')"
+            dispatching="$(gh issue list --repo "$repo" --state open --label 'factory:dispatching' --limit 100 --json number --jq 'length')"
+            dispatched="$(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 --json number --jq 'length')"
+            blocked="$(gh issue list --repo "$repo" --state open --label 'factory:blocked' --limit 100 --json number --jq 'length')"
+            brain_needed="$(gh issue list --repo "$repo" --state open --label 'factory:brain-needed' --limit 100 --json number --jq 'length')"
+            brain_proposals="$(gh issue list --repo "$repo" --state open --label 'factory:brain-proposal' --limit 100 --json number --jq 'length')"
+            human_required="$(gh issue list --repo "$repo" --state open --label 'factory:human-required' --limit 100 --json number --jq 'length')"
+            open_prs="$(gh pr list --repo "$repo" --state open --limit 100 --json number --jq 'length')"
+
+            for lifecycle in factory:dispatching factory:dispatched; do
+              gh issue list --repo "$repo" --state open --label "$lifecycle" --limit 100 --json number,labels \
+                | jq -c '.[]' | while IFS= read -r row; do
+                  issue="$(jq -r '.number' <<< "$row")"
+                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/all-active.tsv
+                  if jq -e '[.labels[].name] | index("factory:agent:chatgpt") != null' <<< "$row" >/dev/null; then
+                    printf '%s\t%s\n' "$repo" "$issue" >> /tmp/chatgpt-active.tsv
+                  else
+                    printf '%s\t%s\n' "$repo" "$issue" >> /tmp/jules-active.tsv
+                  fi
+                done
+            done
+
+            gh issue list --repo "$repo" --state open --label 'factory:escalated' --limit 100 --json number,labels \
+              | jq -c '.[]' | while IFS= read -r row; do
+                issue="$(jq -r '.number' <<< "$row")"
+                if jq -e '[.labels[].name] | index("factory:agent:chatgpt") != null' <<< "$row" >/dev/null; then
+                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/chatgpt-escalated.tsv
+                else
+                  printf '%s\t%s\n' "$repo" "$issue" >> /tmp/jules-escalated.tsv
+                fi
+              done
+
+            jq -n \
+              --arg repository "$repo" \
+              --arg phase "$phase" \
+              --arg planner_mode "$planner_mode" \
+              --argjson open_milestones "$open_milestones" \
+              --argjson queued "$queued" \
+              --argjson dispatching "$dispatching" \
+              --argjson dispatched "$dispatched" \
+              --argjson blocked "$blocked" \
+              --argjson brain_needed "$brain_needed" \
+              --argjson brain_proposals "$brain_proposals" \
+              --argjson human_required "$human_required" \
+              --argjson open_prs "$open_prs" \
+              --argjson roadmap_complete "$roadmap_complete" \
+              '{repository:$repository,phase:(if $phase == "" then null else $phase end),planner_mode:(if $planner_mode == "" then null else $planner_mode end),open_milestones:$open_milestones,queued:$queued,dispatching:$dispatching,dispatched:$dispatched,blocked:$blocked,brain_needed:$brain_needed,brain_proposals:$brain_proposals,human_required:$human_required,open_prs:$open_prs,roadmap_complete:$roadmap_complete}' \
+              >> /tmp/repositories.ndjson
+          done < /tmp/repos.txt
+
+          if [ -s /tmp/repositories.ndjson ]; then
+            jq -s '.' /tmp/repositories.ndjson > /tmp/repositories.json
+          else
+            printf '%s\n' '[]' > /tmp/repositories.json
+          fi
+
+          jules_active="$(sort -u /tmp/jules-active.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          chatgpt_active="$(sort -u /tmp/chatgpt-active.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          jules_escalated="$(sort -u /tmp/jules-escalated.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          chatgpt_escalated="$(sort -u /tmp/chatgpt-escalated.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          jules_available=0
+          chatgpt_available=0
+          if [ "$jules_active" -le "$jules_max" ]; then
+            jules_available="$((jules_max - jules_active))"
+          else
+            echo "CONTROL_PLANE_ANOMALY: active Jules slots ${jules_active} exceed configured capacity ${jules_max}." >&2
+          fi
+          if [ "$chatgpt_active" -le "$chatgpt_max" ]; then
+            chatgpt_available="$((chatgpt_max - chatgpt_active))"
+          else
+            echo "CONTROL_PLANE_ANOMALY: active ChatGPT slots ${chatgpt_active} exceed configured capacity ${chatgpt_max}." >&2
+          fi
+
+          lock_repo=''
+          lock_issue=''
+          all_active="$(sort -u /tmp/all-active.tsv | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [ "$all_active" -gt 0 ]; then
+            sort -u /tmp/all-active.tsv | head -n 1 > /tmp/first-active.tsv
+            lock_repo="$(cut -f1 /tmp/first-active.tsv)"
+            lock_issue="$(cut -f2 /tmp/first-active.tsv)"
+          fi
+
+          managed="$(jq 'length' /tmp/repositories.json)"
+          active_products="$(jq '[.[] | select(.phase != null)] | length' /tmp/repositories.json)"
+          queued_total="$(jq '[.[].queued] | add // 0' /tmp/repositories.json)"
+          blocked_total="$(jq '[.[].blocked] | add // 0' /tmp/repositories.json)"
+          brain_needed_total="$(jq '[.[].brain_needed] | add // 0' /tmp/repositories.json)"
+          human_total="$(jq '[.[].human_required] | add // 0' /tmp/repositories.json)"
+          idle_without_next="$(jq '[.[] | select((.planner_mode != null or .roadmap_complete == true) and .open_milestones == 0 and .queued == 0 and .dispatching == 0 and .dispatched == 0 and .brain_needed == 0 and .brain_proposals == 0 and .human_required == 0)] | length' /tmp/repositories.json)"
+          now="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          jq -n \
+            --arg generated_at "$now" \
+            --arg owner "$OWNER" \
+            --arg lock_repo "$lock_repo" \
+            --arg lock_issue "$lock_issue" \
+            --argjson all_active "$all_active" \
+            --argjson jules_active "$jules_active" \
+            --argjson jules_max "$jules_max" \
+            --argjson jules_available "$jules_available" \
+            --argjson jules_escalated "$jules_escalated" \
+            --argjson chatgpt_active "$chatgpt_active" \
+            --argjson chatgpt_max "$chatgpt_max" \
+            --argjson chatgpt_available "$chatgpt_available" \
+            --argjson chatgpt_escalated "$chatgpt_escalated" \
+            --slurpfile repositories /tmp/repositories.json \
+            --argjson managed "$managed" \
+            --argjson active_products "$active_products" \
+            --argjson queued "$queued_total" \
+            --argjson blocked "$blocked_total" \
+            --argjson brain_needed "$brain_needed_total" \
+            --argjson human_required "$human_total" \
+            --argjson idle_without_next "$idle_without_next" \
+            '{version:1,generated_at:$generated_at,owner:$owner,worker_lock:{active:($all_active > 0),repository:(if $lock_repo == "" then null else $lock_repo end),issue:(if $lock_issue == "" then null else ($lock_issue|tonumber) end)},worker_capacity:{provider:"jules",max_concurrency:$jules_max,active_slots:$jules_active,available_slots:$jules_available,escalated_identities:$jules_escalated},chatgpt_capacity:{provider:"chatgpt",max_concurrency:$chatgpt_max,active_slots:$chatgpt_active,available_slots:$chatgpt_available,escalated_identities:$chatgpt_escalated},repositories:$repositories[0],summary:{managed_repositories:$managed,active_products:$active_products,queued:$queued,blocked:$blocked,brain_needed:$brain_needed,human_required:$human_required,idle_without_next_transition:$idle_without_next}}' \
+            > /tmp/portfolio.json
+
+          python3 -m pip install --disable-pip-version-check --quiet 'jsonschema==4.23.0'
+          python3 -c 'import json,jsonschema; d=json.load(open("/tmp/portfolio.json")); s=json.load(open(".github/roots/factory-portfolio-telemetry.schema.json")); jsonschema.Draft202012Validator(s,format_checker=jsonschema.FormatChecker()).validate(d)'
+
+          export GH_TOKEN="$CONTROL_TOKEN"
+          gh label create 'factory:telemetry' --repo "$GITHUB_REPOSITORY" --color 5319E7 \
+            --description 'Factory-generated product and portfolio telemetry' --force >/dev/null 2>&1 || true
+          title='[FACTORY] Portfolio telemetry'
+          issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label 'factory:telemetry' --limit 50 --json number,title --jq '.[] | select(.title == "[FACTORY] Portfolio telemetry") | .number' | head -n 1)"
+          fence="$(printf '\140\140\140')"
+          body="$(printf '%s\n%sjson\n%s\n%s\n\n%s' '<!-- roots-portfolio-telemetry:v1 -->' "$fence" "$(cat /tmp/portfolio.json)" "$fence" 'Operational telemetry only. Market, revenue and spend evidence must come from separately authorized sources; absent evidence is not inferred.')"
+          if [ -z "$issue" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --label 'factory:telemetry' --body "$body" >/dev/null
+          else
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --body "$body" >/dev/null
+          fi
+
+          if [ "$idle_without_next" -gt 0 ]; then
+            echo "AUTONOMY_SLO_DEGRADED: ${idle_without_next} managed repo(s) have no active work and no explicit next transition." >&2
+          fi

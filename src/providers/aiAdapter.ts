@@ -38,6 +38,25 @@ type TeamMember = {
 
 type SessionMemoryMode = 'runtime_only' | 'read_only' | 'write_only' | 'read_write';
 
+export interface AiExecutionBudget {
+    timeoutMs?: number;
+    maxProviderCalls?: number;
+    providerCallsStarted: number;
+    budgetExceeded: boolean;
+    exceededReason?: string;
+}
+
+export function normalizeBudgetLimit(value: any): number | undefined {
+    if (value === undefined || value === null || value === '') {
+        return undefined;
+    }
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) {
+        return undefined;
+    }
+    return Math.floor(num);
+}
+
 export function registerAiProvider(context: vscode.ExtensionContext) {
     registerCapabilities({
         provider: 'ai',
@@ -66,7 +85,8 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'sessionId', type: 'string', description: 'Optional persistent memory session id' },
                     { name: 'sessionMode', type: 'enum', options: ['runtime_only', 'read_only', 'write_only', 'read_write'], description: 'Session memory mode', default: 'read_write' },
                     { name: 'sessionResetBeforeRun', type: 'boolean', description: 'Reset session memory before running agent', default: false },
-                    { name: 'sessionRecallLimit', type: 'string', description: 'Max session memory entries injected into prompt', default: '12' }
+                    { name: 'sessionRecallLimit', type: 'string', description: 'Max session memory entries injected into prompt', default: '12' },
+                    { name: 'timeoutMs', type: 'number', description: 'Execution timeout in milliseconds for provider CLI call' }
                 ]
             },
             {
@@ -89,19 +109,28 @@ export function registerAiProvider(context: vscode.ExtensionContext) {
                     { name: 'sessionMode', type: 'enum', options: ['runtime_only', 'read_only', 'write_only', 'read_write'], description: 'Session memory mode', default: 'read_write' },
                     { name: 'sessionResetBeforeRun', type: 'boolean', description: 'Reset session memory before running team', default: false },
                     { name: 'sessionRecallLimit', type: 'string', description: 'Max session memory entries injected into prompt', default: '12' },
-                    { name: 'reviewerVoteWeight', type: 'string', description: 'Reviewer weight multiplier when strategy=vote', default: '2' }
+                    { name: 'reviewerVoteWeight', type: 'string', description: 'Reviewer weight multiplier when strategy=vote', default: '2' },
+                    { name: 'timeoutMs', type: 'number', description: 'Execution timeout in milliseconds for each provider CLI call' },
+                    { name: 'maxProviderCalls', type: 'number', description: 'Maximum total provider calls allowed across team members' }
                 ]
             }
         ]
     });
 }
 
-export async function executeAiCommand(args: any): Promise<any> {
+export async function executeAiCommand(args: any, externalBudget?: AiExecutionBudget): Promise<any> {
     const instruction = args?.instruction;
     const contextFiles = args?.contextFiles || [];
     const agentSpecFiles = args?.agentSpecFiles || [];
     const agent = args?.agent || 'gemini';
     const meta = args?.__meta;
+
+    const budget: AiExecutionBudget = externalBudget || {
+        timeoutMs: normalizeBudgetLimit(args?.timeoutMs),
+        maxProviderCalls: normalizeBudgetLimit(args?.maxProviderCalls),
+        providerCallsStarted: 0,
+        budgetExceeded: false
+    };
 
     if (!instruction) {
         throw new Error('AI Generate: Instruction is required');
@@ -195,6 +224,15 @@ ${instructionResolved}
         let settled = false;
 
         const launch = (spec: AiCliSpec, allowReasoningFallback: boolean) => {
+            if (budget.maxProviderCalls !== undefined && budget.providerCallsStarted >= budget.maxProviderCalls) {
+                budget.budgetExceeded = true;
+                budget.exceededReason = `Maximum provider calls limit reached (${budget.maxProviderCalls})`;
+                settled = true;
+                return reject(new Error(`[AI Budget] ${budget.exceededReason}`));
+            }
+
+            budget.providerCallsStarted += 1;
+
             const child = cp.spawn(spec.executable, spec.args, {
                 cwd: effectiveCwd,
                 env,
@@ -203,6 +241,45 @@ ${instructionResolved}
 
             let fullOutput = '';
             let fullStderr = '';
+            let timeoutTimer: NodeJS.Timeout | undefined;
+            let forceKillTimer: NodeJS.Timeout | undefined;
+
+            const cleanupTimers = () => {
+                if (timeoutTimer) {
+                    clearTimeout(timeoutTimer);
+                    timeoutTimer = undefined;
+                }
+                if (forceKillTimer) {
+                    clearTimeout(forceKillTimer);
+                    forceKillTimer = undefined;
+                }
+            };
+
+            if (budget.timeoutMs !== undefined && budget.timeoutMs > 0) {
+                timeoutTimer = setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    budget.budgetExceeded = true;
+                    budget.exceededReason = `Timeout of ${budget.timeoutMs}ms exceeded`;
+                    log(`\n[AI Agent] Timeout of ${budget.timeoutMs}ms exceeded. Terminating provider process...\n`, 'stderr');
+
+                    try {
+                        child.kill('SIGTERM');
+                    } catch (_) {}
+
+                    forceKillTimer = setTimeout(() => {
+                        try {
+                            if (!child.killed) {
+                                child.kill('SIGKILL');
+                            }
+                        } catch (_) {}
+                    }, 200);
+                    if (forceKillTimer.unref) forceKillTimer.unref();
+
+                    reject(new Error(`[AI Budget] Provider execution timed out after ${budget.timeoutMs}ms`));
+                }, budget.timeoutMs);
+                if (timeoutTimer.unref) timeoutTimer.unref();
+            }
 
             if (spec.useStdinPrompt && child.stdin) {
                 child.stdin.write(fullPrompt);
@@ -224,6 +301,7 @@ ${instructionResolved}
             });
 
             child.on('close', (code) => {
+                cleanupTimers();
                 if (settled) return;
                 if (code === 0) {
                     log(`\n[AI Agent] Analysis complete.\n`);
@@ -325,6 +403,7 @@ ${instructionResolved}
             });
 
             child.on('error', (err) => {
+                cleanupTimers();
                 if (settled) return;
                 settled = true;
                 reject(err);
@@ -342,6 +421,30 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
     const runId = meta?.runId;
     const stepId = meta?.stepId;
     const intentId = meta?.traceId || 'unknown';
+
+    const log = (text: string, stream: 'stdout' | 'stderr' = 'stdout') => {
+        if (runId) {
+            pipelineEventBus.emit({
+                type: 'stepLog',
+                runId,
+                intentId,
+                stepId,
+                text,
+                stream
+            });
+        }
+    };
+
+    const budget: AiExecutionBudget = {
+        timeoutMs: normalizeBudgetLimit(args?.timeoutMs),
+        maxProviderCalls: normalizeBudgetLimit(args?.maxProviderCalls),
+        providerCallsStarted: 0,
+        budgetExceeded: false
+    };
+
+    if (budget.maxProviderCalls !== undefined || budget.timeoutMs !== undefined) {
+        log(`[AI Team] Budget configured: maxProviderCalls=${budget.maxProviderCalls ?? 'unlimited'}, timeoutMs=${budget.timeoutMs ?? 'unlimited'}\n`);
+    }
     const sessionEnabled = isSessionMemoryEnabled();
     const sessionId = String(args?.sessionId || '').trim();
     const sessionPolicy = resolveSessionMemoryPolicy(args?.sessionMode);
@@ -364,6 +467,13 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
     const reviewerVoteWeight = resolveReviewerVoteWeight(args?.reviewerVoteWeight);
 
     for (let index = 0; index < members.length; index += 1) {
+        if (budget.maxProviderCalls !== undefined && budget.providerCallsStarted >= budget.maxProviderCalls) {
+            budget.budgetExceeded = true;
+            budget.exceededReason = `Maximum provider calls limit reached (${budget.maxProviderCalls})`;
+            log(`\n[AI Team] Budget limit reached: providerCallsStarted (${budget.providerCallsStarted}) >= maxProviderCalls (${budget.maxProviderCalls}). Stopping team execution.\n`, 'stderr');
+            break;
+        }
+
         const member = members[index];
         const memberName = String(member.name || `member_${index + 1}`);
         const instructionRaw = String(member.instruction || '').trim();
@@ -389,7 +499,7 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
             outputVarChanges: member.outputVarChanges || args?.outputVarChanges
         };
 
-        const result = await executeAiCommand(memberArgs);
+        const result = await executeAiCommand(memberArgs, budget);
         runResults.push({ member, result });
 
         if (result && typeof result === 'object') {
@@ -434,7 +544,12 @@ export async function executeAiTeamCommand(args: any): Promise<any> {
             winnerReason: decision.winnerReason,
             voteScoreByMember: decision.voteScoreByMember,
             members: buildTeamSummaryMembers(runResults),
-            totalFiles: sumTeamFiles(runResults)
+            totalFiles: sumTeamFiles(runResults),
+            providerCallsStarted: budget.providerCallsStarted,
+            maxProviderCalls: budget.maxProviderCalls,
+            timeoutMs: budget.timeoutMs,
+            budgetExceeded: budget.budgetExceeded,
+            budgetReason: budget.exceededReason
         });
     }
     return finalResult;

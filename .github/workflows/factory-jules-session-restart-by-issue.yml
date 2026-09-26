@@ -1,0 +1,92 @@
+name: factory-jules-session-restart-by-issue-v1
+
+"on":
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Factory issue number whose Jules session should be restarted'
+        required: true
+        type: number
+      reason:
+        description: 'Audit reason for the manual restart request'
+        required: false
+        default: ''
+        type: string
+      execute:
+        description: 'Execute kill and replacement; false is validation-only'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-jules-restart-frontdoor-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      CONTROL_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+      REASON: ${{ inputs.reason }}
+      EXECUTE: ${{ inputs.execute }}
+    steps:
+      - name: Resolve unique active Jules task and delegate to canonical restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          echo "::add-mask::$FLEET_TOKEN"
+          [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]
+          [ "$ISSUE_NUMBER" -gt 0 ]
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+          : > /tmp/candidates.txt
+          while IFS= read -r repo; do
+            [ -z "$repo" ] && continue
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '
+              .version == 1 and .managed == true and .repository == $repo and
+              (.worker_policy.enabled | index("jules") != null)
+            ' /tmp/profile.json >/dev/null || continue
+            if ! gh api "repos/${repo}/issues/${ISSUE_NUMBER}" > /tmp/issue.json 2>/dev/null; then
+              continue
+            fi
+            jq -e '
+              .state == "open" and .pull_request == null and
+              ([.labels[].name] | index("factory:agent:chatgpt") == null) and
+              ([.labels[].name] | any(. == "factory:dispatched" or . == "factory:stalled" or . == "factory:restarting"))
+            ' /tmp/issue.json >/dev/null || continue
+            printf '%s\n' "$repo" >> /tmp/candidates.txt
+          done < /tmp/repos.txt
+
+          count="$(sort -u /tmp/candidates.txt | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [ "$count" -ne 1 ]; then
+            echo "RESTART_TARGET_RESOLUTION_FAILED: issue #${ISSUE_NUMBER} resolved to ${count} active managed Jules repositories." >&2
+            cat /tmp/candidates.txt >&2 || true
+            exit 1
+          fi
+          target_repo="$(sort -u /tmp/candidates.txt | head -n 1)"
+
+          GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-jules-session-restart.yml \
+            --repo "$GITHUB_REPOSITORY" --ref Android \
+            -f issue_number="$ISSUE_NUMBER" \
+            -f repository="$target_repo" \
+            -f mode=manual \
+            -f reason="$REASON" \
+            -f execute="$EXECUTE"
+          echo "JULES_RESTART_DELEGATED: ${target_repo}#${ISSUE_NUMBER} -> canonical restart workflow."

@@ -1,0 +1,154 @@
+name: factory-jules-restart-watchdog-v1
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: '6,16,26,36,46,56 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: factory-jules-restart-watchdog
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_TOKEN }}
+      JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+      CONTROL_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      POLICY: .github/roots/factory-jules-restart-policy.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect no-progress Jules sessions and request bounded restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+          test -n "$JULES_API_KEY"
+          echo "::add-mask::$FLEET_TOKEN"
+          echo "::add-mask::$JULES_API_KEY"
+          python3 .github/roots/factory_jules_restart.py validate-policy
+          export GH_TOKEN="$FLEET_TOKEN"
+          test "$(gh api user --jq '.login')" = "$OWNER"
+
+          gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
+            | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
+
+          inspected=0
+          restart_requested=0
+          skipped_recent=0
+          skipped_state=0
+          anomalies=0
+          threshold="$(jq -r '.automatic.no_progress_minutes' "$POLICY")"
+
+          while IFS= read -r repo; do
+            [ -z "$repo" ] && continue
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
+              continue
+            fi
+            jq -e --arg repo "$repo" '
+              .version == 1 and .managed == true and .repository == $repo and
+              (.worker_policy.enabled | index("jules") != null)
+            ' /tmp/profile.json >/dev/null || continue
+            default_branch="$(jq -r '.default_branch' /tmp/profile.json)"
+
+            while IFS= read -r issue; do
+              [ -z "$issue" ] && continue
+              inspected="$((inspected + 1))"
+              issue_json="$(gh api "repos/${repo}/issues/${issue}")"
+              labels="$(jq '[.labels[].name]' <<< "$issue_json")"
+              if jq -e 'any(. == "factory:blocked" or . == "factory:human-required" or . == "factory:escalated" or . == "factory:restarting" or . == "factory:agent:chatgpt")' <<< "$labels" >/dev/null; then
+                skipped_state="$((skipped_state + 1))"
+                continue
+              fi
+
+              task_id="${repo}#${issue}"
+              comments="$(gh api --paginate "repos/${repo}/issues/${issue}/comments")"
+              session_marker="$(jq -r --arg prefix "<!-- roots-jules-session task_id=${task_id} " '[.[] | select((.body // "") | contains($prefix))] | last | .body // empty' <<< "$comments")"
+              if [ -z "$session_marker" ]; then
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${task_id} has factory:dispatched without a Jules session marker." >&2
+                continue
+              fi
+              session="$(sed -n 's/.* session=\([^ ]*\).*/\1/p' <<< "$session_marker" | head -n 1)"
+              if [ -z "$session" ]; then
+                anomalies="$((anomalies + 1))"
+                echo "CONTROL_PLANE_ANOMALY: ${task_id} has malformed Jules session marker." >&2
+                continue
+              fi
+              session_id="${session##*/}"
+
+              if ! curl --fail-with-body --silent --show-error \
+                -H "X-Goog-Api-Key: $JULES_API_KEY" \
+                "https://jules.googleapis.com/v1alpha/${session}" > /tmp/session.json; then
+                anomalies="$((anomalies + 1))"
+                echo "JULES_STATE_UNAVAILABLE: ${task_id}; restart watchdog will not infer termination." >&2
+                continue
+              fi
+              state="$(jq -r '.state // "STATE_UNSPECIFIED"' /tmp/session.json)"
+              if ! jq -e --arg state "$state" '.automatic.eligible_states | index($state) != null' "$POLICY" >/dev/null; then
+                skipped_state="$((skipped_state + 1))"
+                continue
+              fi
+
+              if ! curl --fail-with-body --silent --show-error \
+                -H "X-Goog-Api-Key: $JULES_API_KEY" \
+                "https://jules.googleapis.com/v1alpha/${session}/activities?pageSize=100" > /tmp/activities.json; then
+                anomalies="$((anomalies + 1))"
+                echo "JULES_ACTIVITY_UNAVAILABLE: ${task_id}; automatic restart requires durable progress evidence." >&2
+                continue
+              fi
+              inactivity="$(python3 .github/roots/factory_jules_restart.py progress-minutes \
+                /tmp/session.json /tmp/activities.json "$(date -u +'%Y-%m-%dT%H:%M:%SZ')")"
+              if [ "$inactivity" -lt "$threshold" ]; then
+                skipped_recent="$((skipped_recent + 1))"
+                continue
+              fi
+
+              gh pr list --repo "$repo" --state open --limit 100 \
+                --json number,body,headRefName,baseRefName > /tmp/prs.json
+              jq --argjson issue "$issue" --arg branch "$default_branch" '
+                [.[] | select(.baseRefName == $branch) | select((.body // "") | test("(?i)(fixes|closes|resolves|refs|references)\\s+#" + ($issue|tostring) + "\\b"))]
+              ' /tmp/prs.json > /tmp/linked.json
+              pr_count="$(jq 'length' /tmp/linked.json)"
+              if [ "$pr_count" -eq 0 ]; then
+                jq --arg branch "$default_branch" --arg session_id "$session_id" \
+                  '[.[] | select(.baseRefName == $branch) | select((.headRefName // "") | contains($session_id))]' \
+                  /tmp/prs.json > /tmp/linked.json
+                pr_count="$(jq 'length' /tmp/linked.json)"
+              fi
+              if [ "$pr_count" -gt 0 ]; then
+                skipped_state="$((skipped_state + 1))"
+                echo "RESTART_WATCHDOG_SKIP_PR: ${task_id} has ${pr_count} correlated open PR(s)."
+                continue
+              fi
+
+              GH_TOKEN="$CONTROL_TOKEN" gh workflow run factory-jules-session-restart.yml \
+                --repo "$GITHUB_REPOSITORY" --ref Android \
+                -f issue_number="$issue" -f repository="$repo" -f mode=automatic \
+                -f reason="watchdog: no Jules progress for ${inactivity} minutes" -f execute=true
+              restart_requested="$((restart_requested + 1))"
+              echo "JULES_RESTART_REQUESTED: ${task_id} state=${state} inactivity=${inactivity}m threshold=${threshold}m."
+            done < <(gh issue list --repo "$repo" --state open --label 'factory:dispatched' --limit 100 \
+              --json number,labels --jq '.[] | select(([.labels[].name] | index("factory:agent:chatgpt")) == null) | .number')
+          done < /tmp/repos.txt
+
+          {
+            echo '### Jules restart watchdog v1'
+            echo "- Sessions inspected: ${inspected}"
+            echo "- Automatic restarts requested: ${restart_requested}"
+            echo "- Recent-progress skips: ${skipped_recent}"
+            echo "- State/governance/PR skips: ${skipped_state}"
+            echo "- Control-plane anomalies: ${anomalies}"
+            echo "- No-progress threshold: ${threshold} minutes"
+            echo '- This workflow never kills a session itself; it delegates to the serialized restart workflow, which revalidates all invariants before mutation.'
+          } >> "$GITHUB_STEP_SUMMARY"

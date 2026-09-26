@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "enabled": true,
+  "eligible_phase": "LAUNCH_READY",
+  "require_no_active_work": true,
+  "require_credentials_attested": true,
+  "require_default_branch_ci": true,
+  "production_deploy": "HUMAN_REQUIRED"
+}

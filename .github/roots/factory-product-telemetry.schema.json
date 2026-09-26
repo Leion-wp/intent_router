@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roots.local/schemas/factory-product-telemetry.schema.json",
+  "title": "FactoryProductTelemetry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "repository", "generated_at", "flow", "quality", "portfolio"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "flow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["open_issues", "queued", "dispatching", "dispatched", "blocked", "done", "open_milestones", "closed_milestones", "open_prs", "merged_prs"],
+      "properties": {
+        "open_issues": {"type": "integer", "minimum": 0},
+        "queued": {"type": "integer", "minimum": 0},
+        "dispatching": {"type": "integer", "minimum": 0},
+        "dispatched": {"type": "integer", "minimum": 0},
+        "blocked": {"type": "integer", "minimum": 0},
+        "done": {"type": "integer", "minimum": 0},
+        "open_milestones": {"type": "integer", "minimum": 0},
+        "closed_milestones": {"type": "integer", "minimum": 0},
+        "open_prs": {"type": "integer", "minimum": 0},
+        "merged_prs": {"type": "integer", "minimum": 0}
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rework_events", "blocked_events", "first_pass_rate", "mean_issue_cycle_hours"],
+      "properties": {
+        "rework_events": {"type": "integer", "minimum": 0},
+        "blocked_events": {"type": "integer", "minimum": 0},
+        "first_pass_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "mean_issue_cycle_hours": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "portfolio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["external_signal", "revenue_signal", "cost_signal", "priority_score"],
+      "properties": {
+        "external_signal": {"type": ["number", "null"], "minimum": 0},
+        "revenue_signal": {"type": ["number", "null"], "minimum": 0},
+        "cost_signal": {"type": ["number", "null"], "minimum": 0},
+        "priority_score": {"type": ["number", "null"]}
+      }
+    },
+    "extensions": {"type": "object"}
+  }
+}

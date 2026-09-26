@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "worker": "jules",
+  "automatic": {
+    "enabled": true,
+    "no_progress_minutes": 60,
+    "eligible_states": ["QUEUED", "PLANNING", "IN_PROGRESS"]
+  },
+  "manual": {
+    "enabled": true
+  },
+  "max_restarts_per_issue": 2,
+  "termination": {
+    "verify_attempts": 3,
+    "verify_delay_seconds": 2
+  },
+  "pr_policy": "REFUSE_IF_OPEN_PR",
+  "governance": {
+    "production_gate": "HUMAN_REQUIRED",
+    "credential_gate": "HUMAN_REQUIRED",
+    "workflow_gate": "HUMAN_REQUIRED"
+  }
+}

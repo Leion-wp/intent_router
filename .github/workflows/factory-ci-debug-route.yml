@@ -1,0 +1,70 @@
+name: factory-ci-debug-route-v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        required: true
+        type: string
+      failure_class:
+        required: true
+        type: choice
+        options:
+          - INSTALL
+          - LINT
+          - TYPECHECK
+          - TEST
+          - TEST_HARNESS_INVALID
+          - BUILD
+          - ENV_VALIDATION
+          - RUNTIME_INIT
+          - UNKNOWN
+      culprit:
+        required: false
+        type: string
+      attempts:
+        required: true
+        default: '0'
+        type: string
+      repeated:
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute bounded transition
+        env:
+          HEAD_SHA: ${{ inputs.head_sha }}
+          FAILURE_CLASS: ${{ inputs.failure_class }}
+          CULPRIT: ${{ inputs.culprit }}
+          ATTEMPTS: ${{ inputs.attempts }}
+          REPEATED: ${{ inputs.repeated }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { fingerprint, nextTransition } from './.github/roots/ci-debugger/orchestrate.mjs';
+          const failureClass = process.env.FAILURE_CLASS;
+          const culprit = process.env.CULPRIT || null;
+          const protectedChange = /\.github\/workflows|secret|branch protection|permission/i.test(culprit || '');
+          const diagnosis = {
+            class: failureClass,
+            culprit,
+            retryable: failureClass !== 'UNKNOWN' && !protectedChange,
+            requires_human: failureClass === 'UNKNOWN' || protectedChange,
+          };
+          const fp = fingerprint({ head: process.env.HEAD_SHA, failureClass, culprit });
+          const transition = nextTransition({
+            diagnosis,
+            attempts: Number(process.env.ATTEMPTS || 0),
+            repeated: process.env.REPEATED === 'true',
+          });
+          console.log('ROOTS_CI_FINGERPRINT=' + fp);
+          console.log('ROOTS_CI_TRANSITION=' + transition);
+          NODE
