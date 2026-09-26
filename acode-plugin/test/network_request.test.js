@@ -131,16 +131,18 @@ describe('Acode network:request and github:request maxResponseBytes bounds', () 
     assert.strictEqual(res.metadata.size, 11);
   });
 
-  it('uses fallback post-read byte length checking when getReader is unavailable', async () => {
-    globalThis.fetch = async (url, options) => {
-      return {
-        ok: true,
-        status: 200,
-        headers: new Map([['content-type', 'text/plain']]),
-        body: null, // No streaming body
-        text: async () => 'hello world 12345' // 17 bytes
-      };
-    };
+  it('fails closed before full buffering when getReader is unavailable', async () => {
+    let textCalled = false;
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: new Map([['content-type', 'text/plain']]),
+      body: null,
+      text: async () => {
+        textCalled = true;
+        return 'hello world 12345';
+      }
+    });
 
     const res = await router.route({
       action: 'network:request',
@@ -148,47 +150,44 @@ describe('Acode network:request and github:request maxResponseBytes bounds', () 
     });
 
     assert.strictEqual(res.success, false);
-    assert.strictEqual(res.metadata.code, 'response_too_large');
+    assert.strictEqual(res.metadata.code, 'response_size_unenforceable');
     assert.strictEqual(res.metadata.limit, 10);
-    assert.strictEqual(res.metadata.size, 17);
+    assert.strictEqual(textCalled, false);
   });
 
   it('returns valid JSON and text response structures under limit', async () => {
-    // JSON test
-    globalThis.fetch = async (url, options) => {
-      return {
-        ok: true,
-        status: 200,
-        headers: new Map([['content-type', 'application/json']]),
-        body: null,
-        text: async () => JSON.stringify({ key: 'value' })
-      };
-    };
+    const makeResponse = (contentType, value) => ({
+      ok: true,
+      status: 200,
+      headers: new Map([['content-type', contentType]]),
+      body: {
+        getReader: () => {
+          let sent = false;
+          return {
+            read: async () => {
+              if (sent) return { done: true };
+              sent = true;
+              return { done: false, value: Buffer.from(value) };
+            },
+            cancel: async () => {}
+          };
+        }
+      }
+    });
 
+    globalThis.fetch = async () => makeResponse('application/json', JSON.stringify({ key: 'value' }));
     const jsonRes = await router.route({
       action: 'network:request',
       data: { url: 'https://example.com/json', maxResponseBytes: 100 }
     });
-
     assert.strictEqual(jsonRes.success, true);
     assert.deepStrictEqual(jsonRes.data.body, { key: 'value' });
 
-    // Text test
-    globalThis.fetch = async (url, options) => {
-      return {
-        ok: true,
-        status: 200,
-        headers: new Map([['content-type', 'text/plain']]),
-        body: null,
-        text: async () => 'plain text response'
-      };
-    };
-
+    globalThis.fetch = async () => makeResponse('text/plain', 'plain text response');
     const textRes = await router.route({
       action: 'network:request',
       data: { url: 'https://example.com/text', maxResponseBytes: 100 }
     });
-
     assert.strictEqual(textRes.success, true);
     assert.strictEqual(textRes.data.body, 'plain text response');
   });
@@ -217,22 +216,29 @@ describe('Acode network:request and github:request maxResponseBytes bounds', () 
   });
 
   it('propagates maxResponseBytes and timeoutMs via github:request and github:fetch_repo', async () => {
-    let capturedData = null;
-    globalThis.fetch = async (url, options) => {
-      return {
-        ok: true,
-        status: 200,
-        headers: new Map([['content-type', 'application/json']]),
-        body: null,
-        text: async () => JSON.stringify({ name: 'repo-name' })
-      };
-    };
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: new Map([['content-type', 'application/json']]),
+      body: {
+        getReader: () => {
+          let sent = false;
+          return {
+            read: async () => {
+              if (sent) return { done: true };
+              sent = true;
+              return { done: false, value: Buffer.from(JSON.stringify({ name: 'repo-name' })) };
+            },
+            cancel: async () => {}
+          };
+        }
+      }
+    });
 
     const resReq = await router.route({
       action: 'github:request',
       data: { path: '/user', maxResponseBytes: 1000, timeoutMs: 2000 }
     });
-
     assert.strictEqual(resReq.success, true);
     assert.deepStrictEqual(resReq.data.body, { name: 'repo-name' });
 
@@ -240,9 +246,99 @@ describe('Acode network:request and github:request maxResponseBytes bounds', () 
       action: 'github:fetch_repo',
       data: { repo: 'owner/repo', maxResponseBytes: 1000, timeoutMs: 2000 }
     });
-
     assert.strictEqual(resRepo.success, true);
     assert.deepStrictEqual(resRepo.data.body, { name: 'repo-name' });
+  });
+
+  it('applies the canonical response ceiling when maxResponseBytes is omitted', async () => {
+    let cancelCalled = false;
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: new Map([['content-type', 'text/plain']]),
+      body: {
+        getReader: () => {
+          let sent = false;
+          return {
+            read: async () => {
+              if (sent) return { done: true };
+              sent = true;
+              return { done: false, value: Buffer.alloc((2 * 1024 * 1024) + 1) };
+            },
+            cancel: async () => { cancelCalled = true; }
+          };
+        }
+      }
+    });
+
+    const res = await router.route({
+      action: 'network:request',
+      data: { url: 'https://example.com/default-ceiling' }
+    });
+    assert.strictEqual(res.success, false);
+    assert.strictEqual(res.metadata.code, 'response_too_large');
+    assert.strictEqual(res.metadata.limit, 2 * 1024 * 1024);
+    assert.strictEqual(cancelCalled, true);
+  });
+
+  it('rejects a requested response limit above the canonical ceiling before fetch', async () => {
+    let fetchCalled = false;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      throw new Error('fetch should not run');
+    };
+    const res = await router.route({
+      action: 'network:request',
+      data: { url: 'https://example.com/too-large', maxResponseBytes: (2 * 1024 * 1024) + 1 }
+    });
+    assert.strictEqual(res.success, false);
+    assert.strictEqual(res.metadata.code, 'max_response_bytes_exceeds_ceiling');
+    assert.strictEqual(fetchCalled, false);
+  });
+
+  it('fails closed before fetch when timeoutMs cannot be enforced', async () => {
+    const originalAbortController = globalThis.AbortController;
+    let fetchCalled = false;
+    try {
+      globalThis.AbortController = undefined;
+      globalThis.fetch = async () => {
+        fetchCalled = true;
+        throw new Error('fetch should not run');
+      };
+      const res = await router.route({
+        action: 'network:request',
+        data: { url: 'https://example.com/timeout', timeoutMs: 10 }
+      });
+      assert.strictEqual(res.success, false);
+      assert.strictEqual(res.metadata.code, 'timeout_unavailable');
+      assert.strictEqual(fetchCalled, false);
+    } finally {
+      globalThis.AbortController = originalAbortController;
+    }
+  });
+
+  it('tears down an oversized Content-Length response before reading', async () => {
+    let cancelCount = 0;
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: new Map([
+        ['content-type', 'text/plain'],
+        ['content-length', '500']
+      ]),
+      body: {
+        cancel: async () => { cancelCount += 1; },
+        getReader: () => { throw new Error('body must not be read'); }
+      }
+    });
+
+    const res = await router.route({
+      action: 'network:request',
+      data: { url: 'https://example.com/oversized', maxResponseBytes: 100 }
+    });
+    assert.strictEqual(res.success, false);
+    assert.strictEqual(res.metadata.code, 'response_too_large');
+    assert.strictEqual(cancelCount, 1);
   });
 
   it('rejects invalid maxResponseBytes values', async () => {
