@@ -140,10 +140,12 @@ describe('Acode Sequential Pipeline Builder Tests', () => {
         'router:logs',
         'terminal:exec',
         'router:capabilities',
-        'network:request'
+        'network:request',
+        'custom:non.portable'
       ];
       const filtered = filterRoutableActions(actions);
       assert.deepStrictEqual(filtered, ['file:read', 'network:request', 'terminal:exec']);
+      assert.notStrictEqual(intentToAction(actionToIntent('custom:non.portable')), 'custom:non.portable');
     });
 
     it('sanitizes pipeline filenames and protects against path traversal', () => {
@@ -211,6 +213,11 @@ describe('Acode Sequential Pipeline Builder Tests', () => {
       const mockFs = (url) => ({
         exists: async () => url in existingFiles || url in writtenFiles,
         createDirectory: async () => {},
+        readFile: async () => {
+          if (url in writtenFiles) return writtenFiles[url];
+          if (url in existingFiles) return existingFiles[url];
+          throw new Error('ENOENT');
+        },
         writeFile: async (content) => {
           writtenFiles[url] = content;
         }
@@ -337,6 +344,100 @@ describe('Acode Sequential Pipeline Builder Tests', () => {
       assert.strictEqual(savedContent.steps[1].intent, 'terminal.exec');
       assert.deepStrictEqual(savedContent.steps[0].payload, { path: 'src/main.js' });
       assert.deepStrictEqual(savedContent.steps[1].payload, { command: 'npm test' });
+    });
+
+    it('does not fabricate capabilities when the runtime registry is empty', async () => {
+      const router = createMockRouter();
+      router.commands.clear();
+      const builder = new PipelineBuilderUI(router);
+      await builder.render();
+
+      assert.strictEqual(builder.steps.length, 0);
+      const addStepBtn = builder.$container.querySelectorAll('button').find(b => b.textContent === '+ Add Step');
+      addStepBtn.onclick();
+      assert.strictEqual(builder.steps.length, 0);
+      assert.ok(router.alertLogs.some(entry => entry.msg.includes('No portable runtime capability')));
+    });
+
+    it('fails closed when overwrite confirmation is unavailable', async () => {
+      const target = 'file:///workspace/pipeline/new-pipeline.intent.json';
+      const router = createMockRouter({ [target]: '{"old":true}' });
+      const builder = new PipelineBuilderUI(router);
+      await builder.render();
+      delete global.window.confirm;
+
+      await builder.savePipeline();
+
+      assert.strictEqual(router.writtenFiles[target], undefined);
+      assert.ok(router.alertLogs.some(entry => entry.msg.includes('Overwrite confirmation is unavailable')));
+    });
+
+    it('cancels an existing-file save without reporting success', async () => {
+      const target = 'file:///workspace/pipeline/new-pipeline.intent.json';
+      const router = createMockRouter({ [target]: '{"old":true}' });
+      const builder = new PipelineBuilderUI(router);
+      await builder.render();
+      global.window.confirm = () => false;
+
+      await builder.savePipeline();
+
+      assert.strictEqual(router.writtenFiles[target], undefined);
+      assert.ok(router.toastLogs.some(msg => msg.includes('Save cancelled')));
+      assert.strictEqual(router.toastLogs.some(msg => msg.includes('Pipeline saved')), false);
+    });
+
+    it('overwrites only the exact content that was confirmed', async () => {
+      const target = 'file:///workspace/pipeline/new-pipeline.intent.json';
+      const existingFiles = { [target]: '{"version":1}' };
+      const router = createMockRouter(existingFiles);
+      const builder = new PipelineBuilderUI(router);
+      await builder.render();
+      global.window.confirm = () => {
+        existingFiles[target] = '{"version":2}';
+        return true;
+      };
+
+      await builder.savePipeline();
+
+      assert.strictEqual(router.writtenFiles[target], undefined);
+      assert.ok(router.alertLogs.some(entry => entry.msg.includes('Target changed after overwrite confirmation')));
+    });
+
+    it('allows an explicitly confirmed overwrite when the target is unchanged', async () => {
+      const target = 'file:///workspace/pipeline/new-pipeline.intent.json';
+      const router = createMockRouter({ [target]: '{"version":1}' });
+      const builder = new PipelineBuilderUI(router);
+      await builder.render();
+      global.window.confirm = () => true;
+
+      await builder.savePipeline();
+
+      assert.ok(target in router.writtenFiles);
+      assert.ok(router.toastLogs.some(msg => msg.includes('Pipeline saved')));
+    });
+
+    it('rejects an unavailable capability before any filesystem write', async () => {
+      const router = createMockRouter();
+      const builder = new PipelineBuilderUI(router);
+      await builder.render();
+      builder.steps[0].action = 'custom:non.portable';
+
+      await builder.savePipeline();
+
+      assert.strictEqual(Object.keys(router.writtenFiles).length, 0);
+      assert.ok(router.alertLogs.some(entry => entry.msg.includes('unavailable or non-portable capability')));
+    });
+
+    it('rejects a serialized pipeline larger than the runner limit before write', async () => {
+      const router = createMockRouter();
+      const builder = new PipelineBuilderUI(router);
+      await builder.render();
+      builder.steps[0].rawPayload = JSON.stringify({ payload: 'x'.repeat((5 * 1024 * 1024) + 1024) });
+
+      await builder.savePipeline();
+
+      assert.strictEqual(Object.keys(router.writtenFiles).length, 0);
+      assert.ok(router.alertLogs.some(entry => entry.msg.includes('exceeds limit')));
     });
 
     it('executes generated pipeline with PipelineRunner', async () => {
