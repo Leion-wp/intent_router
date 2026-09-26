@@ -889,7 +889,7 @@
 
         const targetFileUrl = `${pipelineFolderUrl}/${sanitizeResult.fileName}`;
 
-        await withPipelineSaveLock(targetFileUrl, async () => {
+        const saved = await withPipelineSaveLock(targetFileUrl, async () => {
           const fileHandle = fsOperation(targetFileUrl);
           const fileExists = await fileHandle.exists();
 
@@ -924,7 +924,7 @@
 
             if (!confirmed) {
               this.router.toast('Save cancelled: file already exists');
-              return;
+              return false;
             }
 
             // Bind the confirmation to the exact content the user confirmed.
@@ -949,8 +949,10 @@
           }
 
           await fileHandle.writeFile(jsonString);
+          return true;
         });
 
+        if (!saved) return;
         this.router.toast(`Pipeline saved to pipeline/${sanitizeResult.fileName}`);
         await this.router.pipelineUI.loadPipelines();
         await this.router.pipelineUI.render();
