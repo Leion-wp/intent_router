@@ -135,7 +135,8 @@ jobs:
           set -euo pipefail
           [[ "$TARGET" =~ ^[^/]+/[^/]+$ ]]
           test "${TARGET%%/*}" = "$OWNER"
-          gh api --paginate "repos/${TARGET}/milestones?state=all&per_page=100" > milestones.json
+          bash .github/roots/factory-gh-array-collection.sh \
+            "repos/${TARGET}/milestones?state=all&per_page=100" > milestones.json
           jq --arg title "$MILESTONE_TITLE" '[.[] | select(.title == $title)]' milestones.json > matches.json
           count="$(jq 'length' matches.json)"
           if [ "$count" -gt 1 ]; then

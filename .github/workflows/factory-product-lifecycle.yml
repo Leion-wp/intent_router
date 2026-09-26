@@ -57,7 +57,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/milestones?state=all&per_page=100" > milestones.json
+          bash .github/roots/factory-gh-array-collection.sh \
+            "repos/${GITHUB_REPOSITORY}/milestones?state=all&per_page=100" > milestones.json
           jq --arg title "$MILESTONE_TITLE" '[.[] | select(.title == $title)]' milestones.json > matches.json
           count="$(jq 'length' matches.json)"
           if [ "$count" -gt 1 ]; then
@@ -113,7 +114,8 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$MILESTONE_NUMBER"
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?milestone=${MILESTONE_NUMBER}&state=open&per_page=100" > open.json
+          bash .github/roots/factory-gh-array-collection.sh \
+            "repos/${GITHUB_REPOSITORY}/issues?milestone=${MILESTONE_NUMBER}&state=open&per_page=100" > open.json
           open_count="$(jq '[.[] | select(.pull_request == null)] | length' open.json)"
           if [ "$open_count" -ne 0 ]; then
             echo "Milestone still has ${open_count} open issues; refusing close." >&2

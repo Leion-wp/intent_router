@@ -18,6 +18,13 @@ product_brain = importlib.util.module_from_spec(BRAIN_SPEC)
 assert BRAIN_SPEC.loader is not None
 BRAIN_SPEC.loader.exec_module(product_brain)
 
+ACTIVE_PR_SPEC = importlib.util.spec_from_file_location(
+    "factory_active_linked_prs", ROOT / "factory_active_linked_prs.py"
+)
+active_prs = importlib.util.module_from_spec(ACTIVE_PR_SPEC)
+assert ACTIVE_PR_SPEC.loader is not None
+ACTIVE_PR_SPEC.loader.exec_module(active_prs)
+
 
 class RepositoryRoleContractTests(unittest.TestCase):
     repo = "Leion-wp/example"
@@ -208,6 +215,42 @@ class RepositoryRoleContractTests(unittest.TestCase):
             self.assertEqual(state["repository_role"], "factory_substrate")
             self.assertEqual(state["subject"]["consumer"], "Roots factory + human operator + coding agents")
             self.assertNotIn("target_user", state["subject"])
+
+
+class LocalActivePrAdmissionContractTests(unittest.TestCase):
+    def pr(self, number, body="", base="Android"):
+        return {
+            "number": number,
+            "body": body,
+            "base": {"ref": base},
+            "html_url": f"https://github.com/Leion-wp/intent_router/pull/{number}",
+        }
+
+    def test_linked_pr_beyond_default_cli_window_is_detected(self):
+        prs = [self.pr(index, f"Unrelated PR {index}") for index in range(1, 35)]
+        prs.append(self.pr(35, "Refs #123"))
+        matches = active_prs.linked_prs(123, prs, "Android")
+        self.assertEqual([pr["number"] for pr in matches], [35])
+
+    def test_multiple_linked_prs_remain_multiple_for_fail_closed_callers(self):
+        prs = [self.pr(1, "Fixes #123"), self.pr(40, "References #123")]
+        matches = active_prs.linked_prs(123, prs, "Android")
+        self.assertEqual([pr["number"] for pr in matches], [1, 40])
+
+    def test_similar_issue_number_does_not_match(self):
+        prs = [self.pr(1, "Fixes #1234")]
+        self.assertEqual(active_prs.linked_prs(123, prs, "Android"), [])
+
+    def test_local_scheduler_and_dispatch_use_bounded_complete_pr_set(self):
+        workflows = ROOT.parent / "workflows"
+        for name in ("factory-scheduler.yml", "factory-dispatch.yml"):
+            text = (workflows / name).read_text(encoding="utf-8")
+            self.assertIn(".github/roots/factory-gh-array-collection.sh", text, msg=name)
+            self.assertIn("pulls?state=open&base=Android&per_page=100", text, msg=name)
+            self.assertNotIn("gh api --paginate --slurp", text, msg=name)
+            self.assertIn("factory_active_linked_prs.py", text, msg=name)
+            self.assertNotIn("gh pr list", text, msg=name)
+            self.assertIn("CONTROL_PLANE_ANOMALY", text, msg=name)
 
 
 if __name__ == "__main__":
