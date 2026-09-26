@@ -345,6 +345,40 @@ class JulesRestartWorkflowTests(unittest.TestCase):
         self.assertIn("api_discovery", self.resume_text)
         self.assertIn("Discovered Jules session ${session} does not match active PR branch", self.resume_text)
 
+    def test_ci_rework_event_metadata_is_data_and_secret_is_final_step_scoped(self):
+        workflow = yaml.safe_load(self.ci_rework_text)
+        job = workflow["jobs"]["feed-ci-failure"]
+        self.assertNotIn("JULES_API_KEY", job.get("env", {}))
+        self.assertNotIn("toJSON(github.event.workflow_run.pull_requests)", self.ci_rework_text)
+        self.assertIn("$GITHUB_EVENT_PATH", self.ci_rework_text)
+        self.assertIn(".workflow_run.pull_requests // []", self.ci_rework_text)
+
+        steps = job["steps"]
+        send_index = next(
+            index for index, step in enumerate(steps)
+            if step.get("name") == "Send REWORK to the same Jules session"
+        )
+        for step in steps[:send_index]:
+            self.assertNotIn("JULES_API_KEY", step.get("env", {}))
+        send = steps[send_index]
+        self.assertEqual(send["env"]["JULES_API_KEY"], "${{ secrets.JULES_API_KEY }}")
+        run = send["run"]
+        for marker in (
+            'pulls/${PR_NUMBER}',
+            'issues/${ISSUE_NUMBER}',
+            'factory:dispatched',
+            'factory:blocked',
+            'factory:escalated',
+            'factory:human-required',
+            'factory:agent:chatgpt',
+            'factory_worker_identity.py validate',
+            '--comments-json current-comments.json',
+            '--pr-json current-pr.json',
+            '"$HEAD_SHA"',
+        ):
+            self.assertIn(marker, run)
+        self.assertLess(run.index("current-identity.json"), run.index("jules.googleapis.com"))
+
     def test_stalled_reconciler_uses_canonical_versioned_identity(self):
         self.assertIn("actions/checkout@v4", self.stalled_reconciler_text)
         self.assertIn("factory_worker_identity", self.stalled_reconciler_text)
