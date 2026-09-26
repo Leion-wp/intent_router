@@ -5,7 +5,6 @@
   const PLUGIN_VERSION = '1.2.1';
   const MAX_PIPELINE_BYTES = 5 * 1024 * 1024; // 5 MB default limit
   const DEFAULT_EDITOR_MAX_BYTES = 5 * 1024 * 1024; // 5 MB default limit for editor open
-  const MAX_NETWORK_RESPONSE_BYTES = 2 * 1024 * 1024; // hard mobile response ceiling
   const DEFAULT_PIPELINE_BATCH_SIZE = 25; // 25 cards per batch
 
   function validateMaxBytes(maxBytes) {
@@ -865,150 +864,183 @@
 
       this.register('network:request', async (data) => {
         if (!data.url) throw new Error('url is required');
-
-        let limit = MAX_NETWORK_RESPONSE_BYTES;
-        if (data.maxResponseBytes !== undefined) {
-          const requestedLimit = validateMaxBytes(data.maxResponseBytes);
-          if (requestedLimit > MAX_NETWORK_RESPONSE_BYTES) {
-            const err = new Error(`maxResponseBytes exceeds mobile ceiling (${MAX_NETWORK_RESPONSE_BYTES})`);
-            err.code = 'max_response_bytes_exceeds_ceiling';
-            err.limit = MAX_NETWORK_RESPONSE_BYTES;
-            err.size = requestedLimit;
-            throw err;
-          }
-          limit = requestedLimit;
-        }
+        const limit = validateMaxBytes(data.maxResponseBytes);
 
         let timeoutMs = null;
         if (data.timeoutMs !== undefined && data.timeoutMs !== null) {
-          if (typeof data.timeoutMs === 'number') {
-            timeoutMs = data.timeoutMs;
-          } else if (typeof data.timeoutMs === 'string' && data.timeoutMs.trim() !== '') {
-            timeoutMs = Number(data.timeoutMs);
-          } else {
-            const err = new Error('Invalid timeoutMs: must be a positive number');
+          let num = Number(data.timeoutMs);
+          if (isNaN(num) || !Number.isFinite(num) || num <= 0) {
+            const err = new Error('Invalid timeoutMs: must be a positive finite number');
             err.code = 'invalid_timeout_ms';
             throw err;
           }
-          if (isNaN(timeoutMs) || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-            const err = new Error('Invalid timeoutMs: must be a positive number');
-            err.code = 'invalid_timeout_ms';
-            throw err;
-          }
+          timeoutMs = num;
         }
 
-        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-        if (timeoutMs !== null && !controller) {
-          const err = new Error('timeoutMs cannot be enforced: AbortController unavailable');
-          err.code = 'timeout_unavailable';
-          throw err;
+        const options = { method: data.method || 'GET', headers: data.headers || {} };
+        if (data.body !== undefined && data.body !== null) {
+          options.body = typeof data.body === 'string' ? data.body : JSON.stringify(data.body);
         }
 
-        let timeoutId = null;
-        if (timeoutMs !== null) {
-          timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        let controller = null;
+        let timer = null;
+        if (typeof AbortController !== 'undefined') {
+          controller = new AbortController();
+          options.signal = controller.signal;
+          if (timeoutMs) {
+            timer = setTimeout(() => {
+              controller.abort();
+            }, timeoutMs);
+          }
         }
-
-        const teardownResponse = async (response, reader = null) => {
-          if (reader && typeof reader.cancel === 'function') {
-            try { await reader.cancel(); } catch (_) {}
-          } else if (response && response.body && typeof response.body.cancel === 'function') {
-            try { await response.body.cancel(); } catch (_) {}
-          }
-          if (controller && !controller.signal.aborted) {
-            try { controller.abort(); } catch (_) {}
-          }
-        };
 
         try {
-          const options = { method: data.method || 'GET', headers: data.headers || {} };
-          if (controller) options.signal = controller.signal;
-          if (data.body !== undefined && data.body !== null) {
-            options.body = typeof data.body === 'string' ? data.body : JSON.stringify(data.body);
-          }
-
           const response = await fetch(data.url, options);
-          const contentLengthHeader = response.headers.get('content-length');
-          if (contentLengthHeader !== null && contentLengthHeader !== undefined) {
-            const cl = parseInt(contentLengthHeader, 10);
-            if (!isNaN(cl) && cl > limit) {
-              await teardownResponse(response);
-              const err = new Error(`Response size (${cl} bytes) exceeds limit (${limit} bytes) [response_too_large]`);
-              err.code = 'response_too_large';
-              err.limit = limit;
-              err.size = cl;
-              throw err;
+
+          const getHeader = (name) => {
+            if (!response || !response.headers) return '';
+            if (typeof response.headers.get === 'function') {
+              return response.headers.get(name) || response.headers.get(name.toLowerCase()) || '';
             }
-          }
+            if (typeof response.headers === 'object') {
+              const target = name.toLowerCase();
+              for (const key of Object.keys(response.headers)) {
+                if (key.toLowerCase() === target) return String(response.headers[key]);
+              }
+            }
+            return '';
+          };
 
-          if (!response.body || typeof response.body.getReader !== 'function') {
-            await teardownResponse(response);
-            const err = new Error('Response size limit cannot be enforced without a readable stream');
-            err.code = 'response_size_unenforceable';
-            err.limit = limit;
-            throw err;
-          }
-
-          const contentType = response.headers.get('content-type') || '';
-          const reader = response.body.getReader();
-          const chunks = [];
-          let totalBytes = 0;
-
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (!value) continue;
-
-              totalBytes += value.byteLength || value.length || 0;
-              if (totalBytes > limit) {
-                await teardownResponse(response, reader);
-                const err = new Error(`Response body size (${totalBytes} bytes) exceeds limit (${limit} bytes) [response_too_large]`);
+          if (limit !== null) {
+            const contentLengthHeader = getHeader('content-length');
+            if (contentLengthHeader) {
+              const contentLength = parseInt(contentLengthHeader, 10);
+              if (!isNaN(contentLength) && contentLength > limit) {
+                if (controller) {
+                  try { controller.abort(); } catch (_) {}
+                }
+                const err = new Error(`Response size (${contentLength} bytes) exceeds limit (${limit} bytes) [response_too_large]`);
                 err.code = 'response_too_large';
                 err.limit = limit;
-                err.size = totalBytes;
+                err.size = contentLength;
                 throw err;
               }
-              chunks.push(value);
             }
-          } catch (err) {
-            if (err && err.code === 'response_too_large') throw err;
-            throw err;
           }
 
-          let text = '';
-          if (typeof TextDecoder !== 'undefined') {
-            const decoder = new TextDecoder('utf-8');
-            for (let i = 0; i < chunks.length; i++) {
-              text += decoder.decode(chunks[i], { stream: i < chunks.length - 1 });
+          let body;
+          let reader = null;
+          if (response.body && typeof response.body.getReader === 'function') {
+            try {
+              reader = response.body.getReader();
+            } catch (_) {
+              reader = null;
             }
-          } else if (typeof Buffer !== 'undefined') {
-            text = Buffer.concat(chunks).toString('utf-8');
-          } else {
+          }
+
+          if (reader) {
+            const chunks = [];
+            let totalBytes = 0;
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (value) {
+                  totalBytes += value.byteLength || value.length || 0;
+                  if (limit !== null && totalBytes > limit) {
+                    try { await reader.cancel(); } catch (_) {}
+                    if (controller) {
+                      try { controller.abort(); } catch (_) {}
+                    }
+                    const err = new Error(`Response size (${totalBytes} bytes) exceeds limit (${limit} bytes) [response_too_large]`);
+                    err.code = 'response_too_large';
+                    err.limit = limit;
+                    err.size = totalBytes;
+                    throw err;
+                  }
+                  chunks.push(value);
+                }
+              }
+            } catch (streamErr) {
+              if (streamErr && streamErr.code === 'response_too_large') {
+                throw streamErr;
+              }
+              throw streamErr;
+            }
+
+            const combined = new Uint8Array(totalBytes);
+            let offset = 0;
             for (const chunk of chunks) {
-              for (let i = 0; i < chunk.length; i++) text += String.fromCharCode(chunk[i]);
+              combined.set(chunk, offset);
+              offset += chunk.length;
             }
-          }
 
-          let body = text;
-          if (contentType.includes('application/json')) {
-            try { body = JSON.parse(text); } catch (_) {}
+            let text;
+            if (typeof TextDecoder !== 'undefined') {
+              text = new TextDecoder('utf-8').decode(combined);
+            } else if (typeof Buffer !== 'undefined') {
+              text = Buffer.from(combined).toString('utf-8');
+            } else {
+              text = Array.from(combined).map(b => String.fromCharCode(b)).join('');
+            }
+
+            const contentType = getHeader('content-type');
+            if (contentType.includes('application/json')) {
+              try {
+                body = JSON.parse(text);
+              } catch (_) {
+                body = text;
+              }
+            } else {
+              body = text;
+            }
+          } else {
+            const contentType = getHeader('content-type');
+            const text = await response.text();
+
+            if (limit !== null) {
+              const byteLength = getByteLength(text);
+              if (byteLength > limit) {
+                if (controller) {
+                  try { controller.abort(); } catch (_) {}
+                }
+                const err = new Error(`Response size (${byteLength} bytes) exceeds limit (${limit} bytes) [response_too_large]`);
+                err.code = 'response_too_large';
+                err.limit = limit;
+                err.size = byteLength;
+                throw err;
+              }
+            }
+
+            if (contentType.includes('application/json')) {
+              try {
+                body = JSON.parse(text);
+              } catch (_) {
+                body = text;
+              }
+            } else {
+              body = text;
+            }
           }
 
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
           }
 
-          return { status: response.status, headers: Object.fromEntries(response.headers.entries()), body };
+          const headersObj = (response.headers && typeof response.headers.entries === 'function')
+            ? Object.fromEntries(response.headers.entries())
+            : (response.headers && typeof response.headers === 'object' ? Object.assign({}, response.headers) : {});
+
+          return { status: response.status, headers: headersObj, body };
         } catch (err) {
-          if (controller && controller.signal.aborted && err && err.name === 'AbortError' && timeoutMs !== null) {
+          if (controller && controller.signal && controller.signal.aborted && err.name === 'AbortError' && timeoutMs !== null) {
             const timeoutErr = new Error(`Network request timed out after ${timeoutMs}ms`);
             timeoutErr.code = 'request_timeout';
             throw timeoutErr;
           }
           throw err;
         } finally {
-          if (timeoutId) clearTimeout(timeoutId);
+          if (timer) clearTimeout(timer);
         }
       });
 
