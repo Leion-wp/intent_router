@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "repositories": {
+    "Leion-wp/micro-saas-boilerplate": {
+      "technical_rework_owner": "Roots — PR Forge",
+      "reconciliation_owner": "Roots — PR Forge Reconciliation",
+      "lanes": [
+        "CI_REWORK",
+        "QUALITY_REWORK",
+        "HARDEN",
+        "INTEGRATE"
+      ],
+      "native_jules_ci_rework": false,
+      "native_jules_quality_rework": false
+    }
+  }
+}
