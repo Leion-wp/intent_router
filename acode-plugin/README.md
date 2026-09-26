@@ -24,12 +24,14 @@ Human-centric orchestration layer for mobile automation. This plugin allows Acod
 
 ## Features
 - **System Routing**: Control Acode UI and files.
-- **Terminal Integration**:
-  - `terminal:run` (`terminal.run`): Blocking command execution for one-shot pipeline steps using `globalThis.Executor.execute(...)`. Awaits process completion, returning `{ completed: true, stdout }`, or rejecting on error. Supports `{ command, cwd, alpine }`.
-  - `terminal:exec` (`terminal.exec`): Interactive/fire-and-forget submission using `terminal.write(...)`. Returns `{ submitted: true }`.
+- **Terminal Integration**: Execute commands directly (requires Terminal plugin).
+- **Bounded `terminal.run`**: One-shot pipeline commands use Acode Executor streaming with a finite timeout and bounded stdout/stderr capture. `terminal:exec` remains the interactive fire-and-forget primitive.
 - **GitHub API**: Fetch repos and files.
 - **File System (FS)**: Read, write, and manage local files via `fsOperation`.
 - **Extensible**: Register custom providers at runtime using `intentRouter.registerProvider()`.
+- **Pipeline Size Bounding**: Pipeline definitions (`.intent.json`) are checked before reading and parsing. By default, files exceeding `MAX_PIPELINE_BYTES` (5 MB / 5,242,880 bytes) are rejected with a `pipeline_too_large` error to protect mobile WebView memory.
+- **Editor Open Bounding**: `editor:open_file` actions are bounded to protect mobile WebView memory. By default, files exceeding `DEFAULT_EDITOR_MAX_BYTES` (5 MB / 5,242,880 bytes) are rejected with an `editor_file_too_large` error before tab creation. Custom bounds can be specified via `maxBytes`.
+- **System URL Scheme Validation**: `system:open_url` strictly enforces web capability safety by permitting only explicit `https:` and `http:` URL schemes (case-insensitive). Non-HTTP(S) schemes (such as `javascript:`, `data:`, `file:`, `content:`, `intent:`, `tel:`, `sms:`, or custom deep link schemes) and relative URLs are rejected prior to calling `window.open` with a structured `url_scheme_not_allowed` error.
 
 ## API Example
 ```javascript
@@ -40,22 +42,51 @@ intentRouter.execute({
   data: { message: 'Hello World' }
 });
 
-// Run a blocking shell command and await stdout
-intentRouter.route({
-  action: 'terminal:run',
-  data: { command: 'npm install', cwd: '/sdcard/Projects/my-app' }
-});
-
-// Submit an interactive command to terminal session
-intentRouter.route({
-  action: 'terminal:exec',
-  data: { command: 'ls -la' }
-});
-
 // List files in a directory
 intentRouter.execute({
   scheme: 'fs',
   action: 'list',
   data: { path: 'file:///sdcard/Documents' }
 });
+
+// Read file with optional maxBytes limit
+intentRouter.execute({
+  scheme: 'file',
+  action: 'read',
+  data: { path: 'file:///sdcard/Documents/log.txt', maxBytes: 1048576 }
+});
+
+// Open file in editor with optional maxBytes limit (defaults to 5 MB)
+intentRouter.execute({
+  action: 'editor:open_file',
+  data: { path: 'file:///sdcard/Documents/large_log.txt', maxBytes: 2097152 }
+});
+
+// Open external web URL (HTTP / HTTPS allowed)
+intentRouter.execute({
+  action: 'system:open_url',
+  data: { url: 'https://example.com' }
+});
 ```
+
+### Awaited one-shot terminal command
+```javascript
+intentRouter.execute({
+  action: 'terminal:run',
+  data: {
+    command: 'npm test',
+    cwd: '.',
+    timeoutMs: 300000,
+    maxOutputBytes: 1048576
+  }
+});
+```
+
+`terminal.run` requires Acode Executor `start()/stop()` support so timeout and output limits can be enforced during capture. It never falls back to interactive `terminal:exec`.
+
+## Testing & CI
+Run the canonical Acode regression test suite locally from the root directory:
+```bash
+npm run test:acode
+```
+This regression harness runs automatically in GitHub Actions (`acode-regression`) on pull requests to `Android` modifying `acode-plugin/` or test infrastructure.
