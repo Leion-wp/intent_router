@@ -40,27 +40,76 @@ jobs:
 
           ready=0
           waiting=0
-          while IFS= read -r repo; do
-            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
-            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
-              "repos/${repo}/contents/.factory/profile.json" > /tmp/profile.json 2>/dev/null; then
-              continue
+          anomalies=0
+
+          reconcile_repo() {
+            local repo="$1"
+            trap 'return 97' ERR
+
+            profile_state="$(python3 .github/roots/factory_repo_local_state.py \
+              --fetch-endpoint "repos/${repo}/contents/.factory/profile.json" \
+              --output /tmp/profile.json \
+              --kind profile)"
+            case "$profile_state" in
+              PRESENT) ;;
+              ABSENT_404) return 0 ;;
+              ERROR)
+                echo "CONTROL_PLANE_ANOMALY: ${repo} .factory/profile.json could not be read; skipping repository." >&2
+                anomalies="$((anomalies + 1))"
+                return 0
+                ;;
+              *)
+                echo "CONTROL_PLANE_ANOMALY: ${repo} profile fetch returned an unknown state; skipping repository." >&2
+                anomalies="$((anomalies + 1))"
+                return 0
+                ;;
+            esac
+            if ! python3 .github/roots/factory_repo_local_state.py \
+              --document /tmp/profile.json \
+              --schema .github/roots/factory-repository-profile.schema.json \
+              --expect-repository "$repo" \
+              --kind profile; then
+              echo "CONTROL_PLANE_ANOMALY: ${repo} has invalid .factory/profile.json; skipping repository." >&2
+              anomalies="$((anomalies + 1))"
+              return 0
             fi
-            jq -e --arg repo "$repo" '.managed == true and .repository == $repo and .blueprint == "roots-micro-saas-v1"' /tmp/profile.json >/dev/null || continue
-            if ! gh api -H 'Accept: application/vnd.github.raw+json' \
-              "repos/${repo}/contents/.factory/product-state.json" > /tmp/state.json 2>/dev/null; then
-              continue
+
+            state_fetch="$(python3 .github/roots/factory_repo_local_state.py \
+              --fetch-endpoint "repos/${repo}/contents/.factory/product-state.json" \
+              --output /tmp/state.json \
+              --kind product-state)"
+            case "$state_fetch" in
+              PRESENT) ;;
+              ABSENT_404) return 0 ;;
+              ERROR)
+                echo "CONTROL_PLANE_ANOMALY: ${repo} .factory/product-state.json could not be read; no release mutation applied." >&2
+                anomalies="$((anomalies + 1))"
+                return 0
+                ;;
+              *)
+                echo "CONTROL_PLANE_ANOMALY: ${repo} product state fetch returned an unknown state; no release mutation applied." >&2
+                anomalies="$((anomalies + 1))"
+                return 0
+                ;;
+            esac
+            if ! python3 .github/roots/factory_repo_local_state.py \
+              --document /tmp/state.json \
+              --schema .github/roots/factory-product-state.schema.json \
+              --kind product-state; then
+              echo "CONTROL_PLANE_ANOMALY: ${repo} has invalid .factory/product-state.json; no release mutation applied." >&2
+              anomalies="$((anomalies + 1))"
+              return 0
             fi
             phase="$(jq -r '.phase // ""' /tmp/state.json)"
             eligible_phase="$(jq -r '.eligible_phase' "$POLICY")"
-            [ "$phase" = "$eligible_phase" ] || continue
+            [ "$phase" = "$eligible_phase" ] || return 0
 
             gh label create 'factory:release-ready' --repo "$repo" --color 0E8A16 \
-              --description 'All deterministic pre-production gates passed; production approval remains human-owned' --force >/dev/null 2>&1 || true
+              --description 'All deterministic pre-production gates passed; production approval remains human-owned' --force >/dev/null 2>&1
             gh label create 'factory:release-approved' --repo "$repo" --color 5319E7 \
-              --description 'Human explicitly approved the production release transition' --force >/dev/null 2>&1 || true
+              --description 'Human explicitly approved the production release transition' --force >/dev/null 2>&1
             gh label create 'factory:human-required' --repo "$repo" --color D93F0B \
-              --description 'Human authority is required for this transition' --force >/dev/null 2>&1 || true
+              --description 'Human authority is required for this transition' --force >/dev/null 2>&1
 
             open_milestones="$(gh api --paginate "repos/${repo}/milestones?state=open&per_page=100" --jq 'length' | awk '{s+=$1} END {print s+0}')"
             queued="$(gh issue list --repo "$repo" --state open --label 'factory:queued' --limit 100 --json number --jq 'length')"
@@ -70,7 +119,7 @@ jobs:
             open_prs="$(gh pr list --repo "$repo" --state open --limit 100 --json number --jq 'length')"
             if [ "$open_milestones" -gt 0 ] || [ "$queued" -gt 0 ] || [ "$dispatching" -gt 0 ] || [ "$dispatched" -gt 0 ] || [ "$blocked" -gt 0 ] || [ "$open_prs" -gt 0 ]; then
               waiting="$((waiting + 1))"
-              continue
+              return 0
             fi
 
             credential_gate="$(gh issue list --repo "$repo" --state open --limit 100 --json number,title,labels \
@@ -78,13 +127,13 @@ jobs:
             if [ -z "$credential_gate" ]; then
               echo "RELEASE_WAITING: ${repo} has no credential readiness gate yet." >&2
               waiting="$((waiting + 1))"
-              continue
+              return 0
             fi
             credentials_ready="$(gh api "repos/${repo}/issues/${credential_gate}" --jq '[.labels[].name] | index("factory:credentials-ready") != null')"
             if [ "$credentials_ready" != 'true' ]; then
               echo "HUMAN_REQUIRED: ${repo} credential gate #${credential_gate} is not attested ready." >&2
               waiting="$((waiting + 1))"
-              continue
+              return 0
             fi
 
             default_branch="$(jq -r '.default_branch' /tmp/profile.json)"
@@ -93,26 +142,26 @@ jobs:
             if ! [[ "$current_head" =~ ^[0-9a-f]{40}$ ]]; then
               echo "RELEASE_WAITING: ${repo} current default-branch HEAD is invalid or unavailable." >&2
               waiting="$((waiting + 1))"
-              continue
+              return 0
             fi
             gh api "repos/${repo}/actions/workflows/${ci_workflow}/runs?branch=${default_branch}&event=push&per_page=20" > /tmp/runs.json
             latest_run="$(jq -c --arg head "$current_head" '[.workflow_runs[] | select(.head_sha == $head)] | sort_by(.created_at // "") | last // null' /tmp/runs.json)"
             if [ "$latest_run" = 'null' ]; then
               echo "RELEASE_WAITING: ${repo} has no push CI run for current default-branch HEAD ${current_head}." >&2
               waiting="$((waiting + 1))"
-              continue
+              return 0
             fi
             if [ "$(jq -r '.status' <<< "$latest_run")" != 'completed' ] || [ "$(jq -r '.conclusion' <<< "$latest_run")" != 'success' ]; then
               echo "RELEASE_WAITING: ${repo} current default-branch HEAD ${current_head} CI is not successful." >&2
               waiting="$((waiting + 1))"
-              continue
+              return 0
             fi
             run_id="$(jq -r '.id' <<< "$latest_run")"
             run_sha="$(jq -r '.head_sha' <<< "$latest_run")"
             if [ "$run_sha" != "$current_head" ]; then
               echo "RELEASE_WAITING: ${repo} selected CI head ${run_sha} does not match current HEAD ${current_head}." >&2
               waiting="$((waiting + 1))"
-              continue
+              return 0
             fi
             gh api "repos/${repo}/actions/runs/${run_id}/jobs?per_page=100" > /tmp/jobs.json
             required_ok=true
@@ -127,7 +176,7 @@ jobs:
             if [ "$required_ok" != 'true' ]; then
               echo "RELEASE_WAITING: ${repo} required default-branch CI jobs are not all successful on HEAD ${run_sha}." >&2
               waiting="$((waiting + 1))"
-              continue
+              return 0
             fi
 
             release_title='[FACTORY] Production release approval'
@@ -149,7 +198,7 @@ jobs:
             if [ "$final_head" != "$run_sha" ]; then
               echo "RELEASE_WAITING: ${repo} default-branch HEAD advanced from verified ${run_sha} to ${final_head}; waiting for exact-head CI." >&2
               waiting="$((waiting + 1))"
-              continue
+              return 0
             fi
 
             if [ -z "$release_issue" ]; then
@@ -159,8 +208,24 @@ jobs:
               gh issue edit "$release_issue" --repo "$repo" --body "$body" --add-label 'factory:release-ready' --add-label 'factory:human-required' >/dev/null
             fi
 
-            gh issue close "$credential_gate" --repo "$repo" --reason completed >/dev/null 2>&1 || true
+            gh issue close "$credential_gate" --repo "$repo" --reason completed >/dev/null 2>&1
             ready="$((ready + 1))"
+
+            trap - ERR
+            return 0
+          }
+
+          while IFS= read -r repo; do
+            [ "$repo" = "$GITHUB_REPOSITORY" ] && continue
+            set +e
+            reconcile_repo "$repo"
+            repo_rc=$?
+            trap - ERR
+            set -e
+            if [ "$repo_rc" -ne 0 ]; then
+              echo "CONTROL_PLANE_ANOMALY: ${repo} repository-local release readiness operation failed; later repositories will continue." >&2
+              anomalies="$((anomalies + 1))"
+            fi
           done < /tmp/repos.txt
 
-          echo "Release readiness scan: ready=${ready}, waiting=${waiting}. Production deployment remains HUMAN_REQUIRED."
+          echo "Release readiness scan: ready=${ready}, waiting=${waiting}, repository_anomalies=${anomalies}. Production deployment remains HUMAN_REQUIRED."
