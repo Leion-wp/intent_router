@@ -23,8 +23,8 @@ An escalated/HUMAN_REQUIRED identity remains blocked against replacement but doe
 | Persisted event | Direct successor(s) | Purpose |
 | --- | --- | --- |
 | `factory-pr-active` | `factory-stalled-reconciler.yml` | Reconcile active-PR/stalled state |
-| `factory-ci-completed` | `factory-fleet-jules-rework.yml` + `factory-copilot-quality-gate.yml` | Same-session CI repair when needed and immediate native exact-head Quality review |
-| `factory-quality-verdict` | `factory-fleet-jules-quality-rework.yml` + `factory-quality-risk-reconciler.yml` | REWORK returns to the same Jules session; accepted explicit low risk can advance to managed merge |
+| `factory-ci-completed` | `factory-fleet-jules-rework.yml` (non-delegated repositories only) + `factory-copilot-quality-gate.yml` | Native exact-head Quality always runs; technical repair follows the canonical rework routing contract, so delegated repositories are skipped by the Jules writer |
+| `factory-quality-verdict` | `factory-fleet-jules-quality-rework.yml` (non-delegated repositories only) + `factory-quality-risk-reconciler.yml` | REWORK follows the canonical technical-writer routing contract; accepted explicit low risk can advance independently to managed merge |
 | `factory-pr-merged` | `factory-fleet-completion-reconciler.yml` | Persist completion, release that task identity and advance planning |
 | `factory-queue-updated` | `factory-fleet-scheduler.yml` with `dispatch_only=true` | Fill currently available Jules slots with eligible queued identities |
 | `factory-product-proposal` | `factory-product-brain.yml` | Validate and apply a persisted Product Brain proposal immediately |
@@ -95,6 +95,8 @@ The payload contains only repository identity and event type. It cannot supply a
 
 
 ## PR Forge external writer lease
+
+`.github/roots/factory-pr-forge-routing-v1.json` is the canonical repository-scoped declaration for technical rework ownership. A delegated repository has exactly one technical mutation owner for `CI_REWORK`, `QUALITY_REWORK`, `HARDEN` and `INTEGRATE`; native Jules rework workflows must fail closed/skip that repository. The routing contract changes writer ownership only and never worker identity, Quality/Risk/merge authority, provider capacity or human gates.
 
 For managed products whose Jules technical rework has been delegated to `Roots — PR Forge`, the event-driven Forge task and its periodic reconciliation fallback are one logical mutation owner. They serialize product writes with the canonical CAS lease defined by `.github/roots/factory-pr-forge-lease-v1.md`.
 
