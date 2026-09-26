@@ -11,12 +11,15 @@
     "generation",
     "holder_task_id",
     "lease_token",
+    "target_repository",
+    "target_pr",
+    "expected_head",
     "acquired_at",
     "expires_at",
     "released_at"
   ],
   "properties": {
-    "version": { "const": 1 },
+    "version": { "const": 2 },
     "resource": { "const": "roots-pr-forge" },
     "state": { "enum": ["FREE", "HELD"] },
     "generation": { "type": "integer", "minimum": 0 },
@@ -30,6 +33,24 @@
       "anyOf": [
         { "type": "null" },
         { "type": "string", "minLength": 16, "maxLength": 256, "pattern": "^[A-Za-z0-9._:-]+$" }
+      ]
+    },
+    "target_repository": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[^/]+/[^/]+$" }
+      ]
+    },
+    "target_pr": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 1 }
+      ]
+    },
+    "expected_head": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[0-9a-fA-F]{7,64}$" }
       ]
     },
     "acquired_at": {
@@ -58,8 +79,12 @@
         "properties": {
           "holder_task_id": { "type": "string", "minLength": 8 },
           "lease_token": { "type": "string", "minLength": 16 },
+          "target_repository": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+          "target_pr": { "type": "integer", "minimum": 1 },
+          "expected_head": { "type": "string", "pattern": "^[0-9a-fA-F]{7,64}$" },
           "acquired_at": { "type": "string", "format": "date-time" },
-          "expires_at": { "type": "string", "format": "date-time" }
+          "expires_at": { "type": "string", "format": "date-time" },
+          "released_at": { "type": "null" }
         }
       }
     },
@@ -69,6 +94,9 @@
         "properties": {
           "holder_task_id": { "type": "null" },
           "lease_token": { "type": "null" },
+          "target_repository": { "type": "null" },
+          "target_pr": { "type": "null" },
+          "expected_head": { "type": "null" },
           "acquired_at": { "type": "null" },
           "expires_at": { "type": "null" }
         }
