@@ -107,6 +107,26 @@
 
   const VALID_CAPABILITY_ARG_TYPES = new Set(['string', 'number', 'boolean', 'enum', 'object']);
 
+  function cloneMetadataValue(value, depth = 0) {
+    if (depth > 8) return undefined;
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+    if (Array.isArray(value)) {
+      return value
+        .map(item => cloneMetadataValue(item, depth + 1))
+        .filter(item => item !== undefined);
+    }
+    if (value && typeof value === 'object') {
+      const out = {};
+      for (const [key, item] of Object.entries(value)) {
+        const cloned = cloneMetadataValue(item, depth + 1);
+        if (cloned !== undefined) out[key] = cloned;
+      }
+      return out;
+    }
+    return undefined;
+  }
+
   function normalizeCapabilityMetadata(rawMetadata) {
     if (!rawMetadata || typeof rawMetadata !== 'object') {
       return { description: undefined, args: [] };
@@ -118,53 +138,63 @@
 
     const rawArgs = Array.isArray(rawMetadata.args) ? rawMetadata.args : [];
     const normalizedArgs = [];
+    const seenNames = new Set();
 
     for (const arg of rawArgs) {
-      if (!arg || typeof arg !== 'object' || Array.isArray(arg)) {
-        continue;
-      }
-      if (typeof arg.name !== 'string' || arg.name.trim() === '') {
-        continue;
-      }
+      if (!arg || typeof arg !== 'object' || Array.isArray(arg)) continue;
+      if (typeof arg.name !== 'string' || arg.name.trim() === '') continue;
 
       const name = arg.name.trim();
+      if (seenNames.has(name)) continue;
+      seenNames.add(name);
+
       const rawType = typeof arg.type === 'string' ? arg.type.toLowerCase().trim() : 'string';
       const type = VALID_CAPABILITY_ARG_TYPES.has(rawType) ? rawType : 'string';
       const required = !!arg.required;
+      const sensitive = arg.sensitive === true || arg.secret === true;
       const argDesc = typeof arg.description === 'string' ? arg.description : undefined;
 
-      const normalizedArg = {
-        name,
-        type,
-        required
-      };
+      const normalizedArg = { name, type, required };
+      if (argDesc !== undefined) normalizedArg.description = argDesc;
+      if (sensitive) normalizedArg.sensitive = true;
 
-      if (argDesc !== undefined) {
-        normalizedArg.description = argDesc;
+      // Sensitive metadata may describe the field, but never carries public values.
+      if (!sensitive && arg.default !== undefined) {
+        const clonedDefault = cloneMetadataValue(arg.default);
+        if (clonedDefault !== undefined) normalizedArg.default = clonedDefault;
       }
-
-      if (arg.default !== undefined) {
-        normalizedArg.default = arg.default;
-      }
-
-      if (Array.isArray(arg.options)) {
-        normalizedArg.options = [...arg.options];
+      if (!sensitive && Array.isArray(arg.options)) {
+        normalizedArg.options = cloneMetadataValue(arg.options) || [];
       }
 
       normalizedArgs.push(normalizedArg);
     }
 
-    return {
-      description,
-      args: normalizedArgs
-    };
+    return { description, args: normalizedArgs };
+  }
+
+  function projectPublicCapabilityArgs(args) {
+    const normalized = normalizeCapabilityMetadata({ args }).args;
+    return normalized.map(arg => {
+      const projected = {
+        name: arg.name,
+        type: arg.type,
+        required: !!arg.required
+      };
+      if (arg.description !== undefined) projected.description = arg.description;
+      if (arg.sensitive === true) {
+        projected.sensitive = true;
+        return projected;
+      }
+      if (arg.default !== undefined) projected.default = cloneMetadataValue(arg.default);
+      if (arg.options !== undefined) projected.options = cloneMetadataValue(arg.options);
+      return projected;
+    });
   }
 
   function validatePayloadAgainstArgs(payload, args) {
-    const normalizedMeta = normalizeCapabilityMetadata({ args });
-    const normalizedArgs = normalizedMeta.args;
+    const normalizedArgs = normalizeCapabilityMetadata({ args }).args;
     const errors = [];
-
     const data = (payload && typeof payload === 'object' && !Array.isArray(payload)) ? payload : {};
 
     for (const arg of normalizedArgs) {
@@ -172,15 +202,12 @@
       const isPresent = val !== undefined && val !== null;
 
       if (!isPresent) {
-        if (arg.required) {
-          errors.push(`Missing required argument '${arg.name}'`);
-        }
+        if (arg.required) errors.push(`Missing required argument '${arg.name}'`);
         continue;
       }
 
       let valid = true;
-      let actualType = Array.isArray(val) ? 'array' : typeof val;
-
+      const actualType = Array.isArray(val) ? 'array' : typeof val;
       switch (arg.type) {
         case 'string':
           valid = typeof val === 'string';
@@ -192,7 +219,7 @@
           valid = typeof val === 'boolean';
           break;
         case 'object':
-          valid = typeof val === 'object' && !Array.isArray(val);
+          valid = typeof val === 'object' && val !== null && !Array.isArray(val);
           break;
         case 'enum':
           if (Array.isArray(arg.options) && arg.options.length > 0) {
@@ -209,15 +236,10 @@
           valid = true;
       }
 
-      if (!valid) {
-        errors.push(`Invalid type for argument '${arg.name}': expected ${arg.type}, got ${actualType}`);
-      }
+      if (!valid) errors.push(`Invalid type for argument '${arg.name}': expected ${arg.type}, got ${actualType}`);
     }
 
-    return {
-      valid: errors.length === 0,
-      errors
-    };
+    return { valid: errors.length === 0, errors };
   }
 
   async function readBoundedFile(fsHandle, encoding, limit, errorCode = 'file_too_large') {
@@ -841,15 +863,24 @@
       this.register('router:logs', () => this.logs.slice());
       this.register('router:clear_logs', () => { this.logs = []; return { cleared: true }; });
       this.register('router:capabilities', () => {
-        const actionsList = [];
+        const capabilities = [];
         for (const [actionName, entry] of this.commands.entries()) {
           const isObj = entry && typeof entry === 'object' && typeof entry.handler === 'function';
-          actionsList.push({
+          capabilities.push({
             action: actionName,
             description: isObj ? entry.description : undefined,
-            args: isObj && Array.isArray(entry.args) ? entry.args : []
+            args: isObj ? projectPublicCapabilityArgs(entry.args) : []
           });
         }
+
+        // Return independent caller-owned projections: neither array nor nested metadata
+        // may mutate the runtime registry or the sibling projection.
+        const actions = capabilities.map(capability => ({
+          action: capability.action,
+          description: capability.description,
+          args: projectPublicCapabilityArgs(capability.args)
+        }));
+
         return {
           pluginId: PLUGIN_ID,
           version: PLUGIN_VERSION,
@@ -858,8 +889,8 @@
           terminal: !!this.modules.terminal,
           editor: !!(typeof window !== 'undefined' && window.editorManager && window.editorManager.editor),
           network: typeof fetch === 'function',
-          actions: actionsList,
-          capabilities: actionsList
+          actions,
+          capabilities
         };
       });
 
@@ -1133,9 +1164,8 @@
         description: 'Send an HTTP request',
         args: [
           { name: 'url', type: 'string', required: true, description: 'Target URL' },
-          { name: 'method', type: 'enum', required: false, default: 'GET', options: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'], description: 'HTTP method' },
-          { name: 'headers', type: 'object', required: false, description: 'HTTP request headers' },
-          { name: 'body', type: 'string', required: false, description: 'Request payload body' }
+          { name: 'method', type: 'string', required: false, default: 'GET', description: 'HTTP method' },
+          { name: 'headers', type: 'object', required: false, description: 'HTTP request headers' }
         ]
       });
 
@@ -1155,7 +1185,7 @@
           { name: 'path', type: 'string', required: true, description: 'GitHub API endpoint path' },
           { name: 'method', type: 'enum', required: false, default: 'GET', options: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], description: 'HTTP method' },
           { name: 'headers', type: 'object', required: false, description: 'Additional headers' },
-          { name: 'token', type: 'string', required: false, description: 'GitHub personal access token' }
+          { name: 'token', type: 'string', required: false, sensitive: true, description: 'GitHub personal access token' }
         ]
       });
 
@@ -1170,7 +1200,7 @@
         args: [
           { name: 'repo', type: 'string', required: true, description: 'Repository identifier (owner/repo)' },
           { name: 'path', type: 'string', required: false, description: 'Path within repository' },
-          { name: 'token', type: 'string', required: false, description: 'GitHub token' }
+          { name: 'token', type: 'string', required: false, sensitive: true, description: 'GitHub token' }
         ]
       });
 
@@ -1200,20 +1230,7 @@
         ]
       });
 
-      this.register('terminal:run', async (data) => {
-        if (!data || !data.command) throw new Error('command is required');
-        if (typeof globalThis.Executor === 'object' && typeof globalThis.Executor.execute === 'function') {
-          return await globalThis.Executor.execute(data.command);
-        }
-        return await this.route({ action: 'terminal:exec', data });
-      }, {
-        description: 'Run terminal command and return execution output',
-        args: [
-          { name: 'command', type: 'string', required: true, description: 'Command string to run' },
-          { name: 'id', type: 'string', required: false, description: 'Terminal session ID' },
-          { name: 'name', type: 'string', required: false, description: 'Terminal session name' }
-        ]
-      });
+
     }
 
     registerAcodeCommands() {
