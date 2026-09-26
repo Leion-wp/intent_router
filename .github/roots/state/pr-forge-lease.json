@@ -1,11 +1,11 @@
 {
   "version": 1,
   "resource": "roots-pr-forge",
-  "state": "FREE",
-  "generation": 0,
-  "holder_task_id": null,
-  "lease_token": null,
-  "acquired_at": null,
-  "expires_at": null,
+  "state": "HELD",
+  "generation": 1,
+  "holder_task_id": "bootstrap-cas-verification",
+  "lease_token": "cas-proof-A-20260926-0931",
+  "acquired_at": "2026-09-26T09:31:30Z",
+  "expires_at": "2026-09-26T11:31:30Z",
   "released_at": null
 }
