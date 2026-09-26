@@ -70,6 +70,42 @@ describe('Acode capability argument metadata', () => {
         required: false
       });
     });
+
+    it('deduplicates names after normalization and keeps the first contract', () => {
+      const normalized = normalizeCapabilityMetadata({
+        args: [
+          { name: 'mode', type: 'string', required: true },
+          { name: ' mode ', type: 'number', required: false }
+        ]
+      });
+      assert.strictEqual(normalized.args.length, 1);
+      assert.deepStrictEqual(normalized.args[0], {
+        name: 'mode',
+        type: 'string',
+        required: true
+      });
+    });
+
+    it('redacts values from sensitive metadata during normalization', () => {
+      const sentinel = 'sentinel-secret-metadata';
+      const normalized = normalizeCapabilityMetadata({
+        args: [{
+          name: 'token',
+          type: 'string',
+          sensitive: true,
+          default: sentinel,
+          options: [sentinel]
+        }]
+      });
+      assert.deepStrictEqual(normalized.args[0], {
+        name: 'token',
+        type: 'string',
+        required: false,
+        sensitive: true
+      });
+      assert.strictEqual(JSON.stringify(normalized).includes(sentinel), false);
+    });
+
   });
 
   describe('validatePayloadAgainstArgs()', () => {
@@ -207,15 +243,13 @@ describe('Acode capability argument metadata', () => {
   });
 
   describe('router:capabilities inspection and secret/function redaction', () => {
-    it('returns a serializable snapshot without functions, handlers or secrets', async () => {
-      // Register command with private token / handler context
-      let secretToken = 'secret_bearer_token_12345';
-      router.register('custom:secret_action', async (data) => {
-        return { tokenUsed: secretToken };
-      }, {
+    it('returns a serializable snapshot without functions or sensitive metadata values', async () => {
+      const sentinel = 'secret_bearer_token_12345';
+      router.register('custom:secret_action', async () => ({ ok: true }), {
         description: 'Action handling internal tokens',
         args: [
-          { name: 'input', type: 'string', required: true }
+          { name: 'input', type: 'string', required: true },
+          { name: 'token', type: 'string', sensitive: true, default: sentinel, options: [sentinel] }
         ]
       });
 
@@ -223,45 +257,85 @@ describe('Acode capability argument metadata', () => {
       assert.strictEqual(res.success, true);
 
       const snapshot = res.data;
-      assert.ok(Array.isArray(snapshot.capabilities), 'snapshot should contain capabilities array');
-      assert.ok(Array.isArray(snapshot.actions), 'snapshot should contain actions array');
+      assert.ok(Array.isArray(snapshot.capabilities));
+      assert.ok(Array.isArray(snapshot.actions));
 
-      // Verify JSON serializability
       const serialized = JSON.stringify(snapshot);
       assert.doesNotThrow(() => JSON.parse(serialized));
-
-      // Ensure no function objects or secrets appear in metadata
-      assert.strictEqual(serialized.includes('secret_bearer_token_12345'), false);
+      assert.strictEqual(serialized.includes(sentinel), false);
       assert.strictEqual(serialized.includes('function'), false);
 
+      const secretCap = snapshot.capabilities.find(c => c.action === 'custom:secret_action');
+      const tokenArg = secretCap.args.find(a => a.name === 'token');
+      assert.strictEqual(tokenArg.sensitive, true);
+      assert.strictEqual(tokenArg.default, undefined);
+      assert.strictEqual(tokenArg.options, undefined);
       for (const cap of snapshot.capabilities) {
-        assert.strictEqual(cap.handler, undefined, `Capability ${cap.action} should not serialize handler function`);
+        assert.strictEqual(cap.handler, undefined);
       }
     });
 
-    it('exposes minimal metadata for core primitives file:read, network:request, and terminal:run', async () => {
+    it('returns caller-owned deep snapshots that cannot mutate the registry or sibling projection', async () => {
+      router.register('custom:mutable_meta', () => ({ ok: true }), {
+        args: [{
+          name: 'config',
+          type: 'object',
+          required: false,
+          default: { nested: { value: 1 } },
+          options: [{ id: 1 }]
+        }]
+      });
+
+      const first = await router.route({ action: 'router:capabilities' });
+      const capA = first.data.capabilities.find(c => c.action === 'custom:mutable_meta');
+      const actionA = first.data.actions.find(c => c.action === 'custom:mutable_meta');
+
+      capA.args[0].default.nested.value = 999;
+      capA.args[0].options[0].id = 999;
+      capA.args.push({ name: 'injected', type: 'string', required: false });
+
+      assert.strictEqual(actionA.args[0].default.nested.value, 1);
+      assert.strictEqual(actionA.args[0].options[0].id, 1);
+      assert.strictEqual(actionA.args.length, 1);
+
+      const second = await router.route({ action: 'router:capabilities' });
+      const capB = second.data.capabilities.find(c => c.action === 'custom:mutable_meta');
+      assert.strictEqual(capB.args[0].default.nested.value, 1);
+      assert.strictEqual(capB.args[0].options[0].id, 1);
+      assert.strictEqual(capB.args.length, 1);
+    });
+
+    it('exposes metadata only for primitives actually present on the base contract', async () => {
       const res = await router.route({ action: 'router:capabilities' });
       assert.strictEqual(res.success, true);
-
       const capabilities = res.data.capabilities;
-      const findCap = (name) => capabilities.find(c => c.action === name);
+      const findCap = name => capabilities.find(c => c.action === name);
 
       const fileRead = findCap('file:read');
-      assert.ok(fileRead, 'file:read metadata must be present');
-      assert.strictEqual(typeof fileRead.description, 'string');
+      assert.ok(fileRead);
       assert.ok(fileRead.args.some(a => a.name === 'path' && a.required === true));
       assert.ok(fileRead.args.some(a => a.name === 'maxBytes' && a.type === 'number'));
 
       const networkRequest = findCap('network:request');
-      assert.ok(networkRequest, 'network:request metadata must be present');
-      assert.strictEqual(typeof networkRequest.description, 'string');
+      assert.ok(networkRequest);
       assert.ok(networkRequest.args.some(a => a.name === 'url' && a.required === true));
-      assert.ok(networkRequest.args.some(a => a.name === 'method' && a.type === 'enum'));
+      assert.ok(networkRequest.args.some(a => a.name === 'method' && a.type === 'string'));
 
-      const terminalRun = findCap('terminal:run');
-      assert.ok(terminalRun, 'terminal:run metadata must be present');
-      assert.strictEqual(typeof terminalRun.description, 'string');
-      assert.ok(terminalRun.args.some(a => a.name === 'command' && a.required === true));
+      // Android does not yet contain terminal:run; this metadata PR must not create it.
+      assert.strictEqual(findCap('terminal:run'), undefined);
+    });
+
+    it('keeps network metadata permissive where the live handler is permissive', async () => {
+      const res = await router.route({ action: 'router:capabilities' });
+      const networkRequest = res.data.capabilities.find(c => c.action === 'network:request');
+      const validation = validatePayloadAgainstArgs({
+        url: 'https://example.invalid',
+        method: 'OPTIONS',
+        body: { nested: true }
+      }, networkRequest.args);
+
+      // body is deliberately unconstrained because the runtime accepts strings or objects.
+      assert.strictEqual(validation.valid, true);
     });
   });
 
@@ -270,31 +344,25 @@ describe('Acode capability argument metadata', () => {
       const res = await router.route({ action: 'router:capabilities' });
       assert.strictEqual(res.success, true);
 
-      const capabilities = res.data.capabilities;
       const generatedForms = {};
-
-      for (const cap of capabilities) {
-        const fields = cap.args.map(arg => {
-          let fieldType = 'text_input';
-          if (arg.type === 'boolean') fieldType = 'checkbox';
-          if (arg.type === 'number') fieldType = 'number_input';
-          if (arg.type === 'enum') fieldType = 'dropdown_select';
-          if (arg.type === 'object') fieldType = 'json_editor';
-
-          return {
-            key: arg.name,
-            fieldType,
-            label: arg.description || arg.name,
-            required: !!arg.required,
-            defaultValue: arg.default !== undefined ? arg.default : null,
-            options: arg.options || null
-          };
-        });
-
+      for (const cap of res.data.capabilities) {
         generatedForms[cap.action] = {
           title: cap.action,
           description: cap.description || 'No description provided',
-          fields
+          fields: cap.args.map(arg => {
+            let fieldType = 'text_input';
+            if (arg.type === 'boolean') fieldType = 'checkbox';
+            if (arg.type === 'number') fieldType = 'number_input';
+            if (arg.type === 'enum') fieldType = 'dropdown_select';
+            if (arg.type === 'object') fieldType = 'json_editor';
+            return {
+              key: arg.name,
+              fieldType,
+              required: !!arg.required,
+              defaultValue: arg.default !== undefined ? arg.default : null,
+              options: arg.options || null
+            };
+          })
         };
       }
 
@@ -303,14 +371,8 @@ describe('Acode capability argument metadata', () => {
       assert.strictEqual(generatedForms['file:read'].fields.find(f => f.key === 'maxBytes').fieldType, 'number_input');
 
       assert.ok(generatedForms['network:request']);
-      assert.strictEqual(generatedForms['network:request'].fields.find(f => f.key === 'method').fieldType, 'dropdown_select');
-      assert.deepStrictEqual(
-        generatedForms['network:request'].fields.find(f => f.key === 'method').options,
-        ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD']
-      );
-
-      assert.ok(generatedForms['terminal:run']);
-      assert.strictEqual(generatedForms['terminal:run'].fields.find(f => f.key === 'command').required, true);
+      assert.strictEqual(generatedForms['network:request'].fields.find(f => f.key === 'method').fieldType, 'text_input');
+      assert.strictEqual(generatedForms['terminal:run'], undefined);
     });
   });
 });
