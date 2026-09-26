@@ -93,6 +93,17 @@ The payload contains only repository identity and event type. It cannot supply a
 
 `factory-product-proposal` is emitted only after an issue persists the `factory:brain-proposal` label. The receiver still treats that event as a wake-up hint: Product Brain re-lists proposals, validates the JSON schema, checks optimistic preconditions, validates capacity-aware milestone width and enforces uniqueness before applying anything.
 
+
+## PR Forge external writer lease
+
+For managed products whose Jules technical rework has been delegated to `Roots — PR Forge`, the event-driven Forge task and its periodic reconciliation fallback are one logical mutation owner. They serialize product writes with the canonical CAS lease defined by `.github/roots/factory-pr-forge-lease-v1.md`.
+
+The lease lives on `factory-lock/pr-forge` at `.github/roots/state/pr-forge-lease.json`. Acquisition and release use the GitHub Contents API current blob SHA as a compare-and-swap precondition, and the holder revalidates the same lease generation/token/blob SHA immediately before every product write. PR comments remain audit projections and are not locking authority.
+
+A Forge wake-up always rebuilds the complete admissible Jules PR batch from live GitHub state. The lease changes only writer serialization; it grants no Quality, Risk, merge, worker-identity, permission, secret, provider, billing or production authority.
+
+Current Work wake-ups cover PR opened/ready/commit-update. Product `factory-ci-completed` and `factory-quality-verdict` remain canonical GitHub events, but a direct Work wake-up for those transitions is still a separate delivery gap until the Work trigger surface exposes that route. Reconciliation remains fallback for missed Forge wake-ups and must use the same lease.
+
 ## Quality ownership
 
 The GitHub-native `factory-copilot-quality-gate.yml` is the machine producer of exact-head `roots-quality-verdict` comments for managed products. Downstream automation reacts only after that verdict is persisted. External/ChatGPT reviewers may audit it, but must not create a competing machine verdict producer.
