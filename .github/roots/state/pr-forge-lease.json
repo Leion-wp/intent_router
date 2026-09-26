@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "resource": "roots-pr-forge",
+  "state": "FREE",
+  "generation": 0,
+  "holder_task_id": null,
+  "lease_token": null,
+  "acquired_at": null,
+  "expires_at": null,
+  "released_at": null
+}
