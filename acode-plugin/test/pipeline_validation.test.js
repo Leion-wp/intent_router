@@ -277,5 +277,69 @@ describe('Acode Fail-Fast Pipeline Structure Validation Tests', () => {
       assert.strictEqual(router.callCount(), 2);
       assert.strictEqual(result.logs.length, 2);
     });
+
+    it('16. bounds massive validation diagnostics and signals truncation', () => {
+      const invalidPipeline = { steps: Array.from({ length: 500 }, () => null) };
+      try {
+        validatePipelineStructure(invalidPipeline);
+        assert.fail('Should reject invalid pipeline');
+      } catch (err) {
+        assert.strictEqual(err.code, 'invalid_pipeline_structure');
+        assert.ok(err.errors.length <= 32, 'diagnostics must stay bounded');
+        assert.strictEqual(err.truncated, true);
+        assert.strictEqual(err.totalErrors, 500);
+        assert.ok(err.errors.some(e => e.truncated === true));
+        assert.ok(Buffer.byteLength(err.message, 'utf8') <= 4096);
+      }
+    });
+
+    it('17. rejects intent whitespace before any handler runs', async () => {
+      const router = createMockRouter(async () => ({ success: true }));
+      const runner = new PipelineRunner(router);
+      await assert.rejects(
+        () => runner.runPipelineFromData({
+          steps: [
+            { intent: 'file.write', payload: { path: '/side-effect.txt', content: 'x' } },
+            { intent: ' system.toast ' }
+          ]
+        }),
+        err => err && err.code === 'invalid_pipeline_structure'
+      );
+      assert.strictEqual(router.callCount(), 0);
+    });
+
+    it('18. executes a validated onFailure target exactly once', async () => {
+      const actions = [];
+      const router = createMockRouter(async ({ action }) => {
+        actions.push(action);
+        if (action === 'file:read') return { success: false, error: 'boom' };
+        return { success: true, data: {} };
+      });
+      const runner = new PipelineRunner(router);
+      const result = await runner.runPipelineFromData({
+        steps: [
+          { id: 'primary', intent: 'file.read', onFailure: 'recover' },
+          { id: 'recover', intent: 'system.toast' }
+        ]
+      });
+      assert.strictEqual(result.success, true);
+      assert.deepStrictEqual(actions, ['file:read', 'system:toast']);
+    });
+
+    it('19. bounds cyclic onFailure execution', async () => {
+      const router = createMockRouter(async () => ({ success: false, error: 'boom' }));
+      const runner = new PipelineRunner(router);
+      await assert.rejects(
+        () => runner.runPipelineFromData({
+          steps: [
+            { id: 'a', intent: 'file.read', onFailure: 'b' },
+            { id: 'b', intent: 'file.write', onFailure: 'a' }
+          ]
+        }),
+        err => err && err.code === 'pipeline_execution_budget_exceeded'
+      );
+      assert.ok(router.callCount() <= 20);
+    });
+
   });
 });
