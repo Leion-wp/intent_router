@@ -40,6 +40,8 @@ jobs:
               continue
             fi
             jq -e --arg repo "$repo" '.managed == true and .repository == $repo and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
+            # PR Forge owns technical rework for this product; do not dispatch a second writer.
+            [ "$repo" = "Leion-wp/micro-saas-boilerplate" ] && continue
             branch="$(jq -r '.default_branch' /tmp/profile.json)"
 
             while IFS= read -r issue; do
