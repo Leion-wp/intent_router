@@ -35,3 +35,30 @@ The public `intent_router` control plane may continue to use standard GitHub-hos
 The token is supplied at runtime only. No credential value is committed or logged.
 
 The host is still responsible for providing a disposable execution environment. Deleting the runner work directory after a job is not a substitute for VM/container isolation.
+
+## Host-side token broker
+
+The durable administrative credential must stay on the trusted provisioner host.
+
+Use `.github/roots/mint-private-runner-registration.py` to mint a short-lived
+repository registration token into a mode-0600 file:
+
+```bash
+export ROOTS_RUNNER_ADMIN_TOKEN='<fine-grained token kept on the provisioner>'
+python .github/roots/mint-private-runner-registration.py \
+  --repository Leion-wp/micro-saas-boilerplate \
+  --output /secure-tmp/roots-runner-token
+```
+
+The fine-grained credential should be restricted to the repositories listed in
+`managed_private_repositories` and needs repository Administration write only
+because GitHub's runner registration endpoint is an administrative action.
+
+Pass only the short-lived token file into the disposable runner environment and
+set `ROOTS_RUNNER_REGISTRATION_TOKEN_FILE`. The bootstrap consumes and deletes
+that file before the runner starts. Never inject `ROOTS_RUNNER_ADMIN_TOKEN`
+into the disposable runner.
+
+The broker deliberately does not create the VM/container itself. Isolation is
+a host responsibility and must be real; a temp directory on a persistent
+developer workstation is not sufficient.
