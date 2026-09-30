@@ -2,6 +2,11 @@
 set -euo pipefail
 
 : "${ROOTS_RUNNER_REPOSITORY:?set owner/repository}"
+runner_label="${ROOTS_RUNNER_LABEL:-roots-private-ci}"
+case "$runner_label" in
+  roots-private-ci|roots-private-control) ;;
+  *) echo "ROOTS_RUNNER_LABEL must be roots-private-ci or roots-private-control" >&2; exit 2 ;;
+esac
 
 pin_file="${ROOTS_RUNNER_PIN_FILE:-.github/roots/factory-private-runner-version-v1.json}"
 runner_version="${ROOTS_RUNNER_VERSION:-}"
@@ -56,7 +61,7 @@ cd "$runner_dir"
   --url "https://github.com/$ROOTS_RUNNER_REPOSITORY" \
   --token "$registration_token" \
   --name "roots-private-ci-$(hostname)-$$" \
-  --labels "roots-private-ci" \
+  --labels "$runner_label" \
   --disableupdate \
   --work "_work"
 

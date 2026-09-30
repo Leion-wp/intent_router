@@ -1,4 +1,4 @@
-# Install as .github/workflows/factory-ci.yml on a managed private product.
+# Install as .github/workflows/factory-ci.yml on Leion-wp/micro-saas-boilerplate.
 name: factory-ci
 
 "on":
@@ -17,17 +17,27 @@ jobs:
   quality:
     runs-on: [self-hosted, linux, x64, roots-private-ci]
     timeout-minutes: 15
+    env:
+      # Public, non-secret build fixtures. Application validation stays strict:
+      # CI must provide required NEXT_PUBLIC_* values rather than bypassing them.
+      NEXT_PUBLIC_SUPABASE_URL: https://ci.example.com
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-public-anon-key
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_ci_public_key
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.22.2'
           cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile
+      - name: Bootstrap credential-free fixture environment
+        run: pnpm run bootstrap --mode fixture --ci --skip-browser --json
+      - name: Validate Factory product contract
+        run: pnpm run factory:validate -- --json
+      - name: Reject generated product config drift
+        run: pnpm run factory:config:check -- --json
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm test -- --run
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test
       - run: pnpm build
