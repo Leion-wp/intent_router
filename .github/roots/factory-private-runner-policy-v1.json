@@ -32,5 +32,9 @@
   "managed_private_workflows": {
     "factory-ci": "private_ephemeral",
     "factory-product-event-relay": "private_ephemeral"
-  }
+  },
+  "managed_private_repositories": [
+    "Leion-wp/micro-saas-boilerplate",
+    "Leion-wp/memory_factory"
+  ]
 }
