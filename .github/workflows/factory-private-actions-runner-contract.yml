@@ -1,0 +1,28 @@
+name: factory-private-actions-runner-contract
+
+"on":
+  pull_request:
+    branches: [Android]
+    paths:
+      - '.github/roots/factory-private-actions-runner-v1.json'
+      - '.github/roots/factory-private-actions-runner-v1.md'
+      - '.github/roots/fleet/product-ci-self-hosted.yml'
+      - '.github/roots/fleet/product-event-relay.yml'
+      - '.github/roots/test-private-actions-runner.py'
+      - '.github/workflows/factory-private-actions-runner-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate private runner isolation contract
+        run: python .github/roots/test-private-actions-runner.py
