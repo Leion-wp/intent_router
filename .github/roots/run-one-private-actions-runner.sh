@@ -2,8 +2,18 @@
 set -euo pipefail
 
 : "${ROOTS_RUNNER_REPOSITORY:?set owner/repository}"
-: "${ROOTS_RUNNER_VERSION:?set an explicit actions/runner version, for example 2.x.y}"
-: "${ROOTS_RUNNER_SHA256:?set the published SHA-256 for that runner archive}"
+
+pin_file="${ROOTS_RUNNER_PIN_FILE:-.github/roots/factory-private-runner-version-v1.json}"
+runner_version="${ROOTS_RUNNER_VERSION:-}"
+runner_sha256="${ROOTS_RUNNER_SHA256:-}"
+if [ -z "$runner_version" ] && [ -z "$runner_sha256" ]; then
+  test -f "$pin_file"
+  runner_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runner_version"])' "$pin_file")"
+  runner_sha256="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sha256"])' "$pin_file")"
+elif [ -z "$runner_version" ] || [ -z "$runner_sha256" ]; then
+  echo "ROOTS_RUNNER_VERSION and ROOTS_RUNNER_SHA256 must be set together" >&2
+  exit 2
+fi
 
 case "$ROOTS_RUNNER_REPOSITORY" in
   */*) ;;
@@ -33,9 +43,9 @@ archive="$work_root/actions-runner.tar.gz"
 runner_dir="$work_root/runner"
 mkdir -p "$runner_dir"
 
-url="https://github.com/actions/runner/releases/download/v${ROOTS_RUNNER_VERSION}/actions-runner-linux-x64-${ROOTS_RUNNER_VERSION}.tar.gz"
+url="https://github.com/actions/runner/releases/download/v${runner_version}/actions-runner-linux-x64-${runner_version}.tar.gz"
 curl --fail --location --silent --show-error "$url" --output "$archive"
-printf '%s  %s\n' "$ROOTS_RUNNER_SHA256" "$archive" | sha256sum --check --status
+printf '%s  %s\n' "$runner_sha256" "$archive" | sha256sum --check --status
 
 tar -xzf "$archive" -C "$runner_dir"
 cd "$runner_dir"
@@ -47,6 +57,7 @@ cd "$runner_dir"
   --token "$registration_token" \
   --name "roots-private-ci-$(hostname)-$$" \
   --labels "roots-private-ci" \
+  --disableupdate \
   --work "_work"
 
 unset ROOTS_RUNNER_REGISTRATION_TOKEN
