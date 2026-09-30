@@ -1,7 +1,7 @@
 {
   "version": 1,
   "profiles": {
-    "private_ephemeral": {
+    "private_untrusted_ephemeral": {
       "repository_visibility": "private",
       "runner_strategy": "ephemeral_self_hosted",
       "required_labels": [
@@ -14,6 +14,21 @@
       "automatic_github_hosted_fallback": false,
       "requires_disposable_environment": true,
       "may_execute_untrusted_pr_code": true,
+      "may_hold_cross_repo_relay_secret": false
+    },
+    "private_control_ephemeral": {
+      "repository_visibility": "private",
+      "runner_strategy": "ephemeral_self_hosted",
+      "required_labels": [
+        "self-hosted",
+        "linux",
+        "x64",
+        "roots-private-control"
+      ],
+      "max_jobs_per_registration": 1,
+      "automatic_github_hosted_fallback": false,
+      "requires_disposable_environment": true,
+      "may_execute_untrusted_pr_code": false,
       "may_hold_cross_repo_relay_secret": true
     },
     "public_control_plane": {
@@ -30,8 +45,9 @@
     }
   },
   "managed_private_workflows": {
-    "factory-ci": "private_ephemeral",
-    "factory-product-event-relay": "private_ephemeral"
+    "factory-ci": "private_untrusted_ephemeral",
+    "memory-validate": "private_untrusted_ephemeral",
+    "factory-product-event-relay": "private_control_ephemeral"
   },
   "managed_private_repositories": [
     "Leion-wp/micro-saas-boilerplate",
