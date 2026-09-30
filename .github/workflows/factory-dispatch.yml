@@ -72,28 +72,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh pr list \
-            --repo "$GITHUB_REPOSITORY" \
-            --state open \
-            --search "#${ISSUE_NUMBER}" \
-            --json number,body,url > open-prs.json
+          linked_helper='.github/roots/factory_active_linked_prs.py'
+          collection_helper='.github/roots/factory-gh-array-collection.sh'
+          test -f "$linked_helper"
+          test -x "$collection_helper"
 
-          jq --argjson issue "$ISSUE_NUMBER" '
-            [.[] | select((.body // "") | test("(?i)(fixes|closes|resolves)\\s+#" + ($issue|tostring) + "\\b"))]
-          ' open-prs.json > linked-prs.json
+          bash "$collection_helper" \
+            "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=Android&per_page=100" \
+            > open-prs.json
+
+          python "$linked_helper" \
+            --issue "$ISSUE_NUMBER" \
+            --prs-json open-prs.json \
+            --base Android \
+            --output linked-prs.json
 
           count="$(jq 'length' linked-prs.json)"
           echo "active_pr_count=$count" >> "$GITHUB_OUTPUT"
 
           if [ "$count" -gt 1 ]; then
             echo "CONTROL_PLANE_ANOMALY: issue #${ISSUE_NUMBER} has ${count} active linked PRs." >&2
-            jq -r '.[] | "PR #\(.number): \(.url)"' linked-prs.json >&2
+            jq -r '.[] | "PR #\(.number): \(.html_url // .url)"' linked-prs.json >&2
             exit 1
           fi
 
-          if [ "$EXECUTE_REQUESTED" = "true" ] && [ "$count" -ge 1 ]; then
+          if [ "$EXECUTE_REQUESTED" = "true" ] && [ "$count" -eq 1 ]; then
             echo "Dispatch refused: issue #${ISSUE_NUMBER} already has an active linked PR." >&2
-            jq -r '.[] | "Existing PR #\(.number): \(.url)"' linked-prs.json >&2
+            jq -r '.[] | "Existing PR #\(.number): \(.html_url // .url)"' linked-prs.json >&2
             exit 1
           fi
 
