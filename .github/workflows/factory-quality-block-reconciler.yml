@@ -37,6 +37,7 @@ jobs:
           test "$(gh api user --jq '.login')" = "$OWNER"
           identity_helper="$GITHUB_WORKSPACE/.github/roots/factory_worker_identity.py"
           test -f "$identity_helper"
+          test -f "$GITHUB_WORKSPACE/.github/roots/factory-gh-array-collection.sh"
 
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' \
             | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > /tmp/repos.txt
@@ -64,8 +65,10 @@ jobs:
             gh label create 'factory:human-required' --repo "$repo" --color FBCA04 \
               --description 'A human decision is required before factory execution can continue' --force >/dev/null 2>&1 || true
 
-            gh pr list --repo "$repo" --state open --limit 100 \
-              --json number,headRefOid,headRefName,baseRefName,isDraft > /tmp/prs.json
+            bash .github/roots/factory-gh-array-collection.sh \
+              "repos/${repo}/pulls?state=open&per_page=100" > /tmp/prs.json
+            bash .github/roots/factory-gh-array-collection.sh \
+              "repos/${repo}/issues?state=open&per_page=100" > /tmp/issues.json
 
             while IFS= read -r issue; do
               [ -n "$issue" ] || continue
@@ -76,9 +79,10 @@ jobs:
               matches=0
               matched_pr=''
               matched_sha=''
-              while IFS= read -r pr_number; do
-                [ -n "$pr_number" ] || continue
-                gh api "repos/${repo}/pulls/${pr_number}" > /tmp/pr.json
+              while IFS= read -r candidate; do
+                [ -n "$candidate" ] || continue
+                printf '%s\n' "$candidate" > /tmp/pr.json
+                pr_number="$(jq -r '.number' /tmp/pr.json)"
                 [ "$(jq -r '.base.ref' /tmp/pr.json)" = "$branch" ] || continue
                 [ "$(jq -r '.state' /tmp/pr.json)" = open ] || continue
                 [ "$(jq -r '.draft' /tmp/pr.json)" = false ] || continue
@@ -98,7 +102,7 @@ jobs:
                 matches=$((matches + 1))
                 matched_pr="$pr_number"
                 matched_sha="$(jq -r '.head.sha' /tmp/pr.json)"
-              done < <(jq -r '.[].number' /tmp/prs.json)
+              done < <(jq -c '.[]' /tmp/prs.json)
 
               if [ "$matches" -gt 1 ]; then
                 anomalies=$((anomalies + 1))
@@ -149,7 +153,7 @@ jobs:
               fi
 
               echo "QUALITY_BLOCK_CANONICAL: ${repo}#${issue} PR #${matched_pr} head ${matched_sha}."
-            done < <(gh issue list --repo "$repo" --state open --limit 200 --json number --jq '.[].number')
+            done < <(jq -r '.[] | select(.pull_request == null) | .number' /tmp/issues.json)
           done < /tmp/repos.txt
 
           {
