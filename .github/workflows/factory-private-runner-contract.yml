@@ -8,6 +8,7 @@ name: factory-private-runner-contract
       - '.github/roots/factory-private-runner-policy.schema.json'
       - '.github/roots/factory-private-runner-v1.md'
       - '.github/roots/run-one-private-actions-runner.sh'
+      - '.github/roots/mint-private-runner-registration.py'
       - '.github/roots/test-private-runner-policy.py'
       - '.github/workflows/factory-private-runner-contract.yml'
   workflow_dispatch:
@@ -37,5 +38,7 @@ jobs:
           PY
       - name: Run private runner policy tests
         run: python .github/roots/test-private-runner-policy.py
-      - name: Shell syntax check
-        run: bash -n .github/roots/run-one-private-actions-runner.sh
+      - name: Shell and Python syntax checks
+        run: |
+          bash -n .github/roots/run-one-private-actions-runner.sh
+          python -m py_compile .github/roots/mint-private-runner-registration.py
