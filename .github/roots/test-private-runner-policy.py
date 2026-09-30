@@ -15,8 +15,8 @@ RUNNER = ROOT / ".github/roots/run-one-private-actions-runner.sh"
 RUNNER_PIN = ROOT / ".github/roots/factory-private-runner-version-v1.json"
 
 
-def load_broker_module():
-    spec = importlib.util.spec_from_file_location("roots_private_runner_broker", BROKER)
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -28,14 +28,11 @@ class PrivateRunnerPolicyTests(unittest.TestCase):
     def setUpClass(cls):
         cls.policy = json.loads(POLICY.read_text(encoding="utf-8"))
         cls.schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
-        cls.broker = load_broker_module()
-        spec = importlib.util.spec_from_file_location("roots_private_runner_version", VERSION_CHECKER)
-        cls.version_checker = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(cls.version_checker)
+        cls.broker = load_module("roots_private_runner_broker", BROKER)
+        cls.version_checker = load_module("roots_private_runner_version", VERSION_CHECKER)
 
-    def test_private_profile_is_one_job_ephemeral_self_hosted(self):
-        profile = self.policy["profiles"]["private_ephemeral"]
+    def test_untrusted_private_profile_is_one_job_ephemeral(self):
+        profile = self.policy["profiles"]["private_untrusted_ephemeral"]
         self.assertEqual(profile["repository_visibility"], "private")
         self.assertEqual(profile["runner_strategy"], "ephemeral_self_hosted")
         self.assertEqual(
@@ -45,6 +42,43 @@ class PrivateRunnerPolicyTests(unittest.TestCase):
         self.assertEqual(profile["max_jobs_per_registration"], 1)
         self.assertTrue(profile["requires_disposable_environment"])
         self.assertFalse(profile["automatic_github_hosted_fallback"])
+        self.assertTrue(profile["may_execute_untrusted_pr_code"])
+        self.assertFalse(profile["may_hold_cross_repo_relay_secret"])
+
+    def test_privileged_control_profile_is_isolated_from_pr_code(self):
+        profile = self.policy["profiles"]["private_control_ephemeral"]
+        self.assertEqual(
+            profile["required_labels"],
+            ["self-hosted", "linux", "x64", "roots-private-control"],
+        )
+        self.assertEqual(profile["max_jobs_per_registration"], 1)
+        self.assertTrue(profile["requires_disposable_environment"])
+        self.assertFalse(profile["automatic_github_hosted_fallback"])
+        self.assertFalse(profile["may_execute_untrusted_pr_code"])
+        self.assertTrue(profile["may_hold_cross_repo_relay_secret"])
+
+    def test_no_private_profile_combines_untrusted_code_and_relay_secret(self):
+        for name, profile in self.policy["profiles"].items():
+            if profile["repository_visibility"] != "private":
+                continue
+            with self.subTest(profile=name):
+                self.assertFalse(
+                    profile["may_execute_untrusted_pr_code"]
+                    and profile["may_hold_cross_repo_relay_secret"]
+                )
+
+    def test_private_workflows_are_split_by_trust_boundary(self):
+        workflows = self.policy["managed_private_workflows"]
+        self.assertEqual(workflows["factory-ci"], "private_untrusted_ephemeral")
+        self.assertEqual(workflows["memory-validate"], "private_untrusted_ephemeral")
+        self.assertEqual(
+            workflows["factory-product-event-relay"],
+            "private_control_ephemeral",
+        )
+        self.assertNotEqual(
+            workflows["factory-ci"],
+            workflows["factory-product-event-relay"],
+        )
 
     def test_private_repository_scope_is_explicit_and_bounded(self):
         self.assertEqual(
@@ -54,11 +88,6 @@ class PrivateRunnerPolicyTests(unittest.TestCase):
                 "Leion-wp/memory_factory",
             ],
         )
-
-    def test_sensitive_private_workflows_share_the_ephemeral_profile(self):
-        workflows = self.policy["managed_private_workflows"]
-        self.assertEqual(workflows["factory-ci"], "private_ephemeral")
-        self.assertEqual(workflows["factory-product-event-relay"], "private_ephemeral")
 
     def test_public_control_plane_remains_on_github_hosted(self):
         profile = self.policy["profiles"]["public_control_plane"]
@@ -95,12 +124,7 @@ class PrivateRunnerPolicyTests(unittest.TestCase):
         latest = {
             "tag_name": "v" + pin["runner_version"],
             "published_at": pin["published_at"],
-            "assets": [
-                {
-                    "name": pin["asset"],
-                    "digest": "sha256:" + pin["sha256"],
-                }
-            ],
+            "assets": [{"name": pin["asset"], "digest": "sha256:" + pin["sha256"]}],
         }
         now = self.version_checker.parse_time(pin["published_at"])
         self.assertEqual(self.version_checker.evaluate(pin, latest, now), ("CURRENT", 0))
@@ -139,11 +163,13 @@ class PrivateRunnerPolicyTests(unittest.TestCase):
             ("PIN_DIGEST_MISMATCH", 2),
         )
 
-    def test_runner_consumes_and_deletes_token_file(self):
+    def test_runner_consumes_token_file_and_accepts_only_canonical_classes(self):
         text = RUNNER.read_text(encoding="utf-8")
         self.assertIn("ROOTS_RUNNER_REGISTRATION_TOKEN_FILE", text)
         self.assertIn('registration_token="$(cat "$token_file")"', text)
         self.assertIn('rm -f "$token_file"', text)
+        self.assertIn("roots-private-ci|roots-private-control", text)
+        self.assertIn('--labels "$runner_label"', text)
         self.assertIn("--ephemeral", text)
         self.assertIn("--disableupdate", text)
         self.assertIn("factory-private-runner-version-v1.json", text)
