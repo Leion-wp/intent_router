@@ -35,6 +35,11 @@ jobs:
           echo "::add-mask::$JULES_API_KEY"
           authenticated_login="$(gh api user --jq '.login')"
           test "$authenticated_login" = "$OWNER"
+          ROUTING_FILE=".github/roots/factory-pr-forge-routing-v1.json"
+          ROUTING_RESOLVER=".github/roots/resolve-pr-forge-routing.py"
+          test -f "$ROUTING_FILE"
+          test -f "$ROUTING_RESOLVER"
+          python3 "$ROUTING_RESOLVER" --routing "$ROUTING_FILE" --repository "$GITHUB_REPOSITORY" --lane CI_REWORK >/dev/null
           gh api --paginate 'user/repos?per_page=100&affiliation=owner' | jq -r --arg owner "$OWNER" '.[] | select(.owner.login == $owner) | .full_name' > repos.txt
           sent_file="$(mktemp)"
           printf '0' > "$sent_file"
@@ -54,8 +59,9 @@ jobs:
               continue
             fi
             jq -e --arg repo "$repo" '.managed == true and .repository == $repo and (.worker_policy.enabled | index("jules") != null)' /tmp/profile.json >/dev/null || continue
-            # PR Forge owns technical rework for this product; do not dispatch a second writer.
-            [ "$repo" = "Leion-wp/micro-saas-boilerplate" ] && continue
+            native_jules_rework="$(python3 "$ROUTING_RESOLVER" --routing "$ROUTING_FILE" --repository "$repo" --lane CI_REWORK)"
+            [ "$native_jules_rework" = "false" ] && continue
+            test "$native_jules_rework" = "true"
             branch="$(jq -r '.default_branch' /tmp/profile.json)"
 
             while IFS= read -r issue; do

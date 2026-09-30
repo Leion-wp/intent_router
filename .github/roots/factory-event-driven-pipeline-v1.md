@@ -23,8 +23,8 @@ An escalated/HUMAN_REQUIRED identity remains blocked against replacement but doe
 | Persisted event | Direct successor(s) | Purpose |
 | --- | --- | --- |
 | `factory-pr-active` | `factory-stalled-reconciler.yml` | Reconcile active-PR/stalled state |
-| `factory-ci-completed` | `factory-fleet-jules-rework.yml` + `factory-copilot-quality-gate.yml` | Same-session CI repair when needed and immediate native exact-head Quality review |
-| `factory-quality-verdict` | `factory-fleet-jules-quality-rework.yml` + `factory-quality-risk-reconciler.yml` | REWORK returns to the same Jules session; accepted explicit low risk can advance to managed merge |
+| `factory-ci-completed` | `factory-fleet-jules-rework.yml` (non-delegated repositories only) + `factory-copilot-quality-gate.yml` | Native exact-head Quality always runs; technical repair follows the canonical rework routing contract, so delegated repositories are skipped by the Jules writer |
+| `factory-quality-verdict` | `factory-fleet-jules-quality-rework.yml` (non-delegated repositories only) + `factory-quality-risk-reconciler.yml` | REWORK follows the canonical technical-writer routing contract; accepted explicit low risk can advance independently to managed merge |
 | `factory-pr-merged` | `factory-fleet-completion-reconciler.yml` | Persist completion, release that task identity and advance planning |
 | `factory-queue-updated` | `factory-fleet-scheduler.yml` with `dispatch_only=true` | Fill currently available Jules slots with eligible queued identities |
 | `factory-product-proposal` | `factory-product-brain.yml` | Validate and apply a persisted Product Brain proposal immediately |
@@ -96,9 +96,11 @@ The payload contains only repository identity and event type. It cannot supply a
 
 ## PR Forge external writer lease
 
-For managed products whose Jules technical rework has been delegated to `Roots — PR Forge`, the event-driven Forge task and its periodic reconciliation fallback are one logical mutation owner. They serialize product writes with the canonical CAS lease defined by `.github/roots/factory-pr-forge-lease-v1.md`.
+`.github/roots/factory-pr-forge-routing-v1.json` is the canonical repository-scoped declaration for technical rework ownership. A delegated repository has exactly one technical mutation owner for `CI_REWORK`, `QUALITY_REWORK`, `HARDEN` and `INTEGRATE`; native Jules rework workflows must fail closed/skip that repository. The routing contract changes writer ownership only and never worker identity, Quality/Risk/merge authority, provider capacity or human gates.
 
-The lease lives on `factory-lock/pr-forge` at `.github/roots/state/pr-forge-lease.json`. Acquisition and release use the GitHub Contents API current blob SHA as a compare-and-swap precondition, and the holder revalidates the same lease generation/token/blob SHA immediately before every product write. PR comments remain audit projections and are not locking authority.
+For managed products whose Jules technical rework has been delegated to `Roots — PR Forge`, the event-driven Forge task and its periodic reconciliation fallback are one logical mutation owner. They serialize each exact product-write transaction with the canonical CAS lease defined by `.github/roots/factory-pr-forge-lease-v1.md`.
+
+The lease lives on `factory-lock/pr-forge` at `.github/roots/state/pr-forge-lease.json`. Batch discovery and analysis are lock-free; immediately before a product mutation the writer acquires only from `FREE`, binding the generation to the exact repository, PR and expected HEAD. Acquisition/release use the GitHub Contents API current blob SHA as a compare-and-swap precondition. A `HELD` lease, including an expired one, is never automatically taken over: expiry revokes the old holder's authority but does not prove that a paused invocation cannot resume after its last fence check. The holder releases immediately after the single protected write, before further analysis/reporting. An expired `HELD` state is therefore `FORGE_LEASE_STRANDED / HUMAN_REQUIRED`, not a recovery signal. PR comments remain audit projections and are not locking authority.
 
 A Forge wake-up always rebuilds the complete admissible Jules PR batch from live GitHub state. The lease changes only writer serialization; it grants no Quality, Risk, merge, worker-identity, permission, secret, provider, billing or production authority.
 
