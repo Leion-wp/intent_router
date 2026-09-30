@@ -45,6 +45,16 @@ suite('AI Execution Budget & Timeout Guards (Mocked)', () => {
         const hangingScript = "#!/usr/bin/env node\nsetInterval(() => {}, 10000);\n";
         fs.writeFileSync(hangingCliPath, hangingScript, { mode: 511 });
 
+        // CLI ignoring SIGTERM
+        const sigtermIgnoringCliPath = path.join(tempDir, 'sigterm-ignoring-cli.js');
+        const sigtermIgnoringScript = "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nsetInterval(() => {}, 10000);\n";
+        fs.writeFileSync(sigtermIgnoringCliPath, sigtermIgnoringScript, { mode: 511 });
+
+        // CLI exiting cleanly on SIGTERM
+        const sigtermExitingCliPath = path.join(tempDir, 'sigterm-exiting-cli.js');
+        const sigtermExitingScript = "#!/usr/bin/env node\nprocess.on('SIGTERM', () => { process.exit(0); });\nsetInterval(() => {}, 10000);\n";
+        fs.writeFileSync(sigtermExitingCliPath, sigtermExitingScript, { mode: 511 });
+
         // Failing CLI script
         failingCliPath = path.join(tempDir, 'failing-cli.js');
         const failingScript = "#!/usr/bin/env node\nconsole.error('Provider API Error 500');\nprocess.exit(1);\n";
@@ -124,6 +134,71 @@ suite('AI Execution Budget & Timeout Guards (Mocked)', () => {
                 `Error message should contain timeout details, got: ${thrownError.message}`
             );
             assert.ok(elapsed < 2000, `Execution should finish quickly on timeout, elapsed: ${elapsed}ms`);
+        });
+
+        test('escalates to SIGKILL for provider process that ignores SIGTERM', async () => {
+            const sigtermIgnoringCliPath = path.join(tempDir, 'sigterm-ignoring-cli.js');
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [sigtermIgnoringCliPath]);
+
+            const startTime = Date.now();
+            let thrownError: any = null;
+
+            try {
+                await executeAiCommand({
+                    agent: 'codex',
+                    instruction: 'sigterm ignoring instruction',
+                    timeoutMs: 100
+                });
+            } catch (err: any) {
+                thrownError = err;
+            }
+
+            const elapsed = Date.now() - startTime;
+            assert.ok(thrownError, 'Expected ai.generate to throw on timeout');
+            assert.ok(thrownError.message.includes('timed out after 100ms'));
+            assert.ok(elapsed < 2000, `Execution should finish quickly after SIGKILL escalation, elapsed: ${elapsed}ms`);
+        });
+
+        test('does not send SIGKILL if provider process exits upon SIGTERM', async () => {
+            const sigtermExitingCliPath = path.join(tempDir, 'sigterm-exiting-cli.js');
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [sigtermExitingCliPath]);
+
+            let thrownError: any = null;
+
+            try {
+                await executeAiCommand({
+                    agent: 'codex',
+                    instruction: 'sigterm exiting instruction',
+                    timeoutMs: 100
+                });
+            } catch (err: any) {
+                thrownError = err;
+            }
+
+            assert.ok(thrownError, 'Expected ai.generate to throw on timeout');
+            assert.ok(thrownError.message.includes('timed out after 100ms'));
+
+            // Wait beyond the 200ms grace period to ensure no unhandled exception or late kill issues occur
+            await new Promise((resolve) => setTimeout(resolve, 300));
+        });
+
+        test('handles multiple sequential timeouts without residual processes or unhandled errors', async () => {
+            mockVscode.__mock.configStore.set('intentRouter.ai.codex.args', [hangingCliPath]);
+
+            for (let i = 0; i < 3; i++) {
+                let thrownError: any = null;
+                try {
+                    await executeAiCommand({
+                        agent: 'codex',
+                        instruction: `sequential timeout ${i}`,
+                        timeoutMs: 50
+                    });
+                } catch (err: any) {
+                    thrownError = err;
+                }
+                assert.ok(thrownError);
+                assert.ok(thrownError.message.includes('timed out after 50ms'));
+            }
         });
 
         test('unchanged behavior when timeoutMs is not provided', async () => {

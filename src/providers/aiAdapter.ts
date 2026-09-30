@@ -241,6 +241,7 @@ ${instructionResolved}
 
             let fullOutput = '';
             let fullStderr = '';
+            let processExited = false;
             let timeoutTimer: NodeJS.Timeout | undefined;
             let forceKillTimer: NodeJS.Timeout | undefined;
 
@@ -255,6 +256,13 @@ ${instructionResolved}
                 }
             };
 
+            const markExited = () => {
+                processExited = true;
+                cleanupTimers();
+            };
+
+            child.on('exit', markExited);
+
             if (budget.timeoutMs !== undefined && budget.timeoutMs > 0) {
                 timeoutTimer = setTimeout(() => {
                     if (settled) return;
@@ -263,13 +271,15 @@ ${instructionResolved}
                     budget.exceededReason = `Timeout of ${budget.timeoutMs}ms exceeded`;
                     log(`\n[AI Agent] Timeout of ${budget.timeoutMs}ms exceeded. Terminating provider process...\n`, 'stderr');
 
-                    try {
-                        child.kill('SIGTERM');
-                    } catch (_) {}
+                    if (!processExited) {
+                        try {
+                            child.kill('SIGTERM');
+                        } catch (_) {}
+                    }
 
                     forceKillTimer = setTimeout(() => {
                         try {
-                            if (!child.killed) {
+                            if (!processExited) {
                                 child.kill('SIGKILL');
                             }
                         } catch (_) {}
@@ -301,7 +311,7 @@ ${instructionResolved}
             });
 
             child.on('close', (code) => {
-                cleanupTimers();
+                markExited();
                 if (settled) return;
                 if (code === 0) {
                     log(`\n[AI Agent] Analysis complete.\n`);
@@ -403,7 +413,7 @@ ${instructionResolved}
             });
 
             child.on('error', (err) => {
-                cleanupTimers();
+                markExited();
                 if (settled) return;
                 settled = true;
                 reject(err);
