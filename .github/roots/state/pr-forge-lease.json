@@ -1,14 +1,14 @@
 {
   "version": 2,
   "resource": "roots-pr-forge",
-  "state": "FREE",
-  "generation": 4,
-  "holder_task_id": null,
-  "lease_token": null,
-  "target_repository": null,
-  "target_pr": null,
-  "expected_head": null,
-  "acquired_at": null,
-  "expires_at": null,
-  "released_at": "2026-09-30T21:12:55.173Z"
+  "state": "HELD",
+  "generation": 5,
+  "holder_task_id": "6ab77df378ec8191b6c79029b53722b2",
+  "lease_token": "reconcile-20260930T211334803Z-6fm8a9o8gxkh6egz4oeq0ebpp6aorpe9",
+  "target_repository": "Leion-wp/micro-saas-boilerplate",
+  "target_pr": 138,
+  "expected_head": "72c9276115416b24e609490f3fd6120cf80514b7",
+  "acquired_at": "2026-09-30T21:13:34.803Z",
+  "expires_at": "2026-09-30T23:13:34.803Z",
+  "released_at": null
 }
