@@ -7,6 +7,7 @@ name: factory-private-runner-contract
       - '.github/roots/factory-private-runner-policy-v1.json'
       - '.github/roots/factory-private-runner-policy.schema.json'
       - '.github/roots/factory-private-runner-v1.md'
+      - '.github/roots/factory-private-runner-version-v1.json'
       - '.github/roots/run-one-private-actions-runner.sh'
       - '.github/roots/mint-private-runner-registration.py'
       - '.github/roots/test-private-runner-policy.py'
