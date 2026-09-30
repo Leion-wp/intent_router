@@ -13,6 +13,8 @@ BROKER = ROOT / ".github/roots/mint-private-runner-registration.py"
 VERSION_CHECKER = ROOT / ".github/roots/check-private-runner-version.py"
 RUNNER = ROOT / ".github/roots/run-one-private-actions-runner.sh"
 RUNNER_PIN = ROOT / ".github/roots/factory-private-runner-version-v1.json"
+PRODUCT_CI_TEMPLATE = ROOT / ".github/roots/fleet/product-ci-self-hosted.yml"
+CONTROL_RELAY_TEMPLATE = ROOT / ".github/roots/fleet/product-event-relay.yml"
 
 
 def load_module(name, path):
@@ -79,6 +81,25 @@ class PrivateRunnerPolicyTests(unittest.TestCase):
             workflows["factory-ci"],
             workflows["factory-product-event-relay"],
         )
+
+    def test_install_templates_preserve_runner_trust_classes_and_product_gates(self):
+        ci = PRODUCT_CI_TEMPLATE.read_text(encoding="utf-8")
+        relay = CONTROL_RELAY_TEMPLATE.read_text(encoding="utf-8")
+
+        self.assertIn("runs-on: [self-hosted, linux, x64, roots-private-ci]", ci)
+        self.assertNotIn("roots-private-control", ci)
+        self.assertIn("pnpm run bootstrap --mode fixture --ci --skip-browser --json", ci)
+        self.assertIn("pnpm run factory:validate -- --json", ci)
+        self.assertIn("pnpm run factory:config:check -- --json", ci)
+        self.assertIn("pnpm exec playwright install --with-deps chromium", ci)
+        self.assertIn("pnpm test", ci)
+        self.assertIn("pnpm build", ci)
+        self.assertIn("cancel-in-progress: true", ci)
+
+        self.assertIn("runs-on: [self-hosted, linux, x64, roots-private-control]", relay)
+        self.assertNotIn("roots-private-ci]", relay)
+        self.assertNotIn("actions/checkout", relay)
+        self.assertIn("FACTORY_EVENT_TOKEN", relay)
 
     def test_private_repository_scope_is_explicit_and_bounded(self):
         self.assertEqual(
