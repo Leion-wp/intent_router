@@ -62,3 +62,18 @@ into the disposable runner.
 The broker deliberately does not create the VM/container itself. Isolation is
 a host responsibility and must be real; a temp directory on a persistent
 developer workstation is not sufficient.
+
+## Runner release pin
+
+The canonical Linux x64 runner release is stored in
+`.github/roots/factory-private-runner-version-v1.json`.
+
+The one-shot bootstrap consumes that pin by default and verifies the downloaded
+archive against the committed SHA-256 before extraction. It also registers with
+`--disableupdate` so an ephemeral image cannot silently mutate itself during
+startup.
+
+`factory-private-runner-version-watch.yml` compares the pin with GitHub's
+latest public `actions/runner` release weekly. A new release is initially a
+warning; once that release has been available for 21 days the watch fails,
+leaving a safety margin before GitHub's 30-day update requirement.

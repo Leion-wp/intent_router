@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "runner_version": "2.337.0",
+  "platform": "linux",
+  "architecture": "x64",
+  "asset": "actions-runner-linux-x64-2.337.0.tar.gz",
+  "sha256": "70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613",
+  "published_at": "2026-08-26T14:33:29Z",
+  "source_release": "https://github.com/actions/runner/releases/tag/v2.337.0"
+}
