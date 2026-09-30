@@ -143,9 +143,26 @@ jobs:
             '{version:1,task_id:$task_id,status:"SUCCEEDED",worker:"jules",summary:"Jules session created with AUTO_CREATE_PR and durably mapped to the source issue.",outputs:{branch:null,commit:null,pull_request:null,worker_execution_id:$execution_id,worker_url:$worker_url},evidence:{tests:[],checks:["dispatch accepted by Jules API","AUTO_CREATE_PR requested","session mapping persisted on source issue"]},risks:[],next_action:"WAIT"}' \
             > factory-result.json
 
-      - name: Upload FactoryResult
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned FactoryResult validator
+        run: python -m pip install --disable-pip-version-check 'jsonschema==4.23.0'
+
+      - name: Validate FactoryResult before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/roots/factory_result_validate.py \
+            --schema .github/roots/factory-result.schema.json \
+            --result factory-result.json \
+            --expected-task-id "$(jq -r '.task_id' factory-task.json)" \
+            --expected-worker jules
+
+      - name: Upload validated FactoryResult
         uses: actions/upload-artifact@v4
         with:
-          name: factory-result-jules
+          name: validated-factory-result-jules
           path: factory-result.json
           retention-days: 7
