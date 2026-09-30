@@ -121,6 +121,8 @@ if args and args[0] == 'api':
         emit({'login': 'Leion-wp'})
     if endpoint == 'user/repos':
         emit([{'owner': {'login': 'Leion-wp'}, 'full_name': 'Leion-wp/product'}])
+    if '/compare/' in endpoint:
+        emit({'behind_by': state.get('behind_by', 0)})
     if endpoint.endswith('/contents/.factory/profile.json'):
         emit(state['profile'])
     if '/issues/' in endpoint:
