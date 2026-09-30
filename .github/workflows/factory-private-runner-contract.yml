@@ -12,6 +12,9 @@ name: factory-private-runner-contract
       - '.github/roots/run-one-private-actions-runner.sh'
       - '.github/roots/mint-private-runner-registration.py'
       - '.github/roots/test-private-runner-policy.py'
+      - '.github/roots/fleet/product-ci-self-hosted.yml'
+      - '.github/roots/fleet/product-event-relay.yml'
+      - '.github/actionlint.yaml'
       - '.github/workflows/factory-private-runner-contract.yml'
       - '.github/workflows/factory-private-runner-version-watch.yml'
   workflow_dispatch:
