@@ -11,6 +11,7 @@ POLICY = ROOT / ".github/roots/factory-private-runner-policy-v1.json"
 SCHEMA = ROOT / ".github/roots/factory-private-runner-policy.schema.json"
 BROKER = ROOT / ".github/roots/mint-private-runner-registration.py"
 RUNNER = ROOT / ".github/roots/run-one-private-actions-runner.sh"
+RUNNER_PIN = ROOT / ".github/roots/factory-private-runner-version-v1.json"
 
 
 def load_broker_module():
@@ -75,12 +76,23 @@ class PrivateRunnerPolicyTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self.broker.write_secret_file(path, "replacement-token")
 
+    def test_runner_version_pin_is_explicit_and_checksum_bound(self):
+        pin = json.loads(RUNNER_PIN.read_text(encoding="utf-8"))
+        self.assertEqual(pin["version"], 1)
+        self.assertRegex(pin["runner_version"], r"^\d+\.\d+\.\d+$")
+        self.assertEqual(pin["platform"], "linux")
+        self.assertEqual(pin["architecture"], "x64")
+        self.assertRegex(pin["sha256"], r"^[0-9a-f]{64}$")
+        self.assertIn(pin["runner_version"], pin["asset"])
+
     def test_runner_consumes_and_deletes_token_file(self):
         text = RUNNER.read_text(encoding="utf-8")
         self.assertIn("ROOTS_RUNNER_REGISTRATION_TOKEN_FILE", text)
         self.assertIn('registration_token="$(cat "$token_file")"', text)
         self.assertIn('rm -f "$token_file"', text)
         self.assertIn("--ephemeral", text)
+        self.assertIn("--disableupdate", text)
+        self.assertIn("factory-private-runner-version-v1.json", text)
 
 
 if __name__ == "__main__":
