@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / ".github/roots/factory-private-runner-policy-v1.json"
 SCHEMA = ROOT / ".github/roots/factory-private-runner-policy.schema.json"
 BROKER = ROOT / ".github/roots/mint-private-runner-registration.py"
+VERSION_CHECKER = ROOT / ".github/roots/check-private-runner-version.py"
 RUNNER = ROOT / ".github/roots/run-one-private-actions-runner.sh"
 RUNNER_PIN = ROOT / ".github/roots/factory-private-runner-version-v1.json"
 
@@ -28,6 +29,10 @@ class PrivateRunnerPolicyTests(unittest.TestCase):
         cls.policy = json.loads(POLICY.read_text(encoding="utf-8"))
         cls.schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
         cls.broker = load_broker_module()
+        spec = importlib.util.spec_from_file_location("roots_private_runner_version", VERSION_CHECKER)
+        cls.version_checker = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(cls.version_checker)
 
     def test_private_profile_is_one_job_ephemeral_self_hosted(self):
         profile = self.policy["profiles"]["private_ephemeral"]
@@ -84,6 +89,55 @@ class PrivateRunnerPolicyTests(unittest.TestCase):
         self.assertEqual(pin["architecture"], "x64")
         self.assertRegex(pin["sha256"], r"^[0-9a-f]{64}$")
         self.assertIn(pin["runner_version"], pin["asset"])
+
+    def test_runner_version_watch_allows_current_verified_asset(self):
+        pin = json.loads(RUNNER_PIN.read_text(encoding="utf-8"))
+        latest = {
+            "tag_name": "v" + pin["runner_version"],
+            "published_at": pin["published_at"],
+            "assets": [
+                {
+                    "name": pin["asset"],
+                    "digest": "sha256:" + pin["sha256"],
+                }
+            ],
+        }
+        now = self.version_checker.parse_time(pin["published_at"])
+        self.assertEqual(self.version_checker.evaluate(pin, latest, now), ("CURRENT", 0))
+
+    def test_runner_version_watch_warns_then_fails_before_github_deadline(self):
+        pin = json.loads(RUNNER_PIN.read_text(encoding="utf-8"))
+        latest = {
+            "tag_name": "v99.0.0",
+            "published_at": "2026-09-01T00:00:00Z",
+            "assets": [],
+        }
+        published = self.version_checker.parse_time(latest["published_at"])
+        self.assertEqual(
+            self.version_checker.evaluate(
+                pin, latest, published + self.version_checker.dt.timedelta(days=5)
+            ),
+            ("UPDATE_AVAILABLE", 0),
+        )
+        self.assertEqual(
+            self.version_checker.evaluate(
+                pin, latest, published + self.version_checker.dt.timedelta(days=21)
+            ),
+            ("UPDATE_REQUIRED", 1),
+        )
+
+    def test_runner_version_watch_rejects_digest_drift(self):
+        pin = json.loads(RUNNER_PIN.read_text(encoding="utf-8"))
+        latest = {
+            "tag_name": "v" + pin["runner_version"],
+            "published_at": pin["published_at"],
+            "assets": [{"name": pin["asset"], "digest": "sha256:" + ("0" * 64)}],
+        }
+        now = self.version_checker.parse_time(pin["published_at"])
+        self.assertEqual(
+            self.version_checker.evaluate(pin, latest, now),
+            ("PIN_DIGEST_MISMATCH", 2),
+        )
 
     def test_runner_consumes_and_deletes_token_file(self):
         text = RUNNER.read_text(encoding="utf-8")
