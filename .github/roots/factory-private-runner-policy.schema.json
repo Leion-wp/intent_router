@@ -18,12 +18,16 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "private_ephemeral",
+        "private_untrusted_ephemeral",
+        "private_control_ephemeral",
         "public_control_plane"
       ],
       "properties": {
-        "private_ephemeral": {
-          "$ref": "#/$defs/privateProfile"
+        "private_untrusted_ephemeral": {
+          "$ref": "#/$defs/privateUntrustedProfile"
+        },
+        "private_control_ephemeral": {
+          "$ref": "#/$defs/privateControlProfile"
         },
         "public_control_plane": {
           "$ref": "#/$defs/publicProfile"
@@ -35,14 +39,18 @@
       "additionalProperties": false,
       "required": [
         "factory-ci",
+        "memory-validate",
         "factory-product-event-relay"
       ],
       "properties": {
         "factory-ci": {
-          "const": "private_ephemeral"
+          "const": "private_untrusted_ephemeral"
+        },
+        "memory-validate": {
+          "const": "private_untrusted_ephemeral"
         },
         "factory-product-event-relay": {
-          "const": "private_ephemeral"
+          "const": "private_control_ephemeral"
         }
       }
     },
@@ -57,7 +65,7 @@
     }
   },
   "$defs": {
-    "privateProfile": {
+    "privateUntrustedProfile": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -96,6 +104,51 @@
         },
         "may_execute_untrusted_pr_code": {
           "const": true
+        },
+        "may_hold_cross_repo_relay_secret": {
+          "const": false
+        }
+      }
+    },
+    "privateControlProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_visibility",
+        "runner_strategy",
+        "required_labels",
+        "max_jobs_per_registration",
+        "automatic_github_hosted_fallback",
+        "requires_disposable_environment",
+        "may_execute_untrusted_pr_code",
+        "may_hold_cross_repo_relay_secret"
+      ],
+      "properties": {
+        "repository_visibility": {
+          "const": "private"
+        },
+        "runner_strategy": {
+          "const": "ephemeral_self_hosted"
+        },
+        "required_labels": {
+          "const": [
+            "self-hosted",
+            "linux",
+            "x64",
+            "roots-private-control"
+          ]
+        },
+        "max_jobs_per_registration": {
+          "const": 1
+        },
+        "automatic_github_hosted_fallback": {
+          "const": false
+        },
+        "requires_disposable_environment": {
+          "const": true
+        },
+        "may_execute_untrusted_pr_code": {
+          "const": false
         },
         "may_hold_cross_repo_relay_secret": {
           "const": true
