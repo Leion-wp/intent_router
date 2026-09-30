@@ -1,0 +1,41 @@
+name: factory-private-runner-contract
+
+"on":
+  pull_request:
+    branches: [Android]
+    paths:
+      - '.github/roots/factory-private-runner-policy-v1.json'
+      - '.github/roots/factory-private-runner-policy.schema.json'
+      - '.github/roots/factory-private-runner-v1.md'
+      - '.github/roots/run-one-private-actions-runner.sh'
+      - '.github/roots/test-private-runner-policy.py'
+      - '.github/workflows/factory-private-runner-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate runner policy JSON and schema
+        run: |
+          python -m pip install --disable-pip-version-check 'jsonschema==4.23.0'
+          python - <<'PY'
+          import json
+          import jsonschema
+
+          policy = json.load(open('.github/roots/factory-private-runner-policy-v1.json'))
+          schema = json.load(open('.github/roots/factory-private-runner-policy.schema.json'))
+          jsonschema.Draft202012Validator(schema).validate(policy)
+          PY
+      - name: Run private runner policy tests
+        run: python .github/roots/test-private-runner-policy.py
+      - name: Shell syntax check
+        run: bash -n .github/roots/run-one-private-actions-runner.sh
