@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Leion-wp/intent_router/.github/roots/factory-private-runner-policy.schema.json",
+  "title": "Roots private Actions runner policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "profiles", "managed_private_workflows"],
+  "properties": {
+    "version": { "const": 1 },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["private_ephemeral", "public_control_plane"],
+      "properties": {
+        "private_ephemeral": { "$ref": "#/$defs/privateProfile" },
+        "public_control_plane": { "$ref": "#/$defs/publicProfile" }
+      }
+    },
+    "managed_private_workflows": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["factory-ci", "factory-product-event-relay"],
+      "properties": {
+        "factory-ci": { "const": "private_ephemeral" },
+        "factory-product-event-relay": { "const": "private_ephemeral" }
+      }
+    }
+  },
+  "$defs": {
+    "privateProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_visibility",
+        "runner_strategy",
+        "required_labels",
+        "max_jobs_per_registration",
+        "automatic_github_hosted_fallback",
+        "requires_disposable_environment",
+        "may_execute_untrusted_pr_code",
+        "may_hold_cross_repo_relay_secret"
+      ],
+      "properties": {
+        "repository_visibility": { "const": "private" },
+        "runner_strategy": { "const": "ephemeral_self_hosted" },
+        "required_labels": {
+          "const": ["self-hosted", "linux", "x64", "roots-private-ci"]
+        },
+        "max_jobs_per_registration": { "const": 1 },
+        "automatic_github_hosted_fallback": { "const": false },
+        "requires_disposable_environment": { "const": true },
+        "may_execute_untrusted_pr_code": { "const": true },
+        "may_hold_cross_repo_relay_secret": { "const": true }
+      }
+    },
+    "publicProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_visibility",
+        "runner_strategy",
+        "required_labels",
+        "max_jobs_per_registration",
+        "automatic_github_hosted_fallback",
+        "requires_disposable_environment",
+        "may_execute_untrusted_pr_code",
+        "may_hold_cross_repo_relay_secret"
+      ],
+      "properties": {
+        "repository_visibility": { "const": "public" },
+        "runner_strategy": { "const": "github_hosted_standard" },
+        "required_labels": { "const": ["ubuntu-latest"] },
+        "max_jobs_per_registration": { "type": "null" },
+        "automatic_github_hosted_fallback": { "const": true },
+        "requires_disposable_environment": { "const": false },
+        "may_execute_untrusted_pr_code": { "const": false },
+        "may_hold_cross_repo_relay_secret": { "const": true }
+      }
+    }
+  }
+}
