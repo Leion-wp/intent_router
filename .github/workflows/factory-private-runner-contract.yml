@@ -8,10 +8,12 @@ name: factory-private-runner-contract
       - '.github/roots/factory-private-runner-policy.schema.json'
       - '.github/roots/factory-private-runner-v1.md'
       - '.github/roots/factory-private-runner-version-v1.json'
+      - '.github/roots/check-private-runner-version.py'
       - '.github/roots/run-one-private-actions-runner.sh'
       - '.github/roots/mint-private-runner-registration.py'
       - '.github/roots/test-private-runner-policy.py'
       - '.github/workflows/factory-private-runner-contract.yml'
+      - '.github/workflows/factory-private-runner-version-watch.yml'
   workflow_dispatch:
 
 permissions:
@@ -43,3 +45,4 @@ jobs:
         run: |
           bash -n .github/roots/run-one-private-actions-runner.sh
           python -m py_compile .github/roots/mint-private-runner-registration.py
+          python -m py_compile .github/roots/check-private-runner-version.py
