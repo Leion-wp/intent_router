@@ -2,78 +2,111 @@
 
 ## Goal
 
-Private managed repositories must not depend on GitHub-hosted Actions minutes for nominal factory progress.
+Private factory repositories must not depend on GitHub-hosted Actions minutes
+for nominal progress, and privileged relay credentials must never share an
+execution class with untrusted pull-request code.
 
-The canonical runner profile is `private_ephemeral` in
-`.github/roots/factory-private-runner-policy-v1.json`.
+The canonical policy is:
 
-## Security boundary
+`.github/roots/factory-private-runner-policy-v1.json`
 
-Product PRs may contain untrusted generated code. A persistent workstation runner is therefore not an acceptable nominal executor.
+## Runner classes
 
-The `roots-private-ci` label is reserved for an isolated Linux x64 self-hosted runner that:
+### `roots-private-ci`
 
-1. is registered as ephemeral / one-job;
-2. starts from a disposable VM or container image;
-3. is destroyed after the job;
-4. has no user home, SSH keys, cloud credentials or Docker socket inherited from the host;
-5. exposes only the GitHub job token and workflow-declared secrets required by that one job;
-6. never shares a filesystem with a later job.
+Profile: `private_untrusted_ephemeral`.
 
-`factory-ci` and `factory-product-event-relay` intentionally use the same runner profile because the first executes PR code while the second can hold the cross-repository relay secret. Re-use across those jobs would create a credential-exfiltration path.
+Used by product CI and memory validation. These jobs may execute untrusted or
+mutable repository content and therefore **must not receive cross-repository
+relay credentials**.
+
+Every registration is one-job / ephemeral and must start inside a disposable
+Linux x64 VM or container. The environment is destroyed after the job.
+
+### `roots-private-control`
+
+Profile: `private_control_ephemeral`.
+
+Used by the product event relay. This class may receive the narrowly scoped
+`FACTORY_EVENT_TOKEN`, but it must never check out or execute product PR code.
+
+It is also one-job / ephemeral and uses a separate runner label so GitHub cannot
+schedule an untrusted CI job onto a privileged control instance.
+
+### Public control plane
+
+`intent_router` remains on GitHub-hosted `ubuntu-latest` runners.
+
+## Absolute trust invariant
+
+No private runner profile may have both:
+
+- `may_execute_untrusted_pr_code=true`; and
+- `may_hold_cross_repo_relay_secret=true`.
+
+The policy schema and contract tests enforce this invariant.
+
+A persistent developer workstation is not an acceptable nominal runner for
+either private class. A temporary work directory on a persistent host is not
+isolation.
 
 ## Cost policy
 
-For private managed repositories there is no automatic fallback to a GitHub-hosted runner. Exhausting hosted minutes must not silently switch the factory into a paid path or create repeated pre-runner failures.
+There is no automatic fallback from either private class to GitHub-hosted
+compute. If local capacity is absent, the job remains queued rather than
+silently consuming private hosted minutes or paid capacity.
 
-The public `intent_router` control plane may continue to use standard GitHub-hosted runners.
-
-## Bootstrap
-
-`.github/roots/run-one-private-actions-runner.sh` registers one ephemeral runner from an explicit short-lived registration token.
-
-The token is supplied at runtime only. No credential value is committed or logged.
-
-The host is still responsible for providing a disposable execution environment. Deleting the runner work directory after a job is not a substitute for VM/container isolation.
+Superseded product CI runs are cancelled per PR so only the latest head should
+consume local compute.
 
 ## Host-side token broker
 
-The durable administrative credential must stay on the trusted provisioner host.
+The durable administrative credential stays only on the trusted provisioner
+host.
 
 Use `.github/roots/mint-private-runner-registration.py` to mint a short-lived
 repository registration token into a mode-0600 file:
 
 ```bash
-export ROOTS_RUNNER_ADMIN_TOKEN='<fine-grained token kept on the provisioner>'
+export ROOTS_RUNNER_ADMIN_TOKEN='<stored only on the provisioner>'
 python .github/roots/mint-private-runner-registration.py \
   --repository Leion-wp/micro-saas-boilerplate \
   --output /secure-tmp/roots-runner-token
 ```
 
-The fine-grained credential should be restricted to the repositories listed in
-`managed_private_repositories` and needs repository Administration write only
-because GitHub's runner registration endpoint is an administrative action.
+The fine-grained credential is restricted to the repositories listed in
+`managed_private_repositories` and needs repository Administration write for
+runner registration. Never inject `ROOTS_RUNNER_ADMIN_TOKEN` into a job
+environment.
 
-Pass only the short-lived token file into the disposable runner environment and
-set `ROOTS_RUNNER_REGISTRATION_TOKEN_FILE`. The bootstrap consumes and deletes
-that file before the runner starts. Never inject `ROOTS_RUNNER_ADMIN_TOKEN`
-into the disposable runner.
+Pass only the short-lived registration token file into the disposable runner.
 
-The broker deliberately does not create the VM/container itself. Isolation is
-a host responsibility and must be real; a temp directory on a persistent
-developer workstation is not sufficient.
+## One-shot bootstrap
+
+`.github/roots/run-one-private-actions-runner.sh` registers exactly one
+ephemeral runner. Choose the class explicitly:
+
+```bash
+ROOTS_RUNNER_REPOSITORY=Leion-wp/micro-saas-boilerplate \
+ROOTS_RUNNER_LABEL=roots-private-ci \
+ROOTS_RUNNER_REGISTRATION_TOKEN_FILE=/run/secrets/runner-token \
+.github/roots/run-one-private-actions-runner.sh
+```
+
+For the privileged relay instance, use `ROOTS_RUNNER_LABEL=roots-private-control`.
+
+The bootstrap accepts only those two canonical labels, consumes and deletes the
+short-lived token file before the runner starts, verifies the pinned runner
+archive SHA-256, registers with `--ephemeral --disableupdate`, and cleans its
+temporary runner directory on exit. The surrounding VM/container must still be
+destroyed by the host after the job.
 
 ## Runner release pin
 
 The canonical Linux x64 runner release is stored in
 `.github/roots/factory-private-runner-version-v1.json`.
 
-The one-shot bootstrap consumes that pin by default and verifies the downloaded
-archive against the committed SHA-256 before extraction. It also registers with
-`--disableupdate` so an ephemeral image cannot silently mutate itself during
-startup.
-
-`factory-private-runner-version-watch.yml` compares the pin with GitHub's
-latest public `actions/runner` release weekly. A new release is initially a
-warning; once that release has been available for 21 days the watch fails,
-leaving a safety margin before GitHub's 30-day update requirement.
+`factory-private-runner-version-watch.yml` compares the pin against GitHub's
+latest public runner release. A newer release warns initially and becomes a
+failing control-plane check after 21 days, leaving margin before GitHub's
+30-day update enforcement window.
